@@ -1,9 +1,9 @@
 """Extract hand configuration from natural language descriptions using the brain LLM."""
 
+import asyncio
 import json
 import logging
 import re
-import asyncio
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)

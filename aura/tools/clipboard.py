@@ -12,7 +12,7 @@ import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Dict, Optional
 
 import pyperclip
 
@@ -256,7 +256,7 @@ class ClipboardTool:
             "response": f"Captured [{category}]: {content[:80]}...",
         }
 
-    def list_history(self, limit: int = 20, category: str = None) -> dict:
+    def list_history(self, limit: int = 20, category: str | None = None) -> dict:
         """List clipboard history."""
         data = self._load_history()
         entries = data.get("entries", [])

@@ -3,15 +3,16 @@ Base class for all messaging platforms.
 Defines the interface that WhatsApp, Telegram, etc. must implement.
 """
 
+import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Callable, Any
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-import logging
+from typing import Any, Callable, Optional
+
+from aura.core.conversation_manager import get_conversation_manager
 
 from .sanitizer import sanitize_outgoing
-from aura.core.conversation_manager import get_conversation_manager
 
 logger = logging.getLogger(__name__)
 

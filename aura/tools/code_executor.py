@@ -1,10 +1,10 @@
 """Safe Python code executor tool with sandboxing."""
 
+import ast
+import os
 import subprocess
 import sys
 import tempfile
-import os
-import ast
 from typing import Optional, Set
 
 
@@ -303,7 +303,7 @@ class CodeExecutorTool:
             # Sanitize environment to avoid leaking API keys/tokens
             safe_env = {k: v for k, v in os.environ.items()
                         if k in ("PATH", "HOME", "USERPROFILE", "TEMP", "TMP",
-                                 "SYSTEMROOT", "WINDIR", "COMSPEC", "PYTHONPATH")}
+                                 "SYSTEMROOT", "WINDIR", "COMSPEC")}
             proc = subprocess.Popen(
                 [sys.executable, temp_path],
                 stdout=subprocess.PIPE,
@@ -408,10 +408,10 @@ except Exception as _e:
 
         return self._run_subprocess(wrapper_code, code)
 
-    def execute_raw(self, full_script: str, user_code: str = "") -> dict:
-        """Execute a pre-built script directly in a subprocess.
+    def _execute_raw(self, full_script: str, user_code: str = "") -> dict:
+        """Execute a pre-built script directly in a subprocess (PRIVATE).
 
-        This is for callers (like the CodePanel API) that have already:
+        This is for internal callers (like the CodePanel API) that have already:
         1. Validated the user code with their own AST safety check
         2. Wrapped the user code with their own preamble/epilogue
 
@@ -477,6 +477,11 @@ except Exception as _e:
             if isinstance(node, _ast.Attribute):
                 if node.attr.startswith("__"):
                     return {"success": False, "output": "", "error": f"Attribute '{node.attr}' not allowed in math expressions"}
+            # Block huge exponents like 10**10**10 which cause CPU hang
+            if isinstance(node, _ast.BinOp) and isinstance(node.op, _ast.Pow):
+                if isinstance(node.right, _ast.Constant) and isinstance(node.right.value, (int, float)):
+                    if abs(node.right.value) > 10000:
+                        return {"success": False, "output": "", "error": "Exponent too large (max 10000)"}
             if isinstance(node, _ast.Call):
                 if isinstance(node.func, _ast.Name):
                     if node.func.id not in MATH_FUNCS:
@@ -491,7 +496,7 @@ except Exception as _e:
         safe_locals = {f: getattr(__builtins__, f, None) or getattr(_math, f, None)
                        for f in MATH_FUNCS}
         try:
-            result = eval(compile(tree, "<math>", "eval"), safe_globals, safe_locals)  # noqa: S307
+            result = eval(compile(tree, "<math>", "eval"), safe_globals, safe_locals)
             return {"success": True, "output": str(result), "errors": None, "code": expression}
         except ZeroDivisionError:
             return {"success": False, "output": "", "error": "Division by zero"}

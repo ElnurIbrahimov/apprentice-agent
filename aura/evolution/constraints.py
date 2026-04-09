@@ -5,7 +5,7 @@ Every mutation must pass these gates before being accepted.
 """
 
 import logging
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 from .types import Candidate, GEPAConfig
 

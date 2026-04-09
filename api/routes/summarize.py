@@ -2,13 +2,14 @@
 Page summarization via local Ollama.
 """
 
-import os
-import math
 import logging
-import httpx
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
+import math
+import os
 from typing import Optional
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
 from api.utils import safe_error_detail

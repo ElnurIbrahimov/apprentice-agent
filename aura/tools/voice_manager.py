@@ -53,15 +53,15 @@ def _ensure_voice_models():
     if VOICE_MODELS_AVAILABLE is not None:
         return VOICE_MODELS_AVAILABLE
     try:
-        from .sesame_tts import SesameTTS as _ST
         from .personaplex.personaplex_tool import PersonaPlexTool as _PP
+        from .sesame_tts import SesameTTS as _ST
         SesameTTS = _ST
         PersonaPlexTool = _PP
         VOICE_MODELS_AVAILABLE = True
     except ImportError:
         try:
-            from sesame_tts import SesameTTS as _ST
             from personaplex.personaplex_tool import PersonaPlexTool as _PP
+            from sesame_tts import SesameTTS as _ST
             SesameTTS = _ST
             PersonaPlexTool = _PP
             VOICE_MODELS_AVAILABLE = True
@@ -131,7 +131,7 @@ class VoiceManager:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def switch_to_duplex(self, voice: str = None, persona: str = None) -> dict:
+    def switch_to_duplex(self, voice: str | None = None, persona: str | None = None) -> dict:
         """Switch to duplex mode: PersonaPlex handles everything.
 
         Natural conversation with interrupts. Uses full GPU (~8GB).

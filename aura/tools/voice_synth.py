@@ -22,7 +22,7 @@ import os
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,6 @@ class VoiceSynthTool:
 
         try:
             import soundfile as sf
-            import numpy as np
 
             kokoro = _get_kokoro()
             logger.info(f"[VoiceSynth] Generating '{text[:60]}' with voice '{voice}'")
@@ -163,8 +162,8 @@ class VoiceSynthTool:
         if not path.exists():
             return {"success": False, "error": f"File not found: {audio_path}"}
         try:
-            import soundfile as sf
             import sounddevice as sd
+            import soundfile as sf
             data, sr = sf.read(str(path))
             sd.play(data, sr)
             sd.wait()

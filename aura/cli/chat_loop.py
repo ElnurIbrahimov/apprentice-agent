@@ -51,7 +51,7 @@ def _display_channel_message(console: Any, msg: Any) -> None:
     top = f"\u250c\u2500{header}{line_rest}"
 
     body = Text()
-    body.append(f"\u2502 ", style="dim cyan")
+    body.append("\u2502 ", style="dim cyan")
     body.append(f"{msg.user_name}: ", style="bold")
     display_text = msg.text[:500]
     if len(msg.text) > 500:
@@ -62,7 +62,7 @@ def _display_channel_message(console: Any, msg: Any) -> None:
 
     console.print()
     console.print(f"  [cyan]{top}[/cyan]")
-    console.print(f"  ", end="")
+    console.print("  ", end="")
     console.print(body)
     console.print(f"  [cyan]{bottom}[/cyan]")
 
@@ -82,14 +82,14 @@ def _display_channel_response(console: Any, msg: Any, response_text: str) -> Non
         display_text += "..."
 
     body = Text()
-    body.append(f"\u2502 ", style="dim green")
+    body.append("\u2502 ", style="dim green")
     body.append("AURA: ", style="bold green")
     body.append(display_text)
 
     bottom = "\u2514" + "\u2500" * (width)
 
     console.print(f"  [green]{top}[/green]")
-    console.print(f"  ", end="")
+    console.print("  ", end="")
     console.print(body)
     console.print(f"  [green]{bottom}[/green]")
 

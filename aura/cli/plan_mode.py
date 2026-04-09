@@ -5,15 +5,18 @@ Data classes and parsing logic live in aura.core.planner (shared with core).
 This module provides Rich-based rendering and interactive approval.
 """
 from __future__ import annotations
-from typing import Optional
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
 # Re-export from core for backward compat
 from aura.core.planner import (  # noqa: F401
-    StepStatus, PlanStep, ExecutionPlan,
-    parse_plan_from_llm, PLAN_GENERATION_PROMPT,
+    PLAN_GENERATION_PROMPT,
+    ExecutionPlan,
+    PlanStep,
+    StepStatus,
+    parse_plan_from_llm,
 )
 
 
@@ -83,8 +86,8 @@ def edit_plan_text(console: Console, plan_text: str) -> str:
     Returns the edited plan text.
     """
     import os
-    import tempfile
     import subprocess
+    import tempfile
     from pathlib import Path
 
     editor = os.environ.get("EDITOR", "notepad" if os.name == "nt" else "nano")

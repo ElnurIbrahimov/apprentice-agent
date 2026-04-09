@@ -31,7 +31,7 @@ import time
 from collections import defaultdict
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +129,7 @@ except Exception:
 # Whitelist localhost/127.0.0.1 — the Ollama embedding service runs locally.
 try:
     from urllib.parse import urlparse as _urlparse
+
     from aura.security.ssrf_guard import validate_url_safe
     _parsed_embed = _urlparse(_EMBED_URL)
     _embed_host = (_parsed_embed.hostname or "").lower()
@@ -1421,7 +1422,7 @@ class CodebaseIndex:
 
     # ── Search (hybrid BM25 + semantic + recency + importance) ──
 
-    def search(self, query: str, limit: int = 10, top_k: int = None) -> list:
+    def search(self, query: str, limit: int = 10, top_k: int | None = None) -> list:
         """Hybrid search: BM25 + semantic + recency + file importance.
 
         Args:

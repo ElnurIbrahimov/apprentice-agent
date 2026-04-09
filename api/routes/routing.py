@@ -2,6 +2,7 @@
 
 import logging
 from typing import Optional
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -24,8 +25,8 @@ class FeedbackRequest(BaseModel):
 async def submit_feedback(body: FeedbackRequest):
     """Record a feedback signal for the learning loop."""
     try:
-        from aura.routing.router import get_router
         from aura.routing.learning import process_feedback
+        from aura.routing.router import get_router
 
         r = get_router()
 
@@ -50,7 +51,7 @@ async def submit_feedback(body: FeedbackRequest):
         return {"ok": True, "signal": body.signal}
     except Exception as e:
         logger.error(f"[Routing] Feedback failed: {e}")
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": "Feedback recording failed"}
 
 
 @router.get("/stats")
@@ -63,8 +64,8 @@ async def get_routing_stats():
             "profiles": r.profiles.all_profiles(),
             "total_models": len(r.profiles.all_profiles()),
         }
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception:
+        return {"error": "Operation failed"}
 
 
 @router.get("/conversation/{conversation_id}")
@@ -85,5 +86,5 @@ async def get_conversation_profile(conversation_id: str):
             "model_switches": p.model_switches,
             "models_used": p.models_used,
         }
-    except Exception as e:
-        return {"error": str(e)}
+    except Exception:
+        return {"error": "Operation failed"}

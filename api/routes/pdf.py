@@ -6,9 +6,11 @@ Supports file upload and URL extraction.
 import asyncio
 import io
 import logging
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from api.auth import require_api_key
+from api.routes.upload import sanitize_filename
 from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
@@ -50,7 +52,7 @@ async def extract_upload(file: UploadFile = File(...)):
         "page_count": len(pages),
         "word_count": len(text.split()),
         "text": text[:80000],
-        "filename": file.filename,
+        "filename": sanitize_filename(file.filename) if file.filename else "unknown.pdf",
     }
 
 
@@ -58,8 +60,8 @@ async def extract_upload(file: UploadFile = File(...)):
 async def extract_url(body: dict):
     """Extract text from a PDF at a given URL."""
     try:
-        import pdfplumber
         import httpx
+        import pdfplumber
     except ImportError:
         raise HTTPException(503, "Missing dependencies. Run: pip install pdfplumber httpx")
 
@@ -69,41 +71,23 @@ async def extract_url(body: dict):
     if not url.startswith(("http://", "https://")):
         raise HTTPException(400, "Only http:// and https:// URLs are allowed")
 
-    # Block private/loopback IPs (SSRF protection including IPv6)
-    from urllib.parse import urlparse
-    import ipaddress
-    _host = urlparse(url).hostname or ""
-
-    # Reject obviously blocked hostnames first
-    _blocked_prefixes = (
-        "127.", "10.", "172.16.", "172.17.", "172.18.", "172.19.",
-        "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
-        "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
-        "192.168.", "169.254.", "168.63.129.16", "0.", "localhost",
-    )
-    if any(_host.startswith(b) for b in _blocked_prefixes) or _host == "localhost":
-        raise HTTPException(400, "Cannot fetch from private/loopback addresses")
-
-    # Resolve the hostname to an IP and check it — catches IPv6 loopback,
-    # IPv4-mapped IPv6 (::ffff:127.0.0.1), link-local, and other bypasses
+    # SSRF protection: resolve DNS once, validate IP, pin to resolved IP
+    # This eliminates the TOCTOU gap between DNS check and HTTP request
     try:
-        import socket
-        infos = socket.getaddrinfo(_host, None, type=socket.SOCK_STREAM)
-        for _family, _type, _proto, _canon, sockaddr in infos:
-            addr = ipaddress.ip_address(sockaddr[0])
-            if addr.is_loopback or addr.is_private or addr.is_reserved or addr.is_link_local:
-                raise HTTPException(400, "Cannot fetch from private/loopback addresses")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(400, "Cannot fetch URL: DNS resolution failed")
+        from aura.security.ssrf_guard import validate_url_safe
+        pinned_url, original_hostname = validate_url_safe(url)
+    except ValueError as e:
+        raise HTTPException(400, f"Cannot fetch URL: {e}")
 
     _MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB
     try:
+        headers = {}
+        if original_hostname:
+            headers["Host"] = original_hostname
         async with httpx.AsyncClient(timeout=30) as c:
             chunks = []
             total = 0
-            async with c.stream("GET", url, follow_redirects=False) as resp:
+            async with c.stream("GET", pinned_url, follow_redirects=False, headers=headers) as resp:
                 resp.raise_for_status()
                 async for chunk in resp.aiter_bytes():
                     total += len(chunk)

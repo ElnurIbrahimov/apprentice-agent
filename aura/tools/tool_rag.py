@@ -51,6 +51,7 @@ class ToolRAG:
         """
         try:
             import ollama
+
             from aura.config import Config
             self._client = ollama.Client(host=Config.OLLAMA_HOST)
         except Exception as e:

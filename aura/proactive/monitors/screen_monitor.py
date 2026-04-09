@@ -11,14 +11,13 @@ Events generated:
 - idle_detected: User appears to be idle
 """
 
-import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from .base_monitor import BaseMonitor
 from ..event_bus import Event, EventPriority
+from .base_monitor import BaseMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +38,7 @@ except ImportError:
 
 # Try to import Florence-2 vision for enhanced analysis
 try:
-    from aura.tools.vision import _check_florence2_available, VisionTool
+    from aura.tools.vision import VisionTool, _check_florence2_available
     FLORENCE2_SUPPORT = True
 except ImportError:
     FLORENCE2_SUPPORT = False
@@ -77,7 +76,8 @@ class ScreenMonitor(BaseMonitor):
         super().__init__(event_bus, poll_interval)
 
         # Detect headless: no display on Linux = nothing to monitor
-        import sys as _sys, os as _os
+        import os as _os
+        import sys as _sys
         self._headless = bool(_os.environ.get("AURA_HEADLESS")) or (
             _sys.platform != "win32" and not _os.environ.get("DISPLAY")
         )

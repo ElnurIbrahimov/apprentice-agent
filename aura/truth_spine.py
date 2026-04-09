@@ -20,15 +20,15 @@ Memory Tiers:
     SPECULATION = unverified claims (including LLM output)
 """
 
+import ast
 import hashlib
 import hmac
 import json
 import logging
 import math
+import operator
 import os
 import re
-import ast
-import operator
 import secrets
 import shutil
 import subprocess
@@ -36,12 +36,11 @@ import tempfile
 import threading
 import time
 import uuid
-from pathlib import Path
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple, Union, Callable
-from enum import Enum, auto
-from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, ClassVar, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +66,7 @@ class SafeCalculator:
     """
 
     # Allowed binary operators
-    OPERATORS = {
+    OPERATORS: ClassVar[dict] = {
         ast.Add: operator.add,
         ast.Sub: operator.sub,
         ast.Mult: operator.mul,
@@ -80,7 +79,7 @@ class SafeCalculator:
     }
 
     # Allowed safe functions
-    FUNCTIONS = {
+    FUNCTIONS: ClassVar[dict] = {
         'abs': abs,
         'round': round,
         'min': min,
@@ -101,9 +100,9 @@ class SafeCalculator:
             tree = ast.parse(expression, mode='eval')
             return self._eval_node(tree.body)
         except SyntaxError as e:
-            raise ValueError(f"Invalid syntax: {e}")
+            raise ValueError(f"Invalid syntax: {e}") from e
         except (TypeError, KeyError) as e:
-            raise ValueError(f"Invalid expression: {e}")
+            raise ValueError(f"Invalid expression: {e}") from e
 
     def _eval_node(self, node) -> float:
         """Recursively evaluate AST nodes safely."""
@@ -424,7 +423,7 @@ class NoErrorCheck(VerificationCheck):
             if raw.get("error"):
                 return False, f"Error present: {raw['error']}"
             if raw.get("stderr") and "error" in raw["stderr"].lower():
-                return False, f"Stderr contains error"
+                return False, "Stderr contains error"
             if raw.get("success") is False:
                 return False, "success=False"
 
@@ -434,7 +433,7 @@ class NoErrorCheck(VerificationCheck):
 class ContainsTextCheck(VerificationCheck):
     """Verify output contains expected text"""
 
-    def __init__(self, expected_text: str = None):
+    def __init__(self, expected_text: str | None = None):
         self._expected = expected_text
 
     @property
@@ -518,7 +517,7 @@ class VerifierSpine:
     """
 
     # Default checks for different action types
-    DEFAULT_CHECKS = {
+    DEFAULT_CHECKS: ClassVar[dict] = {
         "file_write": ["file_exists", "not_empty", "sandbox_path"],
         "file_read": ["file_exists", "not_empty", "sandbox_path"],
         "command": ["return_code_zero", "no_error"],
@@ -561,8 +560,8 @@ class VerifierSpine:
         self,
         action_type: str,
         raw_result: Dict[str, Any],
-        expected_checks: List[str] = None,
-        context: Dict[str, Any] = None
+        expected_checks: List[str] | None = None,
+        context: Dict[str, Any] | None = None
     ) -> VerificationResult:
         """
         Verify an action's result.
@@ -778,7 +777,7 @@ class VerifiedMemory:
     LLM outputs, inferences, and unverified claims go to BELIEF or SPECULATION.
     """
 
-    def __init__(self, data_dir: Path = None, max_traces: int = 500):
+    def __init__(self, data_dir: Path | None = None, max_traces: int = 500):
         self.data_dir = Path(data_dir) if data_dir else Path("data/memory")
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.max_traces = max_traces
@@ -851,7 +850,7 @@ class VerifiedMemory:
         with self._lock:
             if not verification.is_verified:
                 # Refuse to store unverified content as fact
-                logger.debug(f"[Memory] REFUSED: Cannot store unverified content as FACT")
+                logger.debug("[Memory] REFUSED: Cannot store unverified content as FACT")
                 return None
 
             h = self._content_hash(content)
@@ -1064,7 +1063,7 @@ class VerifiedMemory:
     @staticmethod
     def _cosine_similarity(a: List[float], b: List[float]) -> float:
         """Compute cosine similarity between two vectors."""
-        dot = sum(x * y for x, y in zip(a, b))
+        dot = sum(x * y for x, y in zip(a, b, strict=True))
         norm_a = math.sqrt(sum(x * x for x in a))
         norm_b = math.sqrt(sum(x * x for x in b))
         if norm_a == 0 or norm_b == 0:
@@ -1233,10 +1232,10 @@ class SecureToolExecutor:
     """
 
     # Tools that require user confirmation
-    DANGEROUS_TOOLS = {"write_file", "delete_file", "execute_command", "modify_system"}
+    DANGEROUS_TOOLS: ClassVar[set] = {"write_file", "delete_file", "execute_command", "modify_system"}
 
     # Tools restricted to sandbox
-    SANDBOX_ONLY_TOOLS = {"read_file", "write_file", "list_files", "delete_file"}
+    SANDBOX_ONLY_TOOLS: ClassVar[set] = {"read_file", "write_file", "list_files", "delete_file"}
 
     def __init__(self, sandbox_dir: Path, verifier: VerifierSpine):
         self.sandbox_dir = Path(sandbox_dir).resolve()
@@ -1368,7 +1367,7 @@ class SecureToolExecutor:
 
         return resolved
 
-    def create_session(self, user_id: str = None) -> str:
+    def create_session(self, user_id: str | None = None) -> str:
         """Create a new session for confirmation tracking.
 
         SECURITY: Sessions bind confirmations to specific users.
@@ -1409,7 +1408,7 @@ class SecureToolExecutor:
         tool_name: str,
         params: Dict[str, Any],
         confirmed: bool = False,
-        session_id: str = None
+        session_id: str | None = None
     ) -> Dict[str, Any]:
         """
         Execute a tool with security checks.
@@ -1484,7 +1483,7 @@ class SecureToolExecutor:
         except Exception as e:
             return {"success": False, "error": str(e), "exception": type(e).__name__}
 
-    def confirm(self, confirmation_id: str, session_id: str = None) -> Dict[str, Any]:
+    def confirm(self, confirmation_id: str, session_id: str | None = None) -> Dict[str, Any]:
         """
         Confirm and execute a pending operation.
 
@@ -1553,7 +1552,7 @@ class SecureToolExecutor:
         # Execute with confirmed=True (outside lock to avoid deadlock)
         return self.execute(pending.tool_name, pending.params, confirmed=True)
 
-    def get_pending_confirmations(self, session_id: str = None) -> List[Dict[str, Any]]:
+    def get_pending_confirmations(self, session_id: str | None = None) -> List[Dict[str, Any]]:
         """Get list of pending confirmations.
 
         Args:

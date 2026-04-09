@@ -158,7 +158,7 @@ export function WisebasePanel() {
       );
       setSearchResults(entries);
     } catch {
-      setSearchResults([]);
+      setSearchResults([{ content: '⚠ Search failed — check connection', type: 'error' } as any]);
     } finally {
       setSearching(false);
     }

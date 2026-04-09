@@ -1,18 +1,17 @@
 """File upload endpoint for AURA Web API."""
 
+import logging
 import os
 import re
-import uuid
-import logging
 import unicodedata
+import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from api.auth import require_api_key
+from api.models.schemas import AttachmentType, FileAttachment, UploadResponse
 from api.utils import safe_error_detail
-
-from api.models.schemas import UploadResponse, FileAttachment, AttachmentType
 
 logger = logging.getLogger(__name__)
 

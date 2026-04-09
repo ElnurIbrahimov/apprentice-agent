@@ -8,11 +8,12 @@ Also handles proactive message distribution.
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, Optional, List
+from typing import Dict, List, Optional
 
-from .config import load_config, MESSAGING_CONFIG
-from .base_platform import BasePlatform, OutgoingMessage
 from aura.core.conversation_manager import get_conversation_manager
+
+from .base_platform import BasePlatform, OutgoingMessage
+from .config import MESSAGING_CONFIG, load_config
 
 logger = logging.getLogger(__name__)
 

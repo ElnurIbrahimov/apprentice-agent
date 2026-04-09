@@ -6,9 +6,9 @@ Supports:
 - VRAM-aware model selection to avoid OOM on constrained GPUs
 """
 
-import json
 import base64
 import logging
+
 try:
     import ollama
     OLLAMA_AVAILABLE = True
@@ -16,7 +16,7 @@ except ImportError:
     ollama = None
     OLLAMA_AVAILABLE = False
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Any, Dict, Optional
 
 from ..config import Config
 
@@ -28,8 +28,8 @@ from aura.tools._shared_models import get_florence2
 def _check_florence2_available() -> bool:
     """Check if Florence-2 dependencies are installed."""
     try:
-        import torch
-        import transformers
+        import torch  # noqa: F401
+        import transformers  # noqa: F401
         return True
     except ImportError:
         logger.info("[Vision] Florence-2 unavailable (torch/transformers not installed)")
@@ -93,8 +93,8 @@ def _run_florence2(image_path: str, task: str = "<DETAILED_CAPTION>") -> Optiona
     if not _check_florence2_available():
         return None
     try:
-        from PIL import Image
         import torch
+        from PIL import Image
 
         model, processor = _load_florence2()
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -127,7 +127,7 @@ class VisionTool:
     and Ollama cloud models (kimi-k2.5, qwen3.5) as fallback.
     """
 
-    def __init__(self, model: str = None, brain=None):
+    def __init__(self, model: str | None = None, brain=None):
         """Initialize vision tool.
 
         Args:
@@ -370,7 +370,7 @@ class VisionTool:
             )
         )
 
-    def read_text(self, image_path: str, language_hint: str = None) -> dict:
+    def read_text(self, image_path: str, language_hint: str | None = None) -> dict:
         """Extract and read text from an image (OCR-like).
 
         Tries Florence-2 first for fast structured OCR, falls back to Ollama models.
@@ -632,7 +632,6 @@ Be concise. Only report what you actually see."""
     @staticmethod
     def _parse_florence2_screen_context(caption: str, ocr_text: str) -> Dict[str, Any]:
         """Parse Florence-2 caption + OCR into structured screen context."""
-        import re as _re
         caption_lower = caption.lower()
         ocr_lower = ocr_text.lower()
 

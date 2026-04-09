@@ -15,7 +15,7 @@ import re
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import requests
 
@@ -175,7 +175,7 @@ class MarketplaceTool:
 
         return dangerous
 
-    def browse(self, category: str = None, sort_by: str = "downloads") -> dict:
+    def browse(self, category: str | None = None, sort_by: str = "downloads") -> dict:
         """Browse plugins from the marketplace.
 
         Args:
@@ -395,7 +395,7 @@ class MarketplaceTool:
             actual_hash = hashlib.sha256(plugin_code.encode()).hexdigest()
             if actual_hash != expected_hash:
                 self._log("INSTALL_BLOCKED", plugin_id, f"Hash mismatch: expected {expected_hash}, got {actual_hash}")
-                return {"success": False, "error": f"Plugin integrity check failed: hash mismatch"}
+                return {"success": False, "error": "Plugin integrity check failed: hash mismatch"}
 
             # Safety scan (regex + basic AST)
             dangerous_patterns = self._scan_for_dangerous_code(plugin_code)
@@ -644,7 +644,7 @@ marketplace install {tool_name}
 
             return {
                 "success": True,
-                "message": f"Plugin packaged successfully",
+                "message": "Plugin packaged successfully",
                 "plugin_id": tool_name,
                 "output_dir": str(publish_dir),
                 "files": [

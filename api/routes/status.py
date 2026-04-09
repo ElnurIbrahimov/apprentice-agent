@@ -2,17 +2,24 @@
 
 import asyncio
 import logging
+import os
 import random
 import time
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from api.auth import require_api_key
-from api.utils import safe_error_detail, get_agent_service as _get_agent_service, get_agent, run_sync
-
-from api.models.schemas import StatusResponse, HealthResponse, DeepHealthResponse, SubsystemStatus, MoodState
+from api.models.schemas import (
+    DeepHealthResponse,
+    HealthResponse,
+    MoodState,
+    StatusResponse,
+    SubsystemStatus,
+)
+from api.utils import get_agent_service as _get_agent_service
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -583,7 +590,7 @@ async def update_personality(update: PersonalityUpdate):
         Updated personality and the effect on baseline mood
     """
     try:
-        from aura.emotion.alma_engine import alma_engine, PersonalityProfile
+        from aura.emotion.alma_engine import PersonalityProfile, alma_engine
 
         if alma_engine:
             # Get current values
@@ -634,7 +641,7 @@ async def update_personality(update: PersonalityUpdate):
 async def reset_personality():
     """Reset AURA's personality to default values."""
     try:
-        from aura.emotion.alma_engine import alma_engine, PersonalityProfile
+        from aura.emotion.alma_engine import PersonalityProfile, alma_engine
 
         if alma_engine:
             alma_engine.personality = PersonalityProfile.aura_default()

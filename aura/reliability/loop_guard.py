@@ -25,7 +25,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ class SessionLoopGuard:
             self._trigger_reason = reason
             # Emit telemetry
             try:
-                from aura.reliability.telemetry import emit, TelemetryKind
+                from aura.reliability.telemetry import TelemetryKind, emit
                 emit(
                     TelemetryKind.LOOP_GUARD,
                     session_id=self.session_id,
@@ -260,10 +260,10 @@ def _fingerprint(obj: Any, length: int = 8) -> str:
 
 
 __all__ = [
-    "SessionLoopGuard",
-    "LoopGuardResult",
     "ActionRecord",
+    "LoopGuardResult",
+    "SessionLoopGuard",
     "get_guard",
-    "reset_guard",
     "purge_old_guards",
+    "reset_guard",
 ]

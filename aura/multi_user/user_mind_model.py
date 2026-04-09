@@ -10,7 +10,6 @@ Reuses existing dataclasses and analysis functions from theory_of_mind.py.
 
 import json
 import logging
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -176,8 +175,8 @@ class UserMindModel:
     def _update_topics(self, message: str) -> None:
         """Update topic knowledge from message content."""
         from aura.proactive.theory_of_mind import (
-            TopicKnowledge,
             _TECHNICAL_WORDS,
+            TopicKnowledge,
         )
 
         words = message.lower().split()

@@ -9,7 +9,7 @@ Specialized in finding information from various sources:
 
 import logging
 import time
-from typing import Any, Callable, Dict, List
+from typing import Callable
 
 from ..base_agent import ToolUsingSpecialist
 from ..protocol import AgentMessage, AgentResult

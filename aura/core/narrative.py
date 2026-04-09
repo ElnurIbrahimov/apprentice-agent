@@ -172,8 +172,8 @@ class NarrativeMixin:
         by the time the response generation starts.
         """
         try:
-            from aura.emotion.integration import appraise_message
             from aura.core.thought_recorder import record_thought as _record_thought
+            from aura.emotion.integration import appraise_message
             result = appraise_message(message, self.brain)
             if result:
                 _record_thought(
@@ -195,8 +195,8 @@ class NarrativeMixin:
         if not self._prev_message or not self._prev_response:
             return
         try:
-            from aura.emotion.integration import analyze_user_reaction
             from aura.core.thought_recorder import record_thought as _record_thought
+            from aura.emotion.integration import analyze_user_reaction
             result = analyze_user_reaction(
                 current_message, self._prev_response, self.brain,
             )

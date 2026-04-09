@@ -68,8 +68,11 @@ function StatusCard({ hand, onAction, onClick }: {
   const handleRunNow = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setRunning(true);
-    await onAction(hand.name, 'run');
-    setTimeout(() => setRunning(false), 2000);
+    try {
+      await onAction(hand.name, 'run');
+    } finally {
+      setRunning(false);
+    }
   };
 
   return (
@@ -462,7 +465,6 @@ export default function HandsDashboard() {
       setHands(handsRes.hands || []);
       setApprovals(approvalsRes.approvals || []);
       setHistory(historyRes.history || []);
-      setError(null);
       setLastRefresh(new Date());
     } catch {
       setError('Failed to load hands data');
@@ -474,25 +476,40 @@ export default function HandsDashboard() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
   usePolling(fetchAll, 10000);
 
+  // Auto-dismiss errors after 8 seconds
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 8000);
+    return () => clearTimeout(t);
+  }, [error]);
+
   const handleAction = useCallback(async (name: string, action: string) => {
     try {
-      await fetch(`/api/hands/${name}/${action}`, { method: 'POST' });
+      const res = await fetch(`/api/hands/${name}/${action}`, { method: 'POST' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({ detail: `Failed (${res.status})` }));
+        setError(`${name}/${action}: ${d.detail || `HTTP ${res.status}`}`);
+      }
       await fetchAll();
     } catch {
-      // Swallow
+      setError(`${name}/${action}: Network error`);
     }
   }, [fetchAll]);
 
   const handleApproval = useCallback(async (name: string, approved: boolean) => {
     try {
-      await fetch(`/api/hands/${name}/approve`, {
+      const res = await fetch(`/api/hands/${name}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved }),
       });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({ detail: `Failed (${res.status})` }));
+        setError(`Approve ${name}: ${d.detail || `HTTP ${res.status}`}`);
+      }
       await fetchAll();
     } catch {
-      // Swallow
+      setError(`Approve ${name}: Network error`);
     }
   }, [fetchAll]);
 
@@ -521,7 +538,15 @@ export default function HandsDashboard() {
 
   const handleDeleteHand = async (name: string) => {
     if (!confirm(`Delete hand "${name}"?`)) return;
-    await fetch(`/api/hands/${name}`, { method: 'DELETE' });
+    try {
+      const res = await fetch(`/api/hands/${name}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({ detail: `Failed (${res.status})` }));
+        setError(`Delete ${name}: ${d.detail || `HTTP ${res.status}`}`);
+      }
+    } catch {
+      setError(`Delete ${name}: Network error`);
+    }
     fetchAll();
   };
 

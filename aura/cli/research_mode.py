@@ -1,14 +1,14 @@
 # aura/cli/research_mode.py
 """Research mode — citation tracking, source management, and structured research."""
 from __future__ import annotations
+
 import re
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from typing import List, Optional
+
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 
 
 @dataclass

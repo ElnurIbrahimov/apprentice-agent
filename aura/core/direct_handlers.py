@@ -5,7 +5,6 @@ These bypass the LLM agent loop for deterministic or direct tool execution.
 All methods assume self has: tools, brain, monologue, neurodream, identity.
 """
 
-import json
 import logging
 import re
 from typing import Optional
@@ -782,7 +781,7 @@ Python code:"""
             result = tool.execute(code_to_run)
 
             # Format the response
-            formatted = f"**Code Execution Result**\n\n"
+            formatted = "**Code Execution Result**\n\n"
             formatted += f"```python\n{code_to_run}\n```\n\n"
 
             if result.get("success"):

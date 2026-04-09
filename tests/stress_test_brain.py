@@ -18,6 +18,13 @@ import time
 import threading
 import traceback
 
+import pytest
+
+# Requires a live Ollama instance — skip in automated CI.
+# Guard the import to prevent collection errors when Ollama is not running.
+if os.environ.get("AURA_STRESS_TESTS") != "1":
+    pytest.skip("Stress test requires live Ollama (set AURA_STRESS_TESTS=1)", allow_module_level=True)
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Suppress noisy logs during test

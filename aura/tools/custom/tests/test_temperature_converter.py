@@ -17,7 +17,7 @@ def test_temperature_converter_instantiation():
     tool = TemperatureConverterTool()
     assert tool.name == "temperature_converter"
     assert tool.description is not None
-    print(f"[PASS] TemperatureConverterTool instantiation")
+    print("[PASS] TemperatureConverterTool instantiation")
 
 
 def test_temperature_converter_execute_unknown():
@@ -26,7 +26,7 @@ def test_temperature_converter_execute_unknown():
     result = tool.execute("unknown_action_xyz")
     assert result.get("success") == False
     assert "error" in result
-    print(f"[PASS] TemperatureConverterTool handles unknown action")
+    print("[PASS] TemperatureConverterTool handles unknown action")
 
 
 def test_temperature_converter_celsius_to_fahrenheit():
@@ -34,8 +34,8 @@ def test_temperature_converter_celsius_to_fahrenheit():
     tool = TemperatureConverterTool()
     # Basic test - method should exist and be callable
     assert hasattr(tool, "celsius_to_fahrenheit")
-    assert callable(getattr(tool, "celsius_to_fahrenheit"))
-    print(f"[PASS] TemperatureConverterTool.celsius_to_fahrenheit exists and is callable")
+    assert callable(tool.celsius_to_fahrenheit)
+    print("[PASS] TemperatureConverterTool.celsius_to_fahrenheit exists and is callable")
 
 
 def test_temperature_converter_fahrenheit_to_celsius():
@@ -43,8 +43,8 @@ def test_temperature_converter_fahrenheit_to_celsius():
     tool = TemperatureConverterTool()
     # Basic test - method should exist and be callable
     assert hasattr(tool, "fahrenheit_to_celsius")
-    assert callable(getattr(tool, "fahrenheit_to_celsius"))
-    print(f"[PASS] TemperatureConverterTool.fahrenheit_to_celsius exists and is callable")
+    assert callable(tool.fahrenheit_to_celsius)
+    print("[PASS] TemperatureConverterTool.fahrenheit_to_celsius exists and is callable")
 
 
 

@@ -13,7 +13,7 @@ messages via the existing proactive_messages system.
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Callable, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 

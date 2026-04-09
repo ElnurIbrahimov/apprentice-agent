@@ -10,7 +10,7 @@ Specialized in navigating and searching codebases:
 import logging
 import re
 import time
-from typing import Any, Callable, Dict
+from typing import Callable
 
 from ..base_agent import ToolUsingSpecialist
 from ..protocol import AgentMessage, AgentResult

@@ -6,13 +6,12 @@ Tool #20: Detects user emotions and adapts responses accordingly.
 import json
 import logging
 import re
-import os
+import uuid
+from collections import Counter
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
-from dataclasses import dataclass, asdict
-from collections import Counter
-import uuid
+from typing import Dict, List, Optional, Tuple
 
 from aura.jsonl_utils import rotate_jsonl_if_needed
 
@@ -218,7 +217,7 @@ class EvoEmoTool:
             )
 
         text_lower = text.lower()
-        scores: Dict[str, float] = {emotion: 0.0 for emotion in EMOTION_STATES}
+        scores: Dict[str, float] = dict.fromkeys(EMOTION_STATES, 0.0)
         markers_found: List[str] = []
 
         # Analyze text patterns

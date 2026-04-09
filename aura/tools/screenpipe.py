@@ -16,8 +16,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Any, Set
-from urllib.parse import urlencode
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 

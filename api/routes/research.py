@@ -3,14 +3,14 @@ Deep Research endpoint — multi-source web research with LLM synthesis.
 Streams progress updates, then delivers a structured markdown report.
 """
 
-import os
+import asyncio
 import json
 import logging
-import asyncio
-from urllib.parse import urlparse
+import os
 from typing import Optional
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 

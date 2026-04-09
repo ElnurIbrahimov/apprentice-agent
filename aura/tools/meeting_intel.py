@@ -21,12 +21,11 @@ import logging
 import os
 import queue
 import threading
-import io
-import wave
 import uuid
+import wave
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -190,8 +189,8 @@ class MeetingRecorder:
         decisions = [s for s in sentences if any(k in s.lower() for k in decision_keywords)][:10]
 
         # Simple topic extraction: find most repeated nouns (basic word frequency)
-        from collections import Counter
         import re
+        from collections import Counter
         words = re.findall(r"\b[A-Za-z]{4,}\b", transcript.lower())
         stop = {"that", "this", "with", "from", "they", "have", "been", "will", "were", "would", "could", "should", "when", "what", "then", "just", "also", "some", "more", "very", "than", "about"}
         freq = Counter(w for w in words if w not in stop)
@@ -278,8 +277,8 @@ class MeetingIntelTool:
 
     def get_cross_meeting_themes(self, limit: int = 5) -> Dict:
         """Find themes that appear across multiple meetings."""
-        from collections import Counter
         import re
+        from collections import Counter
 
         word_freq: Counter = Counter()
         total = 0

@@ -125,7 +125,7 @@ class LocationMixin:
 
         lines.append(f"\n\U0001f4cc Coordinates: {lat:.4f}, {lon:.4f}")
 
-        lines.append(f"\nTip: Send me a message about what you want to do here, and I can help with local recommendations!")
+        lines.append("\nTip: Send me a message about what you want to do here, and I can help with local recommendations!")
 
         return "\n".join(lines), results
 

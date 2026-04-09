@@ -1,7 +1,6 @@
 """Metacognition logging system for tracking agent decision quality."""
 
 import json
-import os
 import threading
 from datetime import datetime
 from pathlib import Path

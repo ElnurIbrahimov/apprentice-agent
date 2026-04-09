@@ -21,7 +21,6 @@ Integrates with:
 
 import json
 import logging
-import math
 import os
 import tempfile
 import threading
@@ -658,7 +657,7 @@ class IntrinsicMotivationEngine:
 
             engine.set_intrinsic_preferences(preferences)
             self._stats["preferences_pushed"] += 1
-            logger.debug(f"[IntrinsicMotivation] Pushed preferences: "
+            logger.debug("[IntrinsicMotivation] Pushed preferences: "
                          + ", ".join(f"{k}={v:.2f}" for k, v in preferences.items()))
             return True
 
@@ -722,7 +721,7 @@ class IntrinsicMotivationEngine:
 
         # 4. Record activity in idle presence
         try:
-            from aura.consciousness.idle_presence import get_idle_presence_engine, IdleActivity
+            from aura.consciousness.idle_presence import IdleActivity, get_idle_presence_engine
             ipe = get_idle_presence_engine()
             dominant = max(self._drives.values(), key=lambda d: d.urgency)
             desc = f"motivation cycle: {dominant.drive_type.value} drive active ({dominant.urgency:.0%})"

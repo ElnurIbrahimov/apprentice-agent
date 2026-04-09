@@ -14,10 +14,9 @@ import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -279,11 +278,11 @@ class TaskManagerTool:
     def _generate_id(self) -> str:
         return uuid.uuid4().hex[:8]
 
-    def _record_change(self, conn, task_id: str, field: str, old_val: Any, new_val: Any):
+    def _record_change(self, conn, task_id: str, field_name: str, old_val: Any, new_val: Any):
         """Record a field change in task_history."""
         conn.execute(
             "INSERT INTO task_history (task_id, field, old_value, new_value, changed_at) VALUES (?,?,?,?,?)",
-            (task_id, field, str(old_val) if old_val is not None else None,
+            (task_id, field_name, str(old_val) if old_val is not None else None,
              str(new_val) if new_val is not None else None,
              datetime.now().isoformat()),
         )
@@ -312,9 +311,9 @@ class TaskManagerTool:
     # -------------------------------------------------------------------
 
     def add_task(self, title: str, project: str = "default", priority: str = "P2",
-                 description: str = "", tags: List[str] = None, deadline: str = None,
-                 assignee: str = "", dependencies: List[str] = None,
-                 parent_id: str = None, blocked_reason: str = "") -> dict:
+                 description: str = "", tags: List[str] | None = None, deadline: str | None = None,
+                 assignee: str = "", dependencies: List[str] | None = None,
+                 parent_id: str | None = None, blocked_reason: str = "") -> dict:
         """Create a new task."""
         if not title:
             return {"success": False, "error": "No title provided"}
@@ -445,7 +444,7 @@ class TaskManagerTool:
     #  Subtasks
     # -------------------------------------------------------------------
 
-    def add_subtask(self, task_id: str, title: str, priority: str = None) -> dict:
+    def add_subtask(self, task_id: str, title: str, priority: str | None = None) -> dict:
         """Add a subtask under a parent task."""
         with self._conn() as conn:
             parent = self._get_task(conn, task_id)
@@ -489,8 +488,8 @@ class TaskManagerTool:
     #  Queries / Views
     # -------------------------------------------------------------------
 
-    def list_tasks(self, project: str = None, status: str = None,
-                   priority: str = None, tag: str = None,
+    def list_tasks(self, project: str | None = None, status: str | None = None,
+                   priority: str | None = None, tag: str | None = None,
                    include_subtasks: bool = False) -> dict:
         """List tasks with filters."""
         conditions = []
@@ -545,7 +544,7 @@ class TaskManagerTool:
             "response": f"{len(tasks)} task(s)\n" + "\n".join(formatted),
         }
 
-    def get_unblocked(self, project: str = None) -> dict:
+    def get_unblocked(self, project: str | None = None) -> dict:
         """Return only tasks whose dependencies are all satisfied (done/cancelled).
 
         These are tasks in todo/in_progress that are ready to work on.
@@ -591,7 +590,7 @@ class TaskManagerTool:
             "response": f"{len(unblocked)} unblocked task(s) ready to work on\n" + "\n".join(formatted),
         }
 
-    def board(self, project: str = None) -> dict:
+    def board(self, project: str | None = None) -> dict:
         """Kanban board view grouped by status."""
         conditions = ["parent_id IS NULL"]
         params = []
@@ -660,7 +659,7 @@ class TaskManagerTool:
                 current_date = date_str
                 overdue_tag = " ** OVERDUE **" if dl < today else ""
                 days_away = (dl - today).days
-                when = f"(today)" if days_away == 0 else f"({days_away}d)" if days_away > 0 else f"({abs(days_away)}d ago)"
+                when = "(today)" if days_away == 0 else f"({days_away}d)" if days_away > 0 else f"({abs(days_away)}d ago)"
                 formatted.append(f"\n  {date_str} {when}{overdue_tag}")
             icon = _priority_icon(t["priority"])
             formatted.append(f"    [{t['id']}] {icon} {t['priority']} [{t['status']}] {t['title']}")
@@ -705,7 +704,7 @@ class TaskManagerTool:
             "response": f"{len(tasks)} overdue task(s)\n" + "\n".join(formatted) if tasks else "No overdue tasks",
         }
 
-    def stats(self, project: str = None) -> dict:
+    def stats(self, project: str | None = None) -> dict:
         """Completion rate, avg time-to-done, priority distribution."""
         conditions = ["parent_id IS NULL"]
         params = []
@@ -765,8 +764,8 @@ class TaskManagerTool:
             f"  Avg time-to-done: {avg_hours:.1f}h" if durations else "  Avg time-to-done: N/A",
             f"  Overdue: {overdue_count}",
             f"  Blocked: {blocked}",
-            f"",
-            f"  By Status:",
+            "",
+            "  By Status:",
         ]
         for s in STATUSES:
             c = status_counts[s]
@@ -968,7 +967,7 @@ class TaskManagerTool:
         for i, (score, t) in enumerate(scored[:5]):
             icon = _priority_icon(t["priority"])
             dl = f" (due {t['deadline']})" if t.get("deadline") else ""
-            status_tag = f" [IN PROGRESS]" if t["status"] == "in_progress" else ""
+            status_tag = " [IN PROGRESS]" if t["status"] == "in_progress" else ""
             formatted.append(f"  {i+1}. [{t['id']}] {icon} {t['priority']} {t['title']}{dl}{status_tag} (score: {score:.0f})")
 
         top = scored[0][1] if scored else None
@@ -979,7 +978,7 @@ class TaskManagerTool:
             "response": "\n".join(formatted),
         }
 
-    def decompose(self, task_id: str, subtasks: List[str] = None) -> dict:
+    def decompose(self, task_id: str, subtasks: List[str] | None = None) -> dict:
         """Break a task into subtasks.
 
         If subtasks list is provided, creates them directly.

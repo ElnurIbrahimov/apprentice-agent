@@ -17,17 +17,18 @@ Frameworks: FastAPI, PyTorch, Transformers
 
 ## Architecture
 
-- **Brain** (`aura/brain.py`): OllamaBrain — 3100-line reasoning engine. Handles LLM calls via Ollama (cloud) and ChatGPT (OAuth). Thread-safe with shared executor pool.
-- **Agent** (`aura/agent.py`): ApprenticeAgent — 2600-line orchestrator (mixin-based). ReAct loop, tool dispatch, adaptive planning, session persistence.
+- **Brain** (`aura/brain.py`): OllamaBrain — ~2000-line reasoning engine. Handles LLM calls via Ollama (cloud) and ChatGPT (OAuth). Thread-safe with shared executor pool.
+- **Agent** (`aura/agent.py`): ApprenticeAgent — ~1500-line orchestrator (mixin-based). ReAct loop, tool dispatch, adaptive planning, session persistence.
 - **Memory** (`aura/memory/unified_memory.py`): Consolidated retrieval pipeline — BM25 + semantic + KG, RRF fusion, cross-encoder reranking, FadeMem decay.
 - **Config** (`aura/config.py`): Thread-safe config with model chains and fallback logic. All models are cloud-only via Ollama Pro.
 - **Router** (`aura/core/router.py`): Task-aware model routing with 3 tiers (local/balanced/max) and 8 task categories.
 
 ## Models
 
-### Cloud (Ollama Pro — 11 models)
+### Cloud (Ollama Pro — 13 models)
 - kimi-k2.5:cloud, nemotron-3-super:cloud, qwen3.5:397b-cloud, qwen3.5:cloud
-- deepseek-v3.2:cloud, glm-5:cloud, minimax-m2.7:cloud, minimax-m2.5:cloud
+- deepseek-v3.2:cloud, glm-5:cloud, glm-5.1:cloud, gemma4:31b-cloud
+- minimax-m2.7:cloud, minimax-m2.5:cloud
 - qwen3-coder:480b-cloud, qwen3-coder-next:cloud, gpt-oss:120b-cloud
 
 ### ChatGPT (OAuth — 12 models)
@@ -36,9 +37,11 @@ Frameworks: FastAPI, PyTorch, Transformers
 - gpt-5.2, gpt-5.2-codex
 - gpt-5.1, gpt-5.1-codex, gpt-5.1-codex-max, gpt-5.1-codex-mini
 
-### Local (utility only — 2 models)
+### Local (utility + edge — 4 models)
 - nomic-embed-text:latest (embeddings/RAG)
 - glm-ocr:latest (OCR)
+- gemma4:e4b (edge, 9.6B, multimodal)
+- gemma4:e2b (edge, 5.1B)
 
 ## Default Model Roles
 - **Fast**: nemotron-3-super:cloud
@@ -50,7 +53,7 @@ Frameworks: FastAPI, PyTorch, Transformers
 
 ## Key Patterns
 
-- Centralized thread pools in `aura/pools.py`: `llm_pool(12)`, `bg_pool(8)`, `tool_pool(4)`
+- Centralized thread pools in `aura/pools.py`: `llm_pool(4)`, `bg_pool(8)`, `tool_pool(4)`
 - TTL-cached system prompt additions
 - Circuit breaker on world model
 - FadeMem decay (2-week half-life) for memory

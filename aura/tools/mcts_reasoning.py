@@ -23,22 +23,21 @@ References:
 - https://github.com/THUDM/ReST-MCTS
 """
 
+import hashlib
+import json
+import logging
 import math
+import os
+import threading
 import time
 import uuid
-import json
-import hashlib
-import os
-import logging
-import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from enum import Enum
-from copy import deepcopy
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Callable, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -1128,7 +1127,7 @@ Provide your reflection as JSON:
         steps = [n.thought.content for n in path[1:]]  # Skip root
 
         if steps:
-            return f"Based on reasoning:\n" + "\n".join(f"- {s}" for s in steps[-3:])
+            return "Based on reasoning:\n" + "\n".join(f"- {s}" for s in steps[-3:])
 
         return "Reasoning incomplete."
 

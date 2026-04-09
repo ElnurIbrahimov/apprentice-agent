@@ -39,7 +39,7 @@ import logging
 import queue
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from .bridge import ChannelAdapter, ChannelMessage, ChannelResponse, ChannelSource
 
@@ -158,7 +158,8 @@ class ChannelBridge:
                     try:
                         loop = asyncio.get_event_loop()
                         if loop.is_running():
-                            loop.create_task(result)
+                            from aura.pools import fire_and_forget
+                            fire_and_forget(result)
                         else:
                             asyncio.run(result)
                     except RuntimeError:

@@ -6,7 +6,6 @@ the model's context limit, preventing truncation and crashes.
 
 import json
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

@@ -13,15 +13,13 @@ import logging
 import queue
 import re
 import time as _time
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from aura.core.conversation_manager import get_conversation_manager
 
 try:
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
     from telegram.ext import ContextTypes
     TELEGRAM_AVAILABLE = True
 except ImportError:
@@ -79,6 +77,10 @@ class AgentCoreMixin:
                 text=text,
             )
 
+        # --- Authorization: require allowed user in ALL contexts ---
+        if not self._is_user_allowed(user.id):
+            return
+
         # --- Group gate: only respond if mentioned or replied-to ---
         if is_group:
             me = await context.bot.get_me()
@@ -96,10 +98,6 @@ class AgentCoreMixin:
             text = re.sub(rf"@{re.escape(bot_username)}", "", text, flags=re.IGNORECASE).strip()
             if not text:
                 text = "Hello"
-        else:
-            # Private chat: require allowed user
-            if not self._is_user_allowed(user.id):
-                return
 
         # Per-user rate limit (max_messages_per_minute from config, default 20)
         from aura.messaging.telegram.bot import _check_rate_limit
@@ -236,7 +234,7 @@ class AgentCoreMixin:
         self._save_state()
 
     async def _run_agent_and_reply(self, update: Update, goal: str, *,
-                                    conv_id: str = None, user_id: str = None):
+                                    conv_id: str | None = None, user_id: str | None = None):
         """Run the full ReAct agent loop and send the result back to the user."""
         chat_id = str(update.effective_chat.id)
         start_time = _time.time()
@@ -410,7 +408,7 @@ class AgentCoreMixin:
         except Exception:
             pass  # Reactions are optional — never break the main flow
 
-    def _run_agent_sync(self, goal: str, chunk_queue: queue.Queue = None):
+    def _run_agent_sync(self, goal: str, chunk_queue: queue.Queue | None = None):
         """Synchronous agent execution — called via asyncio.to_thread.
 
         Returns (response_text, list_of_artifact_paths).
@@ -708,12 +706,22 @@ class AgentCoreMixin:
         code blocks, links). Falls back to plain text if formatting fails.
         """
         from telegram.constants import ParseMode
+
         from aura.messaging.telegram_formatting import format_telegram_response
 
         if not text:
             text = "I processed your request but have nothing to report."
 
         text = text.strip()
+
+        # Sanitize outgoing text (prompt injection exfiltration defense)
+        try:
+            from aura.messaging.sanitizer import sanitize_outgoing
+            text, flagged = sanitize_outgoing(text, source="telegram_response")
+            if flagged:
+                logger.warning("[Telegram] Outgoing message flagged by sanitizer")
+        except Exception:
+            pass  # Sanitizer failure must never block message delivery
 
         # Convert markdown → MarkdownV2 and split into chunks
         try:

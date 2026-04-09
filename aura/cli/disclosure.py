@@ -1,11 +1,12 @@
 # aura/cli/disclosure.py
 """Progressive disclosure — collapsible tool output with expand/collapse."""
 from __future__ import annotations
+
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
+
 from rich.console import Console
-from rich.text import Text
 
 
 @dataclass
@@ -117,7 +118,7 @@ def render_expanded(console: Console, section: CollapsibleSection) -> None:
     console.print(f"  [dim]\u25be[/dim] [yellow]{section.tool_name}[/yellow] {section.title}{elapsed_str}")
     for line in section.content.splitlines():
         console.print(f"  [dim]\u2502[/dim] {line}")
-    console.print(f"  [dim]\u2514[/dim]")
+    console.print("  [dim]\u2514[/dim]")
 
 
 def render_section(console: Console, section: CollapsibleSection) -> None:

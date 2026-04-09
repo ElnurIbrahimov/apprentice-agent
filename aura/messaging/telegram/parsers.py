@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 
 def _parse_time_expression(text: str) -> Optional[datetime]:

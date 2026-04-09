@@ -6,10 +6,9 @@ import logging
 import os
 import re
 import sqlite3
-import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +200,7 @@ class DatabaseTool:
 
         return "\n".join(lines)
 
-    def schema(self, db: str = "default", table: str = None) -> dict:
+    def schema(self, db: str = "default", table: str | None = None) -> dict:
         """Inspect database schema."""
         db_path, err = self._get_db_path(db)
         if err:
@@ -315,7 +314,7 @@ class DatabaseTool:
         except Exception as e:
             return {"success": False, "error": f"CSV import failed: {e}"}
 
-    def export_csv(self, table: str, output_path: str = None, db: str = "default") -> dict:
+    def export_csv(self, table: str, output_path: str | None = None, db: str = "default") -> dict:
         """Export a table to CSV."""
         valid, err = _validate_table_name(table)
         if not valid:
@@ -402,6 +401,7 @@ class DatabaseTool:
         """Call ollama LLM. Returns (response_text, error_dict)."""
         try:
             import ollama
+
             from aura.config import Config
         except Exception:
             return None, {"success": False, "error": "LLM not available for natural language queries"}

@@ -22,8 +22,15 @@ PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = "aura"
 SERVER_VERSION = "1.0.0"
 
-# Tools to exclude from MCP exposure (internal-only tools)
-EXCLUDED_TOOLS = {"spawn_agent"}
+# Tools to exclude from MCP exposure — privileged or dangerous tools
+# that should not be callable by external MCP clients without explicit gating
+EXCLUDED_TOOLS = {
+    "spawn_agent",
+    "shell", "run_shell", "shell_executor",  # arbitrary command execution
+    "write_file", "edit_file", "delete_file",  # filesystem mutations
+    "git_push", "git_commit",  # repository mutations
+    "deploy",  # deployment actions
+}
 
 
 def _aura_to_mcp_schema(tool: dict) -> dict:

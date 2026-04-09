@@ -1,9 +1,10 @@
 """Direct API provider management — list providers, set/remove API keys, list models."""
 
-import os
 import logging
+import os
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
@@ -80,6 +81,9 @@ async def set_provider_key(name: str, body: ApiKeyBody):
 @router.delete("/{name}/key")
 async def remove_provider_key(name: str):
     """Remove API key for a provider."""
+    import re
+    if not re.match(r"^[a-zA-Z0-9_-]{1,50}$", name):
+        raise HTTPException(400, "Invalid provider name")
     env_var = _resolve_env_var(name)
 
     # Remove from current process environment

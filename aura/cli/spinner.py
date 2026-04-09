@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import random
 import time
+
 from rich.text import Text
 
 # Bounce animation frames (forward then reverse, like Claude Code / Codex)

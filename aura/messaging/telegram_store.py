@@ -23,7 +23,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +252,7 @@ class TelegramStore:
             return row is not None
 
     def set_premium(self, user_id: str, tier: str, transaction_id: str = "",
-                    stars_amount: int = 0, metadata: dict = None) -> None:
+                    stars_amount: int = 0, metadata: dict | None = None) -> None:
         with self._lock:
             self._get_conn().execute(
                 """INSERT OR REPLACE INTO premium_users
@@ -462,7 +462,11 @@ class TelegramStore:
 
     def migrate_from_json(self, state_file: str = "data/messaging/telegram_state.json",
                           premium_file: str = "data/premium_users.json") -> int:
-        """One-time migration from JSON files to SQLite. Returns count of migrated records."""
+        """One-time migration from JSON files to SQLite. Returns count of migrated records.
+
+        After successful migration, JSON files are renamed to .migrated to prevent
+        re-running on every restart (which would silently overwrite timestamps).
+        """
         count = 0
         # Migrate active chats
         state_path = Path(state_file)
@@ -476,9 +480,11 @@ class TelegramStore:
                         first_name=info.get("first_name", ""),
                     )
                     count += 1
-                logger.info(f"[TelegramStore] Migrated {count} active chats from JSON")
+                logger.info("[TelegramStore] Migrated %d active chats from JSON", count)
+                # Rename to prevent re-migration on every restart
+                state_path.rename(state_path.with_suffix(".json.migrated"))
             except Exception as e:
-                logger.warning(f"[TelegramStore] Failed to migrate state JSON: {e}")
+                logger.warning("[TelegramStore] Failed to migrate state JSON: %s", e)
 
         # Migrate premium users
         premium_path = Path(premium_file)
@@ -493,24 +499,34 @@ class TelegramStore:
                         stars_amount=info.get("stars_amount", 0),
                     )
                     count += 1
-                logger.info(f"[TelegramStore] Migrated premium users from JSON")
+                logger.info("[TelegramStore] Migrated premium users from JSON")
+                premium_path.rename(premium_path.with_suffix(".json.migrated"))
             except Exception as e:
-                logger.warning(f"[TelegramStore] Failed to migrate premium JSON: {e}")
+                logger.warning("[TelegramStore] Failed to migrate premium JSON: %s", e)
 
         return count
 
     # ==================== REACTION FEEDBACK ====================
 
+    _MAX_REACTION_FEEDBACK = 5000  # Cap to prevent unbounded growth
+
     def save_reaction_feedback(self, user_id: str, chat_id: str, message_id: int,
                                reactions: str, sentiment: str):
         """Store a user's emoji reaction as feedback."""
         with self._lock:
-            self._get_conn().execute(
+            conn = self._get_conn()
+            conn.execute(
                 "INSERT INTO reaction_feedback (user_id, chat_id, message_id, reactions, sentiment, timestamp) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (user_id, chat_id, message_id, reactions, sentiment, time.time())
             )
-            self._get_conn().commit()
+            # Prune old entries to prevent unbounded growth
+            conn.execute(
+                "DELETE FROM reaction_feedback WHERE id NOT IN "
+                "(SELECT id FROM reaction_feedback ORDER BY timestamp DESC LIMIT ?)",
+                (self._MAX_REACTION_FEEDBACK,)
+            )
+            conn.commit()
 
     def get_reaction_stats(self, user_id: Optional[str] = None) -> dict:
         """Get reaction feedback statistics."""

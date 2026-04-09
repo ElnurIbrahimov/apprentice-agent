@@ -10,18 +10,17 @@ Supported formats:
 """
 
 import logging
-import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 try:
     from docx import Document
-    from docx.shared import Pt, RGBColor, Inches
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Inches, Pt, RGBColor
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
@@ -248,8 +247,8 @@ class DocumentGeneratorTool:
         if len(headings) < 3:
             return
         try:
-            from docx.oxml.ns import qn
             from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
 
             # Find insertion point: after the first few paragraphs (title, subtitle, date, spacer)
             # We insert before the first content paragraph

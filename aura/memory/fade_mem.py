@@ -25,7 +25,7 @@ try:
     from aura.config import Config
     DEFAULT_HALF_LIFE_HOURS = getattr(Config, "FADEM_HALF_LIFE_HOURS", 14 * 24)
     PRUNE_THRESHOLD = getattr(Config, "FADEM_PRUNE_THRESHOLD", 0.05)
-except (ImportError, AttributeError) as e:
+except (ImportError, AttributeError):
     DEFAULT_HALF_LIFE_HOURS = 14 * 24  # 336 hours = 2 weeks
     PRUNE_THRESHOLD = 0.05
 
@@ -135,11 +135,11 @@ def batch_decay_and_prune(
 
 
 __all__ = [
-    "compute_strength",
-    "reinforce",
-    "get_current_strength",
-    "batch_decay_and_prune",
     "DEFAULT_DECAY_RATE",
     "DEFAULT_HALF_LIFE_HOURS",
     "PRUNE_THRESHOLD",
+    "batch_decay_and_prune",
+    "compute_strength",
+    "get_current_strength",
+    "reinforce",
 ]

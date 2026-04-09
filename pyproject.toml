@@ -31,6 +31,7 @@ memory = [
     "networkx>=3.0,<4.0",
     "numpy>=1.24.0,<3.0.0",
     "kuzu>=0.4.0,<1.0.0",
+    "faiss-cpu>=1.7.4",
 ]
 telegram = [
     "python-telegram-bot>=20.0,<22.0",
@@ -110,8 +111,7 @@ markers = [
     "slow: slow tests (>10s)",
     "llm: tests involving LLM calls (mocked)",
 ]
-timeout = 30
-timeout_method = "thread"
+# timeout = 30  # requires pytest-timeout (pip install pytest-timeout)
 
 [tool.coverage.run]
 source = ["aura/"]

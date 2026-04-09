@@ -8,7 +8,7 @@ during the memory consolidation.
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
@@ -64,6 +64,7 @@ class SearchResponse(BaseModel):
 # -- Endpoints -------------------------------------------------------------
 
 from api.utils import EndpointRateLimiter
+
 _knowledge_save_limiter = EndpointRateLimiter(max_per_minute=30)
 
 @router.post("/save", response_model=SaveResponse)
@@ -106,7 +107,7 @@ async def save_knowledge(body: SaveRequest):
 @router.get("/list")
 async def list_knowledge(
     limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=1000),
 ):
     """List saved knowledge clips with pagination."""
     mem = _get_unified_memory()

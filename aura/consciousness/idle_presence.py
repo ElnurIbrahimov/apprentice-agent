@@ -22,9 +22,8 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +192,7 @@ class IdlePresenceEngine:
         self._record_activity(IdleActivity.DREAM_REM, desc, cognitive_load=0.8)
         self._record_dream_thought("rem", f"eureka: {content[:60]}")
 
-    def _record_dream_thought(self, phase_name: str, content: str = None) -> None:
+    def _record_dream_thought(self, phase_name: str, content: str | None = None) -> None:
         """Record a NeuroDream phase change as a real thought."""
         try:
             from api.routes.thinking import get_manager as get_thinking_manager
@@ -467,7 +466,7 @@ class IdlePresenceEngine:
             from api.routes.idle_behaviors import get_manager
             mgr = get_manager()
             return mgr.get_idle_duration()
-        except Exception as e:
+        except Exception:
             logger.warning("idle_duration_check_failed", exc_info=True)
             return 0.0
 
@@ -585,15 +584,15 @@ class IdlePresenceEngine:
 
             self._record_activity(
                 IdleActivity.PATTERN_MINING,
-                f"skill health: found underperforming skills",
+                "skill health: found underperforming skills",
                 cognitive_load=0.15,
             )
 
             # Deliver as a proactive message through the Gateway Daemon
             try:
-                from aura.proactive.gateway_daemon import get_gateway_daemon
-                from aura.proactive.event_bus import EventPriority
                 from aura.proactive.active_inference import ProactiveAction
+                from aura.proactive.event_bus import EventPriority
+                from aura.proactive.gateway_daemon import get_gateway_daemon
 
                 daemon = get_gateway_daemon()
                 from aura.proactive.gateway_daemon import ProactiveMessage
@@ -604,7 +603,7 @@ class IdlePresenceEngine:
                     metadata={"source": "skill_health_monitor"},
                 )
                 daemon._deliver_message(message)
-                logger.info(f"[IdlePresence] Skill health suggestion delivered")
+                logger.info("[IdlePresence] Skill health suggestion delivered")
             except Exception as e:
                 logger.debug(f"[IdlePresence] Could not deliver skill health suggestion: {e}")
 

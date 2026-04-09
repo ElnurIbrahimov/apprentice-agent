@@ -14,8 +14,7 @@ the system prompt at session start.
 
 import logging
 import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

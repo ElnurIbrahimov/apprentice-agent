@@ -21,8 +21,8 @@ import os
 import threading
 import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -721,7 +721,7 @@ class SelfImprovementEngine:
             if not weak:
                 return
 
-            from aura.consciousness.intrinsic_motivation import get_intrinsic_motivation, DriveType
+            from aura.consciousness.intrinsic_motivation import DriveType, get_intrinsic_motivation
             im = get_intrinsic_motivation()
             with im._lock:
                 competence_drive = im._drives.get(DriveType.COMPETENCE)

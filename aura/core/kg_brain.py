@@ -5,7 +5,6 @@ All methods assume self has: kg_brain, kg_bridge, kg_query_engine, tools, _kg_qu
 """
 
 import logging
-import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -279,7 +278,7 @@ class KGBrainMixin:
         except (AttributeError, KeyError, TypeError, OSError) as e:
             return {"available": False, "error": str(e)}
 
-    def episodic_recall(self, query: str, limit: int = 5, time_filter: str = None) -> list:
+    def episodic_recall(self, query: str, limit: int = 5, time_filter: str | None = None) -> list:
         """Recall memories (redirected to UnifiedMemory)."""
         try:
             from aura.memory.unified_memory import get_unified_memory
@@ -298,8 +297,8 @@ class KGBrainMixin:
         return {"success": False, "error": "Time travel consolidated — use memory query"}
 
     def episodic_record(self, content: str, episode_type: str = "conversation",
-                        importance: float = 0.5, entities: list = None,
-                        tools_used: list = None) -> dict:
+                        importance: float = 0.5, entities: list | None = None,
+                        tools_used: list | None = None) -> dict:
         """Record a memory (redirected to UnifiedMemory)."""
         try:
             from aura.memory.unified_memory import get_unified_memory

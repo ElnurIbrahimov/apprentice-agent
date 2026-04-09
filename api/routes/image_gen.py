@@ -11,7 +11,7 @@ import random
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key

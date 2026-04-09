@@ -73,6 +73,8 @@ export function ArtifactsPanel({ code, type, onClose }: ArtifactsPanelProps) {
   // Listen for iframe messages
   useEffect(() => {
     const handler = (e: MessageEvent) => {
+      // Only accept messages from our sandbox iframe
+      if (e.source !== iframeRef.current?.contentWindow) return;
       if (!e.data?.type) return;
       if (e.data.type === 'artifact-error') {
         setErrors((prev) => [...prev.slice(-19), { msg: e.data.msg, line: e.data.line }]);

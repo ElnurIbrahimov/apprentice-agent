@@ -75,10 +75,16 @@ function ApiProviderManager() {
 
   const removeKey = async (providerName: string) => {
     try {
-      await fetch(`/api/providers/${providerName}/key`, { method: 'DELETE' });
-      setProviders(prev => ({ ...prev, [providerName]: false }));
-      toast.success('Removed', `${providerName} key removed`);
-    } catch {}
+      const res = await fetch(`/api/providers/${providerName}/key`, { method: 'DELETE' });
+      if (res.ok) {
+        setProviders(prev => ({ ...prev, [providerName]: false }));
+        toast.success('Removed', `${providerName} key removed`);
+      } else {
+        toast.error('Error', `Failed to remove ${providerName} key`);
+      }
+    } catch {
+      toast.error('Error', 'Network error removing key');
+    }
   };
 
   return (

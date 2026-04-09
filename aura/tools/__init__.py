@@ -14,17 +14,6 @@ import logging as _logging
 _log = _logging.getLogger(__name__)
 _TOOLS_IMPORT_ERRORS: list[str] = []
 
-# Legacy stubs — kept for backward compatibility (resolved to None)
-SESAME_AVAILABLE = False
-AMEMSystem = None
-MemoryNote = None
-get_amem = None
-AMEMTool = None
-get_amem_tool = None
-HybridAMEMSystem = None
-HybridResult = None
-get_hybrid_memory = None
-
 # ---------------------------------------------------------------------------
 #  Lazy import registry:  symbol_name -> (module_path, attribute_name)
 #

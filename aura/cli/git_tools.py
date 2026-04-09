@@ -1,10 +1,11 @@
 # aura/cli/git_tools.py
 """Git power tools — /pr, /branch, /stash, /blame, auto-commit."""
 from __future__ import annotations
-import subprocess
+
 import re
-from typing import Optional, Dict, List
+import subprocess
 from pathlib import Path
+from typing import Dict, List, Optional
 
 
 def git_run(args: List[str], cwd: Optional[str] = None, timeout: int = 30) -> Dict:
@@ -45,7 +46,7 @@ def get_staged_diff() -> str:
 
 def get_recent_log(n: int = 5) -> str:
     """Get recent commit log."""
-    result = git_run(["log", f"--oneline", f"-{n}"])
+    result = git_run(["log", "--oneline", f"-{n}"])
     return result.get("stdout", "")
 
 

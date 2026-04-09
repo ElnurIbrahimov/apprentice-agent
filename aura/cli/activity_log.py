@@ -1,14 +1,15 @@
 # aura/cli/activity_log.py
 """Activity log — SQLite-backed queryable interaction history."""
 from __future__ import annotations
+
 import json
 import logging
 import re
 import sqlite3
 import time
-from pathlib import Path
-from typing import List, Dict, Optional
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +100,9 @@ class ActivityLog:
             conn.commit()
             # Optionally compute and store embedding for semantic search
             try:
-                import ollama
                 import struct
+
+                import ollama
                 resp = ollama.embed(model="nomic-embed-text:latest", input=f"{prompt} {(response or '')[:500]}")
                 if resp and "embeddings" in resp and resp["embeddings"]:
                     emb = resp["embeddings"][0]
@@ -142,9 +144,10 @@ class ActivityLog:
     def semantic_search(self, query: str, limit: int = 20) -> list[dict]:
         """Semantic search using embedding cosine similarity. Falls back to FTS5."""
         try:
-            import ollama
-            import struct
             import math
+            import struct
+
+            import ollama
 
             resp = ollama.embed(model="nomic-embed-text:latest", input=query)
             if not resp or "embeddings" not in resp or not resp["embeddings"]:

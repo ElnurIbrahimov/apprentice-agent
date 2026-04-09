@@ -7,12 +7,11 @@ _prev_message, _prev_response, kg_bridge, _kg_queue_lock, skill_library,
 thinker, use_fastpath, fast_path_handler, context_engine.
 """
 
+import concurrent.futures
 import json
 import logging
 import time
-import concurrent.futures
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +37,9 @@ class ChatMixin:
         from aura.core.thought_recorder import record_thought as _record_thought
         from aura.pools import bg_pool as _bg_pool_fn
         _AGENT_EXECUTOR = _bg_pool_fn()
-        from aura.memory.unified_memory import get_unified_memory
-        from aura.tools import get_tone_modifier, SleepPhase
         from aura.brain import TaskType
+        from aura.memory.unified_memory import get_unified_memory
+        from aura.tools import SleepPhase, get_tone_modifier
 
         ctx: dict = {}
 
@@ -388,7 +387,6 @@ class ChatMixin:
                 except (ImportError, AttributeError, KeyError, TypeError) as e:
                     logger.debug(f"[ALMA] PAD retrieval failed: {e}")
                 _umem_ref = _get_umem()
-                import threading as _threading
                 _store_fn = getattr(_umem_ref, "store_gated", _umem_ref.store)
                 def _safe_store(_fn=_store_fn, _c=_mem_content, _p=_pad):
                     try:
@@ -460,9 +458,9 @@ class ChatMixin:
 
         try:
             from aura.consciousness.strategy_bandit import (
-                get_strategy_bandit,
                 ReasoningStrategy,
                 compute_quality_metrics,
+                get_strategy_bandit,
             )
             STRATEGY_BANDIT_AVAILABLE = True
         except ImportError:
@@ -473,8 +471,8 @@ class ChatMixin:
 
         try:
             from aura.consciousness.reasoning_templates import (
-                get_template_library,
                 build_trace_from_mcts,
+                get_template_library,
             )
             TEMPLATE_LIBRARY_AVAILABLE = True
         except ImportError:

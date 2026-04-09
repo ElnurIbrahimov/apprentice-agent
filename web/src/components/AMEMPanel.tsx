@@ -36,6 +36,8 @@ export function AMEMPanel() {
   const [activeTab, setActiveTab] = useState<'notes' | 'search' | 'add'>('notes');
   const [selectedNote, setSelectedNote] = useState<AMEMNote | null>(null);
 
+  const [actionError, setActionError] = useState<string | null>(null);
+
   // Add form state
   const [newContent, setNewContent] = useState('');
   const [newTags, setNewTags] = useState('');
@@ -82,8 +84,8 @@ export function AMEMPanel() {
         const data = await res.json();
         setSearchResults(data.results || []);
       }
-    } catch (e) {
-      console.error('Failed to search A-MEM:', e);
+    } catch {
+      setActionError('Search failed');
     } finally {
       setLoading(false);
     }
@@ -110,8 +112,8 @@ export function AMEMPanel() {
         fetchNotes();
         fetchStats();
       }
-    } catch (e) {
-      console.error('Failed to add memory:', e);
+    } catch {
+      setActionError('Failed to add memory');
     } finally {
       setAddLoading(false);
     }
@@ -123,8 +125,8 @@ export function AMEMPanel() {
       await fetch('/api/amem/consolidate', { method: 'POST' });
       await fetchStats();
       await fetchNotes();
-    } catch (e) {
-      console.error('Failed to consolidate:', e);
+    } catch {
+      setActionError('Failed to consolidate');
     } finally {
       setLoading(false);
     }
@@ -139,6 +141,11 @@ export function AMEMPanel() {
 
   return (
     <div className="bg-chat-sidebar rounded-lg p-4">
+      {actionError && (
+        <div className="mb-2 text-xs text-red-400 bg-red-500/10 px-2 py-1 rounded cursor-pointer" onClick={() => setActionError(null)}>
+          {actionError} (click to dismiss)
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-chat-text font-medium flex items-center gap-2">

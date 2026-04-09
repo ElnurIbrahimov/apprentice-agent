@@ -5,6 +5,7 @@ with retry logic, result normalization, and deduplication.
 """
 
 import logging
+import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -41,7 +42,7 @@ def _is_good_result(result) -> bool:
     if result.get("success") is False:
         return False
     # Explicit error
-    if "error" in result and result["error"]:
+    if result.get("error"):
         return False
     # Has actual results
     results = result.get("results", [])
@@ -113,6 +114,7 @@ def _retry_call(fn, retries: int = 1, delay: float = 1.0):
 _tavily = None
 _brave = None
 _firecrawl = None
+_singleton_lock = threading.Lock()
 
 
 def web_search_with_fallback(
@@ -145,9 +147,10 @@ def web_search_with_fallback(
         if tool_registry and "tavily_search" in tool_registry:
             result = tool_registry["tavily_search"].execute(f"search {query}")
         else:
-            if _tavily is None:
-                from aura.tools.tavily_tool import TavilyTool
-                _tavily = TavilyTool()
+            with _singleton_lock:
+                if _tavily is None:
+                    from aura.tools.tavily_tool import TavilyTool
+                    _tavily = TavilyTool()
             result = _retry_call(lambda: _tavily.search(query=query, max_results=max_results))
 
         if _is_good_result(result):
@@ -166,9 +169,10 @@ def web_search_with_fallback(
         if tool_registry and "brave_search" in tool_registry:
             result = tool_registry["brave_search"].execute(f"search {query}")
         else:
-            if _brave is None:
-                from aura.tools.brave_search import BraveSearchTool
-                _brave = BraveSearchTool()
+            with _singleton_lock:
+                if _brave is None:
+                    from aura.tools.brave_search import BraveSearchTool
+                    _brave = BraveSearchTool()
             result = _retry_call(lambda: _brave.run(query=query, count=max_results))
 
         if _is_good_result(result):
@@ -188,9 +192,10 @@ def web_search_with_fallback(
             fc = tool_registry["firecrawl"]
             result = fc.search(query, limit=max_results) if hasattr(fc, 'search') else fc.execute(query)
         else:
-            if _firecrawl is None:
-                from aura.tools.firecrawl_tool import FirecrawlTool
-                _firecrawl = FirecrawlTool()
+            with _singleton_lock:
+                if _firecrawl is None:
+                    from aura.tools.firecrawl_tool import FirecrawlTool
+                    _firecrawl = FirecrawlTool()
             result = _retry_call(lambda: _firecrawl.search(query=query, limit=max_results))
 
         if _is_good_result(result):

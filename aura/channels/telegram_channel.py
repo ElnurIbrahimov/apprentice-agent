@@ -16,10 +16,9 @@ import asyncio
 import logging
 import os
 import platform
-import re
-import time
 import threading
-from typing import Callable, Dict, List, Optional
+import time
+from typing import Callable, List, Optional
 
 from .bridge import (
     ChannelAdapter,
@@ -35,13 +34,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 from aura.messaging.telegram_formatting import (
-    escape_mdv2 as _escape_mdv2,
-    format_telegram_response as _format_telegram_response,
-    split_message as _split_message,
-    _MARKDOWNV2_ESCAPE,
     _TELEGRAM_MSG_LIMIT,
 )
-
+from aura.messaging.telegram_formatting import (
+    format_telegram_response as _format_telegram_response,
+)
+from aura.messaging.telegram_formatting import (
+    split_message as _split_message,
+)
 
 # ---------------------------------------------------------------------------
 #  TelegramChannel adapter

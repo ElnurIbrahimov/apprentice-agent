@@ -10,7 +10,7 @@ Design tokens: zinc-950 bg, zinc-900 cards, purple accent, shadcn/ui patterns.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from .tool_contract import ToolResult
 

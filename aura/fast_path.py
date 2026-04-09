@@ -7,10 +7,10 @@ This is NOT the place for pattern matching on emotional responses!
 Let the LLM handle actual conversation.
 """
 
-import random
 import logging
+import random
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .emotion import EmotionalEngine

@@ -29,8 +29,8 @@ def get_florence2():
         if not os.getenv("FLORENCE2_ENABLED", "true").lower() == "true":
             return None, None
         try:
-            from transformers import AutoProcessor, AutoModelForCausalLM
             import torch
+            from transformers import AutoModelForCausalLM, AutoProcessor
             model_name = "microsoft/Florence-2-base"
             logger.info(f"[SharedModels] Loading Florence-2: {model_name}")
             _florence2_processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)

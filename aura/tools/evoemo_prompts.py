@@ -3,7 +3,7 @@ EvoEmo Adaptive Prompts - Tone modifiers based on emotional state.
 Used by Aura to adjust response style based on detected user emotion.
 """
 
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 # Tone modifier prompts for each emotional state
 TONE_MODIFIERS: Dict[str, Dict[str, str]] = {

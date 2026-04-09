@@ -12,14 +12,14 @@ The code agent:
 """
 
 import ast
-import os
-import re
-import sys
 import json
 import logging
+import os
+import re
 import subprocess
+import sys
 import tempfile
-from typing import Any, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -320,7 +320,7 @@ class CodeAgentMode:
                     # Broadcast to Artifacts live-preview
                     if res.get("success", True):
                         try:
-                            from api.routes.artifacts import is_previewable, broadcast_artifact
+                            from api.routes.artifacts import broadcast_artifact, is_previewable
                             if is_previewable(path):
                                 import os
                                 broadcast_artifact(os.path.basename(path), content)
@@ -387,8 +387,9 @@ class CodeAgentMode:
             # Broadcast to Artifacts live-preview
             if result and result.get("success", True):
                 try:
-                    from api.routes.artifacts import is_previewable, broadcast_artifact
                     import os
+
+                    from api.routes.artifacts import broadcast_artifact, is_previewable
                     if is_previewable(path):
                         with open(path, "r", encoding="utf-8", errors="replace") as f:
                             broadcast_artifact(os.path.basename(path), f.read())

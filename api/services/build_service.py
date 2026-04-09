@@ -14,11 +14,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from aura.core.agentic_loop import AgenticLoop
-from aura.core.permissions import PermissionManager
-
 from api.routes.artifacts import broadcast_event
 from api.services.agent_service import agent_service
+from aura.core.agentic_loop import AgenticLoop
+from aura.core.permissions import PermissionManager
 
 logger = logging.getLogger(__name__)
 

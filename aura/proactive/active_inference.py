@@ -11,12 +11,12 @@ Uses pymdp when available, falls back to simplified implementation.
 
 import copy
 import logging
-import math
-import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +36,8 @@ def _ensure_pymdp():
     if _PyMDPAgent is not None:
         return True
     try:
-        from pymdp.agent import Agent as _Agent
         from pymdp import utils as _utils
+        from pymdp.agent import Agent as _Agent
         _PyMDPAgent = _Agent
         _pymdp_utils = _utils
         return True

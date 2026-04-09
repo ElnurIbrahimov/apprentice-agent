@@ -8,7 +8,7 @@ import collections
 import hashlib
 import logging
 import threading
-from typing import Optional, List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ def get_embedding(text: str, timeout: float = 3.0) -> Optional[List[float]]:
 
     try:
         import requests
+
         from aura.config import Config
         url = getattr(Config, 'OLLAMA_HOST', 'http://localhost:11434') + '/api/embeddings'
         r = requests.post(

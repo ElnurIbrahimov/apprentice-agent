@@ -6,7 +6,7 @@ allowing AURA's brain.py to use ChatGPT models seamlessly.
 
 import json
 import logging
-from typing import Optional, Iterator
+from typing import Iterator
 
 import requests
 
@@ -124,7 +124,7 @@ class ChatGPTClient:
             "accept": "text/event-stream",
         }
 
-    def _build_body(self, model: str, messages: list[dict], options: dict = None) -> dict:
+    def _build_body(self, model: str, messages: list[dict], options: dict | None = None) -> dict:
         """Build the Responses API request body."""
         # Extract system prompt from messages to use as instructions
         instructions = "You are a helpful AI assistant."
@@ -158,7 +158,7 @@ class ChatGPTClient:
         return body
 
     def chat(self, model: str, messages: list[dict], stream: bool = False,
-             options: dict = None) -> dict | Iterator[dict]:
+             options: dict | None = None) -> dict | Iterator[dict]:
         """Call ChatGPT Codex API, returning ollama-compatible response.
 
         Args:

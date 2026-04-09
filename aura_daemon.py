@@ -11,19 +11,20 @@ Install service: python aura_daemon.py --install
 """
 
 import os
+
 os.environ["TQDM_DISABLE"] = "1"
 
-import sys
-import time
-import json
-import signal
-import logging
-import threading
 import argparse
+import json
+import logging
+import signal
+import sys
+import threading
+import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 # Headless mode — skip screen/GUI features on servers without a display
@@ -378,11 +379,11 @@ class AuraDaemon:
     def _start_hands(self):
         """Register and start Autonomous Hands scheduler."""
         try:
-            from aura.hands.manager import get_hand_manager
-            from aura.hands.researcher import ResearcherHand
-            from aura.hands.guardian import GuardianHand
-            from aura.hands.memory_hand import MemoryHand
             from aura.hands.collector import CollectorHand
+            from aura.hands.guardian import GuardianHand
+            from aura.hands.manager import get_hand_manager
+            from aura.hands.memory_hand import MemoryHand
+            from aura.hands.researcher import ResearcherHand
 
             manager = get_hand_manager()
             if not manager.list_hands():
@@ -545,11 +546,9 @@ class EventBus:
             self._handlers[pattern].append(handler)
 
     def shutdown(self):
-        """Shut down the thread pool used for event dispatch."""
-        try:
-            self._pool.shutdown(wait=False)
-        except Exception:
-            logger.debug("event_bus_pool_shutdown_failed", exc_info=True)
+        """Clear all event handlers. Does NOT shut down the shared bg_pool()."""
+        with self._lock:
+            self._handlers.clear()
 
 
 class ProactiveEngine:
@@ -614,7 +613,8 @@ class IPCServer:
 
     def _generate_auth_token(self) -> str:
         """Generate a random auth token and write it to a restricted file."""
-        import secrets, stat
+        import secrets
+        import stat
         token = secrets.token_hex(32)
         token_path = Path(os.getenv("AURA_DATA_DIR", "data")) / "ipc_token"
         token_path.parent.mkdir(parents=True, exist_ok=True)
@@ -622,7 +622,18 @@ class IPCServer:
         try:
             token_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
         except OSError:
-            pass  # Windows may not support POSIX permissions
+            # Windows: POSIX permissions not supported — use icacls to restrict
+            if sys.platform == "win32":
+                try:
+                    import subprocess
+                    # Remove inherited permissions, grant only current user
+                    subprocess.run(
+                        ["icacls", str(token_path), "/inheritance:r",
+                         "/grant:r", f"{os.getenv('USERNAME', 'OWNER')}:(R,W)"],
+                        capture_output=True, timeout=5,
+                    )
+                except Exception as e:
+                    logger.warning("IPC token file permissions could not be restricted: %s", e)
         logger.info("IPC auth token written to %s", token_path)
         return token
 

@@ -9,7 +9,7 @@ import os
 import re
 
 import httpx
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.auth import require_api_key
 from api.utils import safe_error_detail

@@ -8,8 +8,8 @@ def record_activity(
     category: str,
     event_type: str,
     summary: str,
-    payload: dict = None,
-    duration_ms: int = None,
+    payload: dict | None = None,
+    duration_ms: int | None = None,
 ) -> None:
     """Write one event to the activity log. Never raises."""
     try:

@@ -15,11 +15,10 @@ import logging
 import os
 import tempfile
 import threading
-import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +278,7 @@ def get_narrative_self() -> NarrativeSelf:
 
 __all__ = [
     "NarrativeSelf",
+    "get_narrative_self",
     "load_narrative_self",
     "save_narrative_self",
-    "get_narrative_self",
 ]

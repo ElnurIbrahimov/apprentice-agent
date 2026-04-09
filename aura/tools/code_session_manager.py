@@ -56,7 +56,7 @@ class CodeSessionManager:
                 csv_str = info["value"]
                 # Escape for triple-quoted string
                 escaped = csv_str.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
-                lines.append(f'import pandas as _pd, io as _io')
+                lines.append('import pandas as _pd, io as _io')
                 lines.append(f'{name} = _pd.read_csv(_io.StringIO("""{escaped}"""))')
             else:
                 # JSON-safe value — use json.loads for safety

@@ -7,11 +7,9 @@ tool results — enabling full session resume.
 
 import json
 import logging
-import os
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +22,7 @@ def _is_safe_session_id(session_id: str) -> bool:
 class AgenticSession:
     """Persist full agentic sessions to JSON on disk."""
 
-    def __init__(self, sessions_dir: str = None):
+    def __init__(self, sessions_dir: str | None = None):
         self.sessions_dir = Path(sessions_dir or "data/agentic_sessions")
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.session_id: str = ""
@@ -121,6 +119,12 @@ class AgenticSession:
 
         for d in self.sessions_dir.iterdir():
             if not d.is_dir():
+                continue
+            # Symlink containment check — consistent with delete()
+            try:
+                d.resolve().relative_to(self.sessions_dir.resolve())
+            except ValueError:
+                logger.warning(f"[Session] Skipping path outside sessions dir: {d}")
                 continue
             session_file = d / "session.json"
             if not session_file.exists():

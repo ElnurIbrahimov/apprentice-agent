@@ -17,7 +17,7 @@ import struct
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -257,56 +257,58 @@ class ReasoningTemplateLibrary:
     def _init_db(self):
         """Initialize SQLite schema for traces and templates."""
         conn = sqlite3.connect(self._db_path)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=5000")
-
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS reasoning_traces (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                trace_id TEXT UNIQUE NOT NULL,
-                problem TEXT NOT NULL,
-                problem_category TEXT,
-                strategy_used TEXT,
-                full_trace TEXT NOT NULL,
-                composite_reward REAL NOT NULL,
-                user_feedback TEXT,
-                problem_embedding BLOB,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS reasoning_templates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                template_id TEXT UNIQUE NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL,
-                abstract_steps TEXT NOT NULL,
-                applicable_categories TEXT,
-                source_trace_ids TEXT,
-                embedding BLOB,
-                times_used INTEGER DEFAULT 0,
-                avg_reward_when_used REAL DEFAULT 0.0,
-                avg_reward_baseline REAL DEFAULT 0.0,
-                status TEXT DEFAULT 'active',
-                created_at TEXT NOT NULL,
-                last_used TEXT
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_traces_category
-                ON reasoning_traces(problem_category);
-            CREATE INDEX IF NOT EXISTS idx_traces_reward
-                ON reasoning_traces(composite_reward);
-            CREATE INDEX IF NOT EXISTS idx_templates_status
-                ON reasoning_templates(status);
-        """)
-
-        # Schema migration: add granularity column if missing
         try:
-            conn.execute("ALTER TABLE reasoning_templates ADD COLUMN granularity TEXT DEFAULT 'pattern'")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
 
-        conn.commit()
-        conn.close()
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS reasoning_traces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trace_id TEXT UNIQUE NOT NULL,
+                    problem TEXT NOT NULL,
+                    problem_category TEXT,
+                    strategy_used TEXT,
+                    full_trace TEXT NOT NULL,
+                    composite_reward REAL NOT NULL,
+                    user_feedback TEXT,
+                    problem_embedding BLOB,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS reasoning_templates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    template_id TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    abstract_steps TEXT NOT NULL,
+                    applicable_categories TEXT,
+                    source_trace_ids TEXT,
+                    embedding BLOB,
+                    times_used INTEGER DEFAULT 0,
+                    avg_reward_when_used REAL DEFAULT 0.0,
+                    avg_reward_baseline REAL DEFAULT 0.0,
+                    status TEXT DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    last_used TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_traces_category
+                    ON reasoning_traces(problem_category);
+                CREATE INDEX IF NOT EXISTS idx_traces_reward
+                    ON reasoning_traces(composite_reward);
+                CREATE INDEX IF NOT EXISTS idx_templates_status
+                    ON reasoning_templates(status);
+            """)
+
+            # Schema migration: add granularity column if missing
+            try:
+                conn.execute("ALTER TABLE reasoning_templates ADD COLUMN granularity TEXT DEFAULT 'pattern'")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
+            conn.commit()
+        finally:
+            conn.close()
         logger.info(f"[TemplateLib] DB initialized at {self._db_path}")
 
     # ----------------------------------------------------------------
@@ -602,18 +604,19 @@ class ReasoningTemplateLibrary:
         """Group traces by category and abstract patterns into templates via LLM."""
         try:
             conn = sqlite3.connect(self._db_path)
-
-            # Get unprocessed high-reward traces
-            rows = conn.execute(
-                """SELECT trace_id, problem, problem_category, strategy_used,
-                          full_trace, composite_reward
-                   FROM reasoning_traces
-                   WHERE composite_reward >= ?
-                   ORDER BY composite_reward DESC
-                   LIMIT 200""",
-                (self.REWARD_THRESHOLD,),
-            ).fetchall()
-            conn.close()
+            try:
+                # Get unprocessed high-reward traces
+                rows = conn.execute(
+                    """SELECT trace_id, problem, problem_category, strategy_used,
+                              full_trace, composite_reward
+                       FROM reasoning_traces
+                       WHERE composite_reward >= ?
+                       ORDER BY composite_reward DESC
+                       LIMIT 200""",
+                    (self.REWARD_THRESHOLD,),
+                ).fetchall()
+            finally:
+                conn.close()
 
             if not rows:
                 return

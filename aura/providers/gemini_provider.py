@@ -47,7 +47,7 @@ class GeminiProvider(BaseProvider):
     def _strip_prefix(self, model: str) -> str:
         return model[len("gemini:"):] if model.startswith("gemini:") else model
 
-    def _build_body(self, messages: list[dict], options: dict = None) -> dict:
+    def _build_body(self, messages: list[dict], options: dict | None = None) -> dict:
         """Build Gemini GenerateContent request body.
 
         Key differences from OpenAI:
@@ -100,7 +100,7 @@ class GeminiProvider(BaseProvider):
         return body
 
     def chat(self, model: str, messages: list[dict], stream: bool = False,
-             options: dict = None, tools: list | None = None) -> dict | Iterator[dict]:
+             options: dict | None = None, tools: list | None = None) -> dict | Iterator[dict]:
         if not self.is_configured():
             raise ConnectionError(
                 f"Gemini API key not set. Set {_CFG['env_var']} in your .env file."
@@ -116,7 +116,7 @@ class GeminiProvider(BaseProvider):
             url = f"{_CFG['base_url']}/models/{bare_model}:generateContent"
             return self._sync_chat(url, messages, options, tools, api_key=api_key)
 
-    def _sync_chat(self, url: str, messages: list[dict], options: dict = None,
+    def _sync_chat(self, url: str, messages: list[dict], options: dict | None = None,
                    tools: list | None = None, api_key: str = "") -> dict:
         body = self._build_body(messages, options)
         headers = {"Content-Type": "application/json"}
@@ -183,7 +183,7 @@ class GeminiProvider(BaseProvider):
 
         return result
 
-    def _stream_chat(self, url: str, messages: list[dict], options: dict = None,
+    def _stream_chat(self, url: str, messages: list[dict], options: dict | None = None,
                      tools: list | None = None, api_key: str = "") -> Iterator[dict]:
         body = self._build_body(messages, options)
         headers = {"Content-Type": "application/json"}
@@ -219,53 +219,56 @@ class GeminiProvider(BaseProvider):
         tool_calls = []
         resp.encoding = "utf-8"
 
-        for raw_line in resp.iter_lines():
-            if isinstance(raw_line, bytes):
-                line = raw_line.decode("utf-8", errors="replace")
-            else:
-                line = raw_line
+        try:
+            for raw_line in resp.iter_lines():
+                if isinstance(raw_line, bytes):
+                    line = raw_line.decode("utf-8", errors="replace")
+                else:
+                    line = raw_line
 
-            if not line or not line.startswith("data: "):
-                continue
+                if not line or not line.startswith("data: "):
+                    continue
 
-            data_str = line[6:]
-            try:
-                event = json.loads(data_str)
-                candidates = event.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    for part in parts:
-                        text = part.get("text", "")
-                        if text:
-                            yield {
-                                "message": {"role": "assistant", "content": text},
-                                "done": False,
-                            }
-                        if "functionCall" in part:
-                            fc = part["functionCall"]
-                            tool_calls.append({
-                                "id": f"call_{fc.get('name', '')}",
-                                "type": "function",
-                                "function": {
-                                    "name": fc.get("name", ""),
-                                    "arguments": json.dumps(fc.get("args", {})),
-                                },
-                            })
+                data_str = line[6:]
+                try:
+                    event = json.loads(data_str)
+                    candidates = event.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        for part in parts:
+                            text = part.get("text", "")
+                            if text:
+                                yield {
+                                    "message": {"role": "assistant", "content": text},
+                                    "done": False,
+                                }
+                            if "functionCall" in part:
+                                fc = part["functionCall"]
+                                tool_calls.append({
+                                    "id": f"call_{fc.get('name', '')}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": fc.get("name", ""),
+                                        "arguments": json.dumps(fc.get("args", {})),
+                                    },
+                                })
 
-                usage = event.get("usageMetadata")
-                if usage:
-                    input_tokens = usage.get("promptTokenCount", input_tokens)
-                    output_tokens = usage.get("candidatesTokenCount", output_tokens)
+                    usage = event.get("usageMetadata")
+                    if usage:
+                        input_tokens = usage.get("promptTokenCount", input_tokens)
+                        output_tokens = usage.get("candidatesTokenCount", output_tokens)
 
-            except json.JSONDecodeError:
-                continue
+                except json.JSONDecodeError:
+                    continue
 
-        final_msg = {"role": "assistant", "content": ""}
-        if tool_calls:
-            final_msg["tool_calls"] = tool_calls
-        yield {
-            "message": final_msg,
-            "done": True,
-            "prompt_eval_count": input_tokens,
-            "eval_count": output_tokens,
-        }
+            final_msg = {"role": "assistant", "content": ""}
+            if tool_calls:
+                final_msg["tool_calls"] = tool_calls
+            yield {
+                "message": final_msg,
+                "done": True,
+                "prompt_eval_count": input_tokens,
+                "eval_count": output_tokens,
+            }
+        finally:
+            resp.close()

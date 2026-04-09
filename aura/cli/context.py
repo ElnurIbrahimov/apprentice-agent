@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from aura.agent import ApprenticeAgent
+    from aura.cli.background import BackgroundManager
+    from aura.cli.hooks import HookManager
+    from aura.cli.research_mode import ResearchContext
+    from aura.cli.watch_mode import FileWatcher
     from aura.core.agentic_loop import AgenticLoop
     from aura.core.permissions import PermissionManager
     from aura.core.session import AgenticSession
-    from aura.cli.background import BackgroundManager
-    from aura.cli.research_mode import ResearchContext
-    from aura.cli.hooks import HookManager
-    from aura.cli.watch_mode import FileWatcher
 
 
 @dataclass

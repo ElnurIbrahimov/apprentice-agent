@@ -298,9 +298,10 @@ def _chunk_pdf_pages(path: "Path") -> List[Dict[str, Any]]:
 
     chunks: List[Dict[str, Any]] = []
     doc = fitz.open(path)
-    offset = 0
+    try:
+        offset = 0
 
-    for page_idx, page in enumerate(doc):
+        for page_idx, page in enumerate(doc):
         page_text = page.get_text().strip()
         if not page_text:
             continue
@@ -355,8 +356,8 @@ def _chunk_pdf_pages(path: "Path") -> List[Dict[str, Any]]:
                 })
 
         offset += len(page_text) + 2  # account for page separator
-
-    doc.close()
+    finally:
+        doc.close()
     return chunks
 
 
@@ -693,9 +694,11 @@ class LocalRAG:
 
         text_parts = []
         doc = fitz.open(path)
-        for page in doc:
-            text_parts.append(page.get_text())
-        doc.close()
+        try:
+            for page in doc:
+                text_parts.append(page.get_text())
+        finally:
+            doc.close()
         return "\n\n".join(text_parts)
 
     def _load_docx(self, path: Path) -> str:

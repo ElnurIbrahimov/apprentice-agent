@@ -2,13 +2,13 @@
 GEPA Evolution Types — Data structures for skill evolution.
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-from enum import Enum
 import hashlib
 import json
 import os
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Dict, List, Optional
 
 
 class CandidateSelectionStrategy(Enum):

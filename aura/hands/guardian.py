@@ -78,10 +78,11 @@ class GuardianHand(Hand):
         if step_cb:
             await step_cb(2, "Scanning for leaked secrets...")
         try:
-            from aura.security.taint_tracker import scan_for_secrets
             # Check monologue logs for leaked secrets
             import glob
             import os
+
+            from aura.security.taint_tracker import scan_for_secrets
             data_dir = os.environ.get("AURA_DATA_DIR", "data")
             log_dir = os.path.join(data_dir, "inner_monologue", "sessions")
             if os.path.isdir(log_dir):

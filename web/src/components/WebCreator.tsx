@@ -282,6 +282,7 @@ export function WebCreator({ creatorMode: _mode = 'web', customTemplates, custom
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Syntax highlight current HTML for code view
@@ -343,6 +344,7 @@ export function WebCreator({ creatorMode: _mode = 'web', customTemplates, custom
   // Listen for element selections from the preview iframe (click-to-edit)
   useEffect(() => {
     const handler = (e: MessageEvent) => {
+      if (e.source !== previewIframeRef.current?.contentWindow) return;
       if (e.data?.type === 'elementSelected') {
         const { tag, text, classes } = e.data;
         const desc = text
@@ -390,6 +392,7 @@ export function WebCreator({ creatorMode: _mode = 'web', customTemplates, custom
   // Listen for live text edits from the preview iframe
   useEffect(() => {
     const handler = (e: MessageEvent) => {
+      if (e.source !== previewIframeRef.current?.contentWindow) return;
       if (e.data?.type === 'htmlUpdated') {
         let html = e.data.html as string;
         html = html.replace(/\s*contenteditable="[^"]*"/gi, '');
@@ -697,8 +700,13 @@ Rules:
       if (res.ok) {
         const data = await res.json();
         setPublishUrl(data.url);
+      } else {
+        setPublishUrl(null);
+        setDesignReview(`Publish failed: HTTP ${res.status}`);
       }
-    } catch { /* silent */ }
+    } catch {
+      setDesignReview('Publish failed: network error');
+    }
     setIsPublishing(false);
   }, [currentHtml, isPublishing]);
 
@@ -718,8 +726,12 @@ Rules:
       if (res.ok) {
         const data = await res.json();
         setDesignReview(data.response || 'No issues found.');
+      } else {
+        setDesignReview(`Review failed: HTTP ${res.status}`);
       }
-    } catch { /* silent */ }
+    } catch {
+      setDesignReview('Review failed: network error');
+    }
     setIsReviewing(false);
   }, [currentHtml, isReviewing]);
 
@@ -1507,6 +1519,7 @@ Rules:
                     <div className="absolute top-1 left-1/2 -translate-x-1/2 w-24 h-5 bg-gray-800 rounded-b-xl z-10" />
                   )}
                   <iframe
+                    ref={previewIframeRef}
                     srcDoc={srcdoc}
                     sandbox="allow-scripts allow-same-origin"
                     className={`w-full h-full border-none ${DEVICE_FRAMES[device].inner}`}

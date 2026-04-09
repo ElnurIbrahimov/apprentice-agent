@@ -40,8 +40,9 @@ def handle_sources(agent, arg, context) -> Optional[str]:
 
 
 def handle_export(agent, arg, context) -> Optional[str]:
-    from ..display import console as _export_console
     import re as _re_export
+
+    from ..display import console as _export_console
     ctx = get_ctx()
     research_ctx = ctx.research_ctx if ctx else None
     if research_ctx and research_ctx.is_active:
@@ -99,7 +100,7 @@ def _handle_browse_command(agent, arg: str):
             print(f"  Title: {result.get('title', 'N/A')}")
             links = browser.get_links()
             if links.get("success"):
-                print(f"  Top results:")
+                print("  Top results:")
                 count = 0
                 for link in links.get("links", []):
                     href = link.get("href", "")

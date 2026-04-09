@@ -2,13 +2,14 @@
 
 import asyncio
 import logging
-from typing import Optional, List
+import os
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
 from api.auth import require_api_key
-from api.utils import get_agent_service as _get_agent_service, get_agent, call_tool, run_sync, error_response
+from api.utils import call_tool, get_agent
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +27,12 @@ def _safe_error(e: Exception, context: str = "") -> str:
 # ============================================================================
 
 class AddEventRequest(BaseModel):
-    title: str
-    start: str
-    end: Optional[str] = None
-    description: str = ""
-    location: str = ""
-    recurrence: Optional[str] = None
+    title: str = Field(..., max_length=500)
+    start: str = Field(..., max_length=64)
+    end: Optional[str] = Field(None, max_length=64)
+    description: str = Field("", max_length=5000)
+    location: str = Field("", max_length=1000)
+    recurrence: Optional[str] = Field(None, max_length=200)
     reminders: Optional[List[int]] = None
 
 
@@ -95,6 +96,9 @@ def _calendar_add_sync(request: AddEventRequest) -> dict:
 @router.delete("/calendar/{event_id}")
 async def calendar_remove(event_id: str):
     """Remove a calendar event."""
+    import re as _re
+    if not event_id or not _re.match(r'^[a-zA-Z0-9_\-\.]{1,128}$', event_id):
+        return {"success": False, "error": "Invalid event_id format"}
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, lambda: _calendar_remove_sync(event_id))
@@ -115,15 +119,15 @@ def _calendar_remove_sync(event_id: str) -> dict:
 # ============================================================================
 
 class AddCardRequest(BaseModel):
-    front: str
-    back: str
-    tags: List[str] = []
-    deck: str = "default"
+    front: str = Field(..., max_length=10000)
+    back: str = Field(..., max_length=10000)
+    tags: List[str] = Field(default_factory=list, max_length=50)
+    deck: str = Field("default", max_length=200)
 
 
 class AnswerRequest(BaseModel):
-    card_id: str
-    quality: int  # 0-5
+    card_id: str = Field(..., max_length=128)
+    quality: int = Field(..., ge=0, le=5)
 
 
 @router.get("/flashcards/due")
@@ -208,11 +212,11 @@ def _flashcards_add_sync(request: AddCardRequest) -> dict:
 # ============================================================================
 
 class SendEmailRequest(BaseModel):
-    to: str
-    subject: str
-    body: str
-    cc: Optional[str] = None
-    bcc: Optional[str] = None
+    to: str = Field(..., max_length=500)
+    subject: str = Field(..., max_length=500)
+    body: str = Field(..., max_length=100000)
+    cc: Optional[str] = Field(None, max_length=500)
+    bcc: Optional[str] = Field(None, max_length=500)
 
 
 @router.get("/email/status")
@@ -322,7 +326,7 @@ def _screen_active_window_sync() -> dict:
 
 class ShellRunRequest(BaseModel):
     command: str = Field(..., max_length=8192)
-    session_id: Optional[str] = None
+    session_id: Optional[str] = Field(None, max_length=64, pattern=r'^[a-zA-Z0-9_\-]{1,64}$')
     timeout: int = Field(60, ge=1, le=600)
     cwd: Optional[str] = Field(None, max_length=512)
 
@@ -348,11 +352,10 @@ _SHELL_ALLOWED_COMMANDS = {
     # System info (read-only)
     "whoami", "date", "uptime", "uname", "hostname", "df", "du", "free", "top",
     "env", "printenv", "echo", "printf",
-    # Dev tools (read-only / build / version control)
-    "pip", "pip3", "npm", "npx", "yarn", "pnpm",
-    "git", "make", "cargo",
-    # File manipulation (non-destructive)
-    "cp", "mv", "mkdir", "touch", "ln", "tar", "zip", "unzip", "gzip", "gunzip",
+    # Dev tools (read-only / version control)
+    "git",
+    # File manipulation (safe subset)
+    "mkdir", "touch",
     # Process info (read-only)
     "ps", "pgrep",
     # Network (safe read-only)
@@ -361,7 +364,7 @@ _SHELL_ALLOWED_COMMANDS = {
 
 # Extra patterns that are ALWAYS blocked even if the base command is allowed
 _SHELL_DANGER_PATTERNS = [
-    "rm -rf /", "rm -rf /*", "mkfs.", "dd if=", ":(){", "fork bomb",
+    "rm ", "rm\t", "rmdir", "rm -rf /", "rm -rf /*", "mkfs.", "dd if=", ":(){", "fork bomb",
     "chmod -R 777 /", "shutdown", "reboot", "init 0", "init 6",
     "taskkill //F //IM node", "pkill -f node", "killall node",
     "> /dev/sd", "| base64 -d | sh", "| bash", "| sh",
@@ -455,7 +458,7 @@ def _shell_run_sync(request: ShellRunRequest) -> dict:
     # Step 1: Block dangerous patterns (always, regardless of allowlist)
     for pattern in _SHELL_DANGER_PATTERNS:
         if pattern in cmd_lower:
-            return {"success": False, "error": f"Blocked: command matches dangerous pattern"}
+            return {"success": False, "error": "Blocked: command matches dangerous pattern"}
 
     # Step 2: ALLOWLIST — extract every command name and verify ALL are allowed
     cmd_names = _extract_command_names(request.command)
@@ -526,20 +529,20 @@ def _shell_sessions_sync() -> dict:
 # ============================================================================
 
 class AddTaskRequest(BaseModel):
-    title: str
-    description: str = ""
-    priority: str = "medium"
-    project: Optional[str] = None
-    due_date: Optional[str] = None
-    tags: List[str] = []
+    title: str = Field(..., max_length=500)
+    description: str = Field("", max_length=5000)
+    priority: str = Field("medium", max_length=20)
+    project: Optional[str] = Field(None, max_length=200)
+    due_date: Optional[str] = Field(None, max_length=64)
+    tags: List[str] = Field(default_factory=list, max_length=50)
 
 
 class UpdateTaskRequest(BaseModel):
-    task_id: str
-    status: Optional[str] = None
-    priority: Optional[str] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
+    task_id: str = Field(..., max_length=128)
+    status: Optional[str] = Field(None, max_length=20)
+    priority: Optional[str] = Field(None, max_length=20)
+    title: Optional[str] = Field(None, max_length=500)
+    description: Optional[str] = Field(None, max_length=5000)
 
 
 @router.get("/tasks/list")
@@ -774,14 +777,14 @@ def _api_tester_history_sync(limit: int) -> dict:
 # ============================================================================
 
 class SQLQueryRequest(BaseModel):
-    sql: str
-    db: str = "default"
+    sql: str = Field(..., max_length=10000)
+    db: str = Field("default", max_length=200)
 
 
 class CSVImportRequest(BaseModel):
-    csv_path: str
-    table: str
-    db: str = "default"
+    csv_path: str = Field(..., max_length=512)
+    table: str = Field(..., max_length=200)
+    db: str = Field("default", max_length=200)
 
 
 # SQL statements allowed via the API — blocks DROP, DELETE, INSERT, UPDATE, ALTER, etc.
@@ -878,9 +881,9 @@ def _database_import_sync(request: CSVImportRequest) -> dict:
 # ============================================================================
 
 class TranscribeRequest(BaseModel):
-    file_path: str
-    language: Optional[str] = None
-    model_size: Optional[str] = None
+    file_path: str = Field(..., max_length=512)
+    language: Optional[str] = Field(None, max_length=10)
+    model_size: Optional[str] = Field(None, max_length=20)
 
 
 @router.post("/audio/transcribe")
@@ -1035,9 +1038,9 @@ def _clipboard_stats_sync() -> dict:
 # ============================================================================
 
 class SaveResearchRequest(BaseModel):
-    title: str
-    content: str
-    category: str = "tools"
+    title: str = Field(..., max_length=500)
+    content: str = Field(..., max_length=100000)
+    category: str = Field("tools", max_length=100)
     tags: Optional[List[str]] = None
     sources: Optional[List[str]] = None
 

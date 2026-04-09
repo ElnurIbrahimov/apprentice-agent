@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
 
 
 class _DeferredEntry:
     """Internal bookkeeping for one deferred tool."""
-    __slots__ = ("name", "description", "loader", "instance")
+    __slots__ = ("description", "instance", "loader", "name")
 
     def __init__(self, name: str, description: str, loader: Callable):
         self.name = name

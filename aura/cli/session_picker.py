@@ -1,8 +1,10 @@
 # aura/cli/session_picker.py
 """Interactive session browser with arrow keys, preview, and metadata."""
 from __future__ import annotations
+
 import time
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
+
 from rich.console import Console
 
 
@@ -50,9 +52,9 @@ def _format_session_line(session: Dict, width: int = 60, is_current: bool = Fals
 def _pick_session_interactive(sessions: List[Dict], current_session_id: str) -> Optional[Dict]:
     """Full interactive picker using prompt_toolkit."""
     from prompt_toolkit import Application
-    from prompt_toolkit.layout import Layout, HSplit, Window
-    from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout import Layout, Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.styles import Style
 
     filter_text = [""]  # mutable container for closure
@@ -267,7 +269,7 @@ def _pick_session_fallback(console: Console, sessions: List[Dict], current_sessi
         marker = "[green]\u2192[/green]" if is_current else " "
         console.print(f"  {marker} {i + 1:>2}. {line}")
 
-    console.print(f"\n  0. Cancel")
+    console.print("\n  0. Cancel")
     try:
         choice = input("Select session: ").strip()
     except (EOFError, KeyboardInterrupt):

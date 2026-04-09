@@ -40,7 +40,6 @@ def handle_subcommand(command: str, args) -> int:
 
 def cmd_init(args) -> int:
     """Create AURA.md in the current project."""
-    from aura.tools.project_context import init_project
     from aura.tools.code_search import CodeSearchTool
 
     cwd = os.getcwd()
@@ -65,7 +64,7 @@ def cmd_init(args) -> int:
     frontmatter_lines = [
         "---",
         "tier: balanced",
-        f"# model: qwen3.5:397b-cloud",
+        "# model: qwen3.5:397b-cloud",
     ]
     if test_cmd:
         frontmatter_lines.append(f"test_cmd: {test_cmd}")
@@ -106,7 +105,7 @@ def cmd_init(args) -> int:
         print(f"  Detected: {project_type} project ({', '.join(stack)})")
     if test_cmd:
         print(f"  Test command: {test_cmd}")
-    print(f"\n  Edit AURA.md to customize Aura's behavior for this project.")
+    print("\n  Edit AURA.md to customize Aura's behavior for this project.")
     return 0
 
 
@@ -128,7 +127,7 @@ def cmd_doctor(args) -> int:
             print(f"      ... and {len(model_names) - 15} more")
     except Exception as e:
         print(f"    [ERROR] Not reachable: {e}")
-        print(f"    Run: ollama serve")
+        print("    Run: ollama serve")
         all_ok = False
 
     # 2. Check key dependencies
@@ -166,9 +165,9 @@ def cmd_doctor(args) -> int:
     print("\n  Project:")
     aura_md = os.path.join(os.getcwd(), "AURA.md")
     if os.path.exists(aura_md):
-        print(f"    AURA.md: found")
+        print("    AURA.md: found")
     else:
-        print(f"    AURA.md: not found (run: aura init)")
+        print("    AURA.md: not found (run: aura init)")
 
     # 5. Check git
     try:
@@ -177,11 +176,11 @@ def cmd_doctor(args) -> int:
             capture_output=True, text=True, timeout=5, cwd=os.getcwd(),
         )
         if result.returncode == 0:
-            print(f"    Git repo: yes")
+            print("    Git repo: yes")
         else:
-            print(f"    Git repo: no")
+            print("    Git repo: no")
     except Exception:
-        print(f"    Git: not available")
+        print("    Git: not available")
 
     print(f"\n  {'All checks passed!' if all_ok else 'Some issues found.'}\n")
     return 0 if all_ok else 1
@@ -240,7 +239,7 @@ def cmd_config(args) -> int:
 
 def cmd_models(args) -> int:
     """List available models with routing roles."""
-    from aura.core.router import ROUTING_TABLE, VALID_TIERS
+    from aura.core.router import ROUTING_TABLE
 
     print("\nAura Model Routing\n")
     print(f"  {'Category':<16} {'local':<22} {'balanced':<28} {'max'}")
@@ -268,8 +267,8 @@ def cmd_models(args) -> int:
 
 def cmd_commit(args) -> int:
     """Smart commit with AI-generated message."""
-    from aura.tools.git_tool import GitTool
     from aura import ApprenticeAgent
+    from aura.tools.git_tool import GitTool
 
     git = GitTool()
     cwd = os.getcwd()
@@ -476,13 +475,13 @@ def cmd_ide_setup(args) -> int:
         json.dump(tasks_data, f, indent=2)
 
     print(f"\n  Created {tasks_path}")
-    print(f"    - Aura: Chat (interactive mode)")
-    print(f"    - Aura: Run Prompt (one-shot)")
-    print(f"    - Aura: Init Project")
-    print(f"    - Aura: Smart Commit")
+    print("    - Aura: Chat (interactive mode)")
+    print("    - Aura: Run Prompt (one-shot)")
+    print("    - Aura: Init Project")
+    print("    - Aura: Smart Commit")
 
     # Print MCP config snippet
-    print(f"\n  MCP Server config for VS Code settings.json:\n")
+    print("\n  MCP Server config for VS Code settings.json:\n")
     mcp_config = {
         "mcp.servers": {
             "aura": {
@@ -575,7 +574,7 @@ def cmd_setup(args) -> int:
     # Step 4: Test command
     detected_test = _detect_test_cmd(cwd)
     default_test = detected_test or "pytest"
-    test_cmd = _prompt(f"\n  Step 4: Test command", default_test)
+    test_cmd = _prompt("\n  Step 4: Test command", default_test)
     auto_test_str = _prompt("    Auto-run tests after edits? [y/n]", "y")
     auto_test = auto_test_str.lower() in ("y", "yes")
 
@@ -593,7 +592,7 @@ def cmd_setup(args) -> int:
         overwrite = _prompt("    AURA.md already exists. Overwrite? [y/n]", "n")
         if overwrite.lower() not in ("y", "yes"):
             print("    Kept existing AURA.md.")
-            print(f"\n  Setup complete! Run 'aura' to start.\n")
+            print("\n  Setup complete! Run 'aura' to start.\n")
             return 0
 
     # Build content
@@ -630,7 +629,7 @@ def cmd_setup(args) -> int:
         f.write(content)
 
     print(f"    Created {aura_md_path}")
-    print(f"\n  Setup complete! Run 'aura' to start.\n")
+    print("\n  Setup complete! Run 'aura' to start.\n")
     return 0
 
 

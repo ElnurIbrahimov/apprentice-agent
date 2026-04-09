@@ -29,8 +29,9 @@ from aura.consciousness.world_model import (
 
 def _make_wm(enabled=True):
     """Create a WorldModel with a temp DB for testing."""
-    tmp = tempfile.mktemp(suffix=".db")
-    snap = tempfile.mktemp(suffix=".json")
+    tmpdir = tempfile.mkdtemp()
+    tmp = os.path.join(tmpdir, "world.db")
+    snap = os.path.join(tmpdir, "snapshot.json")
     return WorldModel(db_path=tmp, snapshot_path=snap, enabled=enabled)
 
 

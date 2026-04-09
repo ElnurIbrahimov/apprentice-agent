@@ -8,14 +8,14 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.padding import Padding
 from rich.panel import Panel
-from rich.live import Live
 from rich.text import Text
 
-from aura.cli.tool_output import ToolOutputRenderer, format_elapsed
-from aura.cli.tool_icons import get_tool_icon, STATUS_ICONS
+from aura.cli.tool_icons import get_tool_icon
+from aura.cli.tool_output import ToolOutputRenderer
 
 _no_color = os.environ.get("NO_COLOR") is not None
 console: Console = Console(highlight=True, soft_wrap=True, no_color=_no_color)
@@ -83,8 +83,9 @@ def _get_theme_colors() -> dict:
 
 def show_banner() -> None:
     """Display startup screen — cohesive bordered panel with logo, info, shortcuts."""
-    from .banner import _apply_gradient, _LOGO_LINES
     from aura import __version__
+
+    from .banner import _LOGO_LINES, _apply_gradient
 
     colors = _get_theme_colors()
     try:
@@ -195,8 +196,8 @@ def show_status_bar(
     project_type: str = "",
 ) -> None:
     """Update the persistent bottom toolbar."""
-    from .status_bar import build_status_bar
     from .input import set_bottom_toolbar
+    from .status_bar import build_status_bar
 
     toolbar_parts = build_status_bar(
         model=model,
@@ -221,7 +222,7 @@ def show_status_bar(
 # Thinking / Spinner
 # ─────────────────────────────────────────────────────────
 
-def show_thinking(label: str = None, step: int = None) -> Live:
+def show_thinking(label: str | None = None, step: int | None = None) -> Live:
     """Context manager — shows animated shimmer spinner while agent runs."""
     from .spinner import AuraSpinner
     spinner = AuraSpinner(label=label, step=step)
@@ -709,7 +710,7 @@ def show_help() -> None:
     colors = _get_theme_colors()
 
     console.print()
-    console.print(f"  [bold]Commands & Shortcuts[/bold]")
+    console.print("  [bold]Commands & Shortcuts[/bold]")
     console.print()
 
     sections = [
@@ -1051,7 +1052,7 @@ def show_checkpoint_picker(checkpoints: list[dict[str, Any]]) -> Optional[str]:
     display = checkpoints[:10]
 
     console.print()
-    console.print(f"  [bold]Checkpoints[/bold]")
+    console.print("  [bold]Checkpoints[/bold]")
     console.print()
 
     now = _time.time()
@@ -1081,7 +1082,7 @@ def show_checkpoint_picker(checkpoints: list[dict[str, Any]]) -> Optional[str]:
     console.print()
 
     try:
-        raw = console.input(f"  [dim]Pick checkpoint # (or Enter to cancel): [/dim]")
+        raw = console.input("  [dim]Pick checkpoint # (or Enter to cancel): [/dim]")
         raw = raw.strip()
         if not raw:
             return None

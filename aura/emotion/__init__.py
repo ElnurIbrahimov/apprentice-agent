@@ -10,14 +10,14 @@ This module provides AURA with genuine emotional depth through:
 
 from .alma_engine import (
     ALMAEngine,
-    PADState,
     EmotionState,
     MoodState,
+    PADState,
     PersonalityProfile,
     get_alma_engine,
     get_emotional_state,
-    trigger_emotion,
     get_response_modulation,
+    trigger_emotion,
     update_from_interaction,
 )
 
@@ -31,14 +31,14 @@ def __getattr__(name: str):
 
 __all__ = [
     "ALMAEngine",
-    "PADState",
     "EmotionState",
     "MoodState",
+    "PADState",
     "PersonalityProfile",
     "alma_engine",
     "get_alma_engine",
     "get_emotional_state",
-    "trigger_emotion",
     "get_response_modulation",
+    "trigger_emotion",
     "update_from_interaction",
 ]

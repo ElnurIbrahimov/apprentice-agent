@@ -5,12 +5,12 @@ Reasoning Tree API Routes
 API endpoints for MCTS-based deep reasoning.
 """
 
-import logging
 import asyncio
+import logging
 import uuid
-from typing import Optional, List
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
@@ -21,7 +21,10 @@ router = APIRouter(prefix="/api/reasoning-tree", tags=["reasoning-tree"], depend
 logger = logging.getLogger(__name__)
 
 # Store for reasoning session results (capped at 100)
+import threading as _threading
+
 _session_results = {}
+_session_lock = _threading.Lock()
 
 
 class ReasoningRequest(BaseModel):
@@ -101,10 +104,11 @@ async def think_deeply(request: ReasoningRequest):
         )
 
         # Store result (evict oldest if over capacity)
-        _session_results[session_id] = result
-        if len(_session_results) > 100:
-            oldest_key = next(iter(_session_results))
-            del _session_results[oldest_key]
+        with _session_lock:
+            _session_results[session_id] = result
+            if len(_session_results) > 100:
+                oldest_key = next(iter(_session_results))
+                del _session_results[oldest_key]
 
         return ReasoningResponse(
             success=result.get("success", False),
@@ -153,10 +157,11 @@ async def explore_options(request: ExploreRequest):
         )
 
         # Store result (evict oldest if over capacity)
-        _session_results[session_id] = result
-        if len(_session_results) > 100:
-            oldest_key = next(iter(_session_results))
-            del _session_results[oldest_key]
+        with _session_lock:
+            _session_results[session_id] = result
+            if len(_session_results) > 100:
+                oldest_key = next(iter(_session_results))
+                del _session_results[oldest_key]
 
         return ReasoningResponse(
             success=result.get("success", False),

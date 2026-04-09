@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import threading
 from pathlib import Path
-from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DIMENSIONS = ("code", "reason", "speed", "context", "quality", "vision")
 NEUTRAL_PROFILE: dict[str, float] = {
@@ -71,10 +74,17 @@ class ProfileStore:
 
     def _load(self) -> None:
         if self._path.exists():
-            with open(self._path, "r", encoding="utf-8") as f:
-                self._profiles = json.load(f)
+            try:
+                with open(self._path, "r", encoding="utf-8") as f:
+                    self._profiles = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("[ProfileStore] Corrupt profile file, starting fresh: %s", e)
+                self._profiles = {}
 
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._path, "w", encoding="utf-8") as f:
+        # Atomic write: write to temp file then rename to prevent corruption on crash
+        tmp_path = self._path.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self._profiles, f, indent=2)
+        os.replace(tmp_path, self._path)

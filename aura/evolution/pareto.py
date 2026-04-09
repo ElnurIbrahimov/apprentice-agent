@@ -5,7 +5,7 @@ Pareto Frontier — Tracks non-dominated candidates across evaluation examples.
 import logging
 import random
 from collections import defaultdict
-from typing import Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 
 from .types import Candidate
 

@@ -17,11 +17,11 @@ ARCHITECTURE NOTE — Identity layer hierarchy:
     shared soul but personalizes per user session.
 """
 
-import re
 import logging
-from pathlib import Path
+import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from pathlib import Path
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -388,11 +388,11 @@ if __name__ == "__main__":
 
     print(f"Name: {soul.name}")
     print(f"Version: {soul.version}")
-    print(f"\nPersonality traits:")
+    print("\nPersonality traits:")
     for trait in soul.personality_traits[:5]:
         print(f"  - {trait}")
 
-    print(f"\nValues:")
+    print("\nValues:")
     for value in soul.values[:5]:
         print(f"  - {value}")
 

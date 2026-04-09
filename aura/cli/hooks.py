@@ -1,13 +1,13 @@
 # aura/cli/hooks.py
 """Programmable hooks — event-driven automation for the CLI."""
 from __future__ import annotations
+
+import logging
 import shlex
 import subprocess
-import logging
 import time
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Callable
-from pathlib import Path
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

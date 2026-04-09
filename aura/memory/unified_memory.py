@@ -295,9 +295,7 @@ class UnifiedMemory:
 
         self._ensure_store()
 
-        from aura.memory.write_gate import (
-            MemoryCandidate, MemoryDecisionKind, get_write_gate
-        )
+        from aura.memory.write_gate import MemoryCandidate, MemoryDecisionKind, get_write_gate
 
         # Retrieve nearby memories for gate scoring
         try:
@@ -327,7 +325,7 @@ class UnifiedMemory:
 
         # Telemetry
         try:
-            from aura.reliability.telemetry import emit, TelemetryKind
+            from aura.reliability.telemetry import TelemetryKind, emit
             emit(
                 TelemetryKind.MEMORY_DECISION,
                 user_id=user_id,
@@ -424,8 +422,10 @@ class UnifiedMemory:
     # Embedding helper
     # ------------------------------------------------------------------
 
-    def _get_embedding(self, text: str) -> Optional[np.ndarray]:
+    def _get_embedding(self, text: str) -> Optional["np.ndarray"]:
         """Get embedding for text via shared Ollama helper."""
+        if np is None:
+            return None
         from .embedding import get_embedding
         emb = get_embedding(text, timeout=3.0)
         if emb is not None:

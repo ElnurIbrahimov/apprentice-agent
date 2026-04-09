@@ -9,16 +9,16 @@ SECURITY: Validates all tool inputs to prevent:
 Uses Pydantic for type-safe validation with clear error messages.
 """
 
-import re
 import logging
-from typing import Optional, List, Any, Dict
+import re
 from functools import wraps
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Try to import Pydantic, fall back to basic validation
 try:
-    from pydantic import BaseModel, Field, field_validator, ValidationError
+    from pydantic import BaseModel, Field, ValidationError, field_validator
     PYDANTIC_AVAILABLE = True
 except ImportError:
     PYDANTIC_AVAILABLE = False
@@ -154,7 +154,7 @@ def validate_string(value: Any, name: str, max_length: int, min_length: int = 0,
     return value
 
 
-def validate_int(value: Any, name: str, min_val: int = None, max_val: int = None) -> int:
+def validate_int(value: Any, name: str, min_val: int | None = None, max_val: int | None = None) -> int:
     """Validate an integer input."""
     if isinstance(value, bool):  # bool is subclass of int
         raise ValueError(f"{name} must be an integer, got boolean")
@@ -232,12 +232,12 @@ def validated(validator_func):
 #                    TOOL-SPECIFIC VALIDATORS
 # ============================================================================
 
-def validate_filesystem_read(path: str = None, **kwargs) -> dict:
+def validate_filesystem_read(path: str | None = None, **kwargs) -> dict:
     """Validate filesystem read inputs."""
     return {"path": validate_path(path)}
 
 
-def validate_filesystem_write(path: str = None, content: str = None,
+def validate_filesystem_write(path: str | None = None, content: str | None = None,
                               overwrite: bool = False, **kwargs) -> dict:
     """Validate filesystem write inputs."""
     return {
@@ -247,7 +247,7 @@ def validate_filesystem_write(path: str = None, content: str = None,
     }
 
 
-def validate_web_search(query: str = None, num_results: int = 10, **kwargs) -> dict:
+def validate_web_search(query: str | None = None, num_results: int = 10, **kwargs) -> dict:
     """Validate web search inputs."""
     return {
         "query": validate_query(query),
@@ -255,7 +255,7 @@ def validate_web_search(query: str = None, num_results: int = 10, **kwargs) -> d
     }
 
 
-def validate_code_execution(code: str = None, timeout: int = 30, **kwargs) -> dict:
+def validate_code_execution(code: str | None = None, timeout: int = 30, **kwargs) -> dict:
     """Validate code execution inputs."""
     return {
         "code": validate_code(code),
@@ -263,7 +263,7 @@ def validate_code_execution(code: str = None, timeout: int = 30, **kwargs) -> di
     }
 
 
-def validate_vision(image_path: str = None, prompt: str = "Describe this image", **kwargs) -> dict:
+def validate_vision(image_path: str | None = None, prompt: str = "Describe this image", **kwargs) -> dict:
     """Validate vision/image analysis inputs."""
     path = validate_path(image_path)
 
@@ -279,7 +279,7 @@ def validate_vision(image_path: str = None, prompt: str = "Describe this image",
     }
 
 
-def validate_clipboard_write(content: str = None, **kwargs) -> dict:
+def validate_clipboard_write(content: str | None = None, **kwargs) -> dict:
     """Validate clipboard write inputs."""
     return {
         "content": validate_string(content, "content", MAX_CLIPBOARD_SIZE, allow_empty=True)

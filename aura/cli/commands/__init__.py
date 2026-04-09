@@ -3,38 +3,73 @@ from __future__ import annotations
 import difflib
 from typing import Any, Callable, Optional
 
-from .git_commands import (
-    handle_git, handle_diff, handle_blame, handle_branch,
-    handle_stash, handle_pr,
-)
-from .session_commands import (
-    handle_sessions, handle_clear, handle_compact,
-    handle_context, handle_cost, handle_rewind,
-    handle_fork, handle_branches, handle_checkout, handle_merge,
-    handle_changes,
-)
 from .agent_commands import (
-    handle_goal, handle_plan, handle_fleet, handle_agent, handle_hand,
-    handle_debate, handle_chain,
-)
-from .research_commands import (
-    handle_research, handle_sources, handle_export, handle_browse,
-    handle_recall,
-)
-from .tool_commands import (
-    handle_shell, handle_grep, handle_search, handle_edit,
-    handle_test, handle_project, handle_watch, handle_undo,
-)
-from .ui_commands import (
-    handle_model, handle_theme, handle_mood, handle_speak,
-    handle_trust, handle_help, handle_quit, handle_tasks,
-    handle_routing,
-)
-from .system_commands import (
-    handle_hook, handle_mcp, handle_audit, handle_evolve,
+    handle_agent,
+    handle_chain,
+    handle_debate,
+    handle_fleet,
+    handle_goal,
+    handle_hand,
+    handle_plan,
 )
 from .copy_command import handle_copy
+from .git_commands import (
+    handle_blame,
+    handle_branch,
+    handle_diff,
+    handle_git,
+    handle_pr,
+    handle_stash,
+)
+from .research_commands import (
+    handle_browse,
+    handle_export,
+    handle_recall,
+    handle_research,
+    handle_sources,
+)
+from .session_commands import (
+    handle_branches,
+    handle_changes,
+    handle_checkout,
+    handle_clear,
+    handle_compact,
+    handle_context,
+    handle_cost,
+    handle_fork,
+    handle_merge,
+    handle_rewind,
+    handle_sessions,
+)
 from .snippet_command import handle_snippet
+from .system_commands import (
+    handle_audit,
+    handle_evolve,
+    handle_hook,
+    handle_mcp,
+)
+from .tool_commands import (
+    handle_edit,
+    handle_grep,
+    handle_project,
+    handle_search,
+    handle_shell,
+    handle_test,
+    handle_undo,
+    handle_watch,
+)
+from .ui_commands import (
+    handle_help,
+    handle_model,
+    handle_mood,
+    handle_quit,
+    handle_routing,
+    handle_speak,
+    handle_tasks,
+    handle_theme,
+    handle_trust,
+)
+
 
 def _handle_voice(agent, args, context=None, **kwargs):
     from aura.cli.voice_mode import run_voice_mode

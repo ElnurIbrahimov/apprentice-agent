@@ -5,10 +5,10 @@ import functools
 import logging
 import random
 import time
-from typing import Dict, List, Optional, Any
 from datetime import datetime
-from threading import RLock
 from enum import Enum
+from threading import RLock
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -393,7 +393,7 @@ class IdleStateManager:
     def _select_behavior_type(self) -> IdleBehaviorType:
         """Select a behavior type based on context."""
         # Base weights
-        weights = {bt: 1.0 for bt in IdleBehaviorType}
+        weights = dict.fromkeys(IdleBehaviorType, 1.0)
 
         # Apply time-of-day weights
         time_period = self._get_time_period()

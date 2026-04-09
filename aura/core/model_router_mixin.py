@@ -10,7 +10,6 @@ for that class.
 """
 
 import logging
-import time
 from typing import Optional
 
 from aura.config import Config
@@ -79,7 +78,10 @@ class ModelRouterMixin:
             return self.client, model
 
         # For local models / "auto": check if local Ollama is actually reachable.
-        # If not, route to cloud with a cloud-capable model instead of failing.
+        # Refresh status every 120s to recover from transient startup failures.
+        import time as _time
+        if _time.time() - getattr(self, '_local_ollama_last_check', 0) > 120:
+            self._refresh_local_ollama_status()
         if self._cloud_client and not self._local_ollama_ok:
             logger.info(f"[BRAIN] Local Ollama not available, routing '{model}' to cloud")
             cloud_model = model if model.endswith(":cloud") else Config.MODEL_FAST
@@ -104,8 +106,8 @@ class ModelRouterMixin:
 
     def _resolve_tool_model(
         self,
-        model_override: str = None,
-        options: dict = None,
+        model_override: str | None = None,
+        options: dict | None = None,
     ) -> tuple:
         """Resolve model, client, and LLM options for tool-calling methods.
 
@@ -276,7 +278,7 @@ class ModelRouterMixin:
         if user_selected or self._model_override:
             return model
         try:
-            from aura.reliability.routing_stats import get_routing_stats, MicrotaskCategory
+            from aura.reliability.routing_stats import MicrotaskCategory, get_routing_stats
             _CAT_MAP = {
                 TaskType.CODE:      MicrotaskCategory.CODE_EDIT,
                 TaskType.VISION:    MicrotaskCategory.LONG_DOC_EXTRACTION,
@@ -303,7 +305,7 @@ class ModelRouterMixin:
         from aura.brain import TaskType
 
         try:
-            from aura.reliability.routing_stats import get_routing_stats, MicrotaskCategory
+            from aura.reliability.routing_stats import MicrotaskCategory, get_routing_stats
             _CAT_MAP = {
                 TaskType.CODE:      MicrotaskCategory.CODE_EDIT,
                 TaskType.VISION:    MicrotaskCategory.LONG_DOC_EXTRACTION,
@@ -352,7 +354,7 @@ class ModelRouterMixin:
 
     # (observe/plan/decide_action/evaluate removed -- OPAE loop replaced by ReAct)
 
-    def unload_model(self, model: str = None) -> bool:
+    def unload_model(self, model: str | None = None) -> bool:
         """Unload a model from Ollama to free VRAM.
 
         Args:

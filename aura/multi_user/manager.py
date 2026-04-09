@@ -9,18 +9,17 @@ Central coordinator that manages:
 - Cross-user learning via KnowledgeAbstractor
 """
 
-import hashlib
 import json
 import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
-from .schemas import UserSession
 from .identity_core import IdentityCore
 from .knowledge_abstractor import AbstractInsight, KnowledgeAbstractor
 from .privacy_guard import PrivacyGuard
+from .schemas import UserSession
 
 if TYPE_CHECKING:
     from .user_mind_model import UserMindModel

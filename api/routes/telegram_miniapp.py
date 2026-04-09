@@ -14,14 +14,17 @@ import os
 import time
 from urllib.parse import parse_qs
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/telegram",
     tags=["telegram-miniapp"],
+    dependencies=[Depends(require_api_key)],
 )
 
 

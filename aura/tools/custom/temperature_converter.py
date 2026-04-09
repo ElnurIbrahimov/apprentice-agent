@@ -12,7 +12,6 @@ import re
 from typing import Any
 
 
-
 class TemperatureConverterTool:
     """Convert temperatures between Celsius and Fahrenheit"""
 

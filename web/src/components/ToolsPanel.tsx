@@ -44,8 +44,8 @@ export function ToolsPanel() {
         const c = await costsRes.json();
         if (c.success) setCosts(c);
       }
-    } catch (e) {
-      console.error('Failed to fetch tools data:', e);
+    } catch {
+      if (mountedRef.current) setReloadMsg('Failed to load tools data');
     }
     if (mountedRef.current) setLoading(false);
   };

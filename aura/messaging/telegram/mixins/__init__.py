@@ -4,28 +4,28 @@ Mixin classes for TelegramBot.
 Each mixin provides a specific set of handler methods that are mixed into
 the TelegramBot class via multiple inheritance.
 """
-from .commands import CommandsMixin
-from .research import ResearchMixin
-from .sessions import SessionsMixin
-from .media import MediaMixin
 from .agent_core import AgentCoreMixin
-from .skills import SkillsMixin
-from .scheduling import SchedulingMixin
+from .commands import CommandsMixin
 from .location import LocationMixin
-from .social import SocialMixin
-from .payments import PaymentsMixin
+from .media import MediaMixin
 from .misc import MiscMixin
+from .payments import PaymentsMixin
+from .research import ResearchMixin
+from .scheduling import SchedulingMixin
+from .sessions import SessionsMixin
+from .skills import SkillsMixin
+from .social import SocialMixin
 
 __all__ = [
-    "CommandsMixin",
-    "ResearchMixin",
-    "SessionsMixin",
-    "MediaMixin",
     "AgentCoreMixin",
-    "SkillsMixin",
-    "SchedulingMixin",
+    "CommandsMixin",
     "LocationMixin",
-    "SocialMixin",
-    "PaymentsMixin",
+    "MediaMixin",
     "MiscMixin",
+    "PaymentsMixin",
+    "ResearchMixin",
+    "SchedulingMixin",
+    "SessionsMixin",
+    "SkillsMixin",
+    "SocialMixin",
 ]

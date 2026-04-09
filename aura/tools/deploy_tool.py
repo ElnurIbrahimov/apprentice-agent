@@ -13,7 +13,6 @@ import logging
 import os
 import re
 import shutil
-import signal
 import subprocess
 import threading
 from pathlib import Path
@@ -74,9 +73,9 @@ def _run(args: List[str], cwd: str = ".", timeout: int = DEPLOY_TIMEOUT,
     if not Path(resolved).exists():
         return {"success": False, "error": f"Path does not exist: {cwd}"}
 
-    _SENSITIVE_KEYS = {"AURA_API_KEY", "E2B_API_KEY", "OLLAMA_API_KEY", "TELEGRAM_BOT_TOKEN",
-                       "BRAVE_API_KEY", "TAVILY_API_KEY", "FIRECRAWL_API_KEY", "CHATGPT_REFRESH_TOKEN"}
-    run_env = {k: v for k, v in os.environ.items() if k not in _SENSITIVE_KEYS}
+    # Use allowlist (not denylist) — only pass safe env vars to child processes
+    from aura.tools.shell_executor import _get_sanitized_env
+    run_env = _get_sanitized_env()
     if env:
         run_env.update(env)
 
@@ -638,7 +637,7 @@ class DeployTool:
                 return {
                     "success": False,
                     "error": f"This is a {framework} project. The build output isn't available.",
-                    "suggestion": f"Run 'npm run build' first, or use 'npm run dev' for development.",
+                    "suggestion": "Run 'npm run build' first, or use 'npm run dev' for development.",
                 }
 
         class QuietHandler(http.server.SimpleHTTPRequestHandler):

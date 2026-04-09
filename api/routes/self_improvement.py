@@ -7,9 +7,8 @@ quality reports, tunable parameters, and manual cycle triggers.
 """
 
 import logging
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key

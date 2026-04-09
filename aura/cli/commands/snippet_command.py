@@ -1,12 +1,13 @@
 """Handle /snippet command: save, use, list, delete prompt snippets."""
 from __future__ import annotations
+
 from typing import Optional
 
 
 def handle_snippet(agent, arg: str, context: dict) -> Optional[str]:
     """Manage prompt snippets. /snippet save <name> <text>, /snippet <name>, /snippet list, /snippet delete <name>."""
+    from ..display import console, show_error, show_info
     from ..snippets import SnippetManager
-    from ..display import console, show_info, show_error
 
     mgr = SnippetManager()
     parts = arg.split(maxsplit=2) if arg else []

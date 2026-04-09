@@ -8,12 +8,10 @@ These evaluators are optional (STRATEGY_BANDIT_EVAL_ENABLED) and run
 asynchronously to avoid blocking the response path.
 """
 
-import atexit
 import logging
-import re
-from concurrent.futures import ThreadPoolExecutor, Future
-from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional
+from concurrent.futures import Future
+from dataclasses import dataclass
+from typing import Callable, Dict
 
 logger = logging.getLogger(__name__)
 

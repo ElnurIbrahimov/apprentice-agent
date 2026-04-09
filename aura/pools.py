@@ -2,7 +2,8 @@
 Shared thread pool registry for Aura.
 
 Three pools, each with a specific role:
-  - llm_pool()   (12 workers): All Ollama/LLM inference calls
+  - llm_pool()   (4 workers): All Ollama/LLM inference calls
+                                (kept low to respect Ollama Pro's 3-concurrent-model limit)
   - bg_pool()     (8 workers): Non-urgent background work (writes, state updates,
                                 memory indexing, parallel context gather)
   - tool_pool()   (4 workers): Synchronous tool execution (CLI tools, sub-agents,
@@ -16,6 +17,7 @@ Pools are created lazily on first access to avoid spawning threads at import tim
 Cleanup is registered via atexit.
 """
 
+import asyncio
 import atexit
 import logging
 import sys
@@ -92,6 +94,29 @@ def _shutdown_all():
 
 
 atexit.register(_shutdown_all)
+
+
+# ---- Fire-and-forget async tasks (prevents GC of unfinished tasks) --------
+
+_async_background_tasks: set[asyncio.Task] = set()
+
+
+def fire_and_forget(coro) -> asyncio.Task | None:
+    """Schedule a coroutine as a background task with GC protection.
+
+    Returns the task so callers can optionally await it, or None if no
+    running event loop is available (e.g., called from a sync context).
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.debug("[pools] fire_and_forget: no running event loop, dropping coroutine")
+        coro.close()  # Prevent "coroutine was never awaited" warning
+        return None
+    task = loop.create_task(coro)
+    _async_background_tasks.add(task)
+    task.add_done_callback(_async_background_tasks.discard)
+    return task
 
 
 # ---- Background submit with fallback (moved from brain.py 2026-04-06) ----

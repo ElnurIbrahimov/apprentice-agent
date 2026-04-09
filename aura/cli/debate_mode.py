@@ -1,18 +1,18 @@
 """Multi-model debate: pit different LLMs against each other on a question."""
 from __future__ import annotations
 
-import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 DEBATER_TIMEOUT = 60  # seconds per model call
 
 from rich.console import Console
-from rich.panel import Panel
 from rich.live import Live
-
+from rich.panel import Panel
 
 # ── Data classes ──────────────────────────────────────────────────────
 

@@ -15,7 +15,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Step 1: Build the React frontend
 ext_src = os.path.join(SCRIPT_DIR, 'extension-src')
 print('Building React frontend…')
-subprocess.run('npm run build', cwd=ext_src, check=True, shell=True)
+subprocess.run(['npm', 'run', 'build'], cwd=ext_src, check=True)
 print('React build complete.')
 
 target = sys.argv[1] if len(sys.argv) > 1 else 'chrome'

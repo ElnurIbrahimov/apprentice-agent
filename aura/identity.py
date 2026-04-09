@@ -19,7 +19,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-
 # Module-level lock for identity file read/modify/save operations
 _identity_lock = threading.Lock()
 

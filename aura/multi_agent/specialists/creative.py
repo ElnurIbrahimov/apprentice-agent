@@ -10,7 +10,7 @@ Specialized in creative tasks:
 
 import logging
 import time
-from typing import Any, Callable, Dict
+from typing import Callable
 
 from ..base_agent import ToolUsingSpecialist
 from ..protocol import AgentMessage, AgentResult

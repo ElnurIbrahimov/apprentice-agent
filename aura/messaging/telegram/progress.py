@@ -7,11 +7,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as _time
-from typing import Optional, Dict, List
+from typing import Dict, List, Optional
 
 from aura.messaging.telegram_formatting import (
-    split_message as _split_message,
     _TELEGRAM_MSG_LIMIT,
+)
+from aura.messaging.telegram_formatting import (
+    split_message as _split_message,
 )
 
 logger = logging.getLogger(__name__)

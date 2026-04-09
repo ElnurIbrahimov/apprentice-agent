@@ -8,9 +8,8 @@ try:
 except ImportError:
     fitz = None
     FITZ_AVAILABLE = False
-from pathlib import Path
-from typing import Optional, Union
 import re
+from typing import Optional
 
 
 class PDFReaderTool:
@@ -123,7 +122,7 @@ class PDFReaderTool:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Failed to read PDF info: {str(e)}"
+                "error": f"Failed to read PDF info: {e!s}"
             }
 
     def extract_text(self, path: str, pages: str = "all") -> dict:
@@ -210,7 +209,7 @@ class PDFReaderTool:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Failed to extract text: {str(e)}"
+                "error": f"Failed to extract text: {e!s}"
             }
 
     def search(self, path: str, query: str) -> dict:
@@ -290,7 +289,7 @@ class PDFReaderTool:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Failed to search PDF: {str(e)}"
+                "error": f"Failed to search PDF: {e!s}"
             }
 
     def read(self, path: str, pages: str = "all", summarize: bool = False) -> dict:
@@ -407,7 +406,7 @@ class PDFReaderTool:
             }
 
         except Exception as e:
-            return {"success": False, "error": f"Failed to extract tables: {str(e)}"}
+            return {"success": False, "error": f"Failed to extract tables: {e!s}"}
 
     def extract_structured(self, path: str, pages: str = "all") -> dict:
         """Extract structured content (headers, paragraphs, tables) with font/position info.
@@ -422,8 +421,8 @@ class PDFReaderTool:
         if not FITZ_AVAILABLE:
             return {"success": False, "error": "PyMuPDF (fitz) not installed. Run: pip install PyMuPDF"}
 
-        from pathlib import Path as _Path
         from collections import Counter
+        from pathlib import Path as _Path
         DOCS_DIR = _Path(__file__).parent.parent.parent / "data"
         resolved = _Path(path).resolve()
         docs_dir_resolved = DOCS_DIR.resolve()
@@ -540,9 +539,9 @@ class PDFReaderTool:
             }
 
         except Exception as e:
-            return {"success": False, "error": f"Failed to extract structured content: {str(e)}"}
+            return {"success": False, "error": f"Failed to extract structured content: {e!s}"}
 
-    def extract_images(self, path: str, pages: str = "all", output_dir: str = None) -> dict:
+    def extract_images(self, path: str, pages: str = "all", output_dir: str | None = None) -> dict:
         """Extract images from PDF pages.
 
         Args:
@@ -628,7 +627,7 @@ class PDFReaderTool:
             }
 
         except Exception as e:
-            return {"success": False, "error": f"Failed to extract images: {str(e)}"}
+            return {"success": False, "error": f"Failed to extract images: {e!s}"}
 
     def extract_links(self, path: str) -> dict:
         """Extract URI links from all PDF pages.
@@ -679,7 +678,7 @@ class PDFReaderTool:
             }
 
         except Exception as e:
-            return {"success": False, "error": f"Failed to extract links: {str(e)}"}
+            return {"success": False, "error": f"Failed to extract links: {e!s}"}
 
     def page_info(self, path: str, page_num: int) -> dict:
         """Get detailed info about a specific PDF page.
@@ -742,7 +741,7 @@ class PDFReaderTool:
             return result
 
         except Exception as e:
-            return {"success": False, "error": f"Failed to get page info: {str(e)}"}
+            return {"success": False, "error": f"Failed to get page info: {e!s}"}
 
     def execute(self, action: str, **kwargs) -> dict:
         """Execute a PDF action.

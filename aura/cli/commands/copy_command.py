@@ -1,5 +1,6 @@
 """Copy command -- copy last response or specific code blocks to clipboard."""
 from __future__ import annotations
+
 from typing import Optional
 
 
@@ -11,8 +12,8 @@ def handle_copy(agent, arg, context) -> Optional[str]:
         /copy code     -- copy first code block
         /copy code N   -- copy Nth code block
     """
-    from ..display import show_info, show_error
     from ..context import get_ctx
+    from ..display import show_error, show_info
 
     ctx = get_ctx()
     if not ctx or not ctx.agentic_loop:

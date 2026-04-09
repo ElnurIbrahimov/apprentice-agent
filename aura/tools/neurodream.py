@@ -15,16 +15,16 @@ import logging
 import math
 import os
 import random
+import re
 import tempfile
 import threading
 import time
-from dataclasses import dataclass, field, asdict
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from collections import Counter, defaultdict
-import re
 
 from aura.jsonl_utils import rotate_jsonl_if_needed
 
@@ -530,7 +530,7 @@ class NeuroDreamEngine:
 
         except Exception as e:
             logger.debug(f"[NeuroDream] Error during sleep cycle: {e}")
-            self.wake_up(f"error: {str(e)}")
+            self.wake_up(f"error: {e!s}")
 
     def _set_phase(self, phase: SleepPhase):
         """Set current phase with thread safety."""
@@ -2136,7 +2136,7 @@ Rules:
         if self.monologue:
             try:
                 self.monologue.think("reflect", f"[{phase}] {message}", confidence=70)
-            except (AttributeError, TypeError) as e:
+            except (AttributeError, TypeError):
                 pass  # Monologue not properly initialized
         logger.debug(f"[NeuroDream] {phase}: {message}")
 
@@ -2152,9 +2152,9 @@ Rules:
             'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
             'just', 'also', 'now', 'here', 'there', 'then', 'once', 'from',
             'into', 'with', 'about', 'against', 'between', 'through', 'during',
-            'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down',
+            'before', 'after', 'above', 'below', 'to', 'up', 'down',
             'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further',
-            'then', 'once', 'and', 'but', 'or', 'yet', 'for', 'nor', 'so'
+            'and', 'but', 'or', 'yet', 'for'
         }
 
     def set_callbacks(

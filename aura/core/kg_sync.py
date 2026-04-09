@@ -247,8 +247,7 @@ class KGSyncBridge:
     ) -> None:
         """Actual Kuzu relation write — runs on background thread."""
         try:
-            from aura_knowledge_graph.graph_database import Entity, Relationship
-            from aura_knowledge_graph.schema import EntityType
+            from aura_knowledge_graph.graph_database import Relationship
 
             # Resolve source and target entity IDs in Kuzu
             src_entity = self._kuzu.get_entity_by_name(source_label)

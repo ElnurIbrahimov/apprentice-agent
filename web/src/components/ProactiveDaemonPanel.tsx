@@ -111,45 +111,24 @@ export function ProactiveDaemonPanel() {
   usePolling(fetchAll, 30000);
 
   // Control functions
-  const startDaemon = async () => {
+  const daemonAction = async (action: string) => {
     setLoading(true);
     try {
-      await fetch('/api/proactive/start', { method: 'POST' });
+      const res = await fetch(`/api/proactive/${action}`, { method: 'POST' });
+      if (!res.ok) setError(`${action} failed: HTTP ${res.status}`);
+      else setError(null);
       await fetchStatus();
+    } catch {
+      setError(`${action} failed: network error`);
     } finally {
       setLoading(false);
     }
   };
 
-  const stopDaemon = async () => {
-    setLoading(true);
-    try {
-      await fetch('/api/proactive/stop', { method: 'POST' });
-      await fetchStatus();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const pauseDaemon = async () => {
-    setLoading(true);
-    try {
-      await fetch('/api/proactive/pause', { method: 'POST' });
-      await fetchStatus();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const resumeDaemon = async () => {
-    setLoading(true);
-    try {
-      await fetch('/api/proactive/resume', { method: 'POST' });
-      await fetchStatus();
-    } finally {
-      setLoading(false);
-    }
-  };
+  const startDaemon = () => daemonAction('start');
+  const stopDaemon = () => daemonAction('stop');
+  const pauseDaemon = () => daemonAction('pause');
+  const resumeDaemon = () => daemonAction('resume');
 
   const triggerDecision = async () => {
     setLoading(true);

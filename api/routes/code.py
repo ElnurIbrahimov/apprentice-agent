@@ -7,7 +7,7 @@ import re
 import time
 import uuid
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.auth import require_api_key
 
@@ -252,6 +252,7 @@ def _get_executor(timeout: int = 30):
 
 
 from api.utils import EndpointRateLimiter
+
 _code_exec_limiter = EndpointRateLimiter(max_per_minute=20)
 
 
@@ -306,7 +307,7 @@ async def execute_code(body: dict):
     loop = asyncio.get_running_loop()
     start_time = time.time()
     result = await loop.run_in_executor(
-        None, lambda: executor.execute_raw(full_code, user_code=code)
+        None, lambda: executor._execute_raw(full_code, user_code=code)
     )
     execution_time = round(time.time() - start_time, 3)
 
@@ -350,6 +351,9 @@ async def reset_session(body: dict):
     session_id = body.get("session_id", "").strip()
     if not session_id:
         raise HTTPException(400, "session_id is required")
+    import re as _re
+    if not _re.fullmatch(r'[a-zA-Z0-9\-_]{1,64}', session_id):
+        raise HTTPException(400, "Invalid session_id format")
 
     from aura.tools.code_session_manager import get_session_manager
     get_session_manager().reset(session_id)

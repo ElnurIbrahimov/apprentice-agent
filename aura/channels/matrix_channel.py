@@ -100,7 +100,7 @@ class MatrixChannel(ChannelAdapter):
     def _run_client(self):
         """Run the matrix-nio client in its own event loop."""
         try:
-            from nio import AsyncClient, RoomMessageText, LoginResponse
+            from nio import AsyncClient, LoginResponse, RoomMessageText
 
             async def _main():
                 client = AsyncClient(self._homeserver, self._user_id)

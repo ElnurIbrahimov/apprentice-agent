@@ -11,7 +11,6 @@ for that class.
 import json
 import logging
 import shutil
-import threading
 import time
 import uuid
 from pathlib import Path

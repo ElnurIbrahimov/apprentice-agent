@@ -7,7 +7,7 @@ import logging
 import os
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class EvaluationCache:
         if self._cache_path and self._cache_path.exists():
             try:
                 with open(self._cache_path, 'r') as f:
-                    self._memory = json.load(f)
+                    self._memory = OrderedDict(json.load(f))
                 logger.info(f"Loaded {len(self._memory)} cached evaluations")
             except Exception:
                 self._memory = {}

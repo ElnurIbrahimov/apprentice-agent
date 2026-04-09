@@ -18,7 +18,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -349,8 +349,8 @@ class PredictiveTaskEngine:
                 matrix[src] = {dst: cnt / t for dst, cnt in dests.items()}
         return matrix
 
-    def get_sequence_predictions(self, last_tool: str = None, last_action: str = None,
-                                  prev_tool: str = None, prev_action: str = None) -> Dict:
+    def get_sequence_predictions(self, last_tool: str | None = None, last_action: str | None = None,
+                                  prev_tool: str | None = None, prev_action: str | None = None) -> Dict:
         """Predict next tools based on Markov chain transitions.
 
         Uses second-order (t-2, t-1) -> t when data is available, falls back to first-order.
@@ -470,7 +470,7 @@ class PredictiveTaskEngine:
 
     # ---- Combined prediction pipeline ---- #
 
-    def get_combined_predictions(self, context_hint: str = None) -> Dict:
+    def get_combined_predictions(self, context_hint: str | None = None) -> Dict:
         """Merge time + sequence + context predictions. Dedup by (tool, action), keep highest confidence."""
         now = datetime.now()
         time_result = self.get_predictions()

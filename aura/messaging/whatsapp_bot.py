@@ -14,10 +14,9 @@ Setup:
 import asyncio
 import json
 import logging
-import random
 from datetime import datetime
-from typing import Optional, Dict, List
 from pathlib import Path
+from typing import Dict, List
 
 try:
     import websockets
@@ -25,12 +24,7 @@ try:
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
 
-from .base_platform import (
-    BasePlatform,
-    IncomingMessage,
-    OutgoingMessage,
-    MessageType
-)
+from .base_platform import BasePlatform, IncomingMessage, MessageType, OutgoingMessage
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +102,9 @@ class WhatsAppBot(BasePlatform):
             self.websocket = await websockets.connect(self.ws_url)
             self.is_running = True
 
-            # Start message receiver
-            asyncio.create_task(self._receive_loop())
-
-            # Start message sender
-            asyncio.create_task(self._send_loop())
+            # Start message receiver and sender — store tasks for cleanup in stop()
+            self._recv_task = asyncio.create_task(self._receive_loop())
+            self._send_task = asyncio.create_task(self._send_loop())
 
             logger.info("WhatsApp bot connected to bridge!")
             logger.info("Waiting for WhatsApp connection...")
@@ -132,6 +124,15 @@ class WhatsAppBot(BasePlatform):
 
         logger.info("Stopping WhatsApp bot...")
         self.is_running = False
+
+        # Cancel background tasks before closing websocket
+        for task in (getattr(self, '_recv_task', None), getattr(self, '_send_task', None)):
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
         if self.websocket:
             await self.websocket.close()

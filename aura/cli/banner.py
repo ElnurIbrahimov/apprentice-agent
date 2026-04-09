@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from rich.text import Text
 
-
 # Compact 2-line block art — looks striking, renders on all terminals
 _LOGO_LINES = [
     "▄▀█ █ █ █▀█ █▀█",

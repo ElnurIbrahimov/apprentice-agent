@@ -1,9 +1,9 @@
 """ZIP project analyzer — extracts a code project zip and builds LLM context."""
 
-import zipfile
-import tempfile
-import shutil
 import logging
+import shutil
+import tempfile
+import zipfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

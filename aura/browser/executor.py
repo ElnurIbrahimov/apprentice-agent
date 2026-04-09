@@ -14,12 +14,11 @@ Author: Aura reliability upgrade (2026-03)
 from __future__ import annotations
 
 import logging
-import re
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -438,7 +437,7 @@ class BrowserExecutor:
 
     def _emit_telemetry(self, result: ActionResult) -> None:
         try:
-            from aura.reliability.telemetry import emit, TelemetryKind
+            from aura.reliability.telemetry import TelemetryKind, emit
             emit(
                 TelemetryKind.BROWSER_ACTION,
                 session_id=self._session_id,
@@ -537,12 +536,12 @@ class BrowserSession:
 
 
 __all__ = [
-    "BrowserPlanner",
-    "BrowserExecutor",
-    "BrowserSession",
-    "PlannedAction",
+    "ActionKind",
     "ActionResult",
     "ActionTrace",
-    "ActionKind",
+    "BrowserExecutor",
+    "BrowserPlanner",
+    "BrowserSession",
+    "PlannedAction",
     "SafetyClass",
 ]

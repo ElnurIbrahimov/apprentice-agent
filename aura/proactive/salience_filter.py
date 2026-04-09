@@ -10,19 +10,19 @@ Filters events based on:
 Only events passing the salience threshold reach the Gateway Daemon.
 """
 
-import atexit
+import hashlib
+import json
 import logging
 import math
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Set, Any, Optional
-import hashlib
-import json
+from typing import Any, Dict, List, Optional, Set
 
 from aura.config import Config
+
 from .event_bus import Event, EventPriority
 
 logger = logging.getLogger(__name__)

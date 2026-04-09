@@ -14,10 +14,10 @@ import os
 import secrets
 import time
 import webbrowser
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlencode, urlparse, parse_qs
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
@@ -152,8 +152,12 @@ def _get_fernet_key():
     Good enough for a personal AI OS.
     """
     try:
+        import base64
+        import getpass
+        import hashlib
+        import socket
+
         from cryptography.fernet import Fernet
-        import hashlib, base64, getpass, socket
         seed = f"{getpass.getuser()}@{socket.gethostname()}:aura-oauth-tokens"
         key = base64.urlsafe_b64encode(hashlib.sha256(seed.encode()).digest())
         return Fernet(key)
@@ -298,7 +302,7 @@ def login() -> bool:
     server.timeout = 1
 
     # Open browser
-    print(f"\nOpening browser for ChatGPT login...")
+    print("\nOpening browser for ChatGPT login...")
     print(f"If the browser doesn't open, visit:\n{auth_url}\n")
     webbrowser.open(auth_url)
 
@@ -349,7 +353,7 @@ def login() -> bool:
         _save_tokens(access, refresh, expires)
 
         account_id = _extract_account_id(access)
-        print(f"\nAuthenticated successfully!")
+        print("\nAuthenticated successfully!")
         if account_id:
             print(f"Account ID: {account_id[:8]}...")
         print("You can now use chatgpt: models in AURA.\n")
@@ -375,17 +379,11 @@ def save_refresh_token(refresh: str, account_id: str = "") -> Path:
     """Save a refresh token directly (no access token yet).
 
     The access token will be obtained on first use via refresh_token().
+    Uses the same encrypted storage path as _save_tokens().
     Returns the path where the token was saved.
     """
+    _save_tokens(access="", refresh=refresh, expires=0)
     tf = _get_token_file()
-    tf.parent.mkdir(parents=True, exist_ok=True)
-    data = {
-        "access": "",
-        "refresh": refresh,
-        "expires": 0,
-        "account_id": account_id,
-    }
-    tf.write_text(json.dumps(data, indent=2), encoding="utf-8")
     logger.info("[CHATGPT_AUTH] Refresh token saved to %s", tf)
     return tf
 

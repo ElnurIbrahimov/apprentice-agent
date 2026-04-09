@@ -10,12 +10,10 @@ import json
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import IntEnum
-from typing import Dict, List, Optional, Callable, Any, Set
-from queue import Queue, Empty
-import threading
+from typing import Any, Callable, Dict, List, Set
 
 logger = logging.getLogger(__name__)
 

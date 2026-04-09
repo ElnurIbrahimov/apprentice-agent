@@ -6,9 +6,9 @@ nested closures and local variables.
 """
 from __future__ import annotations
 
-import os
-import logging
 import atexit
+import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -32,21 +32,22 @@ class ChatSession:
         bridge: Any = None,
         preference: Optional[str] = None,
     ) -> None:
-        from .context import CLIContext, set_ctx
-        from .display import (
-            console, show_banner, show_response,
-            show_error, show_info, show_status_bar, show_help,
-            show_welcome_info, show_tool_call,
-        )
-        from .input import create_session, SIGNAL_MODEL_PICK
-        from .model_picker import pick_model, update_model_roles_from_config
-        from .context_bar import estimate_messages_tokens, get_context_limit
-        from .permissions_ui import cycle_permission_mode, get_mode_description
-        from .checkpoint import CheckpointManager
         from aura.core.agentic_loop import AgenticLoop
-        from aura.core.session import AgenticSession
-        from aura.core.permissions import PermissionManager
         from aura.core.context import gather_context, get_aura_md_config
+        from aura.core.permissions import PermissionManager
+        from aura.core.session import AgenticSession
+
+        from .checkpoint import CheckpointManager
+        from .context import CLIContext, set_ctx
+        from .context_bar import get_context_limit
+        from .display import (
+            console,
+            show_banner,
+            show_info,
+            show_welcome_info,
+        )
+        from .input import create_session
+        from .model_picker import update_model_roles_from_config
 
         # ── Store references to display helpers for use elsewhere ──
         self.agent = agent
@@ -136,7 +137,11 @@ class ChatSession:
 
         # ── Optional subsystems ──
         try:
-            from .background import BackgroundManager, notify_completion, create_background_indicator
+            from .background import (
+                BackgroundManager,
+                create_background_indicator,
+                notify_completion,
+            )
             self._BackgroundManager = BackgroundManager
             self._notify_completion = notify_completion
             self._create_background_indicator = create_background_indicator
@@ -156,7 +161,7 @@ class ChatSession:
             self._create_research_indicator = lambda *a, **k: ""
 
         try:
-            from .hooks import HookManager, HookEvent
+            from .hooks import HookEvent, HookManager
             self._HookManager = HookManager
             self._HookEvent = HookEvent
         except ImportError:
@@ -184,8 +189,8 @@ class ChatSession:
             self.hook_mgr.load_builtin_hooks(aura_config)
 
         if verbose:
-            from .disclosure import DisclosureManager
             from . import display as _display_mod
+            from .disclosure import DisclosureManager
             _display_mod._disclosure = DisclosureManager(default_expanded=True)
 
         if self.hook_mgr:
@@ -308,7 +313,7 @@ class ChatSession:
 
     def _cli_confirm(self, tool_name: str, description: str) -> bool:
         """Interactive permission prompt — references self.perm_mode."""
-        from .permissions_ui import should_auto_approve_edit, should_auto_approve_command
+        from .permissions_ui import should_auto_approve_command, should_auto_approve_edit
 
         if should_auto_approve_edit(self.perm_mode) and tool_name in ("edit_file", "write_file"):
             return True
@@ -320,11 +325,9 @@ class ChatSession:
             theme = get_theme()
             warn = theme.warning
             accent = theme.permission_accent
-            muted = theme.text_muted
         except (ImportError, AttributeError):
             warn = "#FFC107"
             accent = "#B1B9F9"
-            muted = "#555555"
 
         self.console.print()
         self.console.print(f"  [{warn}]\u25b3[/{warn}] [{accent}]Allow {tool_name}?[/{accent}]", end="")
@@ -333,10 +336,10 @@ class ChatSession:
         else:
             self.console.print()
         self.console.print(f"    [{accent}]> 1. Yes[/{accent}]")
-        self.console.print(f"      2. Yes, always (trust mode)", style="dim")
-        self.console.print(f"      3. No", style="dim")
+        self.console.print("      2. Yes, always (trust mode)", style="dim")
+        self.console.print("      3. No", style="dim")
         try:
-            response = input(f"  Choose (1-3, Enter=yes): ").strip().lower()
+            response = input("  Choose (1-3, Enter=yes): ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             return False
         if response in ("2", "always"):
@@ -419,15 +422,19 @@ class ChatSession:
 
     def _handle_signal(self, user_input: str) -> bool:
         """Handle keyboard signal pseudo-inputs. Returns True if the main loop should continue."""
-        from .input import (
-            SIGNAL_CLEAR_SCREEN, SIGNAL_NEW_SESSION,
-            SIGNAL_COMMAND_PALETTE, SIGNAL_OPEN_EDITOR,
-            SIGNAL_REWIND, SIGNAL_CYCLE_PERMS, SIGNAL_MODEL_PICK,
-        )
-        from .display import show_info
-        from .permissions_ui import cycle_permission_mode, get_mode_description
-        from .context_bar import get_context_limit
         from .chat_loop import _rewind_picker
+        from .context_bar import get_context_limit
+        from .display import show_info
+        from .input import (
+            SIGNAL_CLEAR_SCREEN,
+            SIGNAL_COMMAND_PALETTE,
+            SIGNAL_CYCLE_PERMS,
+            SIGNAL_MODEL_PICK,
+            SIGNAL_NEW_SESSION,
+            SIGNAL_OPEN_EDITOR,
+            SIGNAL_REWIND,
+        )
+        from .permissions_ui import cycle_permission_mode, get_mode_description
 
         if user_input == SIGNAL_CLEAR_SCREEN:
             self.console.clear()
@@ -457,7 +464,7 @@ class ChatSession:
             return True
 
         if user_input == SIGNAL_COMMAND_PALETTE:
-            from .command_palette import open_palette, build_palette, record_usage
+            from .command_palette import build_palette, open_palette, record_usage
             from .input import SLASH_COMMANDS as _palette_cmds
             items = build_palette(_palette_cmds)
             selected = open_palette(items, self.console)
@@ -469,7 +476,8 @@ class ChatSession:
             return True
 
         if user_input == SIGNAL_OPEN_EDITOR:
-            import tempfile, subprocess as _sp
+            import subprocess as _sp
+            import tempfile
             editor = os.environ.get("EDITOR", "notepad" if os.name == "nt" else "nano")
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w") as f:
                 f.write("")
@@ -540,8 +548,8 @@ class ChatSession:
 
     def _dispatch_command(self, user_input: str) -> None:
         """Route slash commands and update status bar afterward."""
-        from .display import show_error
         from .context_bar import estimate_messages_tokens, get_context_limit
+        from .display import show_error
         try:
             from .commands import handle_command
             handle_command(self.agent, user_input, speak=self.speak)
@@ -594,6 +602,7 @@ class ChatSession:
     def _run_agent(self, user_input: str) -> Optional[dict]:
         """Run the agentic loop for a user prompt. Returns result dict or None."""
         import time as _exec_time
+
         from .display import StreamingResponse, show_tool_call, show_tool_result_inline
 
         streamer = StreamingResponse(model=self.current_model)
@@ -713,10 +722,11 @@ class ChatSession:
 
     def _run_plan_mode(self, user_input: str) -> Optional[dict]:
         """Generate plan, get approval, execute. Returns result dict or None."""
-        from .display import show_info, show_error, show_tool_call, show_tool_result_inline
+        from .display import show_error, show_info, show_tool_call, show_tool_result_inline
         from .plan_mode import (
-            render_plan, show_plan_approval, edit_plan_text,
+            edit_plan_text,
             parse_plan_from_llm,
+            show_plan_approval,
         )
 
         show_info("Generating plan...")
@@ -744,11 +754,11 @@ class ChatSession:
                     streamer = _PlanStreamResp(model=self.current_model)
                     streamer.start()
 
-                    def _plan_on_chunk(text: str) -> None:
-                        streamer.chunk(text)
+                    def _plan_on_chunk(text: str, _s=streamer) -> None:
+                        _s.chunk(text)
 
-                    def _plan_on_tool_start(name: str, args: dict[str, Any]) -> None:
-                        streamer.pause()
+                    def _plan_on_tool_start(name: str, args: dict[str, Any], _s=streamer) -> None:
+                        _s.pause()
                         step = getattr(self.agentic, 'iteration', 0)
                         max_iter = getattr(self.agentic, 'max_iterations', 0)
                         desc = args.get("path") or args.get("pattern") or args.get("query") or ""
@@ -756,9 +766,9 @@ class ChatSession:
                             desc = args["command"][:60]
                         show_tool_call(name, str(desc), step=step, max_steps=max_iter, status="running")
 
-                    def _plan_on_tool_call(name: str, args: dict[str, Any], _result: Any) -> None:
+                    def _plan_on_tool_call(name: str, args: dict[str, Any], _result: Any, _s=streamer) -> None:
                         show_tool_result_inline(name, _result)
-                        streamer.resume()
+                        _s.resume()
 
                     result = self.agentic.run(
                         user_input,
@@ -867,17 +877,24 @@ class ChatSession:
 
     def run(self) -> None:
         """The clean main loop — replaces the body of run_chat_mode()."""
-        from .input import (
-            get_input,
-            SIGNAL_CLEAR_SCREEN, SIGNAL_NEW_SESSION,
-            SIGNAL_COMMAND_PALETTE, SIGNAL_OPEN_EDITOR,
-            SIGNAL_REWIND, SIGNAL_CYCLE_PERMS, SIGNAL_MODEL_PICK,
-        )
+        from .context_bar import estimate_messages_tokens, get_context_limit
         from .display import (
-            show_response, show_error, show_info, show_help,
+            show_error,
+            show_help,
+            show_info,
+            show_response,
+        )
+        from .input import (
+            SIGNAL_CLEAR_SCREEN,
+            SIGNAL_COMMAND_PALETTE,
+            SIGNAL_CYCLE_PERMS,
+            SIGNAL_MODEL_PICK,
+            SIGNAL_NEW_SESSION,
+            SIGNAL_OPEN_EDITOR,
+            SIGNAL_REWIND,
+            get_input,
         )
         from .permissions_ui import is_plan_approve_mode
-        from .context_bar import estimate_messages_tokens, get_context_limit
 
         _ALL_SIGNALS = {
             SIGNAL_CLEAR_SCREEN, SIGNAL_NEW_SESSION,
@@ -936,7 +953,8 @@ class ChatSession:
             if _t_ipc.time() - self._last_ipc_heartbeat > 30.0:
                 self._last_ipc_heartbeat = _t_ipc.time()
                 try:
-                    import socket, json as _json
+                    import json as _json
+                    import socket
                     _ipc_token = ""
                     _token_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "ipc_token")
                     if os.path.isfile(_token_path):

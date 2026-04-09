@@ -1,6 +1,5 @@
 """Voice interface tool for speech-to-text and text-to-speech with barge-in detection."""
 
-import io
 import logging
 import os
 import queue
@@ -10,7 +9,7 @@ import time
 import wave
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Callable, Tuple
+from typing import Callable, Optional, Tuple
 
 # numpy and sounddevice are lazy-loaded to avoid pulling them at package import time.
 # They are imported on first use inside the classes that need them.

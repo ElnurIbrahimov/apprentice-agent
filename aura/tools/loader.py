@@ -200,10 +200,19 @@ def load_core_tools(brain=None) -> dict:
     Tools that fail to import or construct are silently skipped.
     """
     from aura.tools import (
-        FileSystemTool, WebSearchTool, CodeExecutorTool, ClipboardTool,
-        GitTool, get_monologue, BraveSearchTool,
-        CalendarTool, TaskManagerTool,
-        CodeSearchTool, CodeEditTool, NotificationTool, LoadSkillTool,
+        BraveSearchTool,
+        CalendarTool,
+        ClipboardTool,
+        CodeEditTool,
+        CodeExecutorTool,
+        CodeSearchTool,
+        FileSystemTool,
+        GitTool,
+        LoadSkillTool,
+        NotificationTool,
+        TaskManagerTool,
+        WebSearchTool,
+        get_monologue,
     )
     from aura.tools.tool_search import ToolSearchTool
 
@@ -435,11 +444,22 @@ def ensure_tool(tools: dict, tool_name: str, brain=None):
 
     # --- Fallback: legacy lazy map for tools not yet in deferred registry ---
     from aura.tools import (
-        ScreenshotTool, VisionTool, PDFReaderTool, ArxivSearchTool,
-        BrowserTool, SystemControlTool, ToolBuilderTool, MarketplaceTool,
-        get_knowledge_graph, CalendarTool, SpacedRepetitionTool,
-        TaskManagerTool, APITesterTool, DatabaseTool, AudioTranscriberTool,
+        APITesterTool,
+        ArxivSearchTool,
+        AudioTranscriberTool,
+        BrowserTool,
+        CalendarTool,
+        DatabaseTool,
+        MarketplaceTool,
+        PDFReaderTool,
         ResearchTool,
+        ScreenshotTool,
+        SpacedRepetitionTool,
+        SystemControlTool,
+        TaskManagerTool,
+        ToolBuilderTool,
+        VisionTool,
+        get_knowledge_graph,
     )
 
     _lazy_map = {

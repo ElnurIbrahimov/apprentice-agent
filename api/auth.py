@@ -1,52 +1,49 @@
 """API key authentication for Aura routes."""
+import logging
 import os
 import secrets
-import logging
+
 from fastapi import Header, HTTPException, status
 
 logger = logging.getLogger(__name__)
 
 _API_KEY_ENV = "AURA_API_KEY"
-_AUTH_REQUIRED_ENV = "AURA_REQUIRE_AUTH"
+_AUTH_REQUIRED_ENV = "AURA_REQUIRE_AUTH"  # Legacy — prefer AURA_API_AUTH_ENABLED
 
 
 def _get_configured_key() -> str | None:
     return os.environ.get(_API_KEY_ENV)
 
 
-def _auth_is_required() -> bool:
-    """Returns True if AURA_REQUIRE_AUTH=true (default: False for local dev)."""
+def _auth_is_enabled() -> bool:
+    """Returns True if API authentication is enabled.
+
+    Checks AURA_API_AUTH_ENABLED first (canonical flag, defaults true),
+    then falls back to legacy AURA_REQUIRE_AUTH for backward compat.
+    """
+    # Canonical flag — used by middleware and route deps
+    api_auth = os.environ.get("AURA_API_AUTH_ENABLED")
+    if api_auth is not None:
+        return api_auth.lower() in ("true", "1", "yes")
+    # Legacy fallback
     return os.environ.get(_AUTH_REQUIRED_ENV, "false").lower() in ("true", "1", "yes")
 
 
 async def require_api_key(x_api_key: str = Header(default="")) -> str:
     """FastAPI dependency: validates X-API-Key header."""
-    # If API-level auth is disabled (AURA_API_AUTH_ENABLED=false), allow all.
-    # Consistent with APIKeyAuthMiddleware and verify_api_key_ws.
-    api_auth_enabled = os.environ.get("AURA_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
-    if api_auth_enabled and not os.environ.get("AURA_API_KEY"):
-        # SECURITY: Fail CLOSED — if auth is enabled but no key is configured,
-        # reject all requests instead of silently disabling auth
-        logger.error("AURA_API_AUTH_ENABLED is true but no AURA_API_KEY set — blocking all requests")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Auth is enabled but AURA_API_KEY is not configured. Set it or disable auth.",
-        )
-    if not api_auth_enabled:
+    if not _auth_is_enabled():
         return ""
 
     configured = _get_configured_key()
 
     if configured is None:
-        if _auth_is_required():
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=(
-                    "AURA_REQUIRE_AUTH=true but AURA_API_KEY is not set. "
-                    "Set AURA_API_KEY environment variable."
-                ),
-            )
-        return ""
+        # SECURITY: Fail CLOSED — auth is enabled but no key is configured.
+        # Reject all requests instead of silently disabling auth.
+        logger.error("Auth enabled but no AURA_API_KEY set — blocking all requests")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Auth is enabled but AURA_API_KEY is not configured. Set it or disable auth.",
+        )
 
     if not secrets.compare_digest(x_api_key or "", configured):
         raise HTTPException(
@@ -60,18 +57,13 @@ async def require_api_key(x_api_key: str = Header(default="")) -> str:
 def verify_api_key_ws(key: str) -> bool:
     """For WebSocket connections where Header dependency isn't available.
 
-    Checks AURA_API_AUTH_ENABLED first (same flag the APIKeyAuthMiddleware uses)
-    so that WebSocket auth is consistent with HTTP auth.  Falls back to
-    AURA_REQUIRE_AUTH for backward compatibility.
+    Uses the same _auth_is_enabled() check as require_api_key and
+    APIKeyAuthMiddleware for consistent behavior across all paths.
     """
-    # If the API-level auth flag is not enabled, allow all WS connections.
-    # This matches APIKeyAuthMiddleware which reads AURA_API_AUTH_ENABLED
-    # (defaults to "true" when unset — consistent with require_api_key).
-    api_auth_enabled = os.environ.get("AURA_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
-    if not api_auth_enabled:
+    if not _auth_is_enabled():
         return True
 
     configured = _get_configured_key()
     if configured is None:
-        return not _auth_is_required()  # Block if auth required, allow in dev mode
+        return False  # Auth enabled but no key configured — fail closed
     return secrets.compare_digest(key or "", configured)

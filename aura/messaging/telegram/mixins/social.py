@@ -8,10 +8,10 @@ import asyncio
 import logging
 import random
 
-from aura.messaging.telegram.constants import EMOTION_REACTIONS, EMOTION_EMOJI
+from aura.messaging.telegram.constants import EMOTION_EMOJI, EMOTION_REACTIONS
 
 try:
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
     from telegram.ext import ContextTypes
     try:
         from telegram import ReactionTypeEmoji
@@ -122,6 +122,9 @@ class SocialMixin:
     async def _handle_retry_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle retry_<user_id> and retry_light_<user_id> callbacks."""
         query = update.callback_query
+        if not self._is_user_allowed(query.from_user.id):
+            await query.answer("Unauthorized", show_alert=True)
+            return
         await query.answer("Retrying...")
 
         data = query.data  # e.g. "retry_12345" or "retry_light_12345"
@@ -131,8 +134,8 @@ class SocialMixin:
         # Retrieve the failed message
         last_input = self._failed_messages.get(user_id, "")
         if not last_input:
-            # Fallback: try _last_exchange
-            exchange = self._last_exchange.get(query.from_user.id, {})
+            # Fallback: try last exchange from store
+            exchange = self.store.get_skill_state(str(query.from_user.id)).get("last_exchange", {})
             last_input = exchange.get("input", "")
         if not last_input:
             await query.message.reply_text("Nothing to retry — I couldn't find the original message.")

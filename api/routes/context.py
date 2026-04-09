@@ -3,15 +3,15 @@
 import asyncio
 import functools
 import logging
-import re
 import math
+import re
 import time
-from typing import Dict, List, Optional, Any
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
 from threading import Lock
+from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api.auth import require_api_key
@@ -35,7 +35,7 @@ class FocusItem:
         self.activation_count = 1
         self.sources: List[str] = []  # Where this focus came from
 
-    def boost(self, amount: float = 0.3, source: str = None):
+    def boost(self, amount: float = 0.3, source: str | None = None):
         """Increase focus weight."""
         self.weight = min(1.0, self.weight + amount)
         self.last_updated = time.time()

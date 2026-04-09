@@ -103,7 +103,8 @@ class SchedulingMixin:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.ensure_future(_send())
+                from aura.pools import fire_and_forget
+                fire_and_forget(_send())
             else:
                 loop.run_until_complete(_send())
         except RuntimeError:

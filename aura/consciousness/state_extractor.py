@@ -12,11 +12,10 @@ Extraction flow:
   5. Return structured dict for WorldModel.process_conversation()
 """
 
-import json
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

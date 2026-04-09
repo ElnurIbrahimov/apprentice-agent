@@ -216,12 +216,12 @@ def create_session():
     global _session_ok
     try:
         from prompt_toolkit import PromptSession
-        from prompt_toolkit.history import FileHistory
         from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-        from prompt_toolkit.styles import Style
-        from prompt_toolkit.formatted_text import HTML
-        from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.completion import Completer, Completion, merge_completers
+        from prompt_toolkit.formatted_text import HTML
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.styles import Style
 
         class SlashCompleter(Completer):
             """Show slash command and subcommand completions when typing /."""
@@ -359,10 +359,15 @@ def create_session():
 
         # Load keybindings from registry (supports user overrides via ~/.aura/keybindings.json)
         from aura.cli.keybindings import (
-            KeybindingsRegistry, parse_key_to_pt,
-            ACTION_CLEAR_SCREEN, ACTION_NEW_SESSION, ACTION_COMMAND_PALETTE,
-            ACTION_OPEN_EDITOR, ACTION_REWIND, ACTION_CYCLE_PERMISSIONS,
+            ACTION_CLEAR_SCREEN,
+            ACTION_COMMAND_PALETTE,
+            ACTION_CYCLE_PERMISSIONS,
             ACTION_MODEL_PICKER,
+            ACTION_NEW_SESSION,
+            ACTION_OPEN_EDITOR,
+            ACTION_REWIND,
+            KeybindingsRegistry,
+            parse_key_to_pt,
         )
         _registry = KeybindingsRegistry()
 

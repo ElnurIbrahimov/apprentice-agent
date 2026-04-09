@@ -93,13 +93,12 @@ class TestChatEndpoints:
         with patch("api.routes.chat._get_agent_service") as mock_svc:
             svc = MagicMock()
             svc.is_ready = True
+            svc.chat.return_value = "Test response"
             mock_svc.return_value = svc
-            with patch("api.routes.chat.get_agent", return_value=mock_agent):
-                with patch("api.routes.chat.run_sync", return_value="Test response"):
-                    r = client.post("/api/chat", json={"message": "hello"})
-                    if r.status_code == 200:
-                        data = r.json()
-                        assert "response" in data
+            r = client.post("/api/chat", json={"message": "hello"})
+            if r.status_code == 200:
+                data = r.json()
+                assert "response" in data
 
     def test_chat_oversized_message_returns_422(self, client):
         r = client.post("/api/chat", json={"message": "x" * 200_000})

@@ -5,14 +5,14 @@ Always-On Context Engine (ACE) — auto-gathers context before every agent respo
 Single entry point: context_engine.gather(message) -> ContextBundle
 """
 
-import re
-import time
 import logging
+import re
 import threading
-from pathlib import Path
+import time
+from concurrent.futures import TimeoutError
 from dataclasses import dataclass, field
-from typing import Optional, List
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from pathlib import Path
+from typing import List, Optional
 
 try:
     import httpx as _httpx
@@ -232,7 +232,7 @@ class AlwaysOnContextEngine:
                 return None
             content = p.read_text(encoding="utf-8", errors="replace")
             if len(content) > self.MAX_FILE_CHARS:
-                content = content[:self.MAX_FILE_CHARS] + f"\n...(truncated)"
+                content = content[:self.MAX_FILE_CHARS] + "\n...(truncated)"
             return ContextBlock(f"File:{p.name}", content, priority=80)
         except Exception as e:
             logger.debug(f"[ACE] File read failed {path_str}: {e}")
@@ -243,8 +243,9 @@ class AlwaysOnContextEngine:
             return None
         try:
             # SSRF protection: block private/loopback/link-local IPs
+            import ipaddress
+            import socket
             from urllib.parse import urlparse
-            import ipaddress, socket
             hostname = urlparse(url).hostname or ""
             try:
                 for info in socket.getaddrinfo(hostname, None, socket.AF_UNSPEC):

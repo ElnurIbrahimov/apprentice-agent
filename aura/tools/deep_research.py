@@ -31,7 +31,8 @@ import os
 import re
 import sqlite3
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+from concurrent.futures import TimeoutError as FuturesTimeoutError
+from concurrent.futures import as_completed
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set
 from urllib.parse import urlparse
@@ -536,7 +537,7 @@ class HierarchicalSummarizer:
     def __init__(self, llm_func: Optional[Callable] = None):
         self.llm = llm_func
 
-    def _call_llm(self, prompt: str, system_prompt: str = None) -> Optional[str]:
+    def _call_llm(self, prompt: str, system_prompt: str | None = None) -> Optional[str]:
         """Safe LLM call — returns None on any failure."""
         if not self.llm:
             return None
@@ -1450,9 +1451,9 @@ class DeepResearchTool:
             "perspectives": [],
             "outline": [
                 f"Overview of {topic}",
-                f"Key details and analysis",
-                f"Recent developments",
-                f"Expert opinions and debate",
+                "Key details and analysis",
+                "Recent developments",
+                "Expert opinions and debate",
             ],
             "key_entities": [],
             "all_queries": self._generate_queries(topic),

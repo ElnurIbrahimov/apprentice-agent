@@ -9,17 +9,15 @@ Features:
 """
 
 import base64
-import copy
 import json
 import logging
 import re
 import time
 import uuid
-from collections import OrderedDict
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -367,7 +365,7 @@ class APITesterTool:
     def _interpolate_dict(self, d: Dict[str, str]) -> Dict[str, str]:
         return {self._interpolate(k): self._interpolate(v) for k, v in d.items()}
 
-    def _apply_auth(self, headers: Dict[str, str], auth_profile: str = None) -> Dict[str, str]:
+    def _apply_auth(self, headers: Dict[str, str], auth_profile: str | None = None) -> Dict[str, str]:
         """Apply auth from a profile (or 'default') to headers."""
         profile_name = auth_profile or "default"
         auth = self._auth.get(profile_name)
@@ -436,10 +434,10 @@ class APITesterTool:
     #  Core: request()
     # -----------------------------------------------------------------------
 
-    def request(self, method: str, url: str, headers: Dict[str, str] = None,
-                body: str = None, json_body: Any = None, auth: tuple = None,
-                auth_profile: str = None, timeout: int = 30, name: str = "",
-                extract_vars: Dict[str, str] = None) -> dict:
+    def request(self, method: str, url: str, headers: Dict[str, str] | None = None,
+                body: str | None = None, json_body: Any = None, auth: tuple | None = None,
+                auth_profile: str | None = None, timeout: int = 30, name: str = "",
+                extract_vars: Dict[str, str] | None = None) -> dict:
         """Send an HTTP request.
 
         Args:
@@ -456,7 +454,7 @@ class APITesterTool:
                          and store as variables for later use.
         """
         try:
-            import requests as req_lib
+            import requests as req_lib  # noqa: F401 — availability check
         except ImportError:
             return {"success": False, "error": "requests library not installed. Run: pip install requests"}
 
@@ -605,22 +603,22 @@ class APITesterTool:
     #  Convenience methods (unchanged interface)
     # -----------------------------------------------------------------------
 
-    def get(self, url: str, headers: Dict[str, str] = None, **kwargs) -> dict:
+    def get(self, url: str, headers: Dict[str, str] | None = None, **kwargs) -> dict:
         return self.request("GET", url, headers=headers, **kwargs)
 
-    def post(self, url: str, body: str = None, json_body: Any = None,
-             headers: Dict[str, str] = None, **kwargs) -> dict:
+    def post(self, url: str, body: str | None = None, json_body: Any = None,
+             headers: Dict[str, str] | None = None, **kwargs) -> dict:
         return self.request("POST", url, headers=headers, body=body, json_body=json_body, **kwargs)
 
-    def put(self, url: str, body: str = None, json_body: Any = None,
-            headers: Dict[str, str] = None, **kwargs) -> dict:
+    def put(self, url: str, body: str | None = None, json_body: Any = None,
+            headers: Dict[str, str] | None = None, **kwargs) -> dict:
         return self.request("PUT", url, headers=headers, body=body, json_body=json_body, **kwargs)
 
-    def delete(self, url: str, headers: Dict[str, str] = None, **kwargs) -> dict:
+    def delete(self, url: str, headers: Dict[str, str] | None = None, **kwargs) -> dict:
         return self.request("DELETE", url, headers=headers, **kwargs)
 
-    def patch(self, url: str, body: str = None, json_body: Any = None,
-              headers: Dict[str, str] = None, **kwargs) -> dict:
+    def patch(self, url: str, body: str | None = None, json_body: Any = None,
+              headers: Dict[str, str] | None = None, **kwargs) -> dict:
         return self.request("PATCH", url, headers=headers, body=body, json_body=json_body, **kwargs)
 
     # -----------------------------------------------------------------------
@@ -628,9 +626,9 @@ class APITesterTool:
     # -----------------------------------------------------------------------
 
     def save_request(self, name: str, method: str, url: str,
-                     headers: Dict[str, str] = None, body: str = None,
+                     headers: Dict[str, str] | None = None, body: str | None = None,
                      json_body: Any = None, collection: str = "default",
-                     description: str = "", auth_type: str = None) -> dict:
+                     description: str = "", auth_type: str | None = None) -> dict:
         """Save a request to a named collection."""
         if not name:
             return {"success": False, "error": "Request name is required"}
@@ -670,7 +668,7 @@ class APITesterTool:
             "response": f"Request '{name}' {action} in collection '{collection}'",
         }
 
-    def list_requests(self, collection: str = None) -> dict:
+    def list_requests(self, collection: str | None = None) -> dict:
         """List saved requests, optionally filtered by collection."""
         if collection:
             items = self._collections.get(collection, [])
@@ -706,10 +704,10 @@ class APITesterTool:
             "response": f"{total} saved request(s) in {len(self._collections)} collection(s):" + "\n".join(all_formatted),
         }
 
-    def run_saved(self, name: str, collection: str = None,
-                  override_headers: Dict[str, str] = None,
+    def run_saved(self, name: str, collection: str | None = None,
+                  override_headers: Dict[str, str] | None = None,
                   override_body: Any = None,
-                  extract_vars: Dict[str, str] = None) -> dict:
+                  extract_vars: Dict[str, str] | None = None) -> dict:
         """Execute a saved request by name."""
         # Search all collections or specific one
         target = None
@@ -813,7 +811,7 @@ class APITesterTool:
 
         masked = dict(auth)
         for key in ("token", "password", "key"):
-            if key in masked and masked[key]:
+            if masked.get(key):
                 val = masked[key]
                 masked[key] = val[:4] + "****" + val[-4:] if len(val) > 8 else "****"
 
@@ -882,8 +880,8 @@ class APITesterTool:
     #  Response Analysis
     # -----------------------------------------------------------------------
 
-    def extract(self, request_id: str = None, json_path: str = "",
-                response_body: str = None) -> dict:
+    def extract(self, request_id: str | None = None, json_path: str = "",
+                response_body: str | None = None) -> dict:
         """Extract values from a response using JSON path notation.
 
         Args:
@@ -1041,8 +1039,8 @@ class APITesterTool:
     #  History (enhanced)
     # -----------------------------------------------------------------------
 
-    def history(self, limit: int = 10, method: str = None,
-                url_contains: str = None, status_code: int = None) -> dict:
+    def history(self, limit: int = 10, method: str | None = None,
+                url_contains: str | None = None, status_code: int | None = None) -> dict:
         """Show recent request history with optional filters."""
         recent = list(self._history)
 
@@ -1332,7 +1330,7 @@ class APITesterTool:
     #  validate_response()
     # -----------------------------------------------------------------------
 
-    def validate_response(self, request_id: str = None, spec_path_or_url: str = None) -> dict:
+    def validate_response(self, request_id: str | None = None, spec_path_or_url: str | None = None) -> dict:
         """Validate a response against an OpenAPI spec.
 
         Args:
@@ -1548,7 +1546,7 @@ class APITesterTool:
     #  retry()
     # -----------------------------------------------------------------------
 
-    def retry(self, request_id: str = None, max_retries: int = 3, backoff: float = 1.0) -> dict:
+    def retry(self, request_id: str | None = None, max_retries: int = 3, backoff: float = 1.0) -> dict:
         """Retry a request with exponential backoff.
 
         Args:

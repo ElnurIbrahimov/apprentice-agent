@@ -331,7 +331,7 @@ export function useWebSocket() {
         if (reconnectAttempts.current < MAX_RECONNECT_ATTEMPTS) {
           reconnectAttempts.current++;
           const delay = getReconnectDelay();
-          reconnectTimeout.current = setTimeout(connect, delay);
+          reconnectTimeout.current = setTimeout(() => connectRef.current(), delay);
         } else {
           setConnectionStatus('disconnected');
           setError('Connection lost. Click to reconnect.');

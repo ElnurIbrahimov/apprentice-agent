@@ -1,60 +1,58 @@
 """Main agent implementation with ReAct loop (single LLM call per step)."""
 
-import json
+import logging
 import os
 import re
-import time
-import logging
 import threading
-import concurrent.futures
+import time
 from collections import deque
-
-# Shared pool — centralized in aura.pools (2026-03-22)
-from aura.pools import bg_pool as _bg_pool_fn
-_AGENT_EXECUTOR = _bg_pool_fn()
-
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Tuple, Callable, List, Dict
+from typing import Callable, Optional
 
-logger = logging.getLogger(__name__)
-
-# ============================================================================
-# Re-exports for backward compatibility — other files import these from here
-# ============================================================================
-from aura.security.tool_validator import (          # noqa: F401
-    validate_custom_tool_code,
-    validate_script_code,
+from aura.core.chat_handler import ChatMixin
+from aura.core.direct_handlers import DirectHandlersMixin
+from aura.core.kg_brain import KGBrainMixin
+from aura.core.narrative import NarrativeMixin
+from aura.core.react_runner import ReactMixin
+from aura.core.skill_manager import SkillManagerMixin
+from aura.security.tool_validator import (  # noqa: F401
     ALLOWED_TOOL_IMPORTS,
     FORBIDDEN_PATTERNS,
+    validate_custom_tool_code,
+    validate_script_code,
 )
-from aura.tools.loader import (                     # noqa: F401
+from aura.tools.custom_registry import (
+    generate_default_keywords,
+    load_custom_tools_from_registry,
+)
+from aura.tools.loader import (  # noqa: F401
     _TOOL_KEYWORDS,
     _TOOL_KEYWORDS_RE,
     load_core_tools,
     load_heavy_tools,
     load_synthesized_tools,
+)
+from aura.tools.loader import (
     ensure_tool as _ensure_tool_fn,
 )
-from aura.tools.custom_registry import (             # noqa: F401
-    load_custom_tools_from_registry,
-    generate_default_keywords,
+
+from .brain import OllamaBrain, TaskType
+from .config import Config
+from .identity import (
+    detect_name_change,
+    detect_personality_change,
+    get_identity_prompt,
+    load_identity,
+    update_name,
+    update_personality,
 )
+from .memory.unified_memory import get_unified_memory
+from .metacognition import MetacognitionLogger
+from .tools import NeuroDreamEngine, SleepPhase
 
-# ============================================================================
-# Mixins — extracted domain-specific method groups (2026-03-23)
-# ============================================================================
-from aura.core.kg_brain import KGBrainMixin
-from aura.core.skill_manager import SkillManagerMixin
-from aura.core.narrative import NarrativeMixin
-from aura.core.direct_handlers import DirectHandlersMixin
-from aura.core.react_runner import ReactMixin
-from aura.core.chat_handler import ChatMixin
-
-
-# Thinking system integration — re-export from shared module for backward compat
-from aura.core.thought_recorder import record_thought as _record_thought
+logger = logging.getLogger(__name__)
 
 # Maximum history size to prevent memory bloat
 MAX_HISTORY_SIZE = 100
@@ -62,13 +60,6 @@ MAX_HISTORY_SIZE = 100
 # Timeout constants
 AGENT_TIMEOUT = 120  # Overall agent loop timeout (2 minutes)
 TOOL_TIMEOUT = 30    # Timeout for tool execution
-
-from .brain import OllamaBrain, TaskType
-from .identity import load_identity, get_identity_prompt, detect_name_change, detect_personality_change, update_name, update_personality
-from .memory.unified_memory import get_unified_memory
-from .metacognition import MetacognitionLogger
-from .config import Config
-from .tools import get_tone_modifier, get_knowledge_graph, NeuroDreamEngine, SleepPhase
 
 # MemoryRetriever removed — consolidated into UnifiedMemory (2026-03-22)
 try:
@@ -80,7 +71,7 @@ except ImportError:
 
 # Code Agent Mode — LLM writes Python code as actions (5.1)
 try:
-    from aura.core.code_agent import CodeAgentMode, should_use_code_agent, CODE_AGENT_SYSTEM_PROMPT
+    from aura.core.code_agent import CODE_AGENT_SYSTEM_PROMPT, CodeAgentMode, should_use_code_agent
     CODE_AGENT_AVAILABLE = True
 except ImportError:
     CODE_AGENT_AVAILABLE = False
@@ -113,7 +104,7 @@ except ImportError:
 
 # Thinker — MIRROR dual-process async background reasoning (roadmap 3.6)
 try:
-    from .thinker import get_thinker, ThinkerEngine
+    from .thinker import ThinkerEngine, get_thinker
     THINKER_AVAILABLE = True
 except ImportError:
     THINKER_AVAILABLE = False
@@ -123,9 +114,9 @@ except ImportError:
 # Strategy Bandit - Adaptive reasoning strategy selection
 try:
     from aura.consciousness.strategy_bandit import (
-        get_strategy_bandit,
         ReasoningStrategy,
         compute_quality_metrics,
+        get_strategy_bandit,
     )
     STRATEGY_BANDIT_AVAILABLE = True
 except ImportError:
@@ -134,25 +125,15 @@ except ImportError:
     get_strategy_bandit = None
     compute_quality_metrics = None
 
-# Reasoning Template Library - Learn reusable reasoning patterns
-try:
-    from aura.consciousness.reasoning_templates import (
-        get_template_library,
-        build_trace_from_mcts,
-    )
-    TEMPLATE_LIBRARY_AVAILABLE = True
-except ImportError:
-    TEMPLATE_LIBRARY_AVAILABLE = False
-
 # Knowledge Graph Brain - Structured Long-Term Memory
 try:
     from aura_knowledge_graph import (
+        KUZU_AVAILABLE,
         AURAKnowledgeGraph,
-        TitansKGBridge,
         BridgeConfig,
         KGQueryEngine,
         QueryMode,
-        KUZU_AVAILABLE
+        TitansKGBridge,
     )
     KG_BRAIN_AVAILABLE = KUZU_AVAILABLE
 except ImportError:
@@ -166,14 +147,14 @@ except ImportError:
 # Skill Library - Procedural Knowledge Storage
 try:
     from aura_skill_library import (
-        SkillLibrary,
+        EMBEDDINGS_AVAILABLE,
         Skill,
         SkillCategory,
-        SkillStore,
-        SkillLearner,
         SkillExecutor,
+        SkillLearner,
+        SkillLibrary,
+        SkillStore,
         TitansSkillBridge,
-        EMBEDDINGS_AVAILABLE
     )
     SKILL_LIBRARY_AVAILABLE = True
 except ImportError:
@@ -315,7 +296,7 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
         try:
             from aura.tools.reasoning_tree_tool import ReasoningTreeTool
             # Create LLM function adapter: MCTSReasoning expects (prompt, system_prompt) -> str
-            def _mcts_llm_func(prompt: str, system_prompt: str = None) -> str:
+            def _mcts_llm_func(prompt: str, system_prompt: str | None = None) -> str:
                 return self.brain.think(prompt, system_prompt=system_prompt, use_history=False)
 
             # Create tool executor adapter for LATS pattern:
@@ -429,8 +410,8 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
         # Initialize Tool RAG for dynamic tool selection
         self.tool_rag = None
         try:
-            from aura.tools.tool_rag import ToolRAG
             from aura.core.tool_schemas import AGENTIC_TOOLS
+            from aura.tools.tool_rag import ToolRAG
             self.tool_rag = ToolRAG()
             self.tool_rag.initialize(self.tools, AGENTIC_TOOLS)
         except (ImportError, AttributeError, TypeError, ValueError, OSError) as e:
@@ -1114,17 +1095,17 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     tail = messages[2:]  # skip system + goal
                     # Find safe trim point — walk from oldest toward newest,
                     # ensure we don't start mid-pair (orphaned tool result).
-                    trim_start = len(tail) - 28
-                    if trim_start < 0:
-                        trim_start = 0
+                    trim_start = max(0, len(tail) - 28)
                     # If the trim point lands on a "tool" message (result),
                     # back up to include the preceding assistant message with tool_calls.
-                    while trim_start < len(tail) and tail[trim_start].get("role") == "tool":
+                    while trim_start > 0 and tail[trim_start].get("role") == "tool":
                         trim_start -= 1
-                        if trim_start < 0:
-                            trim_start = 0
-                            break
-                    messages = messages[:2] + tail[trim_start:]
+                    # If index 0 is still a tool message, no safe trim point exists —
+                    # include everything rather than orphan a tool result
+                    if trim_start == 0 and tail[0].get("role") == "tool":
+                        pass  # skip trim — no safe boundary found
+                    else:
+                        messages = messages[:2] + tail[trim_start:]
 
                 # === Adaptive Re-planning (Roadmap 5.4) ===
                 if task_plan and self.adaptive_planner and status == "continue":
@@ -1467,8 +1448,9 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             if self.gateway_daemon is not None:
                 import asyncio
                 try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self.gateway_daemon.stop())
+                    asyncio.get_running_loop()  # raises RuntimeError if no loop
+                    from aura.pools import fire_and_forget
+                    fire_and_forget(self.gateway_daemon.stop())
                 except RuntimeError:
                     asyncio.run(self.gateway_daemon.stop())
                 results["freed_resources"].append("gateway_daemon")

@@ -11,16 +11,16 @@ Components:
 - Router: Intent classification and agent selection
 """
 
-from .protocol import AgentMessage, AgentResult, CollaborationMode
 from .base_agent import BaseSpecialist
 from .orchestrator import MultiAgentOrchestrator
+from .protocol import AgentMessage, AgentResult, CollaborationMode
 from .router import IntentRouter
 
 __all__ = [
     "AgentMessage",
     "AgentResult",
-    "CollaborationMode",
     "BaseSpecialist",
-    "MultiAgentOrchestrator",
+    "CollaborationMode",
     "IntentRouter",
+    "MultiAgentOrchestrator",
 ]

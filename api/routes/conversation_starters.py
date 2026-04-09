@@ -5,9 +5,9 @@ import functools
 import logging
 import random
 import time
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime
 from threading import Lock
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -151,10 +151,10 @@ class ConversationStarterManager:
 
     def generate_starter(
         self,
-        focus_topics: List[str] = None,
-        emotion: str = None,
+        focus_topics: List[str] | None = None,
+        emotion: str | None = None,
         idle_seconds: float = 0,
-        memories: List[str] = None,
+        memories: List[str] | None = None,
         force: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
@@ -269,7 +269,7 @@ class ConversationStarterManager:
                 "max_per_hour": self._max_per_hour,
             }
 
-    def set_config(self, min_interval: float = None, max_per_hour: int = None):
+    def set_config(self, min_interval: float | None = None, max_per_hour: int | None = None):
         """Update configuration."""
         with self._lock:
             if min_interval is not None:

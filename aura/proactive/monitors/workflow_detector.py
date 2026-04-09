@@ -19,9 +19,8 @@ Created: 2026-02-07
 
 import logging
 import time
-from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 from ..event_bus import Event, EventBus, EventPriority
 from .base_monitor import BaseMonitor
@@ -81,7 +80,8 @@ class WorkflowDetector(BaseMonitor):
         super().__init__(event_bus=event_bus, poll_interval=poll_interval)
 
         # Detect headless: no display on Linux = nothing to monitor
-        import sys as _sys, os as _os
+        import os as _os
+        import sys as _sys
         self._headless = bool(_os.environ.get("AURA_HEADLESS")) or (
             _sys.platform != "win32" and not _os.environ.get("DISPLAY")
         )

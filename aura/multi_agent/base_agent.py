@@ -5,10 +5,10 @@ domain-specific logic while sharing common infrastructure.
 """
 
 import logging
-import time
 import re
+import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional
 
 from .protocol import AgentMessage, AgentResult
 
@@ -88,7 +88,7 @@ class BaseSpecialist(ABC):
         """Get a tool by name if available to this agent."""
         return self._available_tools.get(name)
 
-    def get_system_prompt(self, context: Dict[str, Any] = None) -> str:
+    def get_system_prompt(self, context: Dict[str, Any] | None = None) -> str:
         """Get the full system prompt with optional context injection.
 
         Args:

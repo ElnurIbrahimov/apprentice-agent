@@ -60,7 +60,7 @@ def main() -> None:
     subparsers.add_parser("cost", help="Show session cost breakdown")
     subparsers.add_parser("mcp-serve", help="Run as MCP server (JSON-RPC over stdio)")
     sub_exec = subparsers.add_parser("exec", help="Non-interactive agent execution")
-    sub_exec.add_argument("prompt", nargs="?", default=None, help="Prompt to execute")
+    sub_exec.add_argument("exec_prompt", nargs="?", default=None, help="Prompt to execute")
     sub_ide = subparsers.add_parser("ide", help="IDE integration setup")
     sub_ide.add_argument("action", nargs="?", default="setup", choices=["setup"], help="Action (default: setup)")
     sub_log = subparsers.add_parser("log", help="Query interaction history")
@@ -244,9 +244,11 @@ def main() -> None:
 
     # Handle exec subcommand — convert to non-interactive --prompt path
     if args.command == "exec":
-        if not args.prompt:
+        exec_prompt = getattr(args, "exec_prompt", None) or args.prompt
+        if not exec_prompt:
             print("Usage: aura exec 'your prompt here'")
             sys.exit(1)
+        args.prompt = exec_prompt  # normalize for the shared --prompt path below
         # Fall through to the non-interactive --prompt path below
 
     # Handle subcommands that don't need the full agent
@@ -279,6 +281,10 @@ def main() -> None:
         sys.exit(1)
     agent.max_iterations = args.max_iterations
     agent.use_fastpath = not args.no_fastpath
+
+    # Ensure agent cleanup runs on exit (KG flush, skill library save, etc.)
+    import atexit
+    atexit.register(agent.shutdown)
 
     # Handle session resume — try agentic sessions first, fall back to brain conversations
     if args.resume:
@@ -334,7 +340,7 @@ def main() -> None:
                     print("  Starting new session.")
 
     # Read piped stdin if available (for composability)
-    from aura.cli.pipe_mode import PipeOutput, is_pipe_mode, read_piped_input, EXIT_SUCCESS, EXIT_ERROR
+    from aura.cli.pipe_mode import PipeOutput, read_piped_input, EXIT_SUCCESS, EXIT_ERROR
 
     if not args.prompt and not sys.stdin.isatty():
         piped = read_piped_input()

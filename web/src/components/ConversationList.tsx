@@ -138,9 +138,12 @@ export function ConversationList() {
             });
           }
         }
+      } else {
+        console.error('[ConversationList] Load failed:', res.status);
+        addMessage({ role: 'assistant', content: `Failed to load conversation (HTTP ${res.status})` });
       }
-    } catch (e) {
-      console.error('[ConversationList] Load messages error:', e);
+    } catch {
+      addMessage({ role: 'assistant', content: 'Failed to load conversation: network error' });
     } finally {
       setIsSwitchingConversation(false);
     }
@@ -332,14 +335,15 @@ export function ConversationList() {
       return;
     }
     try {
-      await fetch(`${API_BASE}/conversations/${editingId}`, {
+      const res = await fetch(`${API_BASE}/conversations/${editingId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: editTitle.trim() }),
       });
+      if (!res.ok) console.error('[ConversationList] Rename failed:', res.status);
       await fetchConversations();
-    } catch (e) {
-      console.error('[ConversationList] Rename error:', e);
+    } catch {
+      console.error('[ConversationList] Rename error: network');
     }
     setEditingId(null);
   };

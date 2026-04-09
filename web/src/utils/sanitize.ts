@@ -8,6 +8,6 @@ export function sanitizeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
     ALLOW_ARIA_ATTR: true,
-    ALLOW_DATA_ATTR: true,
+    ALLOW_DATA_ATTR: false,
   });
 }

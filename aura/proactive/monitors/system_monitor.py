@@ -10,14 +10,12 @@ Events generated:
 - system_alert: General system alert
 """
 
-import asyncio
 import logging
 import platform
-from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from .base_monitor import BaseMonitor
 from ..event_bus import Event, EventPriority
+from .base_monitor import BaseMonitor
 
 logger = logging.getLogger(__name__)
 

@@ -13,10 +13,9 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any, Callable, Optional
 
-from aura.hands.base import Hand, HandState, HandResult
+from aura.hands.base import Hand, HandResult, HandState
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +35,16 @@ class ApprovalRequest:
 class HandManager:
     """Manages the lifecycle and scheduling of all Hands."""
 
+    MAX_CONCURRENT_HANDS = 3  # Cap concurrent hand execution threads
+
     def __init__(self):
         self._hands: dict[str, Hand] = {}
         self._lock = threading.Lock()
         self._running = False
         self._scheduler_thread: Optional[threading.Thread] = None
         self._check_interval = 30  # seconds between schedule checks
+        self._active_threads: dict[str, threading.Thread] = {}
+        self._threads_lock = threading.Lock()
 
         # Notification callback (set by API/Telegram to receive results)
         self._notify_callback: Optional[Callable[[HandResult], None]] = None
@@ -159,15 +162,16 @@ class HandManager:
         run_context["max_tokens"] = manifest.max_tokens
         run_context["model_preference"] = manifest.model_preference
         run_context["require_approval_for"] = manifest.require_approval_for
-        run_context["request_approval"] = lambda tool_name, args=None: self.request_approval(
+        run_context["request_approval"] = lambda tool_name, args=None: self.request_approval_async(
             name, tool_name, args or {}
         )
 
         async def _step_cb(step: int, description: str):
             try:
                 from api.routes.chat import broadcast_action_trace
-                loop = asyncio.get_running_loop()
-                loop.create_task(broadcast_action_trace(name, step, description))
+                asyncio.get_running_loop()  # raises RuntimeError if no loop
+                from aura.pools import fire_and_forget
+                fire_and_forget(broadcast_action_trace(name, step, description))
             except Exception:
                 pass
 
@@ -227,12 +231,12 @@ class HandManager:
                     agent_id=f"hand:{name}",
                 )
             except Exception:
-                pass
+                logger.debug("[HandManager] Audit chain write failed", exc_info=True)
 
             # Metacognition recording
             try:
-                from aura.consciousness.metacognition import get_metacognition_engine
-                mc = get_metacognition_engine()
+                from aura.consciousness.metacognition import get_metacognitive_engine
+                mc = get_metacognitive_engine()
                 if mc:
                     mc.log_iteration({
                         "tool": f"hand:{name}",
@@ -242,7 +246,7 @@ class HandManager:
                         "duration_s": result.duration_seconds,
                     })
             except Exception:
-                pass
+                logger.debug("[HandManager] Metacognition recording failed", exc_info=True)
 
             logger.info(
                 f"[HandManager] Hand {name} completed: "
@@ -354,14 +358,32 @@ class HandManager:
         else:
             logger.info(f"[HandManager] Triggering hand: {chosen.name} (idle={idle_seconds:.0f}s)")
 
+        # Check concurrent hand cap
+        with self._threads_lock:
+            # Clean up finished threads
+            self._active_threads = {
+                n: t for n, t in self._active_threads.items() if t.is_alive()
+            }
+            if len(self._active_threads) >= self.MAX_CONCURRENT_HANDS:
+                logger.info(f"[HandManager] Skipping {chosen.name} — {len(self._active_threads)} hands already running")
+                return None
+            if chosen.name in self._active_threads:
+                logger.info(f"[HandManager] Skipping {chosen.name} — already running")
+                return None
+
         # Run in a dedicated event loop on a background thread to avoid blocking
         def _run_async():
             try:
                 asyncio.run(self.run_hand(chosen.name, brain, tools, context))
             except Exception as e:
                 logger.error(f"[HandManager] Async execution error for {chosen.name}: {e}")
+            finally:
+                with self._threads_lock:
+                    self._active_threads.pop(chosen.name, None)
 
         thread = threading.Thread(target=_run_async, daemon=True, name=f"hand-run-{chosen.name}")
+        with self._threads_lock:
+            self._active_threads[chosen.name] = thread
         thread.start()
 
         return chosen.name
@@ -443,8 +465,9 @@ class HandManager:
         if not self._approval_loop or self._approval_loop.is_closed():
             return
         try:
-            from api.routes.chat import _broadcast_json
             import time as _time
+
+            from api.routes.chat import _broadcast_json
             payload = {
                 "type": "proactive",
                 "content": f"**{result.hand_name}** found something:\n\n{result.summary[:300]}",
@@ -464,24 +487,26 @@ class HandManager:
     # Approval workflow
     # ====================================================================
 
-    def request_approval(self, hand_name: str, tool_name: str, args: dict) -> bool:
-        """Request approval for a Hand to use a sensitive tool.
+    async def request_approval_async(self, hand_name: str, tool_name: str, args: dict) -> bool:
+        """Request approval for a Hand to use a sensitive tool (async version).
 
-        Blocks until approved/denied or timeout (5 minutes).
+        Awaits until approved/denied or timeout (60s). Does NOT block a thread.
         Returns True if approved, False if denied or timed out.
         """
-        request_id = f"apr_{uuid.uuid4().hex[:8]}"
+        request_id = f"apr_{uuid.uuid4().hex}"
         request = ApprovalRequest(
             request_id=request_id,
             hand_name=hand_name,
             tool_name=tool_name,
             args=args,
         )
-        event = threading.Event()
+        async_event = asyncio.Event()
+        owner_loop = asyncio.get_running_loop()
 
         with self._approval_lock:
             self._pending_approvals[request_id] = request
-            self._approval_events[request_id] = event
+            # Store (event, loop) tuple so resolve_approval can set from any thread
+            self._approval_events[request_id] = (async_event, owner_loop)
 
         logger.info(f"[HandManager] Approval requested: {hand_name} wants to use {tool_name}")
 
@@ -503,33 +528,92 @@ class HandManager:
         except Exception as e:
             logger.debug(f"[HandManager] Telegram approval notify failed: {e}")
 
-        # Wait for resolution (5 min timeout)
-        resolved = event.wait(timeout=300)
+        # Await resolution (non-blocking — frees the event loop for other work)
+        try:
+            await asyncio.wait_for(async_event.wait(), timeout=60)
+        except asyncio.TimeoutError:
+            logger.info(f"[HandManager] Approval timed out for {hand_name}/{tool_name}")
+            with self._approval_lock:
+                self._pending_approvals.pop(request_id, None)
+                self._approval_events.pop(request_id, None)
+            return False
+
+        with self._approval_lock:
+            req = self._pending_approvals.pop(request_id, request)
+            self._approval_events.pop(request_id, None)
+
+        logger.info(f"[HandManager] Approval {'granted' if req.approved else 'denied'} for {hand_name}/{tool_name}")
+        return req.approved
+
+    def request_approval(self, hand_name: str, tool_name: str, args: dict) -> bool:
+        """Sync fallback — blocks the calling thread. Prefer request_approval_async."""
+        request_id = f"apr_{uuid.uuid4().hex}"
+        request = ApprovalRequest(
+            request_id=request_id,
+            hand_name=hand_name,
+            tool_name=tool_name,
+            args=args,
+        )
+        event = threading.Event()
+
+        with self._approval_lock:
+            self._pending_approvals[request_id] = request
+            self._approval_events[request_id] = event
+
+        self._notify_approval(request_id, hand_name, tool_name, args)
+        resolved = event.wait(timeout=60)
 
         with self._approval_lock:
             req = self._pending_approvals.pop(request_id, request)
             self._approval_events.pop(request_id, None)
 
         if not resolved:
-            logger.info(f"[HandManager] Approval timed out for {hand_name}/{tool_name}")
             return False
-
-        logger.info(f"[HandManager] Approval {'granted' if req.approved else 'denied'} for {hand_name}/{tool_name}")
         return req.approved
 
+    def _notify_approval(self, request_id: str, hand_name: str, tool_name: str, args: dict):
+        """Send approval notifications via WebSocket and Telegram."""
+        request = self._pending_approvals.get(request_id)
+        if request:
+            try:
+                self._broadcast_approval_request(request)
+            except Exception as e:
+                logger.debug(f"[HandManager] Approval broadcast failed: {e}")
+            try:
+                from aura.messaging.telegram_bot import notify_hand_approval_request
+                notify_hand_approval_request({
+                    "request_id": request_id,
+                    "hand_name": hand_name,
+                    "tool_name": tool_name,
+                    "args": args,
+                })
+            except Exception as e:
+                logger.debug(f"[HandManager] Telegram approval notify failed: {e}")
+
     def resolve_approval(self, request_id: str, approved: bool):
-        """Resolve a pending approval request (called by API or Telegram)."""
+        """Resolve a pending approval request (called by API or Telegram).
+
+        Thread-safe: works with both asyncio.Event and threading.Event.
+        """
         with self._approval_lock:
             request = self._pending_approvals.get(request_id)
-            event = self._approval_events.get(request_id)
+            event_entry = self._approval_events.get(request_id)
 
-        if not request or not event:
+        if not request or not event_entry:
             logger.warning(f"[HandManager] Unknown approval request: {request_id}")
             return
 
         request.approved = approved
         request.resolved = True
-        event.set()
+
+        # Handle both async and sync event types
+        if isinstance(event_entry, tuple):
+            # (asyncio.Event, loop) — must set from the owning loop's thread
+            async_event, owner_loop = event_entry
+            owner_loop.call_soon_threadsafe(async_event.set)
+        else:
+            # threading.Event (sync fallback)
+            event_entry.set()
 
     def get_pending_approvals(self) -> list[dict]:
         """Get all pending approval requests."""

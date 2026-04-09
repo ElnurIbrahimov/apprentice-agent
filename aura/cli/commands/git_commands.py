@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -7,8 +7,11 @@ logger = logging.getLogger(__name__)
 
 def handle_diff(agent, arg, context) -> Optional[str]:
     import subprocess as _sp
-    from ..display import console as _diff_console, show_error as _diff_err
+
     from rich.syntax import Syntax as _DiffSyntax
+
+    from ..display import console as _diff_console
+    from ..display import show_error as _diff_err
     try:
         diff_args = ["git", "diff"]
         if arg:
@@ -55,7 +58,8 @@ def handle_git(agent, arg, context) -> Optional[str]:
             print(f"  Blocked: '/git {git_subcmd}' — only read-only git commands are allowed")
             print(f"  Allowed: {', '.join(sorted(GIT_SAFE_SUBCOMMANDS))}")
         else:
-            from ..display import console as _git_console, show_error as _git_err
+            from ..display import console as _git_console
+            from ..display import show_error as _git_err
             try:
                 result = _sp.run(
                     ["git"] + git_tokens,
@@ -80,8 +84,14 @@ def handle_git(agent, arg, context) -> Optional[str]:
 
 
 def handle_pr(agent, arg, context) -> Optional[str]:
-    from ..git_tools import create_pr, get_staged_diff, get_recent_log, get_current_branch, PR_DESCRIPTION_PROMPT
     from ..display import console as _pr_console
+    from ..git_tools import (
+        PR_DESCRIPTION_PROMPT,
+        create_pr,
+        get_current_branch,
+        get_recent_log,
+        get_staged_diff,
+    )
     branch = get_current_branch()
     diff = get_staged_diff()
     log = get_recent_log()
@@ -107,8 +117,8 @@ def handle_pr(agent, arg, context) -> Optional[str]:
 
 
 def handle_branch(agent, arg, context) -> Optional[str]:
-    from ..git_tools import create_branch
     from ..display import console as _branch_console
+    from ..git_tools import create_branch
     name = arg.strip()
     if not name:
         _branch_console.print("[dim]Usage: /branch <name>[/dim]")
@@ -122,8 +132,8 @@ def handle_branch(agent, arg, context) -> Optional[str]:
 
 
 def handle_stash(agent, arg, context) -> Optional[str]:
-    from ..git_tools import smart_stash
     from ..display import console as _stash_console
+    from ..git_tools import smart_stash
     desc = arg.strip() or "Aura stash"
     result = smart_stash(desc)
     if result["success"]:
@@ -134,8 +144,8 @@ def handle_stash(agent, arg, context) -> Optional[str]:
 
 
 def handle_blame(agent, arg, context) -> Optional[str]:
-    from ..git_tools import get_blame
     from ..display import console as _blame_console
+    from ..git_tools import get_blame
     parts_b = arg.strip().rsplit(":", 1)
     if len(parts_b) != 2 or not parts_b[1].isdigit():
         _blame_console.print("[dim]Usage: /blame <file>:<line>[/dim]")

@@ -12,11 +12,10 @@ import logging
 import os
 import subprocess
 import threading
-import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,7 @@ class HooksManager:
 
     STORAGE_FILE = "hooks.json"
 
-    def __init__(self, tools: Optional[Dict[str, Any]] = None, data_dir: str = None):
+    def __init__(self, tools: Optional[Dict[str, Any]] = None, data_dir: str | None = None):
         """Initialize the HooksManager.
 
         Args:

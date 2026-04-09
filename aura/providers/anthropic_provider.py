@@ -58,7 +58,7 @@ class AnthropicProvider(BaseProvider):
         return headers
 
     def _build_body(self, model: str, messages: list[dict], stream: bool,
-                    options: dict = None) -> dict:
+                    options: dict | None = None) -> dict:
         """Build Anthropic Messages API request body.
 
         Key differences from OpenAI:
@@ -115,7 +115,7 @@ class AnthropicProvider(BaseProvider):
         return body
 
     def chat(self, model: str, messages: list[dict], stream: bool = False,
-             options: dict = None, tools: list | None = None) -> dict | Iterator[dict]:
+             options: dict | None = None, tools: list | None = None) -> dict | Iterator[dict]:
         if not self.is_configured():
             raise ConnectionError(
                 f"Anthropic API key not set. Set {_CFG['env_var']} in your .env file."
@@ -204,65 +204,68 @@ class AnthropicProvider(BaseProvider):
         current_tool = None  # Tool block being streamed
         resp.encoding = "utf-8"
 
-        for raw_line in resp.iter_lines():
-            if isinstance(raw_line, bytes):
-                line = raw_line.decode("utf-8", errors="replace")
-            else:
-                line = raw_line
+        try:
+            for raw_line in resp.iter_lines():
+                if isinstance(raw_line, bytes):
+                    line = raw_line.decode("utf-8", errors="replace")
+                else:
+                    line = raw_line
 
-            if not line or not line.startswith("data: "):
-                continue
+                if not line or not line.startswith("data: "):
+                    continue
 
-            data_str = line[6:]
-            try:
-                event = json.loads(data_str)
-                event_type = event.get("type", "")
+                data_str = line[6:]
+                try:
+                    event = json.loads(data_str)
+                    event_type = event.get("type", "")
 
-                if event_type == "content_block_start":
-                    block = event.get("content_block", {})
-                    if block.get("type") == "tool_use":
-                        current_tool = {
-                            "id": block.get("id", ""),
-                            "type": "function",
-                            "function": {
-                                "name": block.get("name", ""),
-                                "arguments": "",
-                            },
-                        }
+                    if event_type == "content_block_start":
+                        block = event.get("content_block", {})
+                        if block.get("type") == "tool_use":
+                            current_tool = {
+                                "id": block.get("id", ""),
+                                "type": "function",
+                                "function": {
+                                    "name": block.get("name", ""),
+                                    "arguments": "",
+                                },
+                            }
 
-                elif event_type == "content_block_delta":
-                    delta = event.get("delta", {})
-                    if delta.get("type") == "text_delta":
-                        yield {
-                            "message": {"role": "assistant", "content": delta.get("text", "")},
-                            "done": False,
-                        }
-                    elif delta.get("type") == "input_json_delta" and current_tool:
-                        current_tool["function"]["arguments"] += delta.get("partial_json", "")
+                    elif event_type == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta":
+                            yield {
+                                "message": {"role": "assistant", "content": delta.get("text", "")},
+                                "done": False,
+                            }
+                        elif delta.get("type") == "input_json_delta" and current_tool:
+                            current_tool["function"]["arguments"] += delta.get("partial_json", "")
 
-                elif event_type == "content_block_stop":
-                    if current_tool:
-                        tool_calls.append(current_tool)
-                        current_tool = None
+                    elif event_type == "content_block_stop":
+                        if current_tool:
+                            tool_calls.append(current_tool)
+                            current_tool = None
 
-                elif event_type == "message_start":
-                    msg = event.get("message", {})
-                    usage = msg.get("usage", {})
-                    input_tokens = usage.get("input_tokens", 0)
+                    elif event_type == "message_start":
+                        msg = event.get("message", {})
+                        usage = msg.get("usage", {})
+                        input_tokens = usage.get("input_tokens", 0)
 
-                elif event_type == "message_delta":
-                    usage = event.get("usage", {})
-                    output_tokens = usage.get("output_tokens", output_tokens)
+                    elif event_type == "message_delta":
+                        usage = event.get("usage", {})
+                        output_tokens = usage.get("output_tokens", output_tokens)
 
-            except json.JSONDecodeError:
-                continue
+                except json.JSONDecodeError:
+                    continue
 
-        final_msg = {"role": "assistant", "content": ""}
-        if tool_calls:
-            final_msg["tool_calls"] = tool_calls
-        yield {
-            "message": final_msg,
-            "done": True,
-            "prompt_eval_count": input_tokens,
-            "eval_count": output_tokens,
-        }
+            final_msg = {"role": "assistant", "content": ""}
+            if tool_calls:
+                final_msg["tool_calls"] = tool_calls
+            yield {
+                "message": final_msg,
+                "done": True,
+                "prompt_eval_count": input_tokens,
+                "eval_count": output_tokens,
+            }
+        finally:
+            resp.close()

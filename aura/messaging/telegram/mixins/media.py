@@ -13,9 +13,9 @@ import tempfile
 from typing import Optional, Tuple
 
 try:
-    from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
-    from telegram.ext import ContextTypes
+    from telegram import InlineQueryResultArticle, InputTextMessageContent, Update
     from telegram.constants import ParseMode
+    from telegram.ext import ContextTypes
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
@@ -308,8 +308,8 @@ class MediaMixin:
                 return "\n\n".join(p.text for p in doc_obj.paragraphs if p.text.strip())
             except ImportError:
                 # Fallback: extract raw XML text
-                import zipfile
                 import re as _re
+                import zipfile
                 with zipfile.ZipFile(io.BytesIO(raw)) as zf:
                     xml = zf.read("word/document.xml").decode("utf-8")
                     return _re.sub(r"<[^>]+>", " ", xml).strip()

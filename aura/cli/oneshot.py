@@ -6,11 +6,12 @@ from typing import Any, NoReturn
 
 
 def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) -> NoReturn:
-    from .display import show_banner, console
     from aura.core.agentic_loop import run_agentic
     from aura.core.context import gather_context, get_aura_md_config
-    from aura.core.router import ModelRouter
     from aura.core.permissions import PermissionManager
+    from aura.core.router import ModelRouter
+
+    from .display import console, show_banner
 
     show_banner()
 
@@ -30,7 +31,7 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
         permissions.apply_aura_md_overrides(aura_config)
 
     def _confirm(tool_name: str, description: str) -> bool | str:
-        console.print(f"\n  [yellow]Permission required:[/yellow]")
+        console.print("\n  [yellow]Permission required:[/yellow]")
         console.print(f"    [bold]{tool_name}[/bold]")
         for line in description.split("\n"):
             console.print(f"    {line}")

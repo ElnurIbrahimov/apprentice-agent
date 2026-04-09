@@ -3,11 +3,13 @@
 SECURITY: Thread-safe configuration with proper locking.
 """
 
-import os
+import atexit
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Dict, List
+
 from dotenv import load_dotenv
 
 # Load .env from the project root (not cwd, which may be different)
@@ -32,7 +34,19 @@ def _get_validation_session():
         if _validation_session is None:
             import requests
             _validation_session = requests.Session()
+            atexit.register(_close_validation_session)
     return _validation_session
+
+
+def _close_validation_session():
+    global _validation_session
+    with _validation_session_lock:
+        if _validation_session is not None:
+            try:
+                _validation_session.close()
+            except Exception:
+                pass
+            _validation_session = None
 
 
 # ============================================================================
@@ -74,7 +88,7 @@ _tags_cache_ts: float = 0.0
 _tags_cache_lock = threading.Lock()
 
 
-def validate_model(model_name: str, ollama_host: str = None) -> bool:
+def validate_model(model_name: str, ollama_host: str | None = None) -> bool:
     """
     Check if a model is available in Ollama.
 
@@ -139,7 +153,8 @@ def get_best_available_model(preferred: str, fallbacks: List[str], role: str = "
 class Config:
     _raw_ollama_host: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     # Validate scheme — reject non-http(s) to prevent SSRF via env misconfiguration
-    OLLAMA_HOST: str = _raw_ollama_host if _raw_ollama_host.startswith(("http://", "https://")) else "http://localhost:11434"
+    # Case-insensitive check: HTTP://host and Http://host are valid
+    OLLAMA_HOST: str = _raw_ollama_host if _raw_ollama_host.lower().startswith(("http://", "https://")) else "http://localhost:11434"
 
     # Feature toggles (configurable via env vars)
     KG_BRAIN_ENABLED: bool = os.getenv("KG_BRAIN_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -161,12 +176,14 @@ class Config:
     MODEL_FAST_CHAIN = [
         "nemotron-3-super:cloud",          # Primary: 449 tok/s, 1M ctx
         "kimi-k2.5:cloud",                # Fallback: strong general
+        "glm-5.1:cloud",                   # Fallback: 744B MoE, strong all-around
         "glm-5:cloud",                     # Fallback: 69 tok/s, low hallucination
         "gemma4:31b-cloud",                # Fallback: 104 tok/s, multimodal
     ]
     MODEL_REASON_CHAIN = [
         "kimi-k2.5:cloud",                # Primary: 92% MMLU, 96.1% AIME, 256K
         "qwen3.5:397b-cloud",             # Fallback: 87.8 MMLU-Pro, hybrid thinking
+        "glm-5.1:cloud",                   # Fallback: 744B MoE, +28% coding over GLM-5
         "glm-5:cloud",                     # Fallback: 96% MMLU, lowest hallucination
         "gemma4:31b-cloud",                # Fallback: 85.2% MMLU-Pro, 89.2% AIME
         "deepseek-v3.2:cloud",             # Fallback: 85.0 MMLU-Pro
@@ -187,6 +204,7 @@ class Config:
     MODEL_THINK_CHAIN = [
         "qwen3.5:397b-cloud",             # Primary: hybrid think/non-think, 262K
         "kimi-k2.5:cloud",                # Fallback: 96.1% AIME
+        "glm-5.1:cloud",                   # Fallback: 744B MoE, strong reasoning
         "glm-5:cloud",                     # Fallback: 92.7% AIME, low hallucination
         "gemma4:31b-cloud",                # Fallback: 89.2% AIME
     ]
@@ -196,6 +214,7 @@ class Config:
         "minimax-m2.5:cloud",              # Fallback: 196K
         "qwen3.5:397b-cloud",             # Fallback: 262K
         "kimi-k2.5:cloud",                 # Fallback: 256K
+        "glm-5.1:cloud",                   # Fallback: 200K context
     ]
 
     # Primary defaults
@@ -214,8 +233,7 @@ class Config:
         # Guard: reject known-weak API keys when auth is enabled
         _weak_keys = {"", "change-this-to-a-strong-random-key", "test", "admin", "password"}
         if cls.API_AUTH_ENABLED and cls.API_KEY in _weak_keys:
-            import logging
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "[Config] AURA_API_KEY is empty or a known placeholder. "
                 "Set a strong random key: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
             )
@@ -492,8 +510,6 @@ class Config:
     VOICE_CONFIG = {
         "default_mode": "whisper",  # Using external voice provider
     }
-
-    # Vision model VRAM — all vision is cloud-based now; dead code path removed in vision.py
 
     # Florence-2 Vision (local HuggingFace model — for image preprocessing only)
     FLORENCE2_MODEL: str = "microsoft/Florence-2-base"

@@ -10,15 +10,15 @@ import hmac
 import json
 import logging
 import os
+import threading
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
-from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ router = APIRouter(
 
 # In-memory registry of webhook subscriptions (survives until restart)
 _webhook_registry: List[Dict[str, Any]] = []
+_webhook_lock = threading.Lock()
 
 # Log of recent webhook events (last 100)
 _webhook_log: List[Dict[str, Any]] = []
@@ -62,9 +63,10 @@ def _log_event(source: str, event_type: str, summary: str, severity: str = "info
         "severity": severity,
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
-    _webhook_log.append(entry)
-    if len(_webhook_log) > _LOG_MAX:
-        _webhook_log.pop(0)
+    with _webhook_lock:
+        _webhook_log.append(entry)
+        if len(_webhook_log) > _LOG_MAX:
+            _webhook_log.pop(0)
     return entry
 
 
@@ -130,7 +132,7 @@ async def _notify_surfaces(text: str, channel: str = "all"):
     if channel in ("web", "all"):
         try:
             from api.routes.chat import broadcast_proactive_message
-            from aura.proactive import ProactiveMessage, ProactiveAction, EventPriority
+            from aura.proactive import EventPriority, ProactiveAction, ProactiveMessage
             msg = ProactiveMessage(
                 action=ProactiveAction.NOTIFY,
                 content=text,
@@ -142,7 +144,7 @@ async def _notify_surfaces(text: str, channel: str = "all"):
             logger.debug(f"[Webhooks] WebSocket broadcast failed: {e}")
 
 
-async def _route_to_agent(task_description: str, context: Dict[str, Any] = None):
+async def _route_to_agent(task_description: str, context: Dict[str, Any] | None = None):
     """Queue a task for the AURA agent to investigate."""
     try:
         from api.services.agent_service import agent_service
@@ -399,6 +401,9 @@ async def notify_webhook(req: NotifyRequest):
 # GET /api/webhooks/list — List registered webhook subscriptions
 # ============================================================================
 
+_WEBHOOK_REGISTRY_MAX = 500
+
+
 def _ensure_subscription(source: str, name: str, event_types: List[str]):
     """Auto-register a subscription when a webhook fires (idempotent)."""
     for sub in _webhook_registry:
@@ -409,6 +414,11 @@ def _ensure_subscription(source: str, name: str, event_types: List[str]):
                     sub["event_types"].append(et)
             sub["last_seen"] = datetime.utcnow().isoformat() + "Z"
             return
+    # Cap registry size to prevent unbounded memory growth
+    if len(_webhook_registry) >= _WEBHOOK_REGISTRY_MAX:
+        # Evict oldest entry by last_seen
+        oldest = min(range(len(_webhook_registry)), key=lambda i: _webhook_registry[i].get("last_seen", ""))
+        _webhook_registry.pop(oldest)
     _webhook_registry.append({
         "id": uuid.uuid4().hex[:8],
         "source": source,

@@ -4,9 +4,11 @@ Real web search with sources via fallback chain (Tavily -> Brave -> SearXNG).
 
 import asyncio
 import logging
-from fastapi import APIRouter, Query, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.auth import require_api_key
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,7 @@ async def _run_search(q: str, limit: int) -> dict:
         )
     except Exception as e:
         logger.error("[Search] Search failed: %s", e)
-        raise HTTPException(500, f"Search failed: {e}")
+        raise HTTPException(500, safe_error_detail(e, "Search failed"))
 
     if not resp.get("success", True) and resp.get("error"):
         raise HTTPException(502, resp["error"])

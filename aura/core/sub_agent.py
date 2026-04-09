@@ -8,11 +8,11 @@ import concurrent.futures
 import json
 import logging
 import threading
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 from aura.pools import tool_pool as _tool_pool_fn
+
 _active_coder = threading.Lock()  # Ensures only 1 coder sub-agent at a time
 
 # Read-only tool subset for restricted roles
@@ -100,8 +100,8 @@ class SubAgentManager:
 
     def _build_child_loop(self, task: str, role: str):
         """Create child AgenticLoop with restricted tools and permissions."""
-        from .agentic_loop import AgenticLoop, ToolExecutor
-        from .permissions import PermissionManager, PermissionTier
+        from .agentic_loop import AgenticLoop
+        from .permissions import PermissionManager
         from .tool_schemas import AGENTIC_TOOLS
 
         # Build restricted tool list based on role
@@ -162,7 +162,7 @@ class SubAgentManager:
                 "tool_calls": tool_calls,
             })
         except concurrent.futures.TimeoutError:
-            logger.warning(f"[SubAgent] Timed out after 120s")
+            logger.warning("[SubAgent] Timed out after 120s")
             return json.dumps({"error": "Sub-agent timed out after 120 seconds"})
         except Exception as e:
             return json.dumps({"error": f"Sub-agent execution error: {e}"})

@@ -14,15 +14,18 @@ import random
 import tempfile
 import time as _time
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional
 
 from aura.core.conversation_manager import get_conversation_manager
-from aura.messaging.telegram.constants import EMOTION_REACTIONS, EMOTION_EMOJI
+from aura.messaging.telegram.constants import EMOTION_EMOJI, EMOTION_REACTIONS
 
 try:
     from telegram import (
-        Update, InlineKeyboardButton, InlineKeyboardMarkup,
-        ReplyKeyboardMarkup, ReplyKeyboardRemove,
+        InlineKeyboardButton,
+        InlineKeyboardMarkup,
+        ReplyKeyboardMarkup,
+        ReplyKeyboardRemove,
+        Update,
     )
     from telegram.ext import ContextTypes
     TELEGRAM_AVAILABLE = True
@@ -93,7 +96,7 @@ class MiscMixin:
         # "last" keyword: use last agent response
         if content_text.strip().lower() == "last" or not content_text:
             uid = update.effective_user.id
-            exchange = self._last_exchange.get(uid, {})
+            exchange = self.store.get_skill_state(str(uid)).get("last_exchange", {})
             content_text = exchange.get("output", "")
             if not content_text:
                 await update.message.reply_text("No recent response to export. Send a message first.")
@@ -290,6 +293,9 @@ class MiscMixin:
     async def _handle_action_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle act_<action>_<msg_id> callbacks from action buttons."""
         query = update.callback_query
+        if not self._is_user_allowed(query.from_user.id):
+            await query.answer("Unauthorized", show_alert=True)
+            return
         await query.answer()
         data = query.data  # e.g. "act_deeper_12345"
         parts = data.split("_", 2)
@@ -300,7 +306,7 @@ class MiscMixin:
 
         # Get last response text for context
         uid = query.from_user.id
-        exchange = self._last_exchange.get(uid, {})
+        exchange = self.store.get_skill_state(str(uid)).get("last_exchange", {})
         last_output = exchange.get("output", "")
         last_input = exchange.get("input", "")
 
@@ -441,7 +447,7 @@ class MiscMixin:
                 goal = (
                     f"Translate this response into {target_lang}:\n\n{last_output[:3000]}"
                 )
-            placeholder = await query.message.reply_text(f"\U0001f310 Translating...")
+            placeholder = await query.message.reply_text("\U0001f310 Translating...")
             chat_id = str(query.message.chat_id)
             try:
                 response_text, _ = await asyncio.wait_for(
@@ -556,7 +562,7 @@ class MiscMixin:
 
             # Fallback: use last exchange if no conversation manager data
             if not messages:
-                exchange = self._last_exchange.get(update.effective_user.id, {})
+                exchange = self.store.get_skill_state(str(update.effective_user.id)).get("last_exchange", {})
                 if exchange:
                     messages = [
                         {"role": "user", "content": exchange.get("input", "")},
@@ -580,7 +586,7 @@ class MiscMixin:
 
             elif fmt == "md":
                 with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(f"# AURA Conversation Export\n")
+                    f.write("# AURA Conversation Export\n")
                     f.write(f"*Exported: {datetime.now().isoformat()}*\n\n---\n\n")
                     for m in messages:
                         if isinstance(m, dict):
@@ -686,11 +692,11 @@ class MiscMixin:
         if not self._is_user_allowed(update.effective_user.id):
             return
 
-        from aura.hands.manager import get_hand_manager
-        from aura.hands.researcher import ResearcherHand
-        from aura.hands.guardian import GuardianHand
-        from aura.hands.memory_hand import MemoryHand
         from aura.hands.collector import CollectorHand
+        from aura.hands.guardian import GuardianHand
+        from aura.hands.manager import get_hand_manager
+        from aura.hands.memory_hand import MemoryHand
+        from aura.hands.researcher import ResearcherHand
 
         manager = get_hand_manager()
         if not manager.list_hands():
@@ -751,7 +757,8 @@ class MiscMixin:
                 except Exception as e:
                     await self._edit_or_send_response(placeholder, f"Hand execution failed: {e}", chat_id)
 
-            asyncio.create_task(_run_and_report())
+            from aura.pools import fire_and_forget
+            fire_and_forget(_run_and_report())
 
         elif subcmd == "activate" and subarg:
             if manager.activate(subarg):
@@ -802,6 +809,9 @@ class MiscMixin:
     async def _handle_hand_approval_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle hand approval inline keyboard callbacks."""
         query = update.callback_query
+        if not self._is_user_allowed(query.from_user.id) or not self._is_admin(query.from_user.id):
+            await query.answer("Unauthorized — admin only", show_alert=True)
+            return
         await query.answer()
 
         data = query.data  # "hand_approve_<request_id>" or "hand_deny_<request_id>"
@@ -880,7 +890,7 @@ class MiscMixin:
         greetings = [
             f"Morning {user_name}! What's on your mind today?",
             f"Hey {user_name}! Morning. Ready when you are.",
-            f"Good morning! How are you feeling today?",
+            "Good morning! How are you feeling today?",
         ]
         await self.send_proactive(chat_id, random.choice(greetings))
 

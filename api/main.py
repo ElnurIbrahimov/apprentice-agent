@@ -1,19 +1,24 @@
 """FastAPI application entry point for AURA Web API."""
 # reload-trigger: 2026-03-01
 
-import os
-import sys
 import asyncio
 import logging
+import os
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
-from api.middleware import APIKeyAuthMiddleware, RateLimitMiddleware, RequestIDMiddleware
+from api.middleware import (
+    APIKeyAuthMiddleware,
+    RateLimitMiddleware,
+    RequestIDMiddleware,
+    SecurityHeadersMiddleware,
+)
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,21 +30,69 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from api.routes import chat, status, upload, features, multi_agent, reasoning_tree, proactive, memory, context, conversation_starters, thinking, idle_behaviors, self_improvement, thinking_mode, tools_new, activity, multi_model, knowledge, search, pdf, transcribe, ocr, image_gen, agent_action, build as build_route, models as models_route, summarize, youtube, math as math_route, research, evolution, artifacts, feed, providers as providers_route, code as code_route, webhooks as webhooks_route, generate as generate_route, share as share_route, hands as hands_route, telegram_miniapp as telegram_miniapp_route, routing as routing_route
-try:
-    from api.routes import reliability as reliability_route
-    _reliability_available = True
-except Exception as _re:
-    logger.warning(f"[API] Reliability routes unavailable: {_re}")
-    reliability_route = None
-    _reliability_available = False
-try:
-    from api.routes import auth as auth_route
-    _auth_available = True
-except Exception as _ae:
-    logger.warning(f"[API] Auth routes unavailable: {_ae}")
-    auth_route = None
-    _auth_available = False
+# Safe route imports — one bad module won't crash the entire server
+_route_modules = {}
+_ROUTE_NAMES = [
+    "chat", "status", "upload", "features", "multi_agent", "reasoning_tree",
+    "proactive", "memory", "context", "conversation_starters", "thinking",
+    "idle_behaviors", "self_improvement", "thinking_mode", "tools_new",
+    "activity", "multi_model", "knowledge", "search", "pdf", "transcribe",
+    "ocr", "image_gen", "agent_action", "build", "models", "summarize",
+    "youtube", "math", "research", "evolution", "artifacts", "feed",
+    "providers", "code", "webhooks", "generate", "share", "hands",
+    "telegram_miniapp", "routing", "reliability", "auth",
+]
+for _name in _ROUTE_NAMES:
+    try:
+        _mod = __import__(f"api.routes.{_name}", fromlist=["router"])
+        _route_modules[_name] = _mod
+    except Exception as _e:
+        logger.warning(f"[API] Route '{_name}' unavailable: {_e}")
+
+# Backward-compat aliases used in include_router calls below
+chat = _route_modules.get("chat")
+status = _route_modules.get("status")
+upload = _route_modules.get("upload")
+features = _route_modules.get("features")
+multi_agent = _route_modules.get("multi_agent")
+reasoning_tree = _route_modules.get("reasoning_tree")
+proactive = _route_modules.get("proactive")
+memory = _route_modules.get("memory")
+context = _route_modules.get("context")
+conversation_starters = _route_modules.get("conversation_starters")
+thinking = _route_modules.get("thinking")
+idle_behaviors = _route_modules.get("idle_behaviors")
+self_improvement = _route_modules.get("self_improvement")
+thinking_mode = _route_modules.get("thinking_mode")
+tools_new = _route_modules.get("tools_new")
+activity = _route_modules.get("activity")
+multi_model = _route_modules.get("multi_model")
+knowledge = _route_modules.get("knowledge")
+search = _route_modules.get("search")
+pdf = _route_modules.get("pdf")
+transcribe = _route_modules.get("transcribe")
+ocr = _route_modules.get("ocr")
+image_gen = _route_modules.get("image_gen")
+agent_action = _route_modules.get("agent_action")
+build_route = _route_modules.get("build")
+models_route = _route_modules.get("models")
+summarize = _route_modules.get("summarize")
+youtube = _route_modules.get("youtube")
+math_route = _route_modules.get("math")
+research = _route_modules.get("research")
+evolution = _route_modules.get("evolution")
+artifacts = _route_modules.get("artifacts")
+feed = _route_modules.get("feed")
+providers_route = _route_modules.get("providers")
+code_route = _route_modules.get("code")
+webhooks_route = _route_modules.get("webhooks")
+generate_route = _route_modules.get("generate")
+share_route = _route_modules.get("share")
+hands_route = _route_modules.get("hands")
+telegram_miniapp_route = _route_modules.get("telegram_miniapp")
+routing_route = _route_modules.get("routing")
+reliability_route = _route_modules.get("reliability")
+auth_route = _route_modules.get("auth")
 # Lazy-loaded agent_service (import removed - now lazy in routes)
 
 
@@ -245,7 +298,7 @@ async def lifespan(app: FastAPI):
                     from aura.messaging.telegram_bot import notify_hand_result
                     notify_hand_result(result)
                 except Exception:
-                    pass
+                    logger.debug("[API] Telegram hand notification failed", exc_info=True)
 
             _hands_mgr.set_notify_callback(_on_hand_result)
             logger.info("[API] HandManager notification callback wired (with approval loop)")
@@ -359,8 +412,8 @@ try:
     from aura.config import Config as _cfg
     _cors_origins_str = getattr(_cfg, 'API_CORS_ORIGINS', '*')
 except Exception:
-    logger.debug("cors_config_load_failed_using_default", exc_info=True)
-    _cors_origins_str = '*'
+    logger.warning("[API] CORS config load failed — defaulting to localhost only (set API_CORS_ORIGINS explicitly)", exc_info=True)
+    _cors_origins_str = 'http://localhost:5173,http://127.0.0.1:5173'
 
 # Default to localhost origins instead of wildcard for security.
 # Set API_CORS_ORIGINS="*" explicitly to allow all origins.
@@ -383,6 +436,9 @@ if _cors_origins != ["*"]:
 # Chrome extension origins are dynamic (chrome-extension://<id>) — use regex
 _cors_origin_regex = r"^chrome-extension://.*$" if _cors_origins != ["*"] else None
 
+# Security headers middleware — X-Content-Type-Options, X-Frame-Options, etc.
+app.add_middleware(SecurityHeadersMiddleware)
+
 # Request ID middleware — adds X-Request-ID header to every response
 app.add_middleware(RequestIDMiddleware)
 
@@ -402,7 +458,7 @@ try:
         enabled=True,
     )
 except Exception as e:
-    logger.warning(f"[API] Auth middleware setup skipped: {e}")
+    logger.error(f"[API] CRITICAL: Auth/rate-limit middleware setup FAILED: {e} — server may be unprotected", exc_info=True)
 
 # CORS must be added LAST — Starlette runs last-added middleware first (outermost),
 # and CORS must wrap everything to handle preflight requests before auth rejects them.
@@ -418,54 +474,59 @@ app.add_middleware(
     allow_headers=["*", "X-API-Key"],
 )
 
-# Include all routers - frontend uses 2s stagger + 30s intervals to prevent thread pool exhaustion
-app.include_router(chat.router)
-app.include_router(status.public_router)  # Unauthenticated: /api/health only
-app.include_router(status.router)
-app.include_router(upload.router)
-app.include_router(features.router)
-app.include_router(multi_agent.router)
-app.include_router(reasoning_tree.router)
-app.include_router(proactive.router)
-app.include_router(memory.router)
-app.include_router(context.router)
-app.include_router(conversation_starters.router)
-app.include_router(thinking.router)
-app.include_router(idle_behaviors.router)
-# consciousness route removed
-app.include_router(self_improvement.router)
-app.include_router(thinking_mode.router)
-app.include_router(tools_new.router)
-app.include_router(activity.router)
-app.include_router(multi_model.router)
-app.include_router(knowledge.router)
-app.include_router(search.router)
-app.include_router(pdf.router)
-app.include_router(transcribe.router)
-app.include_router(ocr.router)
-app.include_router(image_gen.router)
-app.include_router(agent_action.router)
-app.include_router(build_route.router)
-app.include_router(models_route.router)
-app.include_router(summarize.router)
-app.include_router(youtube.router)
-app.include_router(math_route.router)
-app.include_router(research.router)
-app.include_router(evolution.router)
-app.include_router(hands_route.router)
-app.include_router(artifacts.router)
-app.include_router(feed.router)
-app.include_router(providers_route.router)
-app.include_router(code_route.router)
-app.include_router(webhooks_route.router)
-app.include_router(generate_route.router)
-app.include_router(share_route.router)
-app.include_router(telegram_miniapp_route.router)
-app.include_router(routing_route.router)
-if _reliability_available and reliability_route:
-    app.include_router(reliability_route.router)
-if _auth_available and auth_route:
-    app.include_router(auth_route.router)
+# Include all routers - safe: skips modules that failed to import
+def _safe_include(mod, *router_attrs):
+    """Include router(s) from a module, skipping if module is None."""
+    if mod is None:
+        return
+    for attr in (router_attrs or ("router",)):
+        r = getattr(mod, attr, None)
+        if r:
+            app.include_router(r)
+
+_safe_include(chat)
+_safe_include(status, "public_router", "router")
+_safe_include(upload)
+_safe_include(features)
+_safe_include(multi_agent)
+_safe_include(reasoning_tree)
+_safe_include(proactive)
+_safe_include(memory)
+_safe_include(context)
+_safe_include(conversation_starters)
+_safe_include(thinking)
+_safe_include(idle_behaviors)
+_safe_include(self_improvement)
+_safe_include(thinking_mode)
+_safe_include(tools_new)
+_safe_include(activity)
+_safe_include(multi_model)
+_safe_include(knowledge)
+_safe_include(search)
+_safe_include(pdf)
+_safe_include(transcribe)
+_safe_include(ocr)
+_safe_include(image_gen)
+_safe_include(agent_action)
+_safe_include(build_route)
+_safe_include(models_route)
+_safe_include(summarize)
+_safe_include(youtube)
+_safe_include(math_route)
+_safe_include(research)
+_safe_include(evolution)
+_safe_include(hands_route)
+_safe_include(artifacts)
+_safe_include(feed)
+_safe_include(providers_route)
+_safe_include(code_route)
+_safe_include(webhooks_route)
+_safe_include(generate_route)
+_safe_include(share_route)
+_safe_include(telegram_miniapp_route)
+_safe_include(routing_route)
+_safe_include(reliability_route)
+_safe_include(auth_route)
 
 # /api/health is provided by status.py router
 

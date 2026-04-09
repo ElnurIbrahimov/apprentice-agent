@@ -18,12 +18,11 @@ import math
 import os
 import threading
 import time
-
-from aura.jsonl_utils import rotate_jsonl_if_needed
-from collections import defaultdict
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from aura.jsonl_utils import rotate_jsonl_if_needed
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +252,7 @@ class RoutingStatsStore:
         self, category: str, model: str, success: bool, latency_ms: float
     ) -> None:
         try:
-            from aura.reliability.telemetry import emit, TelemetryKind
+            from aura.reliability.telemetry import TelemetryKind, emit
             emit(
                 TelemetryKind.MODEL_ROUTING,
                 success=success,
@@ -308,9 +307,9 @@ def select_model_for_task(category: str, role: str = "fast") -> str:
 
 
 __all__ = [
-    "RoutingStatsStore",
-    "ModelStats",
     "MicrotaskCategory",
+    "ModelStats",
+    "RoutingStatsStore",
     "get_routing_stats",
     "select_model_for_task",
 ]

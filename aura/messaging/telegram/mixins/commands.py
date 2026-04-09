@@ -9,17 +9,18 @@ import io
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from aura.messaging.telegram.constants import _MAX_OUTPUT_CHARS
 from aura.messaging.telegram.parsers import _extract_code_from_message
 
 try:
     from telegram import (
-        Update, InlineKeyboardButton, InlineKeyboardMarkup,
+        InlineKeyboardButton,
+        InlineKeyboardMarkup,
+        Update,
     )
+    from telegram.constants import ChatAction, ParseMode
     from telegram.ext import ContextTypes
-    from telegram.constants import ParseMode, ChatAction
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False

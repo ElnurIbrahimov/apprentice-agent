@@ -22,7 +22,7 @@ import math
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -128,8 +128,10 @@ class KGContradictionDetector:
         Args:
             kg: An instance of KnowledgeGraph from aura/tools/knowledge_graph.py
         """
+        import threading
         self._kg = kg
         self._contradictions: List[ContradictionRecord] = []
+        self._contradictions_lock = threading.Lock()
         self._enabled = True
         try:
             from aura.config import Config
@@ -197,12 +199,13 @@ class KGContradictionDetector:
                 )
                 if contradiction:
                     found.append(contradiction)
-                    self._contradictions.append(contradiction)
-                    # Cap list to prevent unbounded growth
-                    if len(self._contradictions) > 500:
-                        self._contradictions = [
-                            c for c in self._contradictions if not c.resolved
-                        ][:400]
+                    with self._contradictions_lock:
+                        self._contradictions.append(contradiction)
+                        # Cap list to prevent unbounded growth
+                        if len(self._contradictions) > 500:
+                            self._contradictions = [
+                                c for c in self._contradictions if not c.resolved
+                            ][:400]
                     self._mark_contested(new_node_id, candidate_id)
                     self._add_contradiction_edge(new_node_id, candidate_id, contradiction)
                     logger.warning(
@@ -239,10 +242,11 @@ class KGContradictionDetector:
             self._add_supersedes_edge(new_node_id, old_node_id, reason)
 
             # Resolve any existing contradictions between these nodes
-            for c in self._contradictions:
-                if {c.node_a_id, c.node_b_id} == {old_node_id, new_node_id}:
-                    c.resolved    = True
-                    c.resolution  = "superseded_by_newer"
+            with self._contradictions_lock:
+                for c in self._contradictions:
+                    if {c.node_a_id, c.node_b_id} == {old_node_id, new_node_id}:
+                        c.resolved    = True
+                        c.resolution  = "superseded_by_newer"
 
             record = SupersessionRecord(
                 old_node_id=old_node_id,
@@ -266,10 +270,12 @@ class KGContradictionDetector:
 
     def get_unresolved_contradictions(self) -> List[ContradictionRecord]:
         """Return all contradiction records that have not been resolved."""
-        return [c for c in self._contradictions if not c.resolved]
+        with self._contradictions_lock:
+            return [c for c in self._contradictions if not c.resolved]
 
     def get_all_contradictions(self) -> List[Dict[str, Any]]:
-        return [c.to_dict() for c in self._contradictions]
+        with self._contradictions_lock:
+            return [c.to_dict() for c in self._contradictions]
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -475,7 +481,7 @@ class KGContradictionDetector:
 
     def _emit_telemetry(self, rec: ContradictionRecord) -> None:
         try:
-            from aura.reliability.telemetry import emit, TelemetryKind
+            from aura.reliability.telemetry import TelemetryKind, emit
             emit(
                 TelemetryKind.CONTRADICTION,
                 contradictions_detected=1,
@@ -489,12 +495,12 @@ class KGContradictionDetector:
         except Exception as e:
             logger.debug(f"[KGContradiction] non-critical: {e}")
 __all__ = [
-    "KGContradictionDetector",
-    "ContradictionRecord",
-    "SupersessionRecord",
-    "KG_NODE_ACTIVE",
-    "KG_NODE_SUPERSEDED",
-    "KG_NODE_CONTESTED",
     "CONTRADICTS_EDGE",
+    "KG_NODE_ACTIVE",
+    "KG_NODE_CONTESTED",
+    "KG_NODE_SUPERSEDED",
     "SUPERSEDES_EDGE",
+    "ContradictionRecord",
+    "KGContradictionDetector",
+    "SupersessionRecord",
 ]

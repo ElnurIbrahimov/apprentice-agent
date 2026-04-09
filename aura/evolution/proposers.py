@@ -5,21 +5,19 @@ The core insight: instead of blind mutation, read execution traces
 to understand WHY things fail, then propose targeted fixes.
 """
 
-import json
 import logging
 import random
 import re
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 
+from .pareto import ParetoFrontier
 from .types import (
     Candidate,
-    CandidateSelectionStrategy,
     ComponentSelectionMode,
     GEPAConfig,
     ReflectionItem,
     Trajectory,
 )
-from .pareto import ParetoFrontier
 
 logger = logging.getLogger(__name__)
 

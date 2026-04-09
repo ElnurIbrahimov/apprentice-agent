@@ -19,7 +19,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -487,7 +487,7 @@ class ProactivePersistence:
     # ── Activity log ─────────────────────────────────────────────────
 
     def log_activity(self, category: str, event_type: str, summary: str,
-                     payload: dict = None, duration_ms: int = None) -> None:
+                     payload: dict | None = None, duration_ms: int | None = None) -> None:
         """Append one activity event. Capped at MAX_ACTIVITY_LOG rows."""
         try:
             with self._lock:
@@ -508,7 +508,7 @@ class ProactivePersistence:
             logger.warning(f"[Persistence] log_activity error: {e}")
 
     def get_activity_events(self, limit: int = 100, after: float = 0.0,
-                            categories: list = None, before: float = None) -> list:
+                            categories: list | None = None, before: float | None = None) -> list:
         """Return events newer than `after` timestamp, newest first.
         Optional `before` for paginating older events."""
         try:

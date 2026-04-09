@@ -7,7 +7,9 @@ Opens browser, captures OAuth callback, sends refresh token to server.
 import base64
 import hashlib
 import json
+import os
 import secrets
+import sys
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlencode, urlparse, parse_qs
@@ -22,9 +24,13 @@ REDIRECT_URI = "http://localhost:1455/auth/callback"
 SCOPE = "openid profile email offline_access"
 CALLBACK_PORT = 1455
 
-# Your AURA server
-AURA_SERVER = "https://aura-elnur.duckdns.org"
-AURA_API_KEY = "i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ"
+# Your AURA server — configure via environment variables
+AURA_SERVER = os.environ.get("AURA_SERVER", "https://aura-elnur.duckdns.org")
+AURA_API_KEY = os.environ.get("AURA_API_KEY", "")
+if not AURA_API_KEY:
+    print("ERROR: Set AURA_API_KEY environment variable before running.")
+    print("  export AURA_API_KEY='your-key-here'")
+    sys.exit(1)
 
 
 def _generate_pkce():

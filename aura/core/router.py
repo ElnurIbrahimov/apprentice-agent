@@ -29,7 +29,7 @@ CONCURRENT_SLOTS = {
     },
     "balanced": {
         "orchestrator": "glm-5:cloud",              # orchestration + code (SWE 77.8%)
-        "coder": "qwen3-coder-next:cloud",          # code gen + small edits
+        "coder": "glm-5.1:cloud",                   # code gen + SWE 77.8%, +28% coding
         "fast": "nemotron-3-super:cloud",            # tool dispatch + throughput
     },
     "fast": {
@@ -57,7 +57,7 @@ _CATEGORY_TO_SLOT = {
 #
 # Models available (cloud): minimax-m2.7, minimax-m2.5, kimi-k2.5, qwen3.5:397b,
 #   qwen3.5, deepseek-v3.2, qwen3-coder:480b, qwen3-coder-next, gpt-oss:120b,
-#   glm-5, nemotron-3-super
+#   glm-5, glm-5.1, nemotron-3-super
 # Utility (local): nomic-embed-text, glm-ocr
 #
 ROUTING_TABLE = {
@@ -68,7 +68,7 @@ ROUTING_TABLE = {
     },
     "code_gen": {
         "max": "minimax-m2.5:cloud",           # SWE 80.2%, Multi-SWE 51.3%, BFCL 76.8%
-        "balanced": "glm-5:cloud",              # SWE 77.8%, HumanEval 90%
+        "balanced": "glm-5.1:cloud",            # SWE 77.8%, +28% coding over GLM-5
         "fast": "qwen3-coder-next:cloud",       # efficient code MoE
     },
     "small_edit": {
@@ -180,6 +180,7 @@ _CATEGORY_EXEMPLARS: dict[str, list[str]] = {
 # Cache for computed centroids
 _category_centroids: dict[str, list[float]] = {}
 _centroids_computed: bool = False
+_centroids_lock = threading.Lock()
 
 
 def _ensure_centroids() -> None:
@@ -187,26 +188,30 @@ def _ensure_centroids() -> None:
     global _category_centroids, _centroids_computed
     if _centroids_computed:
         return
-    _centroids_computed = True  # Set early to avoid retry on failure
-    try:
-        import ollama
-        import numpy as np
+    with _centroids_lock:
+        if _centroids_computed:
+            return
+        try:
+            import numpy as np
+            import ollama
 
-        for cat, exemplars in _CATEGORY_EXEMPLARS.items():
-            embeddings = []
-            for ex in exemplars:
-                try:
-                    resp = ollama.embed(model="nomic-embed-text:latest", input=ex)
-                    if resp and "embeddings" in resp and resp["embeddings"]:
-                        embeddings.append(resp["embeddings"][0])
-                except Exception:
-                    continue
-            if embeddings:
-                _category_centroids[cat] = np.mean(embeddings, axis=0).tolist()
-    except ImportError:
-        pass  # numpy or ollama not available
-    except Exception:
-        pass  # Ollama not running, etc.
+            for cat, exemplars in _CATEGORY_EXEMPLARS.items():
+                embeddings = []
+                for ex in exemplars:
+                    try:
+                        resp = ollama.embed(model="nomic-embed-text:latest", input=ex)
+                        if resp and "embeddings" in resp and resp["embeddings"]:
+                            embeddings.append(resp["embeddings"][0])
+                    except Exception:
+                        continue
+                if embeddings:
+                    _category_centroids[cat] = np.mean(embeddings, axis=0).tolist()
+        except ImportError:
+            pass  # numpy or ollama not available
+        except Exception:
+            pass  # Ollama not running, etc.
+        finally:
+            _centroids_computed = True
 
 
 def classify_task_embedding(prompt: str) -> "tuple[str, float] | None":
@@ -219,8 +224,8 @@ def classify_task_embedding(prompt: str) -> "tuple[str, float] | None":
         return None
 
     try:
-        import ollama
         import numpy as np
+        import ollama
 
         resp = ollama.embed(model="nomic-embed-text:latest", input=prompt)
         if not resp or "embeddings" not in resp or not resp["embeddings"]:
@@ -392,9 +397,9 @@ class ModelRouter:
         key = (task_category, model)
         with self._stats_lock:
             stats = self._outcome_stats.get(key)
-        if not stats:
-            return False
-        return stats["failures"] > 3 and stats["successes"] == 0
+            if not stats:
+                return False
+            return stats["failures"] > 3 and stats["successes"] == 0
 
     def _get_fallback_model(self, task_category: str, failed_model: str) -> Optional[str]:
         """Get the next model in the tier chain for a category.
@@ -514,7 +519,7 @@ class ModelRouter:
         logger.debug(f"[Router] {task_category}/{effective_tier} -> slot:{slot} -> {model}")
         return model
 
-    def select_agentic(self, prompt: str = None) -> str:
+    def select_agentic(self, prompt: str | None = None) -> str:
         """Select the best model for the agentic loop.
 
         If a prompt is provided, classifies the task and routes to the

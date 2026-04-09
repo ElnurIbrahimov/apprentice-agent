@@ -55,7 +55,7 @@ DEFAULT_HOST = "127.0.0.1"
 class _Connection:
     """Tracks a single WebSocket connection from the extension."""
 
-    __slots__ = ("ws", "conn_id", "connected_at", "last_ping")
+    __slots__ = ("conn_id", "connected_at", "last_ping", "ws")
 
     def __init__(self, ws: Any, conn_id: str) -> None:
         self.ws = ws

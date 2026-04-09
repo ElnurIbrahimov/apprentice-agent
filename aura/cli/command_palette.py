@@ -4,9 +4,11 @@ Ctrl+K opens a palette showing slash commands, recent files, and sessions.
 Uses prompt_toolkit Application (same pattern as model_picker / session_picker).
 """
 from __future__ import annotations
+
 import time as _time
 from dataclasses import dataclass
-from typing import Any, Optional, List, Dict
+from typing import Any, Dict, List, Optional
+
 
 @dataclass
 class PaletteItem:

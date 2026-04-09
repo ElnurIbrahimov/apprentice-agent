@@ -8,7 +8,6 @@ import logging
 import re
 import time as _time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
 try:
     from telegram import Update
@@ -87,7 +86,8 @@ class ResearchMixin:
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    asyncio.ensure_future(_update_status(msg))
+                    from aura.pools import fire_and_forget
+                    fire_and_forget(_update_status(msg))
             except Exception:
                 pass
 
@@ -385,7 +385,7 @@ class ResearchMixin:
         arg = raw_text.partition(" ")[2].strip()
 
         try:
-            from aura.config import Config, VERIFIED_CLOUD_MODELS
+            from aura.config import VERIFIED_CLOUD_MODELS, Config
         except ImportError:
             await update.message.reply_text("Config module not available.")
             return

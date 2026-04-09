@@ -14,17 +14,17 @@ Phase 2 Memory Consolidation:
 # Shared embedding utility
 from .embedding import get_embedding
 
+# FadeMem decay
+from .fade_mem import batch_decay_and_prune, reinforce
+
+# Retrieval pipeline
+from .retrieval import RetrievalResult, retrieve
+
 # Consolidated store (Phase 2)
-from .store import MemoryStore, MemoryRecord, get_memory_store
+from .store import MemoryRecord, MemoryStore, get_memory_store
 
 # Unified memory interface (public API)
 from .unified_memory import UnifiedMemory, UnifiedResult, get_unified_memory
-
-# Retrieval pipeline
-from .retrieval import retrieve, RetrievalResult
-
-# FadeMem decay
-from .fade_mem import batch_decay_and_prune, reinforce
 
 # User profile
 from .user_profile import UserProfile, load_profile, save_profile, update_profile_from_memories

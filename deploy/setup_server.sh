@@ -177,8 +177,9 @@ LimitNOFILE=65536
 MemoryMax=4G
 MemoryHigh=3G
 
-# Watchdog: systemd kills the service if it doesn't notify within 120s
-WatchdogSec=120
+# Watchdog disabled — requires sd_notify() calls in the application.
+# Enable WatchdogSec only after adding sdnotify support to run_web.py.
+# WatchdogSec=120
 
 # Logging
 StandardOutput=journal

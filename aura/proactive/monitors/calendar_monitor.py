@@ -13,16 +13,15 @@ Events generated:
 - deadline_approaching: Task deadline approaching
 """
 
-import asyncio
 import logging
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Set
-from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Set
 
-from .base_monitor import BaseMonitor
 from ..event_bus import Event, EventPriority
+from .base_monitor import BaseMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +295,6 @@ class CalendarMonitor(BaseMonitor):
                 end = start + timedelta(hours=1)
 
             # Convert timezone-aware datetimes to naive local time
-            from datetime import timezone
             if hasattr(start, 'tzinfo') and start.tzinfo is not None:
                 start = start.astimezone().replace(tzinfo=None)
             if hasattr(end, 'tzinfo') and end.tzinfo is not None:

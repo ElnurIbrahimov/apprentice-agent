@@ -3,10 +3,10 @@
 import json
 import re
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -111,7 +111,7 @@ class SpacedRepetitionTool:
 
         return card
 
-    def add_card(self, front: str, back: str, tags: List[str] = None,
+    def add_card(self, front: str, back: str, tags: List[str] | None = None,
                  deck: str = "default", source: str = "manual") -> dict:
         """Create a new flashcard."""
         if not front or not back:
@@ -141,6 +141,7 @@ class SpacedRepetitionTool:
         """Try to generate Q&A pairs using LLM. Returns list of (front, back) tuples, or empty on failure."""
         try:
             import ollama
+
             from aura.config import Config
         except ImportError:
             return []
@@ -168,7 +169,7 @@ class SpacedRepetitionTool:
         except Exception:
             return []
 
-    def add_cards_from_text(self, text: str, tags: List[str] = None, deck: str = "default") -> dict:
+    def add_cards_from_text(self, text: str, tags: List[str] | None = None, deck: str = "default") -> dict:
         """Auto-generate flashcards from text. Tries LLM first, falls back to regex extraction."""
         if not text:
             return {"success": False, "error": "No text provided"}

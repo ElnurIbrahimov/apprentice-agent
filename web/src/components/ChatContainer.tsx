@@ -244,6 +244,7 @@ export function ChatContainer() {
 
   // Pull-to-refresh state
   const [pullDelta, setPullDelta] = useState(0);
+  const pullDeltaRef = useRef(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const pullStartRef = useRef<{ y: number; active: boolean } | null>(null);
   const PULL_THRESHOLD = 60;
@@ -270,7 +271,9 @@ export function ChatContainer() {
       const dy = e.touches[0].clientY - pull.y;
       if (dy < 0) { pull.active = false; }
       else if (dy > 10) {
-        setPullDelta(Math.min(dy * 0.4, 80));
+        const v = Math.min(dy * 0.4, 80);
+        pullDeltaRef.current = v;
+        setPullDelta(v);
       }
     }
     if (!drawerActiveRef.current) return;
@@ -291,13 +294,15 @@ export function ChatContainer() {
 
   const handleDrawerTouchEnd = useCallback(() => {
     // Pull-to-refresh release
-    if (pullStartRef.current?.active && pullDelta >= PULL_THRESHOLD) {
+    if (pullStartRef.current?.active && pullDeltaRef.current >= PULL_THRESHOLD) {
       haptic(25); // haptic on pull-to-refresh trigger
       setPullRefreshing(true);
+      pullDeltaRef.current = 0;
       setPullDelta(0);
       reconnect();
       setTimeout(() => setPullRefreshing(false), 1500);
     } else {
+      pullDeltaRef.current = 0;
       setPullDelta(0);
     }
     pullStartRef.current = null;

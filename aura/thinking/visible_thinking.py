@@ -11,10 +11,10 @@ This makes AURA feel more human and trustworthy.
 """
 
 import logging
-from datetime import datetime
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Callable
+from datetime import datetime
 from enum import Enum
+from typing import Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

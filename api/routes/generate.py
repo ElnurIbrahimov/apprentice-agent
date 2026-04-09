@@ -5,11 +5,11 @@ with their own system prompts, without Aura's personality, tool calling,
 emotion processing, or action-mode routing interfering.
 """
 
+import asyncio
 import json
 import logging
-import asyncio
 import threading
-from typing import Optional, List, Literal
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -33,7 +33,7 @@ class GenerateRequest(BaseModel):
     """Request body for raw generation."""
     message: str = Field(..., min_length=1, max_length=200_000, description="User message / prompt")
     system_prompt: Optional[str] = Field(default=None, max_length=10_000, description="System prompt for the LLM")
-    model: Optional[str] = Field(default=None, description="Model override (None = default)")
+    model: Optional[str] = Field(default=None, max_length=128, pattern=r"^[a-zA-Z0-9._:\-/]+$", description="Model override (None = default)")
     history: Optional[List[HistoryItem]] = Field(default=None, max_length=20, description="Conversation history")
     images: Optional[List[str]] = Field(default=None, max_length=5, description="Base64 images for vision models")
 

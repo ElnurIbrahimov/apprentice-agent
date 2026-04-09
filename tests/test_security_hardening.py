@@ -375,16 +375,15 @@ class TestChannelsActive:
 # ============================================================================
 
 class TestBrainThreadSafety:
-    """Verify OllamaBrain has the _think_lock attribute."""
+    """Verify OllamaBrain has reference-counted inference tracking."""
 
-    def test_think_lock_exists(self):
-        """OllamaBrain.__init__ should create a _think_lock."""
-        import threading
+    def test_inference_refcount_exists(self):
+        """OllamaBrain.__init__ should create _inference_rc_lock and _inference_refcount."""
         from aura.brain import OllamaBrain
-        # Check class source since we can't easily instantiate without Ollama
         import inspect
         source = inspect.getsource(OllamaBrain.__init__)
-        assert "_think_lock" in source
+        assert "_inference_rc_lock" in source
+        assert "_inference_refcount" in source
 
 
 # ============================================================================
@@ -520,7 +519,7 @@ class TestAuthFailClosed:
                     import asyncio
                     from api.auth import require_api_key
                     try:
-                        asyncio.get_event_loop().run_until_complete(require_api_key(""))
+                        asyncio.run(require_api_key(""))
                         assert False, "Should have raised HTTPException"
                     except HTTPException as e:
                         assert e.status_code == 503

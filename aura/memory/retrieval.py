@@ -16,21 +16,22 @@ Created: 2026-03-16
 
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 try:
     import numpy as np
 except ImportError:
     np = None  # type: ignore[assignment]
 
-from .store import MemoryStore, MemoryRecord, get_memory_store
 from .fade_mem import compute_strength, reinforce
+from .store import MemoryRecord, MemoryStore, get_memory_store
 
 # Optional: mood-congruent retrieval bias (Phase 3.3)
 try:
-    from aura.emotion.memory_tagging import compute_mood_congruence, get_current_pad as _get_current_pad_retrieval
+    from aura.emotion.memory_tagging import compute_mood_congruence
+    from aura.emotion.memory_tagging import get_current_pad as _get_current_pad_retrieval
     _HAS_MOOD_CONGRUENCE = True
 except ImportError:
     _HAS_MOOD_CONGRUENCE = False
@@ -45,48 +46,69 @@ RRF_K = 60
 
 # Cross-encoder singleton (lazy-loaded, thread-safe)
 _cross_encoder = None
-_cross_encoder_attempted = False
+_cross_encoder_loading = False  # True while daemon thread is still loading
+_cross_encoder_failed = False   # True after a definitive failure (import error, etc.)
 _cross_encoder_lock = threading.Lock()
 
 
 def _get_cross_encoder():
-    """Lazy-load the cross-encoder reranker model (thread-safe)."""
-    global _cross_encoder, _cross_encoder_attempted
+    """Lazy-load the cross-encoder reranker model (thread-safe).
+
+    Spawns a background thread with a 3s timeout. If loading takes longer,
+    the daemon thread keeps running and writes directly to _cross_encoder.
+    Subsequent calls check _cross_encoder first (fast path), avoiding
+    re-spawning threads or permanently disabling reranking after a slow load.
+    """
+    global _cross_encoder, _cross_encoder_loading, _cross_encoder_failed
+    # Fast path: already loaded
     if _cross_encoder is not None:
         return _cross_encoder
-    if _cross_encoder_attempted:
+    # Permanently failed (import error, etc.)
+    if _cross_encoder_failed:
         return None
     with _cross_encoder_lock:
+        # Re-check under lock
         if _cross_encoder is not None:
             return _cross_encoder
-        if _cross_encoder_attempted:
+        if _cross_encoder_failed:
             return None
-        _cross_encoder_attempted = True
+        if _cross_encoder_loading:
+            # Another thread already spawned the loader — just return None for now
+            return None
+        _cross_encoder_loading = True
         try:
             from sentence_transformers import CrossEncoder
 
-            # Load with a 3-second timeout — if model isn't cached locally, skip it
-            # instead of blocking startup with HuggingFace download retries.
-            result = [None]
             def _load():
+                global _cross_encoder, _cross_encoder_loading, _cross_encoder_failed
                 try:
-                    result[0] = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
-                except Exception:
-                    pass
+                    model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+                    _cross_encoder = model
+                    logger.info("[Retrieval] Cross-encoder loaded successfully")
+                except Exception as e:
+                    logger.warning("[Retrieval] Cross-encoder load failed: %s", e)
+                    _cross_encoder_failed = True
+                finally:
+                    _cross_encoder_loading = False
 
             t = threading.Thread(target=_load, daemon=True)
             t.start()
             t.join(timeout=3.0)
 
-            if result[0] is not None:
-                _cross_encoder = result[0]
-                logger.info("[Retrieval] Cross-encoder loaded successfully")
+            if _cross_encoder is not None:
                 return _cross_encoder
-            else:
-                logger.info("[Retrieval] Cross-encoder skipped (not cached locally or timeout)")
-                return None
+            # Daemon still loading — return None but don't mark as failed
+            logger.info("[Retrieval] Cross-encoder still loading in background")
+            return None
+        except ImportError:
+            _cross_encoder_failed = True
+            _cross_encoder_loading = False
+            logger.info("[Retrieval] sentence-transformers not installed — reranking disabled")
+            return None
         except Exception as e:
-            logger.warning("[Retrieval] Cross-encoder unavailable (CPU reranking disabled): %s", e)
+            _cross_encoder_failed = True
+            _cross_encoder_loading = False
+            logger.warning("[Retrieval] Cross-encoder unavailable: %s", e)
             return None
 
 
@@ -372,6 +394,6 @@ def retrieve(
 
 __all__ = [
     "RetrievalResult",
-    "retrieve",
     "reciprocal_rank_fusion",
+    "retrieve",
 ]

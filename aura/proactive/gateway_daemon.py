@@ -25,17 +25,13 @@ import threading
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Callable, Any
 from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
 
-from .event_bus import EventBus, Event, EventPriority
-from .salience_filter import SalienceFilter, FilteredEvent
-from .active_inference import (
-    ActiveInferenceEngine,
-    ProactiveAction,
-    ProactiveDecision,
-    BeliefState
-)
+from .active_inference import ActiveInferenceEngine, BeliefState, ProactiveAction, ProactiveDecision
+from .event_bus import Event, EventBus, EventPriority
+from .salience_filter import FilteredEvent, SalienceFilter
+
 try:
     from aura.emotion.action_bridge import EmotionActionBridge
 except ImportError:
@@ -736,9 +732,8 @@ class GatewayDaemon:
         # Score this message through the 5-factor formula and check the learned threshold
         import uuid as _uuid
         try:
-            from .motivation_accumulator import (
-                get_motivation_accumulator, PotentialMessage as PotMsg
-            )
+            from .motivation_accumulator import PotentialMessage as PotMsg
+            from .motivation_accumulator import get_motivation_accumulator
             accumulator = get_motivation_accumulator()
 
             # Determine source category from action type
@@ -815,9 +810,8 @@ class GatewayDaemon:
 
         # Score through MotivationAccumulator
         try:
-            from .motivation_accumulator import (
-                get_motivation_accumulator, PotentialMessage as PotMsg
-            )
+            from .motivation_accumulator import PotentialMessage as PotMsg
+            from .motivation_accumulator import get_motivation_accumulator
             accumulator = get_motivation_accumulator()
 
             potential = PotMsg(
@@ -934,12 +928,12 @@ class GatewayDaemon:
         respecting the daemon's existing rate limiting and DND checks.
         """
         import time as _time
+
         from .proactive_messages import (
             generate_proactive_content,
+            get_coherence_message,
             get_curiosity_message,
             get_social_message,
-            get_competence_message,
-            get_coherence_message,
             get_task_message,
         )
 
@@ -1033,9 +1027,8 @@ class GatewayDaemon:
         import uuid as _uuid
         motivation_score = ea.priority  # Fallback
         try:
-            from .motivation_accumulator import (
-                get_motivation_accumulator, PotentialMessage as PotMsg
-            )
+            from .motivation_accumulator import PotentialMessage as PotMsg
+            from .motivation_accumulator import get_motivation_accumulator
             accumulator = get_motivation_accumulator()
             potential = PotMsg(
                 message_id=f"emo_{_uuid.uuid4().hex[:8]}",
@@ -1410,9 +1403,9 @@ class GatewayDaemon:
                     msg = response.strip().strip('"').strip("'")
                     # Sanity: reject if too long or looks like an error
                     if len(msg) < 300 and not msg.lower().startswith("i'm sorry"):
-                        logger.info(f"[GatewayDaemon] LLM generated proactive message")
+                        logger.info("[GatewayDaemon] LLM generated proactive message")
                         return msg
-                    logger.debug(f"[GatewayDaemon] LLM response rejected (too long or generic)")
+                    logger.debug("[GatewayDaemon] LLM response rejected (too long or generic)")
         except BaseException as e:
             logger.warning(f"[GatewayDaemon] LLM generation failed ({type(e).__name__}): {e}")
 

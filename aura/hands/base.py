@@ -179,7 +179,7 @@ class Hand(ABC):
 
         # Circuit breaker: 3 consecutive failures = wait longer
         if self._consecutive_failures >= 3:
-            cooldown = min(3600, 300 * (2 ** (self._consecutive_failures - 3)))
+            cooldown = min(3600, 300 * (2 ** min(self._consecutive_failures - 3, 12)))
             if time.time() - self._last_run < cooldown:
                 return False
 

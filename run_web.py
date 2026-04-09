@@ -50,7 +50,7 @@ def check_dependencies():
         sys.exit(1)
 
 
-def start_api_server(host: str = "127.0.0.1", port: int = 8000, reload: bool = True):
+def start_api_server(host: str = "127.0.0.1", port: int = 8000, reload: bool = False):
     """Start the FastAPI server."""
     import uvicorn
 

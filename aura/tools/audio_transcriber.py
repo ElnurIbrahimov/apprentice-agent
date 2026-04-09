@@ -1,12 +1,11 @@
 """Audio Transcriber tool — speech-to-text from audio/video files using Whisper."""
 
 import logging
-import os
 import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +67,8 @@ class AudioTranscriberTool:
         self._model_size = model_size
         TRANSCRIPTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    def transcribe(self, file_path: str, language: str = None,
-                   model_size: str = None, task: str = "transcribe") -> dict:
+    def transcribe(self, file_path: str, language: str | None = None,
+                   model_size: str | None = None, task: str = "transcribe") -> dict:
         """Transcribe an audio or video file.
 
         Args:

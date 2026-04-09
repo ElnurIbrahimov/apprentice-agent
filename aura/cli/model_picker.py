@@ -1,8 +1,8 @@
 """Interactive model picker for AURA CLI — arrow-key navigable, shows ALL models."""
 from __future__ import annotations
 
-import os
 import logging
+import os
 import time
 from typing import Any, Optional
 

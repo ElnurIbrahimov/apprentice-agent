@@ -5,13 +5,13 @@ import functools
 import logging
 import threading
 import time
-from typing import Dict, List, Optional, Any
-from datetime import datetime
 from collections import deque
+from datetime import datetime
 from threading import Lock
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
 
@@ -261,12 +261,12 @@ async def get_recall_stats(session_id: str = Query(default="default")):
 
 @router.post("/recalls/record")
 async def record_recall(
-    source: str,
-    count: int,
-    query: str,
+    source: str = Query(..., min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_\-]+$'),
+    count: int = Query(..., ge=0, le=10000),
+    query: str = Query(..., min_length=1, max_length=2000),
     memories: Optional[List[str]] = None,
     metadata: Optional[Dict[str, Any]] = None,
-    session_id: str = Query(default="default")
+    session_id: str = Query(default="default"),
 ):
     """
     Record a memory recall event (called internally by agent).
@@ -309,51 +309,69 @@ async def clear_recalls(session_id: str = Query(default="default")):
 async def get_recent_memories(limit: int = Query(default=20, le=100)):
     """Return recent memories from unified memory store."""
     try:
-        from aura.memory.unified_memory import get_unified_memory
-        um = get_unified_memory()
-        memories = um.retrieve("", limit=limit)
+        import asyncio
+        loop = asyncio.get_running_loop()
+
+        def _fetch():
+            from aura.memory.unified_memory import get_unified_memory
+            um = get_unified_memory()
+            return um.retrieve("", limit=limit)
+
+        memories = await loop.run_in_executor(None, _fetch)
         return {"memories": [{"content": m.get("content", ""), "timestamp": m.get("timestamp", ""), "category": m.get("category", "general"), "relevance": m.get("relevance", 0)} for m in (memories if memories else [])]}
     except Exception as e:
-        logger.debug(f"[Memory] recent endpoint: {e}")
-        return {"memories": []}
+        logger.warning(f"[Memory] recent endpoint: {e}")
+        raise HTTPException(status_code=503, detail="Memory store unavailable")
 
 
 @router.get("/search")
 async def search_memories(q: str = Query(..., min_length=1, max_length=500)):
     """Search memories by query text."""
     try:
-        from aura.memory.unified_memory import get_unified_memory
-        um = get_unified_memory()
-        results = um.retrieve(q, limit=20)
+        import asyncio
+        loop = asyncio.get_running_loop()
+
+        def _search():
+            from aura.memory.unified_memory import get_unified_memory
+            um = get_unified_memory()
+            return um.retrieve(q, limit=20)
+
+        results = await loop.run_in_executor(None, _search)
         return {"results": [{"content": m.get("content", ""), "timestamp": m.get("timestamp", ""), "category": m.get("category", "general"), "relevance": m.get("relevance", 0)} for m in (results if results else [])]}
     except Exception as e:
-        logger.debug(f"[Memory] search endpoint: {e}")
-        return {"results": []}
+        logger.warning(f"[Memory] search endpoint: {e}")
+        raise HTTPException(status_code=503, detail="Memory store unavailable")
 
 
 class AddMemoryBody(BaseModel):
-    content: str
-    category: str = "general"
+    content: str = Field(..., max_length=50000)
+    category: str = Field("general", max_length=100)
 
 
 @router.post("/add")
 async def add_memory(body: AddMemoryBody):
     """Store a new memory entry."""
     try:
-        from aura.memory.unified_memory import get_unified_memory
-        um = get_unified_memory()
-        um.store_gated(body.content, category=body.category)
+        import asyncio
+        loop = asyncio.get_running_loop()
+
+        def _store():
+            from aura.memory.unified_memory import get_unified_memory
+            um = get_unified_memory()
+            um.store_gated(body.content, category=body.category)
+
+        await loop.run_in_executor(None, _store)
         return {"ok": True, "message": "Memory stored"}
     except Exception as e:
         logger.warning(f"[Memory] add endpoint failed: {e}")
-        return {"ok": False, "message": str(e)}
+        raise HTTPException(status_code=500, detail="Failed to store memory")
 
 
 # ============================================================================
 # Integration Helper for Agent
 # ============================================================================
 
-def record_memory_recall(source: str, count: int, query: str, memories: List[str] = None, metadata: Dict = None):
+def record_memory_recall(source: str, count: int, query: str, memories: List[str] | None = None, metadata: Dict | None = None):
     """
     Helper function to record memory recalls from agent code.
 

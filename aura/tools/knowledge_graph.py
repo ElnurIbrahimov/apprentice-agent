@@ -22,15 +22,16 @@ ARCHITECTURE NOTE — Dual KG design:
 import json
 import logging
 import math
-import uuid
-import threading
-import tempfile
-import time
 import os
-from datetime import datetime, timedelta
+import tempfile
+import threading
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, List, Any, Tuple
-from dataclasses import dataclass, asdict, field
+from typing import Any, Dict, List, Optional, Tuple
+
 # networkx and numpy are lazy-loaded to avoid pulling them at package import time
 nx = None
 np = None
@@ -1851,7 +1852,8 @@ class KnowledgeGraphTool:
                 from aura_knowledge_graph.graph_database import AURAKnowledgeGraph
                 kuzu_db = AURAKnowledgeGraph()
 
-            from aura_knowledge_graph.graph_database import Entity as KuzuEntity, Relationship as KuzuRelationship
+            from aura_knowledge_graph.graph_database import Entity as KuzuEntity
+            from aura_knowledge_graph.graph_database import Relationship as KuzuRelationship
             from aura_knowledge_graph.schema import EntityType
 
             synced = {"entities": 0, "relationships": 0}
@@ -2253,11 +2255,11 @@ def get_knowledge_graph() -> KnowledgeGraphTool:
 
 # Export
 __all__ = [
-    "KnowledgeGraphTool",
-    "get_knowledge_graph",
-    "seed_initial_knowledge",
-    "Node",
-    "Edge",
+    "EDGE_TYPES",
     "NODE_TYPES",
-    "EDGE_TYPES"
+    "Edge",
+    "KnowledgeGraphTool",
+    "Node",
+    "get_knowledge_graph",
+    "seed_initial_knowledge"
 ]

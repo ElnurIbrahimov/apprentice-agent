@@ -15,16 +15,13 @@ import os
 import re
 import sys
 import threading
-import time
 from pathlib import Path
 from typing import Optional
 
-from rich.text import Text
-
-from .tool_schemas import AGENTIC_TOOLS
 from .permissions import PermissionManager
 from .session import AgenticSession
 from .token_manager import ContextWindowManager
+from .tool_schemas import AGENTIC_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +37,11 @@ def _ensure_console():
             from rich.console import Console
             console = Console()
 
+from aura.pools import tool_pool as _tool_pool_fn
+
 MAX_ITERATIONS = 50
 MAX_TOOL_OUTPUT_CHARS = 15000
-from aura.pools import tool_pool as _tool_pool_fn
+
 
 def _get_tool_pool():
     """Lazy accessor — pool created on first parallel tool call, not at import."""
@@ -208,7 +207,7 @@ def _compact_history(history: list[dict]) -> list[dict]:
     except Exception as e:
         logger.debug(f"[AgenticLoop] Compaction console print failed: {e}")
 
-    return [summary_msg] + recent_msgs
+    return [summary_msg, *recent_msgs]
 
 
 def _truncate(text: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:
@@ -359,7 +358,7 @@ class ToolExecutor:
             return json.dumps({"error": str(e)})
 
     # Aliases for when the LLM uses agent-style names instead of dev-tool names
-    _TOOL_ALIASES = {
+    _TOOL_ALIASES: dict = {
         "filesystem": "list_dir",
         "code_search": "grep",
         "code_edit": "edit_file",
@@ -617,7 +616,7 @@ class ToolExecutor:
         return {"error": error_msg}
 
     # Common command alternatives for "command not found" enrichment
-    _COMMAND_ALTERNATIVES = {
+    _COMMAND_ALTERNATIVES: dict = {
         "python": ["python3", "py"],
         "python3": ["python", "py"],
         "py": ["python", "python3"],
@@ -749,10 +748,10 @@ class ToolExecutor:
 
         return result
 
-    def _maybe_broadcast_artifact(self, path: str, content: str = None) -> None:
+    def _maybe_broadcast_artifact(self, path: str, content: str | None = None) -> None:
         """Broadcast file content to the Artifacts live-preview panel if previewable."""
         try:
-            from api.routes.artifacts import is_previewable, broadcast_artifact
+            from api.routes.artifacts import broadcast_artifact, is_previewable
             if not is_previewable(path):
                 return
             # Read file content if not provided (edit_file case)
@@ -831,6 +830,16 @@ class ToolExecutor:
                     or host.startswith("172.2") or host.startswith("172.3")
                     or host.endswith(".internal") or host.endswith(".local")):
                 return {"error": f"Requests to internal/private addresses blocked: {host}"}
+            # DNS rebinding protection: resolve hostname and check resolved IP
+            import socket
+            try:
+                resolved_ip = socket.gethostbyname(host)
+                import ipaddress
+                ip_obj = ipaddress.ip_address(resolved_ip)
+                if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved:
+                    return {"error": f"Requests to internal/private addresses blocked: {host} -> {resolved_ip}"}
+            except (socket.gaierror, ValueError):
+                return {"error": f"Cannot resolve hostname: {host}"}
         except Exception as e:
             return {"error": f"URL validation failed: {e}"}
         try:
@@ -911,12 +920,12 @@ class AgenticLoop:
         brain,
         project_root: str = ".",
         permissions: Optional[PermissionManager] = None,
-        model_override: str = None,
+        model_override: str | None = None,
         max_iterations: int = MAX_ITERATIONS,
         budget_usd: Optional[float] = None,
         context: str = "",
         session: Optional[AgenticSession] = None,
-        aura_config: dict = None,
+        aura_config: dict | None = None,
         router=None,
     ):
         self.brain = brain
@@ -1009,7 +1018,7 @@ class AgenticLoop:
         try:
             if hasattr(self, '_mcp_client') and self._mcp_client:
                 self._mcp_client.disconnect_all()
-        except Exception as e:
+        except Exception:
             # Can't use logger in __del__ reliably, but at least bind the exception
             pass  # MCP cleanup during GC — best-effort
 
@@ -1059,7 +1068,7 @@ class AgenticLoop:
 
         # Inject design system for frontend tasks
         try:
-            from aura.prompts.design_system import DESIGN_SYSTEM_PROMPT, DESIGN_SYSTEM_MODES
+            from aura.prompts.design_system import DESIGN_SYSTEM_MODES, DESIGN_SYSTEM_PROMPT
             if self._current_action_mode in DESIGN_SYSTEM_MODES:
                 system_prompt += "\n\n" + DESIGN_SYSTEM_PROMPT
         except ImportError:
@@ -1067,8 +1076,9 @@ class AgenticLoop:
 
         # Inject semantic codebase context (same as brain.py path)
         try:
-            from aura.tools.codebase_index import CodebaseIndex
             from pathlib import Path as _P
+
+            from aura.tools.codebase_index import CodebaseIndex
             _idx_db = _P("data/codebase_index/index.db")
             _idx_legacy = _P(self.project_root) / ".aura" / "index.db"
             if (_idx_db.exists() or _idx_legacy.exists()) and len(system_prompt) < 22000:
@@ -1118,7 +1128,6 @@ class AgenticLoop:
         if self._hot_files:
             hot_lines = ["## Recently touched files"]
             for fp in self._hot_files:
-                name = Path(fp).name
                 rel = os.path.relpath(fp, self.project_root)
                 has_snapshot = "(content cached)" if fp in self._hot_file_contents else ""
                 hot_lines.append(f"- {rel} {has_snapshot}")
@@ -1185,7 +1194,7 @@ class AgenticLoop:
         """Estimate cost based on task category and historical data."""
         try:
             from .router import classify_task
-            category, confidence = classify_task(prompt)
+            category, _confidence = classify_task(prompt)
 
             # Historical averages per category (fallback defaults)
             _AVG_ITERS = {"code_gen": 5, "small_edit": 2, "reasoning": 1,
@@ -1209,8 +1218,8 @@ class AgenticLoop:
     def _inject_smart_context(self, prompt: str, system_prompt: str) -> str:
         """Embed prompt and find most relevant project files to inject."""
         try:
-            import ollama
             import numpy as np
+            import ollama
 
             resp = ollama.embed(model="nomic-embed-text:latest", input=prompt)
             if not resp or "embeddings" not in resp or not resp["embeddings"]:
@@ -1225,7 +1234,7 @@ class AgenticLoop:
             candidates = [f for f in candidates[:50] if os.path.getsize(f) < 50000]
 
             # Remove files already in hot_files
-            hot = set(getattr(self, '_hot_files', {}).keys())
+            hot = set(getattr(self, '_hot_files', []))
             candidates = [f for f in candidates if f not in hot][:30]
 
             if not candidates:
@@ -1276,7 +1285,8 @@ class AgenticLoop:
             {"plan_text": str, "plan": ExecutionPlan, "prompt": str}
         """
         from aura.core.planner import (
-            PLAN_GENERATION_PROMPT, parse_plan_from_llm,
+            PLAN_GENERATION_PROMPT,
+            parse_plan_from_llm,
         )
 
         plan_prompt = PLAN_GENERATION_PROMPT.format(task=prompt)
@@ -1322,6 +1332,8 @@ class AgenticLoop:
         self._last_tools_were_reads = True
         self._loop_error = False
         self._verification_done = False  # Only verify once per run
+        self._empty_response_count = 0
+        self._thinking_nudge_count = 0
 
         # Capture baseline cost for per-turn cost tracking (C2)
         _prev_cost = 0.0
@@ -1534,7 +1546,7 @@ class AgenticLoop:
                         if not on_chunk and not accumulated:
                             # Clear the "thinking..." spinner but keep cursor on same line
                             sys.stdout.write("\r\033[K")
-                            sys.stdout.write(f"  \033[90m● generating...\033[0m")
+                            sys.stdout.write("  \033[90m● generating...\033[0m")
                             sys.stdout.flush()
                         accumulated += data
                         if on_chunk:
@@ -1560,7 +1572,7 @@ class AgenticLoop:
                         sys.stdout.write("\r\033[K")  # Clear spinner if no output
                         sys.stdout.flush()
 
-            except ConnectionError as e:
+            except ConnectionError:
                 sys.stdout.write("\r\033[K")
                 sys.stdout.flush()
                 _model_label = step_model or "default model"
@@ -1571,7 +1583,7 @@ class AgenticLoop:
                 )
                 self._loop_error = True
                 break
-            except TimeoutError as e:
+            except TimeoutError:
                 sys.stdout.write("\r\033[K")
                 sys.stdout.flush()
                 _model_label = step_model or "default model"
@@ -1665,7 +1677,7 @@ class AgenticLoop:
                     incomplete_reason = self._verify_task_completion(prompt, content)
                     if incomplete_reason:
                         # Re-enter the loop with the missing context
-                        logger.info(f"[AgenticLoop] Verification found incomplete work, continuing")
+                        logger.info("[AgenticLoop] Verification found incomplete work, continuing")
                         messages.append({"role": "assistant", "content": content})
                         messages.append({
                             "role": "user",
@@ -2092,12 +2104,12 @@ def run_agentic(
     prompt: str,
     project_root: str = ".",
     permissions: Optional[PermissionManager] = None,
-    model_override: str = None,
+    model_override: str | None = None,
     max_iterations: int = MAX_ITERATIONS,
     budget_usd: Optional[float] = None,
     context: str = "",
     trust_mode: bool = False,
-    aura_config: dict = None,
+    aura_config: dict | None = None,
     router=None,
 ) -> dict:
     """Convenience function to run a single agentic task."""

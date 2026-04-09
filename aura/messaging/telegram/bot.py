@@ -12,10 +12,11 @@ import asyncio
 import logging
 import os
 import secrets
+import threading
 import time as _time
 from collections import defaultdict
 from datetime import datetime
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from aura.messaging.telegram_formatting import (
     split_message as _split_message,
@@ -23,26 +24,25 @@ from aura.messaging.telegram_formatting import (
 
 try:
     from telegram import (
-        Update, Bot, InlineQueryResultArticle, InputTextMessageContent,
-        InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice,
-        ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand,
+        Bot,
+        BotCommand,
+        Update,
     )
+    from telegram.constants import ChatAction, ParseMode
     from telegram.ext import (
         Application,
-        CommandHandler,
-        MessageHandler,
-        InlineQueryHandler,
         CallbackQueryHandler,
-        PreCheckoutQueryHandler,
         ChatMemberHandler,
+        CommandHandler,
+        InlineQueryHandler,
+        MessageHandler,
         MessageReactionHandler,
-        ContextTypes,
+        PreCheckoutQueryHandler,
         filters,
     )
-    from telegram.constants import ParseMode, ChatAction
 
     try:
-        from telegram import ReactionTypeEmoji
+        from telegram import ReactionTypeEmoji  # noqa: F401
         REACTIONS_AVAILABLE = True
     except ImportError:
         REACTIONS_AVAILABLE = False
@@ -55,40 +55,21 @@ except ImportError:
 
 from aura.messaging.base_platform import (
     BasePlatform,
-    IncomingMessage,
     OutgoingMessage,
-    MessageType,
 )
-from aura.core.conversation_manager import get_conversation_manager
-
-try:
-    from aura_skill_library import (
-        SkillStore, SkillLearner, Skill, SkillCategory, SkillExample, SkillMetadata
-    )
-    SKILL_LIBRARY_AVAILABLE = True
-except ImportError:
-    SKILL_LIBRARY_AVAILABLE = False
-
-try:
-    from aura.evolution import GEPAEngine, GEPAConfig, AuraSkillAdapter, Candidate, GEPAResult
-    from aura.evolution.types import EvalExample
-    GEPA_AVAILABLE = True
-except (ImportError, Exception):
-    GEPA_AVAILABLE = False
-
 from aura.messaging.telegram.constants import _LRUCache
 from aura.messaging.telegram.mixins import (
-    CommandsMixin,
-    ResearchMixin,
-    SessionsMixin,
-    MediaMixin,
     AgentCoreMixin,
-    SkillsMixin,
-    SchedulingMixin,
+    CommandsMixin,
     LocationMixin,
-    SocialMixin,
-    PaymentsMixin,
+    MediaMixin,
     MiscMixin,
+    PaymentsMixin,
+    ResearchMixin,
+    SchedulingMixin,
+    SessionsMixin,
+    SkillsMixin,
+    SocialMixin,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,26 +84,28 @@ class _RateLimiter:
     def __init__(self) -> None:
         self._timestamps: Dict[str, list] = {}
         self._last_cleanup: float = _time.time()
+        self._lock = threading.Lock()
 
     def check(self, user_id: str, max_per_min: int = 20) -> bool:
         """Return True if the user is within rate limits, False if throttled."""
         now = _time.time()
-        # Periodic cleanup: remove users with no activity in the last hour
-        if now - self._last_cleanup > 3600:
-            cutoff = now - 3600
-            stale = [uid for uid, ts in self._timestamps.items() if not ts or ts[-1] < cutoff]
-            for uid in stale:
-                del self._timestamps[uid]
-            self._last_cleanup = now
-        stamps = self._timestamps.get(user_id)
-        if stamps is None:
-            stamps = []
-            self._timestamps[user_id] = stamps
-        stamps[:] = [t for t in stamps if now - t < 60]
-        if len(stamps) >= max_per_min:
-            return False
-        stamps.append(now)
-        return True
+        with self._lock:
+            # Periodic cleanup: remove users with no activity in the last hour
+            if now - self._last_cleanup > 3600:
+                cutoff = now - 3600
+                stale = [uid for uid, ts in self._timestamps.items() if not ts or ts[-1] < cutoff]
+                for uid in stale:
+                    del self._timestamps[uid]
+                self._last_cleanup = now
+            stamps = self._timestamps.get(user_id)
+            if stamps is None:
+                stamps = []
+                self._timestamps[user_id] = stamps
+            stamps[:] = [t for t in stamps if now - t < 60]
+            if len(stamps) >= max_per_min:
+                return False
+            stamps.append(now)
+            return True
 
 
 _rate_limiter = _RateLimiter()
@@ -362,19 +345,12 @@ class TelegramBot(
 
         # Skill system state (in-memory cache, write-through to store)
         self._skill_pending: Dict[int, dict] = {}
-        self._last_exchange: Dict[int, dict] = {}
         self._skill_store = None   # Lazy-loaded SkillStore
         self._skill_learner = None  # Lazy-loaded SkillLearner
         self._skill_create_state: Dict[int, dict] = {}
 
         # Premium/payment state (backed by store)
         self._premium_users: Dict[str, dict] = self.store.get_premium_users()
-
-        # Group message cache (backed by store, read-through cache)
-        self._group_message_cache: Dict[str, List[dict]] = {}
-
-        # Location sharing state (backed by store)
-        self._user_locations: Dict[str, dict] = {}
 
         # === World-class UX improvements ===
         # Per-user processing locks (backpressure — one message at a time)
@@ -464,6 +440,7 @@ class TelegramBot(
         Handles splitting long messages into chunks.
         """
         from telegram.constants import ParseMode
+
         from aura.messaging.telegram_formatting import format_telegram_response
 
         msg = update_or_msg
@@ -764,7 +741,6 @@ class TelegramBot(
             await self.app.stop()
             await self.app.shutdown()
 
-        self._save_state()
         logger.info("Telegram bot stopped.")
 
     async def send_message(self, message: OutgoingMessage) -> bool:

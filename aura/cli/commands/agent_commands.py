@@ -19,7 +19,10 @@ def print_result(result, is_fastpath: bool = False):
 
 def handle_goal(agent, arg, context) -> Optional[str]:
     if arg:
-        from ..display import show_info as _goal_info, show_response as _goal_resp, show_tool_call as _goal_tool, show_error as _goal_err
+        from ..display import show_error as _goal_err
+        from ..display import show_info as _goal_info
+        from ..display import show_response as _goal_resp
+        from ..display import show_tool_call as _goal_tool
         _goal_info("Running goal...")
         try:
             _goal_agentic = get_ctx().agentic_loop if get_ctx() else None
@@ -43,8 +46,10 @@ def handle_goal(agent, arg, context) -> Optional[str]:
 
 def handle_plan(agent, arg, context) -> Optional[str]:
     if arg:
-        from ..plan_mode import parse_plan_from_llm, render_plan, PLAN_GENERATION_PROMPT, StepStatus
-        from ..display import console as _plan_console, show_thinking, show_info as _plan_info, show_tool_call as _plan_tool
+        from ..display import console as _plan_console
+        from ..display import show_info as _plan_info
+        from ..display import show_tool_call as _plan_tool
+        from ..plan_mode import PLAN_GENERATION_PROMPT, StepStatus, parse_plan_from_llm, render_plan
         _plan_info("Generating plan...")
         prompt = PLAN_GENERATION_PROMPT.format(task=arg)
         try:
@@ -115,11 +120,15 @@ def handle_fleet(agent, arg, context) -> Optional[str]:
         from ..display import console as _fleet_console
         _fleet_console.print("[dim]Usage: /fleet <task description>[/dim]")
         return
-    from ..fleet import (
-        FleetRun, FleetExecutor, parse_decomposition,
-        render_fleet_dashboard, run_fleet_live, DECOMPOSITION_PROMPT,
-    )
     from ..display import console as _fleet_console
+    from ..fleet import (
+        DECOMPOSITION_PROMPT,
+        FleetExecutor,
+        FleetRun,
+        parse_decomposition,
+        render_fleet_dashboard,
+        run_fleet_live,
+    )
     prompt = DECOMPOSITION_PROMPT.format(task=task)
     response = agent.brain.think(prompt)
     if isinstance(response, dict):
@@ -195,8 +204,8 @@ def _handle_agent_command(agent, arg: str):
             spec = agent.orchestrator.specialists[name]
             desc = getattr(spec, 'description', name.capitalize())
             _agent_console.print(f"    {name:12s} - {desc}")
-        _agent_console.print(f"\n  Usage: /agent <specialist> <task>")
-        _agent_console.print(f"         /agent parallel <task>")
+        _agent_console.print("\n  Usage: /agent <specialist> <task>")
+        _agent_console.print("         /agent parallel <task>")
         return
 
     parts = arg.split(maxsplit=1)
@@ -209,7 +218,7 @@ def _handle_agent_command(agent, arg: str):
 
     if specialist == "parallel":
         _agent_console.print(f"  Running all specialists in parallel on: {task[:60]}...")
-        from aura.multi_agent.protocol import AgentMessage, CollaborationMode
+        from aura.multi_agent.protocol import AgentMessage
         message = AgentMessage(content=task, sender="user")
         results = agent.orchestrator._execute_parallel(specialists, message)
         for result in results:
@@ -232,7 +241,7 @@ def _handle_agent_command(agent, arg: str):
 
 
 def handle_debate(agent, arg, context) -> Optional[str]:
-    from ..debate_mode import run_debate, parse_debate_args
+    from ..debate_mode import parse_debate_args, run_debate
     from ..display import console as _debate_console
     if not arg.strip():
         _debate_console.print("[dim]Usage: /debate <question>[/dim]")
@@ -253,9 +262,14 @@ def handle_debate(agent, arg, context) -> Optional[str]:
 def handle_chain(agent, arg, context) -> Optional[str]:
     """Run, save, load, or list prompt chains."""
     from aura.cli.chain_mode import (
-        parse_chain, run_chain, save_chain, load_chain, list_chains, delete_chain,
+        delete_chain,
+        list_chains,
+        load_chain,
+        parse_chain,
+        run_chain,
+        save_chain,
     )
-    from aura.cli.display import show_response, show_info, console
+    from aura.cli.display import console, show_info, show_response
 
     if not arg:
         console.print("[dim]  Prompt pipelines — chain prompts where each output feeds the next.[/dim]")
@@ -353,12 +367,13 @@ def handle_chain(agent, arg, context) -> Optional[str]:
 
 
 def _handle_hand_command(agent, arg: str):
-    from ..display import console as _hand_console
-    from aura.hands.manager import get_hand_manager
-    from aura.hands.researcher import ResearcherHand
-    from aura.hands.guardian import GuardianHand
-    from aura.hands.memory_hand import MemoryHand
     from aura.hands.collector import CollectorHand
+    from aura.hands.guardian import GuardianHand
+    from aura.hands.manager import get_hand_manager
+    from aura.hands.memory_hand import MemoryHand
+    from aura.hands.researcher import ResearcherHand
+
+    from ..display import console as _hand_console
 
     manager = get_hand_manager()
 

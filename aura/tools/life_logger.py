@@ -21,7 +21,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

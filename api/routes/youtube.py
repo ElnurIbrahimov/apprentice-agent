@@ -3,10 +3,11 @@ YouTube video summarizer.
 Fetches transcript via youtube-transcript-api, summarizes with Ollama.
 """
 
-import re
 import logging
+import re
+
 import httpx
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
@@ -17,8 +18,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/youtube", tags=["youtube"], dependencies=[Depends(require_api_key)])
 
 import os as _os
+
 OLLAMA_URL = (_os.getenv("OLLAMA_BASE_URL") or _os.getenv("OLLAMA_HOST", "http://localhost:11434")) + "/api/generate"
-SUMMARY_MODEL = "nemotron-3-super:cloud"
+def _get_summary_model() -> str:
+    try:
+        from aura.config import Config
+        return Config.MODEL_FAST
+    except Exception:
+        return "nemotron-3-super:cloud"
 TRANSCRIPT_CHAR_LIMIT = 12000
 
 
@@ -98,7 +105,11 @@ def _get_transcript(video_id: str) -> tuple[str, str]:
     Raises HTTPException on failure.
     """
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+        from youtube_transcript_api import (
+            NoTranscriptFound,  # noqa: F401
+            TranscriptsDisabled,  # noqa: F401
+            YouTubeTranscriptApi,
+        )
     except ImportError:
         raise HTTPException(
             503,
@@ -146,7 +157,7 @@ KEY POINTS:
 - <key point 5>"""
 
     payload = {
-        "model": SUMMARY_MODEL,
+        "model": _get_summary_model(),
         "prompt": prompt,
         "stream": False,
     }
@@ -228,7 +239,7 @@ async def get_transcript(request: TranscriptRequest):
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(404, f"Transcript not available: {str(e)}")
+            raise HTTPException(404, f"Transcript not available: {e!s}")
 
     loop = asyncio.get_running_loop()
     try:

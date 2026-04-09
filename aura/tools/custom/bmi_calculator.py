@@ -12,7 +12,6 @@ import re
 from typing import Any
 
 
-
 class BmiCalculatorTool:
     """Calculate Body Mass Index (BMI) from height and weight"""
 

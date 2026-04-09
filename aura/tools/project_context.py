@@ -1,6 +1,5 @@
 """AURA.md Project Context — per-project persistent context injected into every response."""
 
-import os
 import logging
 from pathlib import Path
 from typing import Optional

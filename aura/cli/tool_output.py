@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Optional, List
-
+from typing import List
 
 # File reads: show first/last N lines
 _FILE_HEAD = 20

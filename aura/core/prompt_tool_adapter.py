@@ -9,7 +9,6 @@ The agentic loop doesn't need to know whether tools came from Ollama's
 structured calling or this text-based adapter.
 """
 
-import json
 import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple

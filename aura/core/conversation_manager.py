@@ -9,12 +9,12 @@ to read/write conversations. Handles:
 - Unified conversation listing with surface activity info
 """
 
+import asyncio
 import json
 import logging
 import threading
 import time
-import asyncio
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -338,8 +338,9 @@ class ConversationManager:
         for listener in async_listeners:
             try:
                 try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(listener(event))
+                    asyncio.get_running_loop()  # raises RuntimeError if no loop
+                    from aura.pools import fire_and_forget
+                    fire_and_forget(listener(event))
                 except RuntimeError:
                     # No running event loop — skip async listeners
                     pass

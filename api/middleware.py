@@ -1,10 +1,11 @@
 """API middleware for authentication, rate limiting, and security."""
 
+import logging
 import os
+import re
+import secrets
 import time
 import uuid
-import logging
-import secrets
 from collections import defaultdict
 from typing import Dict
 
@@ -18,6 +19,21 @@ logger = logging.getLogger(__name__)
 # NOTE: X-Forwarded-For can be spoofed if not behind a trusted reverse proxy.
 # Only enable this when running behind a trusted proxy (nginx, Cloudflare, etc.).
 _trust_proxy = os.environ.get("AURA_TRUST_PROXY", "").lower() in ("true", "1", "yes")
+
+
+def _get_client_ip(request) -> str:
+    """Extract client IP from request, respecting trusted proxy headers.
+
+    When behind a trusted reverse proxy, use the RIGHTMOST IP in
+    X-Forwarded-For (the one appended by the proxy itself). The leftmost
+    IP is attacker-controlled and must not be trusted for rate limiting.
+    """
+    if _trust_proxy:
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            # Rightmost IP is the one added by the trusted proxy
+            return forwarded_for.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
 
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
@@ -146,14 +162,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         # Rate limit WebSocket handshakes (lower limit than HTTP)
         if request.headers.get("upgrade", "").lower() == "websocket":
-            if _trust_proxy:
-                forwarded_for = request.headers.get("x-forwarded-for")
-                if forwarded_for:
-                    ws_ip = forwarded_for.split(",")[0].strip()
-                else:
-                    ws_ip = request.client.host if request.client else "unknown"
-            else:
-                ws_ip = request.client.host if request.client else "unknown"
+            ws_ip = _get_client_ip(request)
             now = time.time()
             ws_window_start = now - 60
             self._ws_requests[ws_ip] = [
@@ -173,16 +182,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.EXEMPT_PATHS:
             return await call_next(request)
 
-        # Support reverse proxy: check X-Forwarded-For when behind a trusted proxy
-        if _trust_proxy:
-            forwarded_for = request.headers.get("x-forwarded-for")
-            if forwarded_for:
-                # X-Forwarded-For is comma-separated; leftmost is the original client
-                client_ip = forwarded_for.split(",")[0].strip()
-            else:
-                client_ip = request.client.host if request.client else "unknown"
-        else:
-            client_ip = request.client.host if request.client else "unknown"
+        client_ip = _get_client_ip(request)
         now = time.time()
 
         window_start = now - 60
@@ -206,6 +206,24 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add standard security headers to every HTTP response.
+
+    Prevents clickjacking, MIME-sniffing, and information leakage.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+
+        response: Response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        return response
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     """Attach a unique X-Request-ID header to every HTTP response.
 
@@ -219,10 +237,9 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         if request.headers.get("upgrade", "").lower() == "websocket":
             return await call_next(request)
 
-        import re as _re
         raw_request_id = request.headers.get("X-Request-ID")
         # Validate: only accept UUID-like or alphanumeric request IDs (max 64 chars)
-        if raw_request_id and _re.match(r'^[a-zA-Z0-9_\-]{1,64}$', raw_request_id):
+        if raw_request_id and re.match(r'^[a-zA-Z0-9_\-]{1,64}$', raw_request_id):
             request_id = raw_request_id
         else:
             request_id = str(uuid.uuid4())

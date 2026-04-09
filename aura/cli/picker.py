@@ -4,6 +4,7 @@ Provides a prompt_toolkit-based fuzzy-search picker used by
 model_picker, command_palette, and any future list-selection UI.
 """
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
@@ -37,9 +38,9 @@ def run_picker(
         The ``id`` of the selected PickerItem, or None if cancelled.
     """
     from prompt_toolkit import Application
-    from prompt_toolkit.layout import Layout, HSplit, Window
-    from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout import HSplit, Layout, Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.styles import Style
 
     if not items:

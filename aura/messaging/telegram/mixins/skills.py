@@ -21,14 +21,19 @@ except ImportError:
 
 try:
     from aura_skill_library import (
-        SkillStore, SkillLearner, Skill, SkillCategory, SkillExample, SkillMetadata
+        Skill,
+        SkillCategory,
+        SkillExample,
+        SkillLearner,
+        SkillMetadata,
+        SkillStore,
     )
     SKILL_LIBRARY_AVAILABLE = True
 except ImportError:
     SKILL_LIBRARY_AVAILABLE = False
 
 try:
-    from aura.evolution import GEPAEngine, GEPAConfig, AuraSkillAdapter, Candidate, GEPAResult
+    from aura.evolution import AuraSkillAdapter, Candidate, GEPAConfig, GEPAEngine, GEPAResult
     from aura.evolution.types import EvalExample
     GEPA_AVAILABLE = True
 except (ImportError, Exception):
@@ -82,7 +87,7 @@ class SkillsMixin:
             await update.message.reply_text("Skill library is not available on this server.")
             return
 
-        exchange = self._last_exchange.get(user_id)
+        exchange = self.store.get_skill_state(str(user_id)).get("last_exchange") or None
         if not exchange:
             await update.message.reply_text(
                 "No recent conversation to learn from.\n"
@@ -224,7 +229,7 @@ class SkillsMixin:
                 "Use /skill for available commands."
             )
 
-    async def _skill_list(self, update: Update, category_str: str = None):
+    async def _skill_list(self, update: Update, category_str: str | None = None):
         """List all learned skills, optionally filtered by category."""
         try:
             store = self._get_skill_store()

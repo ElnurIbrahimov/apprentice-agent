@@ -9,10 +9,10 @@ import sys
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +299,11 @@ def _parse_structured_output(
 _SAFE_ENV_KEYS = {
     "PATH", "TEMP", "TMP", "HOME", "SYSTEMROOT",
     "COMSPEC", "PATHEXT", "LANG", "USERPROFILE",
+    # Required for many Windows tools and npm/node to function
+    "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+    "WINDIR", "USERNAME", "HOMEDRIVE", "HOMEPATH",
+    # Locale/encoding
+    "LC_ALL", "LC_CTYPE", "PYTHONIOENCODING", "TERM",
 }
 
 
@@ -441,6 +446,16 @@ ALLOWED_COMMANDS_PREFIX = [
     "ver", "systeminfo",
 ]
 
+# Interpreter code-execution flags to block (e.g. python -c, node -e)
+_INTERP_FLAGS = {
+    "python": {"-c", "--command"}, "python3": {"-c", "--command"},
+    "node": {"-e", "--eval", "--print", "-p"},
+    "ruby": {"-e"}, "perl": {"-e"},
+    "pwsh": {"-c", "-command", "-encodedcommand", "-enc"},
+    "powershell": {"-c", "-command", "-encodedcommand", "-enc"},
+    "git": {"-c"},
+}
+
 # Commands that allow arbitrary code execution or data exfiltration.
 # These are auto-routed through run_sandboxed() instead of direct execution.
 SANDBOX_REQUIRED_COMMANDS = {
@@ -543,14 +558,6 @@ class ShellExecutorTool:
                 continue  # Don't check allowed list for sandbox commands
 
             # Block interpreter code-execution flags (e.g. python -c, node -e)
-            _INTERP_FLAGS = {
-                "python": {"-c", "--command"}, "python3": {"-c", "--command"},
-                "node": {"-e", "--eval", "--print", "-p"},
-                "ruby": {"-e"}, "perl": {"-e"},
-                "pwsh": {"-c", "-command", "-encodedcommand", "-enc"},
-                "powershell": {"-c", "-command", "-encodedcommand", "-enc"},
-                "git": {"-c"},
-            }
             if base_cmd in _INTERP_FLAGS:
                 blocked_flags = _INTERP_FLAGS[base_cmd]
                 for token in parts[1:]:
@@ -571,7 +578,7 @@ class ShellExecutorTool:
 
         return True, "OK"
 
-    def _get_session(self, session_id: str = None) -> ShellSession:
+    def _get_session(self, session_id: str | None = None) -> ShellSession:
         """Get or create a session."""
         # Clean up expired sessions
         self._cleanup_sessions()
@@ -613,8 +620,8 @@ class ShellExecutorTool:
                 + f"\n\n... [TRUNCATED {len(output) - MAX_OUTPUT_CHARS} chars] ...\n\n"
                 + output[-half:])
 
-    def run(self, command: str, session_id: str = None,
-            timeout: int = DEFAULT_TIMEOUT, cwd: str = None) -> dict:
+    def run(self, command: str, session_id: str | None = None,
+            timeout: int = DEFAULT_TIMEOUT, cwd: str | None = None) -> dict:
         """Execute a command in a session."""
         if not command or not command.strip():
             return {"success": False, "error": "No command provided"}
@@ -719,7 +726,7 @@ class ShellExecutorTool:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Command failed: {str(e)}",
+                "error": f"Command failed: {e!s}",
                 "session_id": session.id,
             }
 
@@ -795,7 +802,7 @@ class ShellExecutorTool:
                 return {"success": True, "response": f"Session {session_id} closed"}
         return {"success": False, "error": f"Session not found: {session_id}"}
 
-    def get_history(self, session_id: str = None, limit: int = 10) -> dict:
+    def get_history(self, session_id: str | None = None, limit: int = 10) -> dict:
         """Get command history for a session."""
         with self._sessions_lock:
             if session_id and session_id in self._sessions:
@@ -819,8 +826,8 @@ class ShellExecutorTool:
             "response": f"Last {len(history)} command(s):\n" + "\n".join(formatted)
         }
 
-    def run_streaming(self, command: str, session_id: str = None,
-                      timeout: int = DEFAULT_TIMEOUT, cwd: str = None,
+    def run_streaming(self, command: str, session_id: str | None = None,
+                      timeout: int = DEFAULT_TIMEOUT, cwd: str | None = None,
                       on_output=None) -> dict:
         """Execute a command with real-time streaming output.
 
@@ -913,7 +920,7 @@ class ShellExecutorTool:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Command failed: {str(e)}",
+                "error": f"Command failed: {e!s}",
                 "session_id": session.id,
             }
 
@@ -1001,7 +1008,7 @@ class ShellExecutorTool:
             cwd=cwd
         )
 
-    def run_sandboxed(self, command: str, cwd: str = None, timeout: int = DEFAULT_TIMEOUT) -> dict:
+    def run_sandboxed(self, command: str, cwd: str | None = None, timeout: int = DEFAULT_TIMEOUT) -> dict:
         """Execute command through the SandboxExecutor (E2B first, local fallback).
 
         Falls back to normal self.run() if no SandboxExecutor is wired in.
@@ -1023,12 +1030,7 @@ class ShellExecutorTool:
                     )
                 except ImportError:
                     # Sandbox unavailable — safe fallback with shell=False
-                    # Validate command before fallback execution
-                    is_valid, reason = self._validate_command(command)
-                    if not is_valid:
-                        return {"success": False, "error": f"Security: {reason}"}
-                    if _contains_shell_injection(command):
-                        return {"success": False, "error": "Command contains disallowed characters or flags", "exit_code": 1}
+                    # (command already validated at top of run_sandboxed)
                     try:
                         cmd_args = shlex.split(command)
                         result = subprocess.run(

@@ -7,14 +7,14 @@ interesting things happen.
 """
 
 from .base_monitor import BaseMonitor, MonitorState
-from .screen_monitor import ScreenMonitor
 from .calendar_monitor import CalendarMonitor
+from .screen_monitor import ScreenMonitor
 from .system_monitor import SystemMonitor
 
 __all__ = [
     "BaseMonitor",
+    "CalendarMonitor",
     "MonitorState",
     "ScreenMonitor",
-    "CalendarMonitor",
     "SystemMonitor",
 ]

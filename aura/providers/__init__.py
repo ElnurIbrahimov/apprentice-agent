@@ -7,7 +7,7 @@ import logging
 from typing import Optional
 
 from .base import BaseProvider
-from .registry import PROVIDER_CONFIGS, OPENAI_COMPATIBLE_PROVIDERS
+from .registry import OPENAI_COMPATIBLE_PROVIDERS, PROVIDER_CONFIGS
 
 logger = logging.getLogger(__name__)
 

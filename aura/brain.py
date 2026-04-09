@@ -1,28 +1,32 @@
 """Ollama API integration as the agent's reasoning engine."""
 
-import os
+import atexit
+import concurrent.futures
 import json
 import logging
+import os
 import threading
 import time
-import shutil
-import concurrent.futures
-import atexit
-import uuid
 from collections import deque
-from pathlib import Path
 from enum import Enum
-from typing import Optional, Callable, Any
+from pathlib import Path
+from typing import Any, Callable, Optional
+
 import ollama
 import requests
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from .config import Config
-from .identity import get_identity_prompt
-from .core.token_manager import estimate_messages_tokens, get_context_window
-from .prompt_builder import SystemPromptBuilder, classify_budget, build_budget_instruction
 from .core.conversation_mixin import ConversationMixin
 from .core.model_router_mixin import ModelRouterMixin
+from .core.token_manager import estimate_messages_tokens, get_context_window
+from .prompt_builder import SystemPromptBuilder, build_budget_instruction, classify_budget
 
 # ChatGPT OAuth client (optional — uses ChatGPT Plus/Pro subscription)
 try:
@@ -36,17 +40,16 @@ logger = logging.getLogger(__name__)
 
 # ALMA Emotional Intelligence System
 try:
-    from .emotion.integration import (
-        get_emotional_tone_modifier,
-        process_user_message,
-        process_response_outcome,
-        get_mood_emoji,
-    )
     from .emotion.alma_engine import alma_engine, trigger_emotion
+    from .emotion.integration import (
+        get_mood_emoji,
+        process_response_outcome,
+        process_user_message,
+    )
     ALMA_AVAILABLE = True
 except ImportError:
     ALMA_AVAILABLE = False
-    logger.warning("[BRAIN] ALMA emotional system not available")
+    logger.debug("[BRAIN] ALMA emotional system not available")
 
 # Default timeouts (in seconds)
 LLM_TIMEOUT = 120  # 120 seconds for LLM calls (cloud models need more time)
@@ -109,6 +112,7 @@ def _run_world_model_extraction(conversation_id, messages, user_inference_event=
             else:
                 logger.info("[BRAIN] World model extraction circuit breaker RESET — retrying")
                 _wm_consecutive_failures = 0
+                _wm_circuit_broken_at = 0.0
 
     if not _wm_extraction_lock.acquire(blocking=False):
         logger.debug("[BRAIN] Skipping world model extraction — previous still running")
@@ -128,8 +132,11 @@ def _run_world_model_extraction(conversation_id, messages, user_inference_event=
                 logger.warning(f"[BRAIN] World model extraction failed {_wm_consecutive_failures}x — circuit breaker OPEN for {_WM_CIRCUIT_BREAKER_RESET_AFTER}s")
             else:
                 logger.debug(f"[BRAIN] World model extraction failed ({_wm_consecutive_failures}/{_WM_CIRCUIT_BREAKER_THRESHOLD}): {e}")
+    finally:
+        _wm_extraction_lock.release()
 
     # ADV-02 Phase 3: Quick proactive awareness analysis after extraction
+    # Runs OUTSIDE the extraction lock so it doesn't block subsequent extractions
     try:
         if getattr(Config, "PROACTIVE_AWARENESS_QUICK_AFTER_CHAT", True):
             from aura.consciousness.proactive_awareness import get_proactive_awareness_engine
@@ -137,8 +144,9 @@ def _run_world_model_extraction(conversation_id, messages, user_inference_event=
             engine.run_quick_analysis()
     except Exception as e:
         logger.debug(f"[BRAIN] Proactive awareness quick analysis failed: {e}")
-    finally:
-        _wm_extraction_lock.release()
+
+
+_NEURO_DEFAULTS = {"dopamine": 0.5, "serotonin": 0.5, "norepinephrine": 0.5, "oxytocin": 0.5}
 
 
 def _get_neuromodulator_levels() -> dict:
@@ -148,13 +156,13 @@ def _get_neuromodulator_levels() -> dict:
     Returns 0.5 for all if ALMA is unavailable.
     During sleep, applies NeuroDream oscillation-based neuromodulator offsets.
     """
-    _DEFAULTS = {"dopamine": 0.5, "serotonin": 0.5, "norepinephrine": 0.5, "oxytocin": 0.5}
+    if not ALMA_AVAILABLE:
+        return _NEURO_DEFAULTS.copy()
     try:
-        from aura.emotion.alma_engine import alma_engine
         state = alma_engine.get_emotional_state()
         base = (state or {}).get("neuromodulators") or {}
         if not base:
-            return _DEFAULTS
+            return _NEURO_DEFAULTS.copy()
         # Apply sleep neuromodulator influence from NeuroDream
         try:
             from aura.tools.neurodream import get_neurodream
@@ -167,7 +175,7 @@ def _get_neuromodulator_levels() -> dict:
         return base
     except Exception as e:
         logger.debug(f"[Brain] non-critical: {e}")
-    return _DEFAULTS
+    return _NEURO_DEFAULTS.copy()
 
 
 def _neuro_scale(base_value: float, neuro_level: float, sensitivity: float = 0.5) -> float:
@@ -190,7 +198,9 @@ def _neuro_scale(base_value: float, neuro_level: float, sensitivity: float = 0.5
 # Shared pools — centralized in aura.pools (2026-03-22)
 # Use functions instead of cached references to avoid stale pool handles
 # after pool re-initialization (e.g., in tests or daemon restarts).
-from aura.pools import llm_pool as _llm_pool_fn, bg_pool as _bg_pool_fn, bg_submit as _bg_submit
+from aura.pools import bg_submit as _bg_submit
+from aura.pools import llm_pool as _llm_pool_fn
+
 # Don't cache pool references — call functions to get fresh handles
 # atexit cleanup now handled by aura.pools
 
@@ -353,6 +363,28 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
     # Ollama cloud configuration
     OLLAMA_CLOUD_HOST = "https://api.ollama.com"
 
+    def _refresh_local_ollama_status(self) -> None:
+        """Check if local Ollama is reachable and has chat models.
+
+        Called at init and periodically (every 120s) to recover from
+        transient startup failures.
+        """
+        self._local_ollama_last_check = time.time()
+        try:
+            result = self.client.list()
+            chat_models = [m.model for m in result.models
+                          if not any(x in m.model.lower() for x in ("embed", "nomic", "ocr"))]
+            if chat_models:
+                if not self._local_ollama_ok:
+                    logger.info(f"[BRAIN] Local Ollama has {len(chat_models)} chat models")
+                self._local_ollama_ok = True
+            else:
+                self._local_ollama_ok = False
+                logger.info("[BRAIN] Local Ollama has no chat models — using cloud for all requests")
+        except Exception:
+            self._local_ollama_ok = False
+            logger.info("[BRAIN] Local Ollama not reachable — using cloud for all requests")
+
     def __init__(self, warmup: bool = True):
         # Local Ollama client (for local models)
         # Explicit timeout prevents infinite hangs on unresponsive models
@@ -362,20 +394,10 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
 
         # Check if local Ollama has useful models (not just embedding/OCR models)
         self._local_ollama_ok = False
-        try:
-            result = self.client.list()
-            chat_models = [m.model for m in result.models
-                          if not any(x in m.model.lower() for x in ("embed", "nomic", "ocr"))]
-            if chat_models:
-                self._local_ollama_ok = True
-                logger.info(f"[BRAIN] Local Ollama has {len(chat_models)} chat models")
-            else:
-                logger.info("[BRAIN] Local Ollama has no chat models — using cloud for all requests")
-        except Exception:
-            logger.info("[BRAIN] Local Ollama not reachable — using cloud for all requests")
+        self._local_ollama_last_check = 0.0
+        self._refresh_local_ollama_status()
 
-        # Cloud Ollama client (for cloud models like kimi-k2.5:cloud)
-        self._cloud_client = None
+        self._cloud_client = None  # Default to None — prevents AttributeError in routing
         api_key = os.getenv("OLLAMA_API_KEY")
         if api_key:
             # Cloud models: 90s read timeout (cloud can be slower than local)
@@ -385,9 +407,9 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 headers={"Authorization": f"Bearer {api_key}"},
                 timeout=_cloud_timeout,
             )
-            logger.debug(f"[BRAIN] Ollama cloud client initialized")
+            logger.debug("[BRAIN] Ollama cloud client initialized")
         else:
-            logger.debug(f"[BRAIN] Warning: OLLAMA_API_KEY not set, cloud models unavailable")
+            logger.debug("[BRAIN] Warning: OLLAMA_API_KEY not set, cloud models unavailable")
 
         # ChatGPT client (for chatgpt: prefixed models)
         self._chatgpt_client = None
@@ -399,9 +421,6 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         self._max_history: int = Config.HISTORY_LIMIT
         self.conversation_history: list[dict] = []
         self._history_lock = threading.RLock()
-        # Serialize concurrent think()/think_stream() calls to prevent
-        # interleaved conversation history and token counter corruption
-        self._think_lock = threading.Lock()
         self._last_model_used: str = self.model  # Track for metacognition
         self._query_count: int = 0  # Track queries for auto-reset (resets every 15)
         self._total_query_count: int = 0  # Total queries (never resets)
@@ -411,8 +430,12 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         # Phase 4 — compaction notification flag
         self._compaction_pending: bool = False
 
-        # Fix 9B — user inference priority: background tasks should yield
+        # User inference priority: background tasks should yield when active.
+        # Reference-counted so concurrent think()/think_stream() calls don't
+        # prematurely clear the flag when one finishes before the other.
         self._user_inference_active = threading.Event()
+        self._inference_refcount = 0
+        self._inference_rc_lock = threading.Lock()
 
         # Adaptive timeout based on recent LLM latencies (replaces serotonin-modulated timeout)
         self._recent_latencies: deque = deque(maxlen=100)
@@ -492,7 +515,6 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             self._warmup_models()
 
         # Register cleanup on process exit
-        import atexit
         atexit.register(self.close)
 
     def close(self) -> None:
@@ -548,7 +570,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         actual_model: str,
         messages: list,
         llm_options: dict,
-        tools: list = None,
+        tools: list | None = None,
         timeout: int = 120,
     ) -> tuple:
         """Execute an LLM tool call with fallback chain. Shared by tool-calling methods.
@@ -626,8 +648,8 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         self,
         messages: list[dict],
         tools: list[dict],
-        model_override: str = None,
-        options: dict = None,
+        model_override: str | None = None,
+        options: dict | None = None,
     ) -> dict:
         """Call Ollama with structured tool calling (tools= parameter).
 
@@ -817,7 +839,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         self,
         messages: list[dict],
         tool_schemas: list[dict],
-        model_override: str = None,
+        model_override: str | None = None,
     ) -> dict:
         """Execute one ReAct step: single LLM call that produces thought + tool call(s).
 
@@ -905,7 +927,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
     def react_step_code(
         self,
         messages: list[dict],
-        model_override: str = None,
+        model_override: str | None = None,
     ) -> dict:
         """Execute one ReAct code step: LLM produces Thought + Python code block.
 
@@ -969,14 +991,20 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         self,
         messages: list[dict],
         tools: list[dict],
-        model_override: str = None,
-        options: dict = None,
+        model_override: str | None = None,
+        options: dict | None = None,
     ):
         """Streaming version of think_with_tools(). Yields (chunk_type, data) tuples.
 
         chunk_type: "content" | "tool_calls" | "done" | "error"
         data: str for content, list for tool_calls, dict for done/error
         """
+        # Check circuit breaker (same as think() / think_stream())
+        cb_response = self._check_think_circuit_breaker()
+        if cb_response:
+            yield ("error", {"error": cb_response})
+            return
+
         client, actual_model, llm_options = self._resolve_tool_model(model_override, options)
 
         if actual_model.startswith("chatgpt:"):
@@ -1091,8 +1119,8 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 self._query_count = data.get("query_count", 0)
                 self._total_query_count = data.get("total_query_count", 0)
                 logger.info(f"[BRAIN] Loaded {len(self.conversation_history)} messages from history (total queries: {self._total_query_count})")
-        except (json.JSONDecodeError, IOError) as e:
-            logger.warning(f"[BRAIN] Could not load history: {e}")
+        except (json.JSONDecodeError, IOError, UnicodeDecodeError) as e:
+            logger.warning("[BRAIN] Could not load history: %s", e)
             self.conversation_history = []
 
     def _save_history(self) -> None:
@@ -1212,10 +1240,12 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         Returns:
             Generated response string
         """
-        # Yield to user inference
+        # Yield to user inference — wait briefly in case it finishes soon
         if self._user_inference_active.is_set():
-            logger.debug("[BRAIN] _quick_generate skipped — user inference active")
-            return ""
+            self._user_inference_active.wait(timeout=5.0)
+            if self._user_inference_active.is_set():
+                logger.debug("[BRAIN] _quick_generate skipped — user inference still active after 5s")
+                return ""
         fast_model = Config.MODEL_FAST
         try:
             client, actual_model = self._get_client_for_model(fast_model)
@@ -1235,11 +1265,11 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             logger.error(f"[BRAIN] Quick generate failed: {e}")
             return ""
 
-    def compact_history(self, focus: str = None) -> str:
+    def compact_history(self, focus: str | None = None) -> str:
         """Compact conversation history synchronously."""
         return self._do_compact_history(focus)
 
-    def _do_compact_history(self, focus: str = None) -> str:
+    def _do_compact_history(self, focus: str | None = None) -> str:
         """Compact conversation history by summarizing older messages.
 
         Takes the oldest 2/3 of conversation_history, asks LLM to summarize
@@ -1265,7 +1295,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
 
         # Build summary prompt
         conversation_text = "\n".join(
-            f"{msg['role'].upper()}: {msg['content'][:1000]}"
+            f"{msg.get('role', 'unknown').upper()}: {msg.get('content', '')[:1000]}"
             for msg in old_messages
         )
 
@@ -1286,8 +1316,9 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         # Replace history: summary as system message + recent messages.
         # Re-acquire lock and check if new messages arrived during the LLM call.
         new_history = [
-            {"role": "system", "content": f"[Conversation summary] {summary}"}
-        ] + recent_messages
+            {"role": "system", "content": f"[Conversation summary] {summary}"},
+            *recent_messages,
+        ]
         with self._history_lock:
             current_len = len(self.conversation_history)
             if current_len > snapshot_len:
@@ -1299,29 +1330,34 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                     len(new_messages),
                 )
             elif current_len < snapshot_len:
-                # History was truncated (e.g., by _update_history_and_cleanup).
-                # The messages after the truncation point are already in the
-                # current history — grab everything that's still there beyond
-                # what we already included in recent_messages.
+                # History was truncated (e.g., by _update_history_and_cleanup)
+                # while we were compacting. The current history is authoritative —
+                # do NOT overwrite it with our stale new_history.
                 logger.info(
                     "[BRAIN] History truncated during compaction (%d -> %d), "
-                    "preserving current tail",
+                    "preserving current state — skipping compaction result",
                     snapshot_len, current_len,
                 )
+                self._compaction_pending = True
+                return summary
             self.conversation_history = new_history
+            self._compaction_pending = True
         self._save_history()
 
         logger.info(f"[BRAIN] Compacted {len(old_messages)} messages into summary, kept {len(recent_messages)} recent")
         return summary
 
-    def _retry_on_rate_limit(self, func, max_retries=3, base_delay=2.0):
-        """Retry a function call with exponential backoff on rate limit (429) errors."""
+    def _retry_on_rate_limit(self, func, max_retries=2, base_delay=1.0):
+        """Retry a function call with exponential backoff on rate limit (429) errors.
+
+        Uses short delays (max ~3s total) to avoid starving the shared llm_pool.
+        """
         for attempt in range(max_retries + 1):
             try:
                 return func()
             except Exception as e:
                 if attempt < max_retries and _is_rate_limit_error(e):
-                    delay = base_delay * (2 ** attempt)
+                    delay = min(base_delay * (2 ** attempt), 3.0)
                     logger.warning(f"[BRAIN] Rate limited (attempt {attempt+1}/{max_retries}), retrying in {delay:.1f}s")
                     time.sleep(delay)
                 else:
@@ -1522,10 +1558,9 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             elapsed = time.time() - getattr(self, '_user_inference_started_at', 0)
             if elapsed > 120:
                 logger.warning("[BRAIN] Clearing stale _user_inference_active flag (%.0fs old)", elapsed)
-                self._user_inference_active.clear()
-
-        self._user_inference_started_at = time.time()
-        self._user_inference_active.set()
+                with self._inference_rc_lock:
+                    self._inference_refcount = 0
+                    self._user_inference_active.clear()
 
         return {
             "model": model,
@@ -1539,7 +1574,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         full_system_prompt: str,
         use_history: bool,
     ) -> list:
-        """Build the message list for think()/think_stream() inside _think_lock.
+        """Build the message list for think()/think_stream().
 
         Returns:
             List of message dicts ready for the LLM call.
@@ -1549,7 +1584,9 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             messages.append({"role": "system", "content": full_system_prompt})
         if use_history:
             with self._history_lock:
-                messages.extend(self.conversation_history[-self._max_history:])
+                # Deep copy history snapshot so concurrent think() calls
+                # don't interleave messages during the LLM call window
+                messages.extend([dict(m) for m in self.conversation_history[-self._max_history:]])
         messages.append({"role": "user", "content": prompt})
         return messages
 
@@ -1633,14 +1670,14 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         model = ctx["model"]
         full_system_prompt = ctx["full_system_prompt"]
 
+        self._user_inference_started_at = time.time()
+        self._begin_user_inference()
         try:
-            # Phase 1: Snapshot under lock (brief — only reads shared history)
-            with self._think_lock:
-                messages = self._build_chat_messages(prompt, full_system_prompt, use_history)
-                client, actual_model = self._resolve_chat_client(model)
-                neuro = _get_neuromodulator_levels()
-                llm_options = self._build_neuro_llm_options(prompt, neuro)
-            # _think_lock released — LLM call proceeds without blocking other callers
+            # Phase 1: Build messages (_build_chat_messages copies history under _history_lock)
+            messages = self._build_chat_messages(prompt, full_system_prompt, use_history)
+            client, actual_model = self._resolve_chat_client(model)
+            neuro = _get_neuromodulator_levels()
+            llm_options = self._build_neuro_llm_options(prompt, neuro)
 
             # Taint tracking: scan user messages for secrets (OpenFang-inspired)
             try:
@@ -1711,7 +1748,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                         continue
 
             if response is None:
-                logger.warning(f"[BRAIN] All models in chain failed, returning error message")
+                logger.warning("[BRAIN] All models in chain failed, returning error message")
                 with self._cb_lock:
                     self._consecutive_think_failures += 1
                     if self._consecutive_think_failures >= self._think_cb_threshold:
@@ -1754,13 +1791,12 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                     + assistant_message
                 )
 
-            # Phase 3: Update history under lock (brief — only writes shared history)
-            with self._think_lock:
-                self._update_history_and_cleanup(prompt, assistant_message, actual_model, use_history)
+            # Phase 3: Update history (uses _history_lock internally)
+            self._update_history_and_cleanup(prompt, assistant_message, actual_model, use_history)
 
             return assistant_message
         finally:
-            self._user_inference_active.clear()
+            self._end_user_inference()
 
     def think_stream(
         self,
@@ -1786,23 +1822,27 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         Yields:
             str: Response chunks as they are generated
         """
+        # Check circuit breaker (same as think() — prevents streaming when circuit is open)
+        cb_response = self._check_think_circuit_breaker()
+        if cb_response:
+            yield cb_response
+            return
+
         ctx = self._prepare_chat_think(
             prompt, system_prompt, use_history, task_type, tone_modifier, model_override,
         )
         model = ctx["model"]
         full_system_prompt = ctx["full_system_prompt"]
 
+        self._user_inference_started_at = time.time()
+        self._begin_user_inference()
         try:
-            # Acquire _think_lock briefly to snapshot history and prepare messages.
-            # Cannot hold through the streaming generator, but this prevents a
-            # concurrent think() from reading stale history while we're mid-stream.
-            with self._think_lock:
-                messages = self._build_chat_messages(prompt, full_system_prompt, use_history)
-                logger.debug(f"[BRAIN] Streaming call to {model}")
-                client, actual_model = self._resolve_chat_client(model)
-                neuro = _get_neuromodulator_levels()
-                llm_options = self._build_neuro_llm_options(prompt, neuro)
-            # _think_lock released — streaming proceeds without blocking other callers
+            # Build messages (_build_chat_messages copies history under _history_lock)
+            messages = self._build_chat_messages(prompt, full_system_prompt, use_history)
+            logger.debug(f"[BRAIN] Streaming call to {model}")
+            client, actual_model = self._resolve_chat_client(model)
+            neuro = _get_neuromodulator_levels()
+            llm_options = self._build_neuro_llm_options(prompt, neuro)
 
             full_response = ""
             _all_models_failed = False
@@ -1858,8 +1898,11 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                     if _try_model == _models_to_try[-1]:
                         import traceback
                         _tb = traceback.format_exc()
-                        logger.error(f"[BRAIN] All stream models failed: {e}\n{_tb}")
-                        fallback = _user_facing_llm_error(e, model=_try_actual)
+                        logger.error("[BRAIN] All stream models failed: %s\n%s", e, _tb)
+                        # Use _try_model (always defined) — _try_actual may be unassigned
+                        # if _get_client_for_model raised before the tuple unpack
+                        _err_model = locals().get("_try_actual", _try_model)
+                        fallback = _user_facing_llm_error(e, model=_err_model)
                         yield fallback
                         full_response += fallback
                         _all_models_failed = True
@@ -1889,7 +1932,20 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 ]
                 self._trigger_world_model_extraction(list(recent))
         finally:
-            self._user_inference_active.clear()
+            self._end_user_inference()
+
+    def _begin_user_inference(self):
+        """Mark a user inference as active (reference-counted for concurrent calls)."""
+        with self._inference_rc_lock:
+            self._inference_refcount += 1
+            self._user_inference_active.set()
+
+    def _end_user_inference(self):
+        """Mark a user inference as complete (only clears when all concurrent calls finish)."""
+        with self._inference_rc_lock:
+            self._inference_refcount = max(0, self._inference_refcount - 1)
+            if self._inference_refcount == 0:
+                self._user_inference_active.clear()
 
     def _trigger_world_model_extraction(self, recent: list, executor=None) -> None:
         """Submit background world model extraction (deduplicates logic from think/think_stream)."""
@@ -1913,6 +1969,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             ).start()
         except Exception as e:
             logger.debug(f"[Brain] non-critical: {e}")
+
     def summarize(self, content: str, goal: str) -> str:
         """Summarize content in relation to a goal."""
         prompt = f"""Goal: {goal}

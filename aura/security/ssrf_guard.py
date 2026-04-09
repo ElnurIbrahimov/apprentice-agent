@@ -11,6 +11,7 @@ Fixes the vulnerability flagged in ENGINEERING_REVIEW_2026-03-20.md:
 import ipaddress
 import logging
 import socket
+import threading
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
@@ -67,6 +68,11 @@ def is_private_ip(ip_str: str) -> bool:
     except ValueError:
         return True  # Invalid IP = blocked
 
+    # SECURITY: Check IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
+    # These bypass stdlib's is_loopback/is_private for IPv6 but map to private IPv4.
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        return is_private_ip(str(addr.ipv4_mapped))
+
     # Fast path: stdlib catches most private/reserved/loopback/link-local
     if addr.is_private or addr.is_reserved or addr.is_loopback or addr.is_link_local or addr.is_multicast:
         return True
@@ -78,26 +84,44 @@ def is_private_ip(ip_str: str) -> bool:
     return False
 
 
+_dns_executor = None
+_dns_executor_lock = threading.Lock()
+
+
+def _get_dns_executor():
+    """Lazily create a shared thread pool for DNS resolution.
+
+    Avoids creating a new ThreadPoolExecutor per call, which would exhaust
+    OS thread limits under load.
+    """
+    global _dns_executor
+    if _dns_executor is None:
+        with _dns_executor_lock:
+            if _dns_executor is None:
+                from concurrent.futures import ThreadPoolExecutor
+                _dns_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ssrf-dns")
+    return _dns_executor
+
+
 def _resolve_hostname(hostname: str, timeout: float = 5.0) -> list[str]:
     """Resolve hostname to IP addresses. Raises on failure.
 
-    Uses a thread-pool timeout instead of socket.setdefaulttimeout to avoid
-    mutating process-global state (which is not thread-safe).
+    Uses a shared thread-pool with timeout instead of socket.setdefaulttimeout
+    to avoid mutating process-global state (which is not thread-safe).
     """
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+    from concurrent.futures import TimeoutError as FuturesTimeout
 
     def _do_resolve():
         results = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         return list({r[4][0] for r in results})
 
-    with ThreadPoolExecutor(max_workers=1) as ex:
-        fut = ex.submit(_do_resolve)
-        try:
-            ips = fut.result(timeout=timeout)
-        except FuturesTimeout:
-            raise ValueError(f"DNS resolution timed out for {hostname} ({timeout}s)")
-        except socket.gaierror as e:
-            raise ValueError(f"DNS resolution failed for {hostname}: {e}")
+    fut = _get_dns_executor().submit(_do_resolve)
+    try:
+        ips = fut.result(timeout=timeout)
+    except FuturesTimeout:
+        raise ValueError(f"DNS resolution timed out for {hostname} ({timeout}s)") from None
+    except socket.gaierror as e:
+        raise ValueError(f"DNS resolution failed for {hostname}: {e}") from e
     if not ips:
         raise ValueError(f"DNS resolution returned no results for {hostname}")
     return ips
@@ -193,8 +217,9 @@ def safe_request(url: str, method: str = "GET", **kwargs) -> "requests.Response"
     Resolves DNS once, validates IP, then makes request with pinned IP.
     Drop-in replacement for requests.get/post/etc.
     """
+    from urllib.parse import urljoin
+
     import requests
-    from urllib.parse import urlparse, urljoin
 
     pinned_url, original_hostname = validate_url_safe(url)
 

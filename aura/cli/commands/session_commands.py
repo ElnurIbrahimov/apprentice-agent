@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 from typing import Optional
 
 from ..context import get_ctx
@@ -31,8 +31,8 @@ class ErrorTracker:
 
 def handle_export_session(agent, arg, context) -> "str | None":
     """Export the current session to a markdown or JSON file."""
-    from ..display import console, show_info, show_error
     from ..context import get_ctx
+    from ..display import show_error, show_info
 
     ctx = get_ctx()
     session_id = ""
@@ -59,8 +59,8 @@ def handle_export_session(agent, arg, context) -> "str | None":
         show_error("No interactions found for this session.")
         return None
 
-    from pathlib import Path
     import time
+    from pathlib import Path
     ext = "json" if fmt == "json" else "md"
     filename = f"session_{session_id[:12]}_{int(time.time())}.{ext}"
     outpath = Path.cwd() / filename
@@ -83,8 +83,8 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
             from ..display import console
             console.print("  No sessions found.")
             return
-        from ..session_picker import _format_session_line
         from ..display import console
+        from ..session_picker import _format_session_line
         ctx = get_ctx()
         current_sid = ""
         if ctx and ctx.session:
@@ -126,8 +126,8 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
             from ..display import console
             console.print("  No sessions found.")
             return
-        from ..session_picker import pick_session
         from ..display import console as _sessions_console
+        from ..session_picker import pick_session
         ctx = get_ctx()
         current_sid = ""
         if ctx and ctx.session:
@@ -147,7 +147,7 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
             if target_id and session_mgr.delete(target_id):
                 _sessions_console.print(f"  Deleted session: {target_session.get('title', target_id)}")
             else:
-                _sessions_console.print(f"  Failed to delete session.")
+                _sessions_console.print("  Failed to delete session.")
 
 
 def handle_clear(agent, arg, context) -> Optional[str]:
@@ -179,7 +179,9 @@ def handle_compact(agent, arg, context) -> Optional[str]:
 def handle_retry(agent, arg, context) -> Optional[str]:
     """Re-run the last prompt with optional model tier escalation."""
     from ..context import get_ctx
-    from ..display import show_info as _retry_info, show_error as _retry_error, show_response as _retry_response
+    from ..display import show_error as _retry_error
+    from ..display import show_info as _retry_info
+    from ..display import show_response as _retry_response
 
     ctx = get_ctx()
     if not ctx or not ctx.agentic_loop:
@@ -238,9 +240,15 @@ def handle_retry(agent, arg, context) -> Optional[str]:
 def handle_context(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if ctx and ctx.agentic_loop:
-        from ..display import console as _context_console
-        from ..context_bar import estimate_messages_tokens, get_context_limit, build_context_breakdown, estimate_tokens
         from rich.panel import Panel
+
+        from ..context_bar import (
+            build_context_breakdown,
+            estimate_messages_tokens,
+            estimate_tokens,
+            get_context_limit,
+        )
+        from ..display import console as _context_console
         agentic_loop = ctx.agentic_loop
         tokens_used = estimate_messages_tokens(agentic_loop._conversation_history)
         token_limit = get_context_limit(agent.brain._model_override or "default")
@@ -262,7 +270,7 @@ def handle_context(agent, arg, context) -> Optional[str]:
 def handle_cost(agent, arg, context) -> Optional[str]:
     from ..display import console
     stats = agent.brain.get_session_stats()
-    console.print(f"\n  Session Cost:")
+    console.print("\n  Session Cost:")
     console.print(f"    Input tokens:  {stats['input_tokens']:,}")
     console.print(f"    Output tokens: {stats['output_tokens']:,}")
     console.print(f"    Total tokens:  {stats['total_tokens']:,}")
@@ -274,8 +282,8 @@ def handle_cost(agent, arg, context) -> Optional[str]:
 def handle_rewind(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if ctx and ctx.agentic_loop and hasattr(ctx.agentic_loop, '_checkpoint_mgr'):
-        from ..display import console as _rw_console
         from ..chat_loop import _rewind_picker
+        from ..display import console as _rw_console
         _rewind_picker(ctx.agentic_loop._checkpoint_mgr, _rw_console)
     else:
         from ..display import console
@@ -418,7 +426,8 @@ def handle_changes(agent, arg, context) -> Optional[str]:
 
     console.print(f"\n[bold]Files modified this session ({len(hot_files)}):[/bold]\n")
     for f in hot_files:
-        import subprocess, os
+        import os
+        import subprocess
         basename = os.path.basename(f)
         # Guard against git argument injection: paths starting with - could be interpreted as flags
         safe_path = f if not f.startswith("-") else "./" + f

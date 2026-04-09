@@ -1,14 +1,13 @@
 """Browser control tool using Playwright — world-class automation."""
 
 import base64
+import functools
 import json
 import logging
 import time
-import functools
-from pathlib import Path
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Union
-from urllib.parse import urlparse
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -1102,7 +1101,8 @@ class BrowserTool:
                 from aura.tools.vision import VisionTool
                 self._vision_tool = VisionTool()
 
-            import tempfile, os
+            import os
+            import tempfile
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 tmp.write(base64.b64decode(ss["base64"]))
                 tmp_path = tmp.name
@@ -1132,7 +1132,9 @@ class BrowserTool:
                 from aura.tools.vision import VisionTool
                 self._vision_tool = VisionTool()
 
-            import tempfile, os, re as _re
+            import os
+            import re as _re
+            import tempfile
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 tmp.write(base64.b64decode(ss["base64"]))
                 tmp_path = tmp.name
@@ -1180,7 +1182,7 @@ class BrowserTool:
         try:
             self._ensure_browser()
             try:
-                from aura.core.brain import OllamaBrain
+                from aura.brain import OllamaBrain
                 brain = OllamaBrain()
             except Exception:
                 return {"success": False, "error": "LLM not available for planning"}

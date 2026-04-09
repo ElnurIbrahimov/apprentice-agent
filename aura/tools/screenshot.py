@@ -7,9 +7,8 @@ try:
 except ImportError:
     mss = None
     MSS_AVAILABLE = False
-from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from pathlib import Path
 
 
 class ScreenshotTool:
@@ -76,7 +75,7 @@ class ScreenshotTool:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Failed to capture screenshot: {str(e)}"
+                "error": f"Failed to capture screenshot: {e!s}"
             }
 
     def take_screenshot_region(self, x: int, y: int, width: int, height: int) -> dict:
@@ -122,7 +121,7 @@ class ScreenshotTool:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Failed to capture region: {str(e)}"
+                "error": f"Failed to capture region: {e!s}"
             }
 
     def list_monitors(self) -> dict:
@@ -153,7 +152,7 @@ class ScreenshotTool:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Failed to list monitors: {str(e)}"
+                "error": f"Failed to list monitors: {e!s}"
             }
 
     def execute(self, action: str, **kwargs) -> dict:

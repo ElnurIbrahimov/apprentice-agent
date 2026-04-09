@@ -6,13 +6,14 @@ Used by KnowledgeAbstractor before generalizing insights across users.
 """
 
 import hashlib
+import logging
+import math
 import os
 import random
 import re
 import secrets
-import logging
 from pathlib import Path
-from typing import Any, Dict, List, Set, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Set
 
 if TYPE_CHECKING:
     from .knowledge_abstractor import AbstractInsight
@@ -130,8 +131,10 @@ class PrivacyGuard:
             Value with noise added.
         """
         scale = sensitivity / self.noise_epsilon
-        noise = random.random() - 0.5
-        return value + noise * scale
+        # Laplace noise (proper DP) — sample via inverse CDF: -scale * sign(u-0.5) * ln(1-2|u-0.5|)
+        u = random.random() - 0.5
+        noise = -scale * (1 if u >= 0 else -1) * math.log(1 - 2 * abs(u))
+        return value + noise
 
     def anonymize_user_id(self, user_id: str) -> str:
         """One-way hash a user ID for aggregate tracking."""

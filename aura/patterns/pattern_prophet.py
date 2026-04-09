@@ -13,11 +13,12 @@ Makes AURA anticipate needs and provide contextual help.
 import json
 import logging
 import os
+import threading
+from collections import defaultdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Tuple, Set
-from collections import defaultdict
+from typing import Dict, List, Optional, Set, Tuple
 
 from aura.jsonl_utils import rotate_jsonl_if_needed
 
@@ -89,6 +90,8 @@ class PatternProphet:
 
         self.patterns_file = self.data_dir / "patterns.json"
         self.interactions_file = self.data_dir / "interactions.jsonl"
+
+        self._lock = threading.Lock()
 
         # Load existing patterns
         self.patterns: Dict[str, Pattern] = self._load_patterns()
@@ -205,7 +208,7 @@ class PatternProphet:
             "casual": ["hello", "hi", "hey", "thanks", "bye", "chat"]
         }
 
-        scores = {topic: 0 for topic in topic_indicators}
+        scores = dict.fromkeys(topic_indicators, 0)
 
         for topic, indicators in topic_indicators.items():
             for indicator in indicators:
@@ -260,27 +263,31 @@ class PatternProphet:
             sentiment=sentiment
         )
 
-        self.interactions.append(interaction)
+        with self._lock:
+            self.interactions.append(interaction)
+            # Cap in-memory list to prevent unbounded growth
+            if len(self.interactions) > 1000:
+                self.interactions = self.interactions[-1000:]
 
-        # Record to file
-        try:
-            rotate_jsonl_if_needed(self.interactions_file)
-            with open(self.interactions_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(asdict(interaction)) + "\n")
-        except IOError as e:
-            logger.error(f"Error recording interaction: {e}")
+            # Record to file
+            try:
+                rotate_jsonl_if_needed(self.interactions_file)
+                with open(self.interactions_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(asdict(interaction)) + "\n")
+            except IOError as e:
+                logger.error(f"Error recording interaction: {e}")
 
-        # Update working memory
-        if previous_topic:
-            self._topic_sequences[previous_topic][topic] += 1
+            # Update working memory
+            if previous_topic:
+                self._topic_sequences[previous_topic][topic] += 1
 
-        self._temporal_patterns[now.hour][topic] += 1
+            self._temporal_patterns[now.hour][topic] += 1
 
-        for kw in keywords:
-            self._keyword_cooccurrence[kw].update(keywords)
+            for kw in keywords:
+                self._keyword_cooccurrence[kw].update(keywords)
 
-        # Trigger pattern detection
-        self._detect_patterns()
+            # Trigger pattern detection
+            self._detect_patterns()
 
         return interaction
 

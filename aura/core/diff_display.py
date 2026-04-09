@@ -5,11 +5,10 @@ proposes file edits, and handles user approval flow.
 """
 
 import difflib
+
 from rich.console import Console
-from rich.syntax import Syntax
 from rich.panel import Panel
 from rich.text import Text
-
 
 console = Console()
 

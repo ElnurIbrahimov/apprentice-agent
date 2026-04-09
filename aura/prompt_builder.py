@@ -9,7 +9,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Optional, Callable, List
+from typing import Callable, List, Optional
 
 from .config import Config
 from .identity import get_identity_prompt
@@ -172,7 +172,7 @@ class SystemPromptBuilder:
     @staticmethod
     def _inject_design_system(full: str, action_mode: Optional[str]) -> str:
         try:
-            from aura.prompts.design_system import DESIGN_SYSTEM_PROMPT, DESIGN_SYSTEM_MODES
+            from aura.prompts.design_system import DESIGN_SYSTEM_MODES, DESIGN_SYSTEM_PROMPT
             if action_mode and action_mode in DESIGN_SYSTEM_MODES:
                 full = f"{full}\n\n{DESIGN_SYSTEM_PROMPT}"
                 logger.debug(f"[PromptBuilder] Design system prompt injected for mode: {action_mode}")

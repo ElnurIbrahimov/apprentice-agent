@@ -11,7 +11,6 @@ import argparse
 import json
 import logging
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -21,11 +20,11 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
-def create_llm_func(model: str, base_url: str = None):
+def create_llm_func(model: str, base_url: str | None = None):
     """Create an LLM function using Ollama's API."""
     import os as _os
-    import urllib.request
     import urllib.error
+    import urllib.request
     if base_url is None:
         base_url = _os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
@@ -73,9 +72,9 @@ def run_evolution(
     Returns:
         Result summary dict
     """
-    from .types import GEPAConfig
     from .adapter import AuraSkillAdapter
     from .engine import GEPAEngine
+    from .types import GEPAConfig
 
     # Load config
     config = GEPAConfig()

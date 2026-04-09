@@ -4,10 +4,11 @@ Requires: pip install openai-whisper  +  ffmpeg on PATH
 """
 
 import asyncio
+import logging
 import os
 import tempfile
-import logging
-from fastapi import APIRouter, File, UploadFile, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from api.auth import require_api_key
 from api.utils import safe_error_detail

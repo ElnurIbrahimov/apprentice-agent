@@ -20,10 +20,12 @@ function formatTime(ms: number): string {
 export function ModelCompare({ results, query, onUseResponse }: ModelCompareProps) {
   const [copied, setCopied] = useState<string | null>(null);
 
-  const handleCopy = (text: string, modelId: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(modelId);
-    setTimeout(() => setCopied(null), 2000);
+  const handleCopy = async (text: string, modelId: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(modelId);
+      setTimeout(() => setCopied(null), 2000);
+    } catch { /* clipboard permission denied */ }
   };
 
   return (

@@ -15,7 +15,7 @@ Features:
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any
+from typing import Dict, List, Optional
 
 try:
     import requests

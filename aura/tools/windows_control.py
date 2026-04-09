@@ -11,19 +11,18 @@ Config: No tokens needed — works with any running Windows app.
 """
 
 import logging
-import os
 import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 try:
     import pywinauto
     from pywinauto import Application, Desktop
-    from pywinauto.findwindows import ElementNotFoundError, ElementAmbiguousError
+    from pywinauto.findwindows import ElementAmbiguousError, ElementNotFoundError
     PYWINAUTO_AVAILABLE = True
 except ImportError:
     PYWINAUTO_AVAILABLE = False
@@ -407,7 +406,6 @@ class WindowsControlTool:
             return {"success": False, "error": "pyautogui not installed"}
         try:
             from datetime import datetime
-            from PIL import Image
             img = pyautogui.screenshot(region=(x, y, width, height))
             out = output or str(Path.home() / "Desktop" / f"capture_{datetime.now().strftime('%H%M%S')}.png")
             img.save(out)

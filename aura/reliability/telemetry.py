@@ -212,9 +212,9 @@ def emit(kind: str, **kwargs) -> TelemetryEvent:
 
 
 __all__ = [
-    "TelemetryKind",
     "TelemetryEvent",
+    "TelemetryKind",
     "TelemetrySink",
-    "get_telemetry",
     "emit",
+    "get_telemetry",
 ]

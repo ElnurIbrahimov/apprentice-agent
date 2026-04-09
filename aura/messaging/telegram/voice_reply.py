@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class VoiceReply:
     """Synthesizes voice replies using Kokoro-ONNX with pyttsx3 fallback."""
 
-    async def synthesize(self, text: str, voice: str = None, max_chars: int = 500) -> Optional[str]:
+    async def synthesize(self, text: str, voice: str | None = None, max_chars: int = 500) -> Optional[str]:
         """Generate a WAV file from text. Returns file path or None on failure.
         Truncates to max_chars to keep audio reasonable length."""
         truncated = text[:max_chars]
@@ -21,7 +21,7 @@ class VoiceReply:
             path = await asyncio.to_thread(self._try_pyttsx3, truncated)
         return path
 
-    def _try_kokoro(self, text: str, voice: str = None) -> Optional[str]:
+    def _try_kokoro(self, text: str, voice: str | None = None) -> Optional[str]:
         try:
             from aura.tools.voice_synth import VoiceSynthTool
             synth = VoiceSynthTool()

@@ -472,7 +472,7 @@ class TestWebSocketProtocol:
         mock_service = MagicMock()
         mock_service.is_ready = True
 
-        def fake_chat_stream(message, model_override=None, action_mode=None):
+        def fake_chat_stream(message, model_override=None, action_mode=None, **kwargs):
             yield {"type": "chunk", "content": "Hello "}
             yield {"type": "chunk", "content": "world!"}
             yield {"type": "done", "mood": {"emotion": "neutral", "confidence": 50}, "model_used": "test-model"}

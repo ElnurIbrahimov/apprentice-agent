@@ -3,10 +3,9 @@
 SECURITY: All operations are sandboxed to prevent path traversal attacks.
 """
 
+import logging
 from pathlib import Path
 from typing import Optional, Tuple
-import os
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +225,7 @@ class FileSystemTool:
 
         # Block null bytes (can bypass some checks)
         if '\x00' in path:
-            logger.warning(f"[SECURITY] Blocked null byte in path")
+            logger.warning("[SECURITY] Blocked null byte in path")
             return None, "Invalid path: null bytes not allowed"
 
         # Block excessively long paths (Windows MAX_PATH = 260, Linux = 4096)

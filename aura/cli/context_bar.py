@@ -1,8 +1,9 @@
 """Context window visibility — token counting and budget display."""
 from __future__ import annotations
+
 import json
-import math
-from typing import List, Dict, Optional
+from typing import Dict, List
+
 
 def estimate_tokens(text: str) -> int:
     """Estimate token count — delegates to the authoritative token_manager."""
@@ -70,7 +71,7 @@ def build_context_breakdown(system_tokens: int, history_tokens: int, tools_token
         f"  System prompt:  {format_token_count(system_tokens):>8}",
         f"  Conversation:   {format_token_count(history_tokens):>8}",
         f"  Tool schemas:   {format_token_count(tools_tokens):>8}",
-        f"  ─────────────────────",
+        "  ─────────────────────",
         f"  Total:          {format_token_count(total):>8} / {format_token_count(limit)}",
     ]
     pct = (total / limit * 100) if limit > 0 else 0
@@ -87,6 +88,6 @@ def build_context_breakdown(system_tokens: int, history_tokens: int, tools_token
         if est_remaining > 0:
             lines.append(f"  Remaining:      ~{est_remaining} more messages")
         else:
-            lines.append(f"  [red]Context nearly full — use /compact[/red]")
+            lines.append("  [red]Context nearly full — use /compact[/red]")
 
     return "\n".join(lines)

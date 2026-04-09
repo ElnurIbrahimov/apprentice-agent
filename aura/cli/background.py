@@ -1,15 +1,16 @@
 # aura/cli/background.py
 """Background agent mode — run tasks asynchronously with notifications."""
 from __future__ import annotations
+
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Callable
+from typing import Callable, Dict, List, Optional
+
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
 
 
 class TaskState(str, Enum):

@@ -1,5 +1,6 @@
 """Syntax-highlighted inline diff viewer for the terminal."""
 from __future__ import annotations
+
 import difflib
 import logging
 from typing import Optional

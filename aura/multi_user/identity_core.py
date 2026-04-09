@@ -19,12 +19,10 @@ ARCHITECTURE NOTE — Identity layer hierarchy:
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
-from .schemas import IdentityLayer
 
 logger = logging.getLogger(__name__)
 

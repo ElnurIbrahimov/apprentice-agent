@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -23,8 +23,10 @@ def handle_edit(agent, arg, context) -> Optional[str]:
 
 
 def handle_test(agent, arg, context) -> Optional[str]:
-    from ..test_runner import run_tests, render_test_results
-    from ..display import console as _test_console, show_response as _test_show, show_info as _test_info, show_tool_call as _test_tool
+    from ..display import console as _test_console
+    from ..display import show_response as _test_show
+    from ..display import show_tool_call as _test_tool
+    from ..test_runner import render_test_results, run_tests
     test_cmd = arg.strip()
     if not test_cmd:
         try:
@@ -47,6 +49,7 @@ def handle_test(agent, arg, context) -> Optional[str]:
         except (EOFError, KeyboardInterrupt):
             return
         if choice in ("y", "yes"):
+            from aura.cli.context import get_ctx
             ctx = get_ctx()
             agentic_loop = ctx.agentic_loop if ctx else None
             if agentic_loop:
@@ -65,9 +68,9 @@ def handle_project(agent, arg, context) -> Optional[str]:
 
 
 def handle_watch(agent, arg, context) -> Optional[str]:
-    from ..watch_mode import FileWatcher, create_watch_indicator, remove_ai_comment
-    from ..display import console as _watch_console
     from ..context import get_ctx
+    from ..display import console as _watch_console
+    from ..watch_mode import FileWatcher
     ctx = get_ctx()
     watcher = ctx.file_watcher if ctx else None
     if not watcher:
@@ -142,6 +145,7 @@ def _handle_shell_command(agent, arg: str):
 
     try:
         from aura.core.permissions import PermissionTier
+
         from ..context import get_ctx
         ctx = get_ctx()
         pm = ctx.permissions if ctx else None

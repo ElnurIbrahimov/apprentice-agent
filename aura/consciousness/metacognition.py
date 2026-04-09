@@ -13,7 +13,6 @@ Integrates with:
 
 import json
 import logging
-import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta

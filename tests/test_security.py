@@ -82,14 +82,22 @@ class TestSSRFGuard:
 
     def test_dns_timeout(self):
         from aura.security.ssrf_guard import _resolve_hostname
-        # Valid host should resolve within timeout
-        ips = _resolve_hostname("example.com", timeout=5.0)
-        assert len(ips) > 0
+        from unittest.mock import patch
+        import socket
+        # Mock DNS resolution to avoid live network calls in CI
+        with patch("socket.getaddrinfo", return_value=[
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 80))
+        ]):
+            ips = _resolve_hostname("example.com", timeout=5.0)
+            assert len(ips) > 0
 
     def test_dns_failure(self):
         from aura.security.ssrf_guard import _resolve_hostname
-        with pytest.raises(ValueError, match="DNS resolution failed"):
-            _resolve_hostname("this-domain-definitely-does-not-exist-xyz123.invalid")
+        from unittest.mock import patch
+        import socket
+        with patch("socket.getaddrinfo", side_effect=socket.gaierror("mocked DNS failure")):
+            with pytest.raises(ValueError, match="DNS resolution failed"):
+                _resolve_hostname("this-domain-definitely-does-not-exist-xyz123.invalid")
 
 
 # ── Taint Tracker ───────────────────────────────────────────────────────────

@@ -3,21 +3,22 @@
 SECURITY: Rate limited to prevent abuse and DDoS.
 """
 
+import logging
 import math
 import os
 import re
-import requests
-import logging
 import threading
 import time
-from typing import Dict, List
 from functools import wraps
+from typing import Dict, List
+
+import requests
 
 logger = logging.getLogger(__name__)
 
 # Try to import tenacity for retry logic
 try:
-    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+    from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
     TENACITY_AVAILABLE = True
 except ImportError:
     TENACITY_AVAILABLE = False
@@ -25,7 +26,7 @@ except ImportError:
 
 # Try to import validation
 try:
-    from .validation import validate_query, validate_int, sanitize_for_log, MAX_QUERY_LENGTH
+    from .validation import MAX_QUERY_LENGTH, sanitize_for_log, validate_int, validate_query
     VALIDATION_AVAILABLE = True
 except ImportError:
     VALIDATION_AVAILABLE = False

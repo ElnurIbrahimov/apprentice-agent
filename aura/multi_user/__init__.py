@@ -11,17 +11,17 @@ Usage:
     user_model = manager.get_active_user_model()
 """
 
-from .schemas import TrustLevel, IdentityLayer
-from .user_mind_model import UserMindModel
 from .identity_core import IdentityCore, get_identity_core
 from .manager import MultiUserManager, get_multi_user_manager
+from .schemas import IdentityLayer, TrustLevel
+from .user_mind_model import UserMindModel
 
 __all__ = [
-    "MultiUserManager",
-    "get_multi_user_manager",
-    "UserMindModel",
-    "TrustLevel",
-    "IdentityLayer",
     "IdentityCore",
+    "IdentityLayer",
+    "MultiUserManager",
+    "TrustLevel",
+    "UserMindModel",
     "get_identity_core",
+    "get_multi_user_manager",
 ]

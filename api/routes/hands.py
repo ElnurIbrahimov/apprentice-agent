@@ -4,8 +4,7 @@ import asyncio
 import copy
 import logging
 import threading
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -22,14 +21,14 @@ router = APIRouter(prefix="/api/hands", tags=["hands"], dependencies=[Depends(re
 # ============================================================================
 
 def _get_manager():
-    from aura.hands.manager import get_hand_manager
-    from aura.hands.researcher import ResearcherHand
-    from aura.hands.guardian import GuardianHand
-    from aura.hands.memory_hand import MemoryHand
     from aura.hands.collector import CollectorHand
-    from aura.hands.morning_briefing import MorningBriefingHand
-    from aura.hands.dynamic_hand import DynamicHand
     from aura.hands.custom_store import get_custom_hand_store
+    from aura.hands.dynamic_hand import DynamicHand
+    from aura.hands.guardian import GuardianHand
+    from aura.hands.manager import get_hand_manager
+    from aura.hands.memory_hand import MemoryHand
+    from aura.hands.morning_briefing import MorningBriefingHand
+    from aura.hands.researcher import ResearcherHand
 
     manager = get_hand_manager()
     # Lazy-register built-in Hands on first API access
@@ -53,15 +52,8 @@ def _get_manager():
 def _get_agent():
     """Get the agent instance for brain/tools access."""
     try:
-        from api.services.agent_service import get_agent_service
-        svc = get_agent_service()
-        return getattr(svc, '_agent', None) or getattr(svc, 'agent', None)
-    except Exception:
-        pass
-    # Fallback: try the singleton agent
-    try:
-        from aura.agent import _agent_instance
-        return _agent_instance
+        from api.utils import get_agent
+        return get_agent()
     except Exception:
         return None
 
@@ -172,14 +164,13 @@ HAND_TEMPLATES: list[dict] = [
 @router.post("/create")
 async def create_hand(body: CreateHandRequest) -> HandConfigResponse:
     """Create a custom Hand from a natural language description."""
-    from api.services.agent_service import get_agent_service
-    from aura.hands.dynamic_hand import DynamicHand
-    from aura.hands.custom_store import get_custom_hand_store
     from api.services.hand_config_extractor import extract_hand_config
+    from api.utils import get_agent
+    from aura.hands.custom_store import get_custom_hand_store
+    from aura.hands.dynamic_hand import DynamicHand
 
-    svc = get_agent_service()
-    brain = getattr(svc, '_agent', None)
-    brain = getattr(brain, 'brain', None) if brain else None
+    agent = get_agent()
+    brain = getattr(agent, 'brain', None) if agent else None
     if not brain:
         raise HTTPException(status_code=503, detail="Agent brain not available")
 
@@ -207,8 +198,8 @@ async def list_templates() -> Dict[str, Any]:
 @router.post("/from-template")
 async def create_from_template(body: FromTemplateRequest) -> HandConfigResponse:
     """Create a custom Hand from a named template, applying variable substitutions."""
-    from aura.hands.dynamic_hand import DynamicHand
     from aura.hands.custom_store import get_custom_hand_store
+    from aura.hands.dynamic_hand import DynamicHand
 
     template = next((t for t in HAND_TEMPLATES if t["name"] == body.template_name), None)
     if not template:

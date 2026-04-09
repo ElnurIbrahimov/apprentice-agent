@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from api.auth import require_api_key, verify_api_key_ws

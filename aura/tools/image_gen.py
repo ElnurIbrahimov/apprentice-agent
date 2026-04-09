@@ -1,10 +1,9 @@
 """Image generation tool using Stable Diffusion."""
 
 import logging
-import os
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 

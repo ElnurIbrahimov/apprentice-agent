@@ -10,11 +10,11 @@ organized by context: time of day, emotional state, idle duration,
 drive type, and conversational intent.
 """
 
-import random
 import logging
+import random
 from collections import deque
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +229,7 @@ _CURIOSITY_GENERIC = [
 ]
 
 
-def get_curiosity_message(topics: List[str] = None, recent: Optional[deque] = None) -> str:
+def get_curiosity_message(topics: List[str] | None = None, recent: Optional[deque] = None) -> str:
     """Get a curiosity-driven message, optionally with discovered topics."""
     if recent is None:
         recent = deque(maxlen=20)
@@ -297,7 +297,7 @@ _COMPETENCE_GENERIC = [
 ]
 
 
-def get_competence_message(weak_areas: str = None, recent: Optional[deque] = None) -> Optional[str]:
+def get_competence_message(weak_areas: str | None = None, recent: Optional[deque] = None) -> Optional[str]:
     """Get a competence/learning-driven message."""
     if recent is None:
         recent = deque(maxlen=20)

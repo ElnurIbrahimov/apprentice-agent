@@ -1,18 +1,18 @@
 """Singleton wrapper for ApprenticeAgent."""
 
-import sys
-import os
-import time
-import threading
 import logging
-from typing import Optional, Dict, Any, Generator
+import os
+import sys
+import threading
+import time
+from typing import Any, Dict, Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from api.models.schemas import MoodState
 from aura import ApprenticeAgent
 from aura.core.conversation_manager import get_conversation_manager
-from api.models.schemas import MoodState
 
 # Import ALMA directly for mood detection
 try:
@@ -26,6 +26,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 import re
+
 
 def _filter_skill_json(text: str) -> str:
     """Remove skill learning JSON artifacts from chat responses.
@@ -66,7 +67,7 @@ def _get_truth_spine():
         with _truth_spine_lock:
             if _truth_spine_instance is None:
                 try:
-                    from aura.truth_spine import VerifiedMemory, MemoryTier
+                    from aura.truth_spine import MemoryTier, VerifiedMemory
                     _truth_spine_instance = VerifiedMemory()
                     _MemoryTier = MemoryTier
                 except Exception as e:
@@ -255,12 +256,12 @@ ACTION_MODE_MODELS = {
     },
     "code": {
         "preferred": "minimax-m2.5:cloud",
-        "fallbacks": ["qwen3-coder:480b-cloud"],
+        "fallbacks": ["glm-5.1:cloud", "qwen3-coder:480b-cloud"],
         "description": "Backend/code — 80.2% SWE-bench top open model"
     },
     "search": {
         "preferred": "nemotron-3-super:cloud",
-        "fallbacks": ["glm-5:cloud"],
+        "fallbacks": ["glm-5.1:cloud", "glm-5:cloud"],
         "description": "Quick web search — fastest model"
     },
     "research": {
@@ -275,7 +276,7 @@ ACTION_MODE_MODELS = {
     },
     "debug": {
         "preferred": "chatgpt:gpt-5.4-thinking",
-        "fallbacks": ["minimax-m2.7:cloud"],
+        "fallbacks": ["glm-5.1:cloud", "minimax-m2.7:cloud"],
         "description": "Debug/review — extended thinking for hard bugs"
     },
     "vision": {
@@ -295,7 +296,7 @@ ACTION_MODE_MODELS = {
     },
     "agent": {
         "preferred": "kimi-k2.5:cloud",
-        "fallbacks": ["minimax-m2.7:cloud"],
+        "fallbacks": ["glm-5.1:cloud", "minimax-m2.7:cloud"],
         "description": "Autonomous task execution"
     },
 }
@@ -499,7 +500,7 @@ def get_model_for_action(action_mode: str) -> Optional[str]:
     _load_available_models()
 
     config = ACTION_MODE_MODELS[action_mode]
-    candidates = [config.get("preferred")] + config.get("fallbacks", [])
+    candidates = [config.get("preferred"), *config.get("fallbacks", [])]
 
     for model in candidates:
         if _is_model_available(model):
@@ -657,6 +658,7 @@ class AgentService:
             # of a proactive message, record as engaged
             try:
                 import time as _time
+
                 from aura.proactive.gateway_daemon import get_gateway_daemon
                 daemon = get_gateway_daemon()
                 time_since_proactive = _time.time() - daemon._last_proactive_message_time
@@ -806,7 +808,7 @@ class AgentService:
                 topic = message.lower()
                 for trigger in ["deep research", "thorough research", "extensive research"]:
                     topic = topic.replace(trigger, "").strip()
-                topic = topic.strip(" on about for")
+                topic = re.sub(r'\s+(?:on|about|for)\s*$', '', topic).strip()
 
                 result = deep_tool.research(topic, depth="deep")
 
@@ -1123,13 +1125,14 @@ Summarize key findings with [1], [2] citations. Be factual and concise."""
             if detected_action == "deep_research":
                 try:
                     import queue as _queue
+
                     from aura.tools.deep_research import DeepResearchTool
                     deep_tool = DeepResearchTool()
 
                     topic = message.lower()
                     for trigger in ["deep research", "thorough research", "extensive research", "full research", "research everything", "research in depth"]:
                         topic = topic.replace(trigger, "").strip()
-                    topic = topic.strip(" on about for")
+                    topic = re.sub(r'\s+(?:on|about|for)\s*$', '', topic).strip()
 
                     logger.info(f"[AgentService] Deep research on: {topic}")
                     yield {"type": "chunk", "content": f"## Deep Research: {topic}\n\n"}
@@ -1308,7 +1311,7 @@ Provide a well-structured, informative summary with key findings and cite source
 
             # ===== AGENT MODE (agentic loop with tools) =====
             if detected_action == "agent" and hasattr(agent, 'run'):
-                logger.info(f"[AgentService] Using agent.run() for agent mode")
+                logger.info("[AgentService] Using agent.run() for agent mode")
                 try:
                     import queue as _queue
                     result_q = _queue.Queue()
@@ -1340,7 +1343,7 @@ Provide a well-structured, informative summary with key findings and cite source
                     return
                 except Exception as e:
                     logger.error(f"[AgentService] Agent run failed: {e}", exc_info=True)
-                    yield {"type": "chunk", "content": f"Agent encountered an error. Falling back to standard response.\n\n"}
+                    yield {"type": "chunk", "content": "Agent encountered an error. Falling back to standard response.\n\n"}
 
             # ===== STANDARD STREAMING =====
             if hasattr(brain, 'think_stream'):
@@ -1708,7 +1711,7 @@ Provide a well-structured, informative summary with key findings and cite source
     def _handle_thinking_mode_command(self, message: str) -> Dict[str, Any]:
         """Handle /think s1|s2|auto|status commands."""
         try:
-            from aura.thinking_mode import get_thinking_mode_manager, ThinkingMode
+            from aura.thinking_mode import ThinkingMode, get_thinking_mode_manager
             tmm = get_thinking_mode_manager()
 
             parts = message.split(maxsplit=1)
@@ -1764,7 +1767,7 @@ Provide a well-structured, informative summary with key findings and cite source
         ChatGPT models come from chatgpt_client or hardcoded fallback.
         """
         try:
-            from aura.config import VERIFIED_LOCAL_MODELS, VERIFIED_CLOUD_MODELS
+            from aura.config import VERIFIED_CLOUD_MODELS, VERIFIED_LOCAL_MODELS
 
             cloud_models = sorted(VERIFIED_CLOUD_MODELS)
             local_models = sorted(VERIFIED_LOCAL_MODELS)

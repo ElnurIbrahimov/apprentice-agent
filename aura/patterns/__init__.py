@@ -2,9 +2,9 @@
 import threading
 from typing import Optional
 
-from .pattern_prophet import PatternProphet, Pattern
+from .pattern_prophet import Pattern, PatternProphet
 
-__all__ = ["PatternProphet", "Pattern", "get_pattern_prophet"]
+__all__ = ["Pattern", "PatternProphet", "get_pattern_prophet"]
 
 _prophet: Optional[PatternProphet] = None
 _prophet_lock = threading.Lock()

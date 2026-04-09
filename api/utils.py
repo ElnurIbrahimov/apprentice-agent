@@ -5,7 +5,7 @@ import functools
 import logging
 import os
 import re
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def validate_id(value: str, name: str = "id") -> str:
 
 def validate_model_name(value: str) -> str:
     """Validate a model name parameter."""
-    if not value or not _SAFE_MODEL_RE.match(value):
+    if not value or not _SAFE_MODEL_RE.match(value) or ".." in value:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Invalid model name")
     return value

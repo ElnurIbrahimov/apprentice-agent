@@ -10,8 +10,8 @@ Created: 2026-03-16
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Dict, List, Optional
 
 from .store import MemoryStore, get_memory_store
 
@@ -233,7 +233,7 @@ Only include facts clearly stated by the user. Be concise."""
 
 __all__ = [
     "UserProfile",
-    "save_profile",
     "load_profile",
+    "save_profile",
     "update_profile_from_memories",
 ]

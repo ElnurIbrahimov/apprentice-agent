@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import mimetypes
 import os
 import secrets
@@ -11,10 +10,10 @@ import string
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
@@ -91,6 +90,18 @@ def _count_active_shares() -> int:
             db.close()
 
 
+import re
+
+_SHARE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def _validate_share_id(share_id: str) -> str:
+    """Validate share_id contains only safe characters."""
+    if not _SHARE_ID_RE.match(share_id):
+        raise HTTPException(400, "Invalid share ID")
+    return share_id
+
+
 def _safe_path(base: Path, user_path: str) -> Path:
     """Resolve path safely — prevent directory traversal."""
     normalized = user_path.replace("\\", "/").lstrip("/")
@@ -98,7 +109,8 @@ def _safe_path(base: Path, user_path: str) -> Path:
     if any(p in {".", ".."} or not p for p in parts):
         raise ValueError(f"Invalid path: {user_path}")
     resolved = (base / normalized).resolve()
-    if not str(resolved).startswith(str(base.resolve())):
+    base_resolved = str(base.resolve())
+    if not (str(resolved).startswith(base_resolved + os.sep) or str(resolved) == base_resolved):
         raise ValueError(f"Path traversal detected: {user_path}")
     return resolved
 
@@ -231,6 +243,7 @@ async def list_shares() -> List[ShareInfo]:
 @router.delete("/api/shares/{share_id}", dependencies=[Depends(require_api_key)])
 async def delete_share(share_id: str):
     """Delete a share by ID."""
+    _validate_share_id(share_id)
     share_dir = SHARED_DIR / share_id
     if share_dir.exists():
         import shutil
@@ -248,6 +261,7 @@ async def delete_share(share_id: str):
 @router.get("/shared/{share_id}/{path:path}")
 async def serve_shared_file(share_id: str, path: str = ""):
     """Serve shared project files as static content. No auth required."""
+    _validate_share_id(share_id)
     share_dir = SHARED_DIR / share_id
     if not share_dir.exists():
         raise HTTPException(404, "Share not found")
@@ -284,7 +298,15 @@ async def serve_shared_file(share_id: str, path: str = ""):
     if not mime_type:
         mime_type = "application/octet-stream"
 
-    return FileResponse(file_path, media_type=mime_type)
+    # Security headers — prevent stored XSS via uploaded HTML/SVG
+    headers = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+    }
+    if mime_type in ("text/html", "application/xhtml+xml", "image/svg+xml"):
+        headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; script-src 'none'; object-src 'none'; frame-ancestors 'none'"
+
+    return FileResponse(file_path, media_type=mime_type, headers=headers)
 
 
 @router.get("/shared/{share_id}")

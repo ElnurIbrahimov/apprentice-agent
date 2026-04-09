@@ -11,8 +11,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 MAX_CACHE_SIZE = 500
 
-from .protocol import CollaborationMode, RoutingDecision
 from .base_agent import BaseSpecialist
+from .protocol import CollaborationMode, RoutingDecision
 
 logger = logging.getLogger(__name__)
 

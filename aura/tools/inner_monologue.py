@@ -9,13 +9,13 @@ Created: 2026-01-26
 import json
 import logging
 import re
-import uuid
 import threading
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, List, Any, Generator, Callable
-from dataclasses import dataclass, asdict, field
-import time
+from typing import Any, Callable, Dict, Generator, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -471,7 +471,7 @@ class InnerMonologueTool:
                 # Taint protection: redact secrets before writing to disk
                 _taint_redact = None
                 try:
-                    from aura.security.taint_tracker import scan_for_secrets, redact
+                    from aura.security.taint_tracker import redact, scan_for_secrets
                     _taint_redact = (scan_for_secrets, redact)
                 except ImportError:
                     pass

@@ -7,8 +7,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from aura.messaging.telegram_formatting import escape_mdv2 as _escape_mdv2
 from aura.core.conversation_manager import get_conversation_manager
+from aura.messaging.telegram_formatting import escape_mdv2 as _escape_mdv2
 
 try:
     from telegram import Update
@@ -114,7 +114,7 @@ class SessionsMixin:
             logger.error(f"[Telegram] /session info error: {e}", exc_info=True)
             await update.message.reply_text("Could not retrieve session info.")
 
-    async def _session_new(self, update: Update, manager, user_id: str, title: str = None):
+    async def _session_new(self, update: Update, manager, user_id: str, title: str | None = None):
         """Create a new conversation and switch to it."""
         try:
             conv_id = manager.new_session("telegram", user_id, title)
@@ -184,7 +184,7 @@ class SessionsMixin:
                 )
                 lines.append(line)
 
-            lines.append(f"\nSwitch: `/session <id>`")
+            lines.append("\nSwitch: `/session <id>`")
 
             text = "\n".join(lines)
             await update.message.reply_text(text, parse_mode="MarkdownV2")
@@ -212,7 +212,7 @@ class SessionsMixin:
                     lines = ["Multiple matches:\n"]
                     for c in candidates[:5]:
                         lines.append(f"  `{c['id']}` — {_escape_mdv2(c.get('title', 'Untitled'))}")
-                    lines.append(f"\nBe more specific\\.")
+                    lines.append("\nBe more specific\\.")
                     await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
                     return
 
@@ -312,15 +312,17 @@ class SessionsMixin:
                 logger.info(f"[TelegramBot] Added to group: {chat.title} ({chat.id})")
             elif new_status in ("left", "kicked"):
                 chat = update.my_chat_member.chat
-                # Clean up group cache
+                # Clean up group data from store
                 cache_key = str(chat.id)
-                self._group_message_cache.pop(cache_key, None)
+                getattr(self, '_group_message_cache', {}).pop(cache_key, None)
                 logger.info(f"[TelegramBot] Removed from group: {chat.title} ({chat.id})")
         except Exception as e:
             logger.error(f"[TelegramBot] Error handling chat_member update: {e}", exc_info=True)
 
     async def _handle_summarize_group(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Summarize recent group conversation from cached messages."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
         chat_id = str(update.effective_chat.id)
         chat_type = update.effective_chat.type
 
@@ -350,6 +352,8 @@ class SessionsMixin:
 
     async def _handle_summarize_thread(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Summarize a thread when used as a reply in a group."""
+        if not self._is_user_allowed(update.effective_user.id):
+            return
         chat_id = str(update.effective_chat.id)
         chat_type = update.effective_chat.type
 

@@ -5,7 +5,6 @@ All methods assume self has: skill_library, skill_bridge.
 """
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +26,7 @@ class SkillManagerMixin:
         except (AttributeError, KeyError, TypeError, OSError) as e:
             return {"available": False, "error": str(e)}
 
-    def skill_search(self, query: str, limit: int = 5, category: str = None) -> list:
+    def skill_search(self, query: str, limit: int = 5, category: str | None = None) -> list:
         """Search for relevant skills.
 
         Args:
@@ -74,7 +73,7 @@ class SkillManagerMixin:
         category: str,
         trigger_patterns: list,
         procedure: str,
-        tags: list = None
+        tags: list | None = None
     ) -> dict:
         """Create a new skill.
 
@@ -111,7 +110,7 @@ class SkillManagerMixin:
         input_context: str,
         output: str,
         success: bool,
-        feedback: str = None
+        feedback: str | None = None
     ) -> dict:
         """Record usage of a skill for learning.
 
@@ -182,8 +181,8 @@ class SkillManagerMixin:
         user_input: str,
         output: str,
         success: bool,
-        context: dict = None,
-        feedback: str = None
+        context: dict | None = None,
+        feedback: str | None = None
     ) -> str:
         """Record an interaction for potential skill learning.
 
@@ -239,7 +238,7 @@ class SkillManagerMixin:
             logger.error(f"Skill list summaries error: {e}")
             return []
 
-    def skill_list(self, category: str = None, sort_by: str = "success_rate") -> list:
+    def skill_list(self, category: str | None = None, sort_by: str = "success_rate") -> list:
         """List all skills.
 
         Args:

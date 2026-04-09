@@ -1,7 +1,8 @@
 """Model configuration API — list available models, get/set per-role routing."""
 
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key

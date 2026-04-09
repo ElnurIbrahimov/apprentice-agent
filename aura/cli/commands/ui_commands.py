@@ -1,5 +1,5 @@
-import sys
 import logging
+import sys
 from typing import Optional
 
 from ..context import get_ctx
@@ -38,8 +38,11 @@ def handle_model(agent, arg, context) -> Optional[str]:
 
 
 def handle_theme(agent, arg, context) -> Optional[str]:
-    from ..themes import set_theme as _set_theme, get_theme as _get_theme, list_themes as _list_themes, save_theme_preference as _save_pref
     from ..display import console as _theme_console
+    from ..themes import get_theme as _get_theme
+    from ..themes import list_themes as _list_themes
+    from ..themes import save_theme_preference as _save_pref
+    from ..themes import set_theme as _set_theme
     if arg:
         if _set_theme(arg.strip()):
             _save_pref(arg.strip())
@@ -81,7 +84,6 @@ def handle_speak(agent, arg, context) -> Optional[str]:
 def handle_trust(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if not ctx or not ctx.permissions:
-        from aura.core.permissions import PermissionManager
         print("  Permissions not available outside chat mode.")
         return
 
@@ -95,7 +97,7 @@ def handle_trust(agent, arg, context) -> Optional[str]:
 
 def handle_help(agent, arg, context) -> Optional[str]:
     """Show help. Use /help <command> for detailed help on a specific command."""
-    from ..display import show_help, console
+    from ..display import console, show_help
 
     if not arg or not arg.strip():
         show_help()
@@ -137,7 +139,7 @@ def handle_help(agent, arg, context) -> Optional[str]:
         }
 
         if cmd in EXAMPLES:
-            console.print(f"\n  [dim]Examples:[/dim]")
+            console.print("\n  [dim]Examples:[/dim]")
             for ex in EXAMPLES[cmd]:
                 console.print(f"    [dim]{ex}[/dim]")
         console.print()

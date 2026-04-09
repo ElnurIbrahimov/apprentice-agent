@@ -1,22 +1,23 @@
 """Content sanitization for outgoing messages to prevent prompt injection exfiltration."""
-import re
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
-MAX_MESSAGE_LENGTH = 1000
+# Telegram message limit is 4096; use that as the ceiling
+MAX_MESSAGE_LENGTH = 4000
 
+# Only flag actual social engineering / phishing patterns — NOT URLs,
+# which are legitimate in research results, citations, and tool output.
 _SUSPICIOUS_PATTERNS = re.compile(
     r'(?:'
-    r'https?://\S+'           # URLs
-    r'|click here'
+    r'click here'
     r'|verify your account'
     r'|your account (?:will|has)'
-    r'|urgent[: ]'
-    r'|immediately\b'
-    r'|password\b'
-    r'|credit card'
-    r'|bank account'
+    r'|urgent[: ]action'
+    r'|password\b.*\brequired'
+    r'|credit card\b.*\bnumber'
+    r'|bank account\b.*\bdetails'
     r')',
     re.IGNORECASE
 )

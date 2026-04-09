@@ -17,7 +17,7 @@ def test_bmi_calculator_instantiation():
     tool = BmiCalculatorTool()
     assert tool.name == "bmi_calculator"
     assert tool.description is not None
-    print(f"[PASS] BmiCalculatorTool instantiation")
+    print("[PASS] BmiCalculatorTool instantiation")
 
 
 def test_bmi_calculator_execute_unknown():
@@ -26,7 +26,7 @@ def test_bmi_calculator_execute_unknown():
     result = tool.execute("unknown_action_xyz")
     assert result.get("success") == False
     assert "error" in result
-    print(f"[PASS] BmiCalculatorTool handles unknown action")
+    print("[PASS] BmiCalculatorTool handles unknown action")
 
 
 def test_bmi_calculator_calculate_bmi():
@@ -34,8 +34,8 @@ def test_bmi_calculator_calculate_bmi():
     tool = BmiCalculatorTool()
     # Basic test - method should exist and be callable
     assert hasattr(tool, "calculate_bmi")
-    assert callable(getattr(tool, "calculate_bmi"))
-    print(f"[PASS] BmiCalculatorTool.calculate_bmi exists and is callable")
+    assert callable(tool.calculate_bmi)
+    print("[PASS] BmiCalculatorTool.calculate_bmi exists and is callable")
 
 
 def test_bmi_calculator_calculate_bmi_imperial():
@@ -43,8 +43,8 @@ def test_bmi_calculator_calculate_bmi_imperial():
     tool = BmiCalculatorTool()
     # Basic test - method should exist and be callable
     assert hasattr(tool, "calculate_bmi_imperial")
-    assert callable(getattr(tool, "calculate_bmi_imperial"))
-    print(f"[PASS] BmiCalculatorTool.calculate_bmi_imperial exists and is callable")
+    assert callable(tool.calculate_bmi_imperial)
+    print("[PASS] BmiCalculatorTool.calculate_bmi_imperial exists and is callable")
 
 
 

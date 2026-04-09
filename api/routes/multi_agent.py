@@ -4,13 +4,14 @@ import asyncio
 import logging
 import re
 import threading
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
-from api.utils import safe_error_detail, get_agent_service as _get_agent_service, get_agent, run_sync
+from api.utils import get_agent_service as _get_agent_service
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -240,8 +241,7 @@ async def clear_history(session_id: str = Query(default="default")):
         loop = asyncio.get_running_loop()
         def _clear():
             with _orch_lock:
-                if session_id in _orchestrators:
-                    del _orchestrators[session_id]
+                _orchestrators.pop(session_id, None)
         await loop.run_in_executor(None, _clear)
         return {"status": "cleared", "session_id": session_id}
     except Exception as e:

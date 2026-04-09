@@ -10,15 +10,16 @@ Enhanced with:
 - Usage tracking for deprecation decisions
 """
 
+import ast as _ast
 import json
+import logging
 import os
 import re
 import sqlite3
 import subprocess
 import sys
-import logging
+import threading
 import time
-import ast as _ast
 from datetime import datetime
 from pathlib import Path
 
@@ -28,7 +29,7 @@ _SAFE_ENV_KEYS = frozenset({"PATH", "HOME", "USERPROFILE", "TEMP", "TMP",
 
 def _safe_env() -> dict:
     return {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
-from typing import Any, Callable, Optional
+from typing import Optional
 
 _BLOCKED_BUILTINS = {"eval", "exec", "compile", "__import__", "open", "breakpoint"}
 # Use the authoritative blocked-modules list from code_executor
@@ -40,14 +41,13 @@ except ImportError:
 
 from .tool_contract import ToolResult
 from .tool_template import (
-    TOOL_CLASS_TEMPLATE,
-    METHOD_TEMPLATE,
     EXECUTE_DISPATCH_TEMPLATE,
-    TEST_TEMPLATE,
+    METHOD_TEMPLATE,
     METHOD_TEST_TEMPLATE,
     NETWORK_IMPORTS,
+    TEST_TEMPLATE,
+    TOOL_CLASS_TEMPLATE,
 )
-
 
 # Paths
 BASE_DIR = Path(__file__).parent.parent.parent
@@ -84,6 +84,7 @@ class ToolUsageTracker:
     def __init__(self, db_path: str = str(USAGE_DB_PATH)):
         self._db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.Lock()
         self._ensure_db()
 
     def _ensure_db(self):
@@ -116,34 +117,36 @@ class ToolUsageTracker:
     def record_use(self, tool_name: str, success: bool = True, latency_ms: int = 0):
         if not self._conn:
             return
-        try:
-            self._conn.execute(
-                "INSERT INTO tool_usage (tool_name, success, latency_ms) VALUES (?, ?, ?)",
-                (tool_name, int(success), latency_ms)
-            )
-            self._conn.execute("""
-                INSERT INTO tool_lifecycle (tool_name, last_used, total_uses, success_rate)
-                VALUES (?, CURRENT_TIMESTAMP, 1, ?)
-                ON CONFLICT(tool_name) DO UPDATE SET
-                    last_used = CURRENT_TIMESTAMP,
-                    total_uses = total_uses + 1,
-                    success_rate = (success_rate * total_uses + ?) / (total_uses + 1)
-            """, (tool_name, float(success), float(success)))
-            self._conn.commit()
-        except Exception as e:
-            logger.debug(f"[UsageTracker] record_use failed: {e}")
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT INTO tool_usage (tool_name, success, latency_ms) VALUES (?, ?, ?)",
+                    (tool_name, int(success), latency_ms)
+                )
+                self._conn.execute("""
+                    INSERT INTO tool_lifecycle (tool_name, last_used, total_uses, success_rate)
+                    VALUES (?, CURRENT_TIMESTAMP, 1, ?)
+                    ON CONFLICT(tool_name) DO UPDATE SET
+                        last_used = CURRENT_TIMESTAMP,
+                        total_uses = total_uses + 1,
+                        success_rate = (success_rate * total_uses + ?) / (total_uses + 1)
+                """, (tool_name, float(success), float(success)))
+                self._conn.commit()
+            except Exception as e:
+                logger.debug(f"[UsageTracker] record_use failed: {e}")
 
     def register_tool(self, tool_name: str):
         if not self._conn:
             return
-        try:
-            self._conn.execute("""
-                INSERT OR IGNORE INTO tool_lifecycle (tool_name, created_at, total_uses, success_rate, status)
-                VALUES (?, CURRENT_TIMESTAMP, 0, 1.0, 'active')
-            """, (tool_name,))
-            self._conn.commit()
-        except Exception as e:
-            logger.debug(f"[UsageTracker] register_tool failed: {e}")
+        with self._lock:
+            try:
+                self._conn.execute("""
+                    INSERT OR IGNORE INTO tool_lifecycle (tool_name, created_at, total_uses, success_rate, status)
+                    VALUES (?, CURRENT_TIMESTAMP, 0, 1.0, 'active')
+                """, (tool_name,))
+                self._conn.commit()
+            except Exception as e:
+                logger.debug(f"[UsageTracker] register_tool failed: {e}")
 
     def get_stats(self, tool_name: str) -> Optional[dict]:
         if not self._conn:

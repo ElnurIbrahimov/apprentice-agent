@@ -1,6 +1,7 @@
 """API routes for System 1/2 explicit thinking-mode control."""
 
 import logging
+
 from fastapi import APIRouter, Depends
 
 from api.auth import require_api_key
@@ -29,7 +30,7 @@ async def set_thinking_mode(body: dict):
     Body: {"mode": "auto" | "system1" | "system2"}
     """
     try:
-        from aura.thinking_mode import get_thinking_mode_manager, ThinkingMode
+        from aura.thinking_mode import ThinkingMode, get_thinking_mode_manager
         tmm = get_thinking_mode_manager()
 
         mode_str = body.get("mode", "auto").lower()

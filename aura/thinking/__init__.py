@@ -1,4 +1,4 @@
 """Visible thinking system for AURA - internal reasoning display."""
-from .visible_thinking import VisibleThinking, ThoughtProcess, ThoughtType
+from .visible_thinking import ThoughtProcess, ThoughtType, VisibleThinking
 
-__all__ = ["VisibleThinking", "ThoughtProcess", "ThoughtType"]
+__all__ = ["ThoughtProcess", "ThoughtType", "VisibleThinking"]

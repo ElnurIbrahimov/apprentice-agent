@@ -15,6 +15,11 @@ import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from .adapter import AuraSkillAdapter
+from .cache import EvaluationCache
+from .constraints import ConstraintValidator
+from .pareto import ParetoFrontier
+from .proposers import MergeProposer, ReflectiveMutationProposer
 from .types import (
     Candidate,
     CandidateSelectionStrategy,
@@ -22,11 +27,6 @@ from .types import (
     GEPAConfig,
     GEPAResult,
 )
-from .adapter import AuraSkillAdapter
-from .cache import EvaluationCache
-from .constraints import ConstraintValidator
-from .pareto import ParetoFrontier
-from .proposers import MergeProposer, ReflectiveMutationProposer
 
 logger = logging.getLogger(__name__)
 

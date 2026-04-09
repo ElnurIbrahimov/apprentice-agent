@@ -17,20 +17,19 @@ Job types:
 
 import json
 import logging
-import os
 import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Callable
+from typing import Any, Callable, Dict, Optional
 
 try:
-    from apscheduler.schedulers.background import BackgroundScheduler
-    from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-    from apscheduler.triggers.cron import CronTrigger
-    from apscheduler.triggers.interval import IntervalTrigger
-    from apscheduler.triggers.date import DateTrigger
     from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
+    from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.date import DateTrigger
+    from apscheduler.triggers.interval import IntervalTrigger
     APSCHEDULER_AVAILABLE = True
 except ImportError:
     APSCHEDULER_AVAILABLE = False

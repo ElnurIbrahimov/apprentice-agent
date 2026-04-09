@@ -8,8 +8,6 @@ _REACT_TOOL_MODEL, _REACT_CODE_MODEL, _REACT_REASON_MODEL.
 
 import json
 import logging
-import concurrent.futures
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +346,7 @@ class ReactMixin:
             try:
                 state_key = f"{tool_name}:{json.dumps(args, sort_keys=True, default=str)}"
             except (TypeError, ValueError):
-                state_key = f"{tool_name}:{str(args)}"
+                state_key = f"{tool_name}:{args!s}"
             if state_key in state_hashes:
                 messages.append({
                     "role": "tool",

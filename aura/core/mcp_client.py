@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class MCPClientConnection:
     """Single connection to an MCP server process."""
 
-    def __init__(self, name: str, command: list[str], env: dict = None):
+    def __init__(self, name: str, command: list[str], env: dict | None = None):
         self.name = name
         self.command = command
         self.env = env
@@ -144,7 +144,7 @@ class MCPClientManager:
     def __init__(self):
         self.connections: dict[str, MCPClientConnection] = {}
 
-    def connect(self, name: str, command: list[str], env: dict = None) -> bool:
+    def connect(self, name: str, command: list[str], env: dict | None = None) -> bool:
         """Connect to an MCP server by spawning its process."""
         conn = MCPClientConnection(name, command, env)
         if conn.connect():

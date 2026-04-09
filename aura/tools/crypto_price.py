@@ -8,7 +8,7 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ class CryptoPriceTool:
                         change = data[crypto_id].get(f"{currency}_24h_change", 0)
                         results[crypto_id] = {
                             "price": price,
-                            "price_formatted": f"{{'usd': '$', 'eur': '€', 'gbp': '£', 'jpy': '¥'}.get(currency.lower(), currency.upper() + ' ')}{price:,.2f}",
+                            "price_formatted": f"{ {'usd': '$', 'eur': '€', 'gbp': '£', 'jpy': '¥'}.get(currency.lower(), currency.upper() + ' ')}{price:,.2f}",
                             "change_24h": f"{change:+.2f}%" if change else "N/A",
                         }
 

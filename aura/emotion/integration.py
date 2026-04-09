@@ -10,14 +10,13 @@ Connects ALMA emotional engine to AURA's brain and response pipeline:
 
 import logging
 import re
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, Optional
 
 from .alma_engine import (
     alma_engine,
     get_emotional_state,
-    trigger_emotion,
     get_response_modulation,
-    PADState,
+    trigger_emotion,
 )
 
 logger = logging.getLogger(__name__)

@@ -1,5 +1,6 @@
 """Unix-composable pipe mode — stdout for content, stderr for status."""
 from __future__ import annotations
+
 import json
 import sys
 from typing import Optional

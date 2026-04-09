@@ -40,6 +40,7 @@ export function RecordPanel() {
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState(0);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
 
   /* Playback state */
@@ -111,7 +112,7 @@ export function RecordPanel() {
     return () => {
       stopEverything();
       abortRef.current?.abort();
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     };
   }, []);
 
@@ -192,6 +193,7 @@ export function RecordPanel() {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
         setAudioBlob(blob);
         const url = URL.createObjectURL(blob);
+        audioUrlRef.current = url;
         setAudioUrl(url);
       };
 

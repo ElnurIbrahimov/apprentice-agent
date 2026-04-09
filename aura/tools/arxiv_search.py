@@ -1,12 +1,13 @@
 """arXiv search tool for finding and downloading academic papers."""
 
-from pathlib import Path
-from typing import Optional, List
-import arxiv
 import json
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import List, Optional
+
+import arxiv
 
 try:
     import requests as _requests
@@ -21,7 +22,6 @@ except ImportError:
     OLLAMA_AVAILABLE = False
 
 from ..config import Config
-
 
 # ---------------------------------------------------------------------------
 # SQLite cache for Semantic Scholar API responses

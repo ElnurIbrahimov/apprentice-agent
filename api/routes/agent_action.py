@@ -18,11 +18,11 @@ import logging
 import os
 import re
 import time
+from typing import Any, Dict
 
 import httpx
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
 
 from api.auth import require_api_key
 from api.utils import safe_error_detail
@@ -60,6 +60,8 @@ async def agent_action(body: dict):
     if session_id and not _SESSION_ID_RE.match(session_id):
         raise HTTPException(400, "Invalid session_id: must be alphanumeric/hyphens, max 64 chars")
     model = body.get("model") or os.getenv("AURA_AGENT_MODEL", "nemotron-3-super:cloud")
+    from api.utils import validate_model_name
+    validate_model_name(model)
 
     t0 = time.monotonic()
 
@@ -128,7 +130,7 @@ async def agent_action(body: dict):
 
     # Telemetry
     try:
-        from aura.reliability.telemetry import emit, TelemetryKind
+        from aura.reliability.telemetry import TelemetryKind, emit
         emit(
             TelemetryKind.BROWSER_ACTION,
             session_id=session_id,

@@ -123,7 +123,7 @@ class InnerThoughtsEngine:
                     if high_neuro:
                         parts.append(f"Active neuromodulators: {', '.join(high_neuro)}")
         except Exception:
-            pass
+            logger.debug("inner_thoughts: emotion context failed", exc_info=True)
 
         # Recent conversation topics from context tracker
         try:
@@ -135,7 +135,7 @@ class InnerThoughtsEngine:
                 topics = [item["name"] for item in items[:3]]
                 parts.append(f"Recent topics: {', '.join(topics)}")
         except Exception:
-            pass
+            logger.debug("inner_thoughts: context tracker failed", exc_info=True)
 
         # Time since last user message
         idle_secs = 0
@@ -165,7 +165,7 @@ class InnerThoughtsEngine:
                 if activity:
                     parts.append(f"Background activity: {activity}")
             except Exception:
-                pass
+                logger.debug("inner_thoughts: idle presence failed", exc_info=True)
 
         # ADV-02 Phase 3: Proactive awareness context
         try:
@@ -175,7 +175,7 @@ class InnerThoughtsEngine:
             if awareness:
                 parts.append(awareness)
         except Exception:
-            pass
+            logger.debug("inner_thoughts: proactive awareness failed", exc_info=True)
 
         # Recent thinking activity
         try:
@@ -186,7 +186,7 @@ class InnerThoughtsEngine:
             if real > 0:
                 parts.append(f"Recent cognitive events: {real} real thoughts recorded")
         except Exception:
-            pass
+            logger.debug("inner_thoughts: thinking stats failed", exc_info=True)
 
         if not parts:
             return "No specific context available. Reflect on your general state."
@@ -310,11 +310,14 @@ class InnerThoughtsEngine:
                             intensity=0.65,  # Background thoughts — elevated to dominate templates
                         )
                     except Exception:
-                        pass
+                        logger.debug("inner_thoughts: monologue record failed", exc_info=True)
 
                     # Phase 6D: Record in idle presence engine for activity tracking
                     try:
-                        from aura.consciousness.idle_presence import get_idle_presence_engine, IdleActivity
+                        from aura.consciousness.idle_presence import (
+                            IdleActivity,
+                            get_idle_presence_engine,
+                        )
                         ipe = get_idle_presence_engine()
                         ipe._record_activity(
                             IdleActivity.INNER_THOUGHT,
@@ -322,7 +325,7 @@ class InnerThoughtsEngine:
                             cognitive_load=0.15,
                         )
                     except Exception:
-                        pass
+                        logger.debug("inner_thoughts: idle presence record failed", exc_info=True)
 
                 else:
                     self._consecutive_failures += 1

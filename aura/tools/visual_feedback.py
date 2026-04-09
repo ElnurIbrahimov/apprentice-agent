@@ -16,7 +16,6 @@ Flow:
 
 import base64
 import logging
-import os
 import re
 import tempfile
 import time
@@ -259,7 +258,7 @@ class VisualFeedbackLoop:
                     return True
         return False
 
-    def _call_llm(self, prompt: str, system_prompt: str = None, image_b64: str = None) -> tuple:
+    def _call_llm(self, prompt: str, system_prompt: str | None = None, image_b64: str | None = None) -> tuple:
         """Call the LLM, optionally with an image.
 
         Returns:

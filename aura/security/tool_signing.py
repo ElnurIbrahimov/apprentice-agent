@@ -20,8 +20,8 @@ import hmac
 # Try to import Ed25519 — fallback to HMAC-SHA256 if nacl not available
 _HAS_NACL = False
 try:
-    from nacl.signing import SigningKey, VerifyKey
     from nacl.exceptions import BadSignatureError
+    from nacl.signing import SigningKey, VerifyKey
     _HAS_NACL = True
 except ImportError:
     logger.debug("[ToolSign] PyNaCl not installed, falling back to HMAC-SHA256")
@@ -153,15 +153,17 @@ def verify_tool(tool_path: str) -> Tuple[bool, Optional[str]]:
 
     stored_hash = sig_data.get("hash", "")
     signature = sig_data.get("signature", "")
-    algorithm = sig_data.get("algorithm", "")
 
     # Verify content hash matches current file
     current_hash = _hash_file(tool_path)
     if current_hash != stored_hash:
-        return False, f"File has been modified since signing (hash mismatch)"
+        return False, "File has been modified since signing (hash mismatch)"
 
-    # Verify cryptographic signature
-    if algorithm == "ed25519" and _HAS_NACL:
+    # SECURITY: Pin algorithm to what the server currently supports, not what
+    # the .sig file claims. This prevents algorithm-downgrade attacks where an
+    # attacker replaces a .sig file with a weaker algorithm.
+    if _HAS_NACL and os.path.exists(_PUBLIC_KEY_FILE):
+        # Ed25519 keypair exists — only accept Ed25519 signatures
         try:
             vk = VerifyKey(public_key)
             vk.verify(stored_hash.encode("utf-8"), bytes.fromhex(signature))
@@ -170,14 +172,13 @@ def verify_tool(tool_path: str) -> Tuple[bool, Optional[str]]:
             return False, "Ed25519 signature verification failed"
         except Exception as e:
             return False, f"Signature verification error: {e}"
-    elif algorithm == "hmac-sha256":
+    else:
+        # HMAC mode — accept HMAC-SHA256 signatures
         expected = hmac.new(public_key, stored_hash.encode("utf-8"), hashlib.sha256).hexdigest()
         if hmac.compare_digest(expected, signature):
             return True, None
         else:
             return False, "HMAC signature verification failed"
-    else:
-        return False, f"Unknown algorithm: {algorithm}"
 
 
 def is_tool_signed(tool_path: str) -> bool:

@@ -15,7 +15,7 @@ def handle_hook(agent, arg, context) -> Optional[str]:
         _hook_mgr = HookManager()
         if ctx:
             ctx.hook_manager = _hook_mgr
-    from ..hooks import render_hooks_table, HookEvent
+    from ..hooks import render_hooks_table
     sub = arg.strip().split(None, 1)
     if not sub or sub[0] == "list":
         render_hooks_table(_hook_console, _hook_mgr.list_hooks())
@@ -143,13 +143,13 @@ def _handle_evolve_command(agent, arg: str):
         logger.debug("gepa_skill_snapshot_failed", exc_info=True)
 
     if dry_run:
-        print(f"\n  [GEPA] Dry run — previewing evolution plan...")
+        print("\n  [GEPA] Dry run — previewing evolution plan...")
     else:
         print(f"\n  [GEPA] Starting skill evolution (max {max_iterations} iterations)...")
         if skill_ids:
             print(f"  Target skills: {', '.join(skill_ids)}")
         else:
-            print(f"  Target: all skills in library")
+            print("  Target: all skills in library")
 
     try:
         result = run_evolution(
@@ -164,7 +164,7 @@ def _handle_evolve_command(agent, arg: str):
     if result.get("error"):
         print(f"  [GEPA] Error: {result['error']}")
     elif result.get("dry_run"):
-        print(f"\n  [GEPA] Dry-run results:")
+        print("\n  [GEPA] Dry-run results:")
         print(f"  Skills to evolve: {len(result.get('skills', []))}")
         for sid in result.get("skills", []):
             name = store.index.get(sid, {}).get("name", sid) if store else sid
@@ -179,7 +179,7 @@ def _handle_evolve_command(agent, arg: str):
         best_score = result.get("best_score", 0)
         updated = result.get("skills_updated", 0)
 
-        print(f"\n  [GEPA] Evolution complete!")
+        print("\n  [GEPA] Evolution complete!")
         print(f"  Score: {seed_score:.3f} -> {best_score:.3f} (+{improvement:.3f})")
         print(f"  Skills updated: {updated}")
         print(f"  Iterations: {result.get('iterations', 0)}, Evals: {result.get('total_evals', 0)}")
@@ -188,7 +188,7 @@ def _handle_evolve_command(agent, arg: str):
         print(f"  Run saved to: {result.get('run_dir', 'N/A')}")
 
         if updated > 0 and before_procedures:
-            print(f"\n  --- Procedure diffs ---")
+            print("\n  --- Procedure diffs ---")
             try:
                 store_after = SkillStore(storage_path="./aura_data/skill_library")
                 for sid, old_proc in before_procedures.items():
@@ -223,7 +223,7 @@ def _handle_evolve_command(agent, arg: str):
                         if len(diff_lines) > 40:
                             print(f"    ... ({len(diff_lines) - 40} more lines)")
                     else:
-                        print(f"    (no textual changes)")
+                        print("    (no textual changes)")
             except (OSError, KeyError, TypeError, AttributeError) as e:
                 print(f"  (Could not generate diff: {e})")
 

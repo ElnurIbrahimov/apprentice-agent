@@ -6,7 +6,8 @@ Requires: pip install pytesseract pillow
 
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.auth import require_api_key
 from api.utils import safe_error_detail
@@ -39,6 +40,7 @@ async def ocr_image(body: dict):
     try:
         import base64
         import io
+
         from PIL import Image
 
         def _decode_and_ocr():

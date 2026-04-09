@@ -1,7 +1,7 @@
 """System control tool for volume, brightness, apps, and system info."""
 
-import subprocess
 import ctypes
+import subprocess
 from typing import Optional
 
 
@@ -31,7 +31,8 @@ class SystemControlTool:
     def _get_volume_interface(self):
         """Lazy load volume interface."""
         if self._volume_interface is None:
-            from ctypes import cast, POINTER
+            from ctypes import POINTER, cast
+
             from comtypes import CLSCTX_ALL
             from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 

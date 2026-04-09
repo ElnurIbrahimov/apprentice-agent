@@ -8,17 +8,17 @@ Each specialist is optimized for a specific domain:
 - SearcherAgent: Code search, definitions, references, project structure
 """
 
-from .research import ResearchAgent
-from .coder import CoderAgent
 from .analyst import AnalystAgent
+from .coder import CoderAgent
 from .creative import CreativeAgent
+from .research import ResearchAgent
 from .searcher import SearcherAgent
 
 __all__ = [
-    "ResearchAgent",
-    "CoderAgent",
     "AnalystAgent",
+    "CoderAgent",
     "CreativeAgent",
+    "ResearchAgent",
     "SearcherAgent",
 ]
 

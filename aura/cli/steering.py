@@ -1,9 +1,10 @@
 # aura/cli/steering.py
 """Mid-turn steering — queue user messages while agent is running."""
 from __future__ import annotations
+
 import threading
 from collections import deque
-from typing import Optional, List
+from typing import List, Optional
 
 
 class SteeringQueue:

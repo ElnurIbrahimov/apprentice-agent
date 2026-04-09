@@ -13,15 +13,13 @@ Created: 2026-03-16
 """
 
 import atexit
-import json
 import logging
 import math
 import re
 import sqlite3
 import threading
-import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -30,6 +28,13 @@ try:
     import numpy as np
 except ImportError:
     np = None  # type: ignore[assignment]
+
+try:
+    import faiss
+    _FAISS_AVAILABLE = True
+except ImportError:
+    faiss = None  # type: ignore[assignment]
+    _FAISS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +209,13 @@ class MemoryStore:
         self._init_db()
         atexit.register(self.close)
 
+        # FAISS vector index (lazy-built on first search_semantic call)
+        self._faiss_index: Optional[Any] = None  # faiss.IndexIDMap
+        self._faiss_id_map: Dict[int, str] = {}  # faiss int64 id → memory_id string
+        self._faiss_str_map: Dict[str, int] = {}  # memory_id string → faiss int64 id
+        self._faiss_next_id: int = 0
+        self._faiss_built = False
+
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
@@ -259,6 +271,9 @@ class MemoryStore:
             except Exception:
                 conn.rollback()
                 raise
+        # Sync FAISS index
+        if embedding is not None:
+            self._faiss_add(record.id, embedding)
         return record.id
 
     def get(self, memory_id: str) -> Optional[MemoryRecord]:
@@ -324,6 +339,8 @@ class MemoryStore:
             except Exception:
                 conn.rollback()
                 raise
+        if cur.rowcount > 0:
+            self._faiss_add(memory_id, embedding)
         return cur.rowcount > 0
 
     def delete(self, memory_id: str) -> bool:
@@ -336,6 +353,8 @@ class MemoryStore:
             except Exception:
                 conn.rollback()
                 raise
+        if cur.rowcount > 0:
+            self._faiss_remove(memory_id)
         return cur.rowcount > 0
 
     def touch(self, memory_id: str) -> None:
@@ -354,6 +373,104 @@ class MemoryStore:
                 raise
 
     # ------------------------------------------------------------------
+    # FAISS vector index
+    # ------------------------------------------------------------------
+
+    def _build_faiss_index(self) -> bool:
+        """Build (or rebuild) the FAISS index from all embeddings in the DB.
+
+        Returns True if FAISS is available and the index was built.
+        """
+        if not _FAISS_AVAILABLE or np is None:
+            return False
+
+        emb_idx = _COLUMNS.index("embedding")
+        id_idx = _COLUMNS.index("id")
+
+        with self._lock:
+            rows = self._get_conn().execute(
+                f"SELECT {','.join(_COLUMNS)} FROM memories WHERE embedding IS NOT NULL"
+            ).fetchall()
+
+        if not rows:
+            # Empty index — detect dimension from first future insert
+            self._faiss_built = True
+            return True
+
+        # Detect dimension from first row
+        first_vec = _blob_to_float32(rows[0][emb_idx])
+        dim = first_vec.shape[0]
+
+        # IndexFlatIP = inner product on L2-normalized vectors = cosine similarity
+        base_index = faiss.IndexFlatIP(dim)
+        index = faiss.IndexIDMap(base_index)
+
+        vectors = []
+        ids = []
+        self._faiss_id_map.clear()
+        self._faiss_str_map.clear()
+        self._faiss_next_id = 0
+
+        for row in rows:
+            blob = row[emb_idx]
+            if not blob:
+                continue
+            vec = _blob_to_float32(blob)
+            if vec.shape[0] != dim:
+                continue
+            norm = np.linalg.norm(vec)
+            if norm < 1e-8:
+                continue
+            vec = vec / norm  # L2-normalize for cosine via IP
+
+            mem_id = row[id_idx]
+            faiss_id = self._faiss_next_id
+            self._faiss_next_id += 1
+            self._faiss_id_map[faiss_id] = mem_id
+            self._faiss_str_map[mem_id] = faiss_id
+
+            vectors.append(vec)
+            ids.append(faiss_id)
+
+        if vectors:
+            mat = np.array(vectors, dtype=np.float32)
+            index.add_with_ids(mat, np.array(ids, dtype=np.int64))
+
+        self._faiss_index = index
+        self._faiss_built = True
+        logger.info(f"[MemoryStore] FAISS index built: {len(vectors)} vectors, dim={dim}")
+        return True
+
+    def _faiss_add(self, memory_id: str, embedding: np.ndarray) -> None:
+        """Add or update a single vector in the FAISS index."""
+        if not self._faiss_built or self._faiss_index is None:
+            return
+        # Remove old entry if updating
+        if memory_id in self._faiss_str_map:
+            self._faiss_remove(memory_id)
+
+        vec = embedding.astype(np.float32)
+        norm = np.linalg.norm(vec)
+        if norm < 1e-8:
+            return
+        vec = (vec / norm).reshape(1, -1)
+
+        faiss_id = self._faiss_next_id
+        self._faiss_next_id += 1
+        self._faiss_id_map[faiss_id] = memory_id
+        self._faiss_str_map[memory_id] = faiss_id
+        self._faiss_index.add_with_ids(vec, np.array([faiss_id], dtype=np.int64))
+
+    def _faiss_remove(self, memory_id: str) -> None:
+        """Remove a vector from the FAISS index."""
+        if not self._faiss_built or self._faiss_index is None:
+            return
+        faiss_id = self._faiss_str_map.pop(memory_id, None)
+        if faiss_id is not None:
+            self._faiss_id_map.pop(faiss_id, None)
+            self._faiss_index.remove_ids(np.array([faiss_id], dtype=np.int64))
+
+    # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
 
@@ -364,11 +481,71 @@ class MemoryStore:
         lifecycle_states: Optional[List[str]] = None,
         user_id: Optional[str] = None,
     ) -> List[Tuple[MemoryRecord, float]]:
-        """Cosine similarity search on embedding BLOBs using chunked iteration.
+        """Cosine similarity search using FAISS (with brute-force fallback).
 
         Returns list of (record, similarity_score) sorted descending.
         Only considers memories with non-NULL embeddings.
         """
+        # Try FAISS path first
+        if _FAISS_AVAILABLE:
+            if not self._faiss_built:
+                self._build_faiss_index()
+            if self._faiss_index is not None and self._faiss_index.ntotal > 0:
+                return self._search_semantic_faiss(query_embedding, k, lifecycle_states, user_id)
+
+        # Fallback: brute-force linear scan
+        return self._search_semantic_brute(query_embedding, k, lifecycle_states, user_id)
+
+    def _search_semantic_faiss(
+        self,
+        query_embedding: np.ndarray,
+        k: int,
+        lifecycle_states: Optional[List[str]],
+        user_id: Optional[str],
+    ) -> List[Tuple[MemoryRecord, float]]:
+        """FAISS-accelerated cosine search with post-filtering."""
+        q = query_embedding.astype(np.float32)
+        q_norm = np.linalg.norm(q)
+        if q_norm < 1e-8:
+            return []
+        q_unit = (q / q_norm).reshape(1, -1)
+
+        states = set(lifecycle_states or ["candidate", "stable", "summary"])
+
+        # Over-fetch to account for post-filtering (3x k, min 50)
+        fetch_k = min(max(k * 3, 50), self._faiss_index.ntotal)
+        scores, ids = self._faiss_index.search(q_unit, fetch_k)
+
+        results: List[Tuple[MemoryRecord, float]] = []
+        for i in range(ids.shape[1]):
+            faiss_id = int(ids[0][i])
+            if faiss_id < 0:  # FAISS returns -1 for missing
+                continue
+            sim = float(scores[0][i])
+            mem_id = self._faiss_id_map.get(faiss_id)
+            if not mem_id:
+                continue
+            record = self.get(mem_id)
+            if not record:
+                continue
+            if record.lifecycle_state not in states:
+                continue
+            if user_id and record.user_id != user_id:
+                continue
+            results.append((record, sim))
+            if len(results) >= k:
+                break
+
+        return results
+
+    def _search_semantic_brute(
+        self,
+        query_embedding: np.ndarray,
+        k: int,
+        lifecycle_states: Optional[List[str]],
+        user_id: Optional[str],
+    ) -> List[Tuple[MemoryRecord, float]]:
+        """Brute-force linear scan fallback (no FAISS)."""
         states = lifecycle_states or ["candidate", "stable", "summary"]
         state_placeholders = ",".join(["?"] * len(states))
 
@@ -380,7 +557,6 @@ class MemoryStore:
             sql += " AND user_id=?"
             params.append(user_id)
 
-        # Pre-compute query unit vector
         q = query_embedding.astype(np.float32)
         q_norm = np.linalg.norm(q)
         if q_norm < 1e-8:
@@ -390,9 +566,6 @@ class MemoryStore:
         emb_idx = _COLUMNS.index("embedding")
         scored: List[Tuple[MemoryRecord, float]] = []
 
-        # Fetch all rows under lock to prevent cursor race conditions.
-        # The cursor must not be used after the lock is released because
-        # concurrent writes could invalidate it.
         with self._lock:
             cursor = self._get_conn().execute(sql, params)
             all_rows = cursor.fetchall()
@@ -644,11 +817,15 @@ class MemoryStore:
         now = datetime.now().isoformat()
         with self._lock:
             conn = self._get_conn()
-            conn.execute(
-                "INSERT OR REPLACE INTO user_profile(user_id, profile, updated_at) VALUES(?,?,?)",
-                (user_id, profile_json, now),
-            )
-            conn.commit()
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO user_profile(user_id, profile, updated_at) VALUES(?,?,?)",
+                    (user_id, profile_json, now),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def load_user_profile(self, user_id: str) -> Optional[str]:
         """Load user profile JSON string. Returns None if not found."""
@@ -756,7 +933,7 @@ def get_memory_store(db_path: Optional[str] = None) -> MemoryStore:
 
 
 __all__ = [
-    "MemoryStore",
     "MemoryRecord",
+    "MemoryStore",
     "get_memory_store",
 ]

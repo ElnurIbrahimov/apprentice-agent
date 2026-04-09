@@ -1,12 +1,12 @@
 # aura/cli/mood_display.py
 """Emotional context display — mood indicator, /mood command, dream insights."""
 from __future__ import annotations
-from typing import Dict, Optional, Tuple
+
+from typing import Dict, Optional
+
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
-
 
 # PAD mood to emoji mapping (Pleasure, Arousal, Dominance)
 _MOOD_EMOJIS = {
@@ -131,7 +131,7 @@ def render_mood_detail(console: Console, emotional_state: Dict) -> None:
     # Recent influences
     influences = emotional_state.get("recent_influences", emotional_state.get("triggers", []))
     if influences:
-        text.append(f"\n  Recent influences:\n", style="bold")
+        text.append("\n  Recent influences:\n", style="bold")
         for inf in influences[:3]:
             text.append(f"    \u2192 {inf}\n", style="dim")
 

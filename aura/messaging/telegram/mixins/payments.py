@@ -11,7 +11,7 @@ import time as _time
 from aura.messaging.telegram.constants import PREMIUM_TIERS
 
 try:
-    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Update
     from telegram.ext import ContextTypes
     TELEGRAM_AVAILABLE = True
 except ImportError:

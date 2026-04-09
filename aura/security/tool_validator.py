@@ -16,7 +16,21 @@ ALLOWED_TOOL_IMPORTS = {
     "pathlib", "collections", "enum", "abc", "math",
     "itertools", "functools", "operator", "string",
     "urllib.parse",  # urllib.parse is safe (URL encoding/decoding)
-    "aura",  # Allow importing aura.tools.* for VOYAGER tool composition
+    "aura.tools",  # Allow importing aura.tools.* for VOYAGER tool composition (NOT aura.security/config/etc)
+}
+
+# SECURITY: aura.tools submodules that can execute arbitrary code or commands.
+# Custom tools must NOT be allowed to import these — they would bypass all
+# safety checks (AST validation, sandbox routing, injection detection).
+_BLOCKED_TOOL_SUBMODULES = {
+    "aura.tools.shell_executor",
+    "aura.tools.code_executor",
+    "aura.tools.code_edit",
+    "aura.tools.browser",
+    "aura.tools.database_tool",
+    "aura.tools.deploy_tool",
+    "aura.tools.system_control",
+    "aura.tools.windows_control",
 }
 
 # Forbidden patterns that indicate potentially malicious code
@@ -112,6 +126,32 @@ def _check_fstring_evasion(tree: ast.AST, forbidden: list, source: str) -> Tuple
     return True, ""
 
 
+def _is_import_allowed(module_name: str) -> bool:
+    """Check if a module import is in the allowlist.
+
+    Supports both exact matches (e.g. 'json') and prefix matches
+    (e.g. 'aura.tools' allows 'aura.tools.browser' but not 'aura.security').
+
+    SECURITY: Even within aura.tools.*, certain dangerous submodules
+    (shell_executor, code_executor, browser, etc.) are explicitly blocked.
+    """
+    # Block dangerous aura.tools submodules even though aura.tools is allowed
+    for blocked in _BLOCKED_TOOL_SUBMODULES:
+        if module_name == blocked or module_name.startswith(blocked + "."):
+            return False
+
+    for allowed in ALLOWED_TOOL_IMPORTS:
+        if module_name == allowed:
+            return True
+        if module_name.startswith(allowed + "."):
+            return True
+    # Also check top-level module for simple stdlib imports
+    module_base = module_name.split(".")[0]
+    if module_base in ALLOWED_TOOL_IMPORTS:
+        return True
+    return False
+
+
 def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
     """
     Validate custom tool code before dynamic import.
@@ -152,21 +192,22 @@ def validate_custom_tool_code(code: str, tool_path: str) -> Tuple[bool, str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                module_base = alias.name.split('.')[0]
-                if module_base not in ALLOWED_TOOL_IMPORTS:
+                if not _is_import_allowed(alias.name):
                     return False, f"Forbidden import '{alias.name}' in {tool_path}"
 
         elif isinstance(node, ast.ImportFrom):
             if node.module:
-                module_base = node.module.split('.')[0]
-                if module_base not in ALLOWED_TOOL_IMPORTS:
+                if not _is_import_allowed(node.module):
                     return False, f"Forbidden import 'from {node.module}' in {tool_path}"
 
         # Block dynamic import calls: importlib.import_module(), __import__(), etc.
         elif isinstance(node, ast.Call):
             func = node.func
             # Check for direct calls: __import__("os"), eval("code"), exec("code")
-            if isinstance(func, ast.Name) and func.id in ("__import__", "eval", "exec", "compile", "getattr", "delattr"):
+            if isinstance(func, ast.Name) and func.id in (
+                "__import__", "eval", "exec", "compile", "getattr", "delattr", "setattr",
+                "type", "vars", "dir",
+            ):
                 return False, f"Forbidden call '{func.id}()' in {tool_path}"
             # Check for attribute calls: importlib.import_module(), builtins.__import__()
             if isinstance(func, ast.Attribute) and func.attr in ("import_module", "__import__", "system", "popen", "call", "run", "Popen"):
@@ -239,20 +280,18 @@ def validate_script_code(code: str, source: str) -> tuple:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                module_base = alias.name.split('.')[0]
-                if module_base not in ALLOWED_TOOL_IMPORTS:
+                if not _is_import_allowed(alias.name):
                     return False, f"Forbidden import '{alias.name}' in {source}"
 
         elif isinstance(node, ast.ImportFrom):
             if node.module:
-                module_base = node.module.split('.')[0]
-                if module_base not in ALLOWED_TOOL_IMPORTS:
+                if not _is_import_allowed(node.module):
                     return False, f"Forbidden import 'from {node.module}' in {source}"
 
         elif isinstance(node, ast.Call):
             func = node.func
             if isinstance(func, ast.Name) and func.id in (
-                "__import__", "eval", "exec", "compile", "getattr", "delattr",
+                "__import__", "eval", "exec", "compile", "getattr", "delattr", "setattr",
                 "type", "vars", "dir",
             ):
                 return False, f"Forbidden call '{func.id}()' in {source}"

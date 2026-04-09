@@ -10,7 +10,7 @@ Prevents: API keys leaked to memory, PII in logs, secrets in tool outputs.
 import logging
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 

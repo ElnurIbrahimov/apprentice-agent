@@ -7,10 +7,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from aura.routing.profiles import ProfileStore, DIMENSIONS
 from aura.routing.classifier import extract_features, score_task
-from aura.routing.matcher import match, PREFERENCE_WEIGHTS
 from aura.routing.conversation import ConversationTracker
+from aura.routing.matcher import match
+from aura.routing.profiles import DIMENSIONS, ProfileStore
 
 
 @dataclass

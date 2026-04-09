@@ -210,7 +210,12 @@ class MemoryWriteGate:
 
         # 0a. Taint check: redact secrets before storing (OpenFang-inspired)
         try:
-            from aura.security.taint_tracker import scan_for_secrets, redact, highest_taint, TaintLabel
+            from aura.security.taint_tracker import (
+                TaintLabel,
+                highest_taint,
+                redact,
+                scan_for_secrets,
+            )
             taint_matches = scan_for_secrets(candidate.content, check_pii=False)
             if taint_matches:
                 taint_level = highest_taint(taint_matches)
@@ -442,12 +447,19 @@ class MemoryWriteGate:
 
     def _record_hash(self, c: MemoryCandidate) -> None:
         with self._hash_lock:
-            self._recent_hashes[c.content_hash] = time.time()
-            # Evict oldest half when cap exceeded (not clear-all, to preserve dedup)
+            now = time.time()
+            self._recent_hashes[c.content_hash] = now
+            # Evict by TTL first, then by oldest insertion if still over cap
             if len(self._recent_hashes) > 10000:
-                evict_count = len(self._recent_hashes) // 2
-                for k in list(self._recent_hashes.keys())[:evict_count]:
-                    del self._recent_hashes[k]
+                # Purge expired entries first
+                stale = [h for h, ts in self._recent_hashes.items() if now - ts > self._RECENT_TTL]
+                for h in stale:
+                    del self._recent_hashes[h]
+                # If still over cap, evict oldest half by insertion order
+                if len(self._recent_hashes) > 10000:
+                    evict_count = len(self._recent_hashes) // 2
+                    for k in list(self._recent_hashes.keys())[:evict_count]:
+                        del self._recent_hashes[k]
 
     def _decide(
         self,
@@ -497,10 +509,10 @@ def get_write_gate() -> MemoryWriteGate:
 
 
 __all__ = [
-    "MemoryWriteGate",
     "MemoryCandidate",
     "MemoryDecision",
-    "MemoryLifecycleState",
     "MemoryDecisionKind",
+    "MemoryLifecycleState",
+    "MemoryWriteGate",
     "get_write_gate",
 ]

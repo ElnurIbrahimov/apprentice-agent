@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,8 @@ class ChangeDetector:
         Returns (changed, difference_ratio).
         """
         try:
-            from PIL import Image, ImageChops
             import numpy as np
+            from PIL import Image, ImageChops
         except ImportError:
             # Fallback: hash-based comparison
             return self._hash_compare(current_frame)
@@ -118,7 +118,7 @@ class ScreenReaderTool:
         self._screenshot_dir = Path(__file__).parent.parent.parent / "screenshots"
         self._screenshot_dir.mkdir(parents=True, exist_ok=True)
 
-    def _capture_screen(self, region: dict = None):
+    def _capture_screen(self, region: dict | None = None):
         """Capture the screen (or region) using mss. Returns (screenshot, path)."""
         try:
             import mss
@@ -346,7 +346,7 @@ class ScreenReaderTool:
             "response": f"Active window: {title}" + (f" ({process})" if process else "")
         }
 
-    def watch(self, keywords: List[str] = None, interval_s: float = 3.0,
+    def watch(self, keywords: List[str] | None = None, interval_s: float = 3.0,
               duration_s: float = 30.0) -> dict:
         """Watch screen for keyword appearance."""
         if not keywords:

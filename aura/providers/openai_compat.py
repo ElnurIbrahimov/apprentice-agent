@@ -57,7 +57,7 @@ class OpenAICompatProvider(BaseProvider):
         }
 
     def _build_body(self, model: str, messages: list[dict], stream: bool,
-                    options: dict = None) -> dict:
+                    options: dict | None = None) -> dict:
         """Build OpenAI Chat Completions request body."""
         # Convert ollama message format to OpenAI format
         oai_messages = []
@@ -84,7 +84,7 @@ class OpenAICompatProvider(BaseProvider):
         return body
 
     def chat(self, model: str, messages: list[dict], stream: bool = False,
-             options: dict = None, tools: list | None = None) -> dict | Iterator[dict]:
+             options: dict | None = None, tools: list | None = None) -> dict | Iterator[dict]:
         if not self.is_configured():
             raise ConnectionError(
                 f"{self._display_name} API key not set. "
@@ -155,69 +155,72 @@ class OpenAICompatProvider(BaseProvider):
         accumulated_tool_calls = {}  # index -> {id, type, function: {name, arguments}}
         resp.encoding = "utf-8"
 
-        for raw_line in resp.iter_lines():
-            if isinstance(raw_line, bytes):
-                line = raw_line.decode("utf-8", errors="replace")
-            else:
-                line = raw_line
+        try:
+            for raw_line in resp.iter_lines():
+                if isinstance(raw_line, bytes):
+                    line = raw_line.decode("utf-8", errors="replace")
+                else:
+                    line = raw_line
 
-            if not line or not line.startswith("data: "):
-                continue
+                if not line or not line.startswith("data: "):
+                    continue
 
-            data_str = line[6:]
-            if data_str.strip() == "[DONE]":
-                break
+                data_str = line[6:]
+                if data_str.strip() == "[DONE]":
+                    break
 
-            try:
-                event = json.loads(data_str)
-                choice = event.get("choices", [{}])[0]
-                delta = choice.get("delta", {})
-                content = delta.get("content", "")
+                try:
+                    event = json.loads(data_str)
+                    choice = event.get("choices", [{}])[0]
+                    delta = choice.get("delta", {})
+                    content = delta.get("content", "")
 
-                # Accumulate tool_calls from streaming deltas
-                delta_tool_calls = delta.get("tool_calls")
-                if delta_tool_calls:
-                    for tc in delta_tool_calls:
-                        idx = tc.get("index", 0)
-                        if idx not in accumulated_tool_calls:
-                            accumulated_tool_calls[idx] = {
-                                "id": tc.get("id", ""),
-                                "type": tc.get("type", "function"),
-                                "function": {"name": "", "arguments": ""},
-                            }
-                        entry = accumulated_tool_calls[idx]
-                        if tc.get("id"):
-                            entry["id"] = tc["id"]
-                        func = tc.get("function", {})
-                        if func.get("name"):
-                            entry["function"]["name"] += func["name"]
-                        if func.get("arguments"):
-                            entry["function"]["arguments"] += func["arguments"]
+                    # Accumulate tool_calls from streaming deltas
+                    delta_tool_calls = delta.get("tool_calls")
+                    if delta_tool_calls:
+                        for tc in delta_tool_calls:
+                            idx = tc.get("index", 0)
+                            if idx not in accumulated_tool_calls:
+                                accumulated_tool_calls[idx] = {
+                                    "id": tc.get("id", ""),
+                                    "type": tc.get("type", "function"),
+                                    "function": {"name": "", "arguments": ""},
+                                }
+                            entry = accumulated_tool_calls[idx]
+                            if tc.get("id"):
+                                entry["id"] = tc["id"]
+                            func = tc.get("function", {})
+                            if func.get("name"):
+                                entry["function"]["name"] += func["name"]
+                            if func.get("arguments"):
+                                entry["function"]["arguments"] += func["arguments"]
 
-                # Some providers include usage in the final chunk
-                usage = event.get("usage")
-                if usage:
-                    input_tokens = usage.get("prompt_tokens", input_tokens)
-                    output_tokens = usage.get("completion_tokens", output_tokens)
+                    # Some providers include usage in the final chunk
+                    usage = event.get("usage")
+                    if usage:
+                        input_tokens = usage.get("prompt_tokens", input_tokens)
+                        output_tokens = usage.get("completion_tokens", output_tokens)
 
-                if content:
-                    yield {
-                        "message": {"role": "assistant", "content": content},
-                        "done": False,
-                    }
-            except json.JSONDecodeError:
-                continue
+                    if content:
+                        yield {
+                            "message": {"role": "assistant", "content": content},
+                            "done": False,
+                        }
+                except json.JSONDecodeError:
+                    continue
 
-        # Final done chunk
-        final_msg = {"role": "assistant", "content": ""}
-        if accumulated_tool_calls:
-            final_msg["tool_calls"] = [
-                accumulated_tool_calls[i]
-                for i in sorted(accumulated_tool_calls.keys())
-            ]
-        yield {
-            "message": final_msg,
-            "done": True,
-            "prompt_eval_count": input_tokens,
-            "eval_count": output_tokens,
-        }
+            # Final done chunk
+            final_msg = {"role": "assistant", "content": ""}
+            if accumulated_tool_calls:
+                final_msg["tool_calls"] = [
+                    accumulated_tool_calls[i]
+                    for i in sorted(accumulated_tool_calls.keys())
+                ]
+            yield {
+                "message": final_msg,
+                "done": True,
+                "prompt_eval_count": input_tokens,
+                "eval_count": output_tokens,
+            }
+        finally:
+            resp.close()

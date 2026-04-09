@@ -19,11 +19,9 @@ import logging
 import os
 import re
 import threading
-import time
-import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set
+from typing import Dict, List, Optional, Set
 
 try:
     import ollama

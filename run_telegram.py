@@ -204,7 +204,7 @@ async def main():
         print("Or create a .env file with:")
         print("  TELEGRAM_BOT_TOKEN=your_token_here")
         print("")
-        return
+        sys.exit(1)
 
     logger.info("=" * 60)
     logger.info("  AURA Telegram Bot starting")

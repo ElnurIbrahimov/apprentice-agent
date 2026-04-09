@@ -1,19 +1,18 @@
 # aura/cli/fleet.py
 """Parallel sub-agent fleet — decompose tasks and run in parallel."""
 from __future__ import annotations
+
 import threading
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Dict, Optional, Callable
+from typing import Callable, Dict, List, Optional
+
 from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
-from rich.table import Table
 from rich.live import Live
-from rich.progress import Progress, BarColumn, TextColumn, SpinnerColumn
+from rich.panel import Panel
+from rich.table import Table
 
 
 class SubAgentStatus(str, Enum):

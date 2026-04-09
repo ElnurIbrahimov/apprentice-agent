@@ -4,25 +4,25 @@ Coordinates specialist agents to handle complex tasks through
 routing, collaboration, and response synthesis.
 """
 
+import concurrent.futures
 import logging
 import time
-import concurrent.futures
 from typing import Any, Callable, Dict, List, Optional
 
+from .base_agent import BaseSpecialist
 from .protocol import (
     AgentMessage,
     AgentResult,
     CollaborationMode,
+    ConversationTurn,
     RoutingDecision,
-    ConversationTurn
 )
-from .base_agent import BaseSpecialist
 from .router import IntentRouter
 from .specialists import (
-    ResearchAgent,
-    CoderAgent,
     AnalystAgent,
+    CoderAgent,
     CreativeAgent,
+    ResearchAgent,
     SearcherAgent,
 )
 

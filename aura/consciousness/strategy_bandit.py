@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +376,7 @@ class StrategyBandit:
         self.enabled = enabled
         self.epsilon = epsilon
         self._lock = threading.Lock()
+        self._db_lock = threading.Lock()  # Separate lock for DB I/O to avoid stalling non-DB ops
         self._classifier = ProblemClassifier()
         self._reward_computer = CompositeRewardComputer()
 
@@ -620,7 +621,10 @@ class StrategyBandit:
 
         composite_reward = self._reward_computer.compute(all_metrics)
 
-        with self._lock:
+        # Use dedicated DB lock (not self._lock) to avoid blocking non-DB operations.
+        # SQLite busy_timeout handles inter-process contention; this lock handles
+        # intra-process serialization of writes.
+        with self._db_lock:
             conn = sqlite3.connect(self._db_path)
             conn.execute("PRAGMA busy_timeout = 5000")
             try:
@@ -701,7 +705,7 @@ class StrategyBandit:
 
         feedback = max(0.0, min(1.0, float(feedback)))
 
-        with self._lock:
+        with self._db_lock:
             conn = sqlite3.connect(self._db_path)
             conn.execute("PRAGMA busy_timeout = 5000")
             try:
@@ -775,7 +779,7 @@ class StrategyBandit:
         now = time.time()
         decay_constant = math.log(2) / (half_life_days * 86400)
 
-        with self._lock:
+        with self._db_lock:
             conn = sqlite3.connect(self._db_path)
             try:
                 rows = conn.execute(
@@ -812,7 +816,7 @@ class StrategyBandit:
         Returns:
             Dict mapping category names to lists of arm stat dicts.
         """
-        with self._lock:
+        with self._db_lock:
             conn = sqlite3.connect(self._db_path)
             try:
                 rows = conn.execute(
@@ -839,7 +843,7 @@ class StrategyBandit:
 
     def get_best_strategy(self, category: ProblemCategory) -> Optional[str]:
         """Get the strategy with the highest mean reward for a category."""
-        with self._lock:
+        with self._db_lock:
             conn = sqlite3.connect(self._db_path)
             try:
                 row = conn.execute(
@@ -856,49 +860,50 @@ class StrategyBandit:
 
     def get_stats_summary(self) -> Dict:
         """Get a summary of bandit state for monitoring/debugging."""
-        conn = sqlite3.connect(self._db_path)
-        try:
-            total_outcomes = conn.execute(
-                "SELECT COUNT(*) FROM strategy_outcomes"
-            ).fetchone()[0]
+        with self._db_lock:
+            conn = sqlite3.connect(self._db_path)
+            try:
+                total_outcomes = conn.execute(
+                    "SELECT COUNT(*) FROM strategy_outcomes"
+                ).fetchone()[0]
 
-            total_arms = conn.execute(
-                "SELECT COUNT(*) FROM strategy_arms"
-            ).fetchone()[0]
+                total_arms = conn.execute(
+                    "SELECT COUNT(*) FROM strategy_arms"
+                ).fetchone()[0]
 
-            # Category breakdown
-            category_counts = conn.execute(
-                "SELECT category, COUNT(*) FROM strategy_outcomes GROUP BY category"
-            ).fetchall()
+                # Category breakdown
+                category_counts = conn.execute(
+                    "SELECT category, COUNT(*) FROM strategy_outcomes GROUP BY category"
+                ).fetchall()
 
-            # Best per category
-            best_per_category = {}
-            for cat in ProblemCategory:
-                row = conn.execute(
-                    """SELECT strategy, alpha / (alpha + beta) as mean_reward, total_pulls
-                       FROM strategy_arms
-                       WHERE category = ? AND total_pulls > 0
-                       ORDER BY mean_reward DESC
-                       LIMIT 1""",
-                    (cat.value,),
-                ).fetchone()
-                if row:
-                    best_per_category[cat.value] = {
-                        "strategy": row[0],
-                        "mean_reward": round(row[1], 3),
-                        "pulls": row[2],
-                    }
+                # Best per category
+                best_per_category = {}
+                for cat in ProblemCategory:
+                    row = conn.execute(
+                        """SELECT strategy, alpha / (alpha + beta) as mean_reward, total_pulls
+                           FROM strategy_arms
+                           WHERE category = ? AND total_pulls > 0
+                           ORDER BY mean_reward DESC
+                           LIMIT 1""",
+                        (cat.value,),
+                    ).fetchone()
+                    if row:
+                        best_per_category[cat.value] = {
+                            "strategy": row[0],
+                            "mean_reward": round(row[1], 3),
+                            "pulls": row[2],
+                        }
 
-            return {
-                "enabled": self.enabled,
-                "epsilon": self.epsilon,
-                "total_outcomes": total_outcomes,
-                "total_arms": total_arms,
-                "category_counts": dict(category_counts),
-                "best_per_category": best_per_category,
-            }
-        finally:
-            conn.close()
+                return {
+                    "enabled": self.enabled,
+                    "epsilon": self.epsilon,
+                    "total_outcomes": total_outcomes,
+                    "total_arms": total_arms,
+                    "category_counts": dict(category_counts),
+                    "best_per_category": best_per_category,
+                }
+            finally:
+                conn.close()
 
 
 # ============================================================================

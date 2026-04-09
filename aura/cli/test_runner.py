@@ -1,11 +1,13 @@
 # aura/cli/test_runner.py
 """Test runner integration — /test with formatted output and auto-fix loop."""
 from __future__ import annotations
-import subprocess
+
 import re
+import subprocess
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from typing import Dict, List
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -14,6 +16,7 @@ from rich.text import Text
 @dataclass
 class TestResult:
     """Parsed test execution result."""
+    __test__ = False  # Not a pytest test class
     passed: int = 0
     failed: int = 0
     skipped: int = 0
@@ -42,8 +45,8 @@ class TestResult:
 
 def run_tests(test_cmd: str, cwd: str = ".", timeout: int = 300) -> TestResult:
     """Run tests and return parsed results."""
-    import shlex
     import os
+    import shlex
     start = time.time()
     try:
         if os.name == "nt":
@@ -111,7 +114,7 @@ def render_test_results(console: Console, result: TestResult) -> None:
     console.print(Panel(text, title=f"[bold]{header}[/bold]", border_style=border, padding=(0, 1)))
 
     if result.failures:
-        console.print(f"\n[red]Failed tests:[/red]")
+        console.print("\n[red]Failed tests:[/red]")
         for f in result.failures[:5]:
             console.print(f"  [red]\u2717[/red] {f['test']}")
 
@@ -119,6 +122,7 @@ def render_test_results(console: Console, result: TestResult) -> None:
 @dataclass
 class TestHistory:
     """Track test results over a session."""
+    __test__ = False  # Not a pytest test class
     runs: List[TestResult] = field(default_factory=list)
 
     def add(self, result: TestResult) -> None:

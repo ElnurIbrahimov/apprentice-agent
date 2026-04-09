@@ -21,10 +21,10 @@ import logging
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -219,18 +219,18 @@ class DreamMode:
     def _print_patterns(self, patterns: dict) -> None:
         """Print pattern analysis results."""
         logger.debug(f"\n      Total actions: {patterns['total_actions']}")
-        logger.debug(f"\n      Tool Performance:")
+        logger.debug("\n      Tool Performance:")
         for tool, stats in patterns["tools"].items():
             logger.debug(f"        - {tool}: {stats['success_rate']}% success, "
                   f"avg confidence {stats['avg_confidence']}%")
 
-        logger.debug(f"\n      Confidence Distribution:")
+        logger.debug("\n      Confidence Distribution:")
         cd = patterns["confidence_distribution"]
         logger.debug(f"        - Low (<50%): {cd['low']}")
         logger.debug(f"        - Medium (50-80%): {cd['medium']}")
         logger.debug(f"        - High (>80%): {cd['high']}")
 
-        logger.debug(f"\n      Retry Analysis:")
+        logger.debug("\n      Retry Analysis:")
         ra = patterns["retry_analysis"]
         logger.debug(f"        - First attempt success: {ra['first_attempt_success']}")
         logger.debug(f"        - Needed retry: {ra['needed_retry']}")
@@ -758,7 +758,7 @@ class DreamConsolidator:
 
         # Emit telemetry
         try:
-            from aura.reliability.telemetry import emit, TelemetryKind
+            from aura.reliability.telemetry import TelemetryKind, emit
             emit(TelemetryKind.DREAM_CYCLE, user_id=user_id, extra=cycle.to_dict())
         except Exception:
             pass
@@ -868,6 +868,7 @@ class DreamConsolidator:
         merged_count = 0
         try:
             import numpy as np
+
             from aura.memory.store import _blob_to_float32
 
             # Get all candidate memories

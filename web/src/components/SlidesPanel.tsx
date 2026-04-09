@@ -158,6 +158,7 @@ export function SlidesPanel() {
   /* ── Update slide counter from iframe postMessage ── */
   useEffect(() => {
     const handler = (e: MessageEvent) => {
+      if (e.source !== iframeRef.current?.contentWindow) return;
       if (e.data?.type === 'slideChange') {
         setCurrentSlide(e.data.current ?? 1);
         setTotalSlides(e.data.total ?? 0);

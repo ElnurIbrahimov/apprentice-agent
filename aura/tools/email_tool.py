@@ -9,8 +9,8 @@ Supports:
 """
 
 import email
-import email.mime.text
 import email.mime.multipart
+import email.mime.text
 import hashlib
 import imaplib
 import json
@@ -21,11 +21,11 @@ import smtplib
 import sqlite3
 import ssl
 import threading
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from email.header import decode_header
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,9 @@ EMAIL_CONFIG_FILE = Path(__file__).parent.parent.parent / "data" / "email_config
 #  Optional imports — never break if missing
 # ---------------------------------------------------------------------------
 try:
+    from google.auth.transport.requests import Request as GRequest
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request as GRequest
     from googleapiclient.discovery import build as google_build
     HAS_GMAIL_API = True
 except ImportError:
@@ -199,7 +199,7 @@ class GmailBackend:
         return self._service
 
     def inbox(self, limit: int = 20, unread_only: bool = False,
-              label: str = None) -> List[Dict[str, Any]]:
+              label: str | None = None) -> List[Dict[str, Any]]:
         """Fetch messages from Gmail inbox."""
         service = self._get_service()
         query = "in:inbox"
@@ -297,7 +297,7 @@ class GmailBackend:
         return body_text, body_html, attachments
 
     def send(self, to: str, subject: str, body: str,
-             cc: str = None, bcc: str = None) -> Dict[str, Any]:
+             cc: str | None = None, bcc: str | None = None) -> Dict[str, Any]:
         """Send email via Gmail API."""
         import base64
 
@@ -572,9 +572,9 @@ class EmailTool:
             "response": f"Email not configured via IMAP. Gmail API: {gmail_status}. Use 'setup' action to configure IMAP."
         }
 
-    def setup(self, email_addr: str = None, app_password: str = None,
-              imap_server: str = None, smtp_server: str = None,
-              display_name: str = None) -> dict:
+    def setup(self, email_addr: str | None = None, app_password: str | None = None,
+              imap_server: str | None = None, smtp_server: str | None = None,
+              display_name: str | None = None) -> dict:
         """Configure email settings."""
         if not email_addr or not app_password:
             return {
@@ -715,7 +715,7 @@ class EmailTool:
     #  Gmail API convenience wrappers
     # ------------------------------------------------------------------
     def gmail_inbox(self, limit: int = 20, unread_only: bool = False,
-                    label: str = None) -> dict:
+                    label: str | None = None) -> dict:
         """Fetch inbox via Gmail API."""
         if not self.gmail_available:
             return {"success": False, "error": "Gmail API not configured. Place OAuth2 credentials at ~/.aura/gmail_creds.json"}
@@ -748,7 +748,7 @@ class EmailTool:
             return {"success": False, "error": f"Gmail read error: {e}"}
 
     def gmail_send(self, to: str, subject: str, body: str,
-                   cc: str = None, bcc: str = None) -> dict:
+                   cc: str | None = None, bcc: str | None = None) -> dict:
         """Send email via Gmail API."""
         if not self.gmail_available:
             return {"success": False, "error": "Gmail API not configured."}
@@ -800,7 +800,7 @@ class EmailTool:
         return self.read_email(message_id)
 
     def send(self, to: str, subject: str, body: str,
-             cc: str = None, bcc: str = None) -> dict:
+             cc: str | None = None, bcc: str | None = None) -> dict:
         """Send email — uses Gmail API if available, falls back to SMTP."""
         if self.gmail_available:
             return self.gmail_send(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
@@ -813,7 +813,7 @@ class EmailTool:
         return self.search_emails(query)
 
     def fetch_emails(self, folder: str = "INBOX", limit: int = 10,
-                     unread_only: bool = False, since_date: str = None) -> dict:
+                     unread_only: bool = False, since_date: str | None = None) -> dict:
         """Fetch emails from a folder via IMAP."""
         if not self._is_configured():
             return {"success": False, "error": "Email not configured. Use 'setup' first."}
@@ -920,7 +920,7 @@ class EmailTool:
             return {"success": False, "error": f"Read failed: {_sanitize_error(e)}"}
 
     def send_email(self, to: str, subject: str, body: str,
-                   cc: str = None, bcc: str = None) -> dict:
+                   cc: str | None = None, bcc: str | None = None) -> dict:
         """Send an email via SMTP."""
         if not self._is_configured():
             return {"success": False, "error": "Email not configured. Use 'setup' first."}
@@ -1080,7 +1080,7 @@ class EmailTool:
                 "success": True,
                 "folders": folder_names,
                 "count": len(folder_names),
-                "response": f"Mailbox folders:\n" + "\n".join(folder_names)
+                "response": "Mailbox folders:\n" + "\n".join(folder_names)
             }
 
         except Exception as e:
@@ -1113,7 +1113,7 @@ class EmailTool:
         }
 
     def download_attachment(self, email_id: str, attachment_index: int = 0,
-                            save_dir: str = None) -> dict:
+                            save_dir: str | None = None) -> dict:
         """Download an attachment from an email.
 
         For Gmail API: uses attachmentId directly.
@@ -1123,7 +1123,7 @@ class EmailTool:
             return self._gmail_download_attachment(email_id, attachment_index, save_dir)
         return self._imap_download_attachment(email_id, attachment_index, save_dir)
 
-    def _gmail_download_attachment(self, email_id: str, index: int, save_dir: str = None) -> dict:
+    def _gmail_download_attachment(self, email_id: str, index: int, save_dir: str | None = None) -> dict:
         try:
             msg = self._gmail.read(email_id)
             attachments = msg.get("attachments", [])
@@ -1151,7 +1151,7 @@ class EmailTool:
         except Exception as e:
             return {"success": False, "error": f"Download failed: {e}"}
 
-    def _imap_download_attachment(self, email_id: str, index: int, save_dir: str = None) -> dict:
+    def _imap_download_attachment(self, email_id: str, index: int, save_dir: str | None = None) -> dict:
         if not self._is_configured():
             return {"success": False, "error": "Email not configured."}
 

@@ -35,7 +35,7 @@ def test_registry_has_all_expected_commands():
 
 
 def test_registry_count():
-    assert len(COMMAND_REGISTRY) == 57
+    assert len(COMMAND_REGISTRY) == 58
 
 
 def test_every_registry_value_is_callable():

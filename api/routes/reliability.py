@@ -13,7 +13,7 @@ Author: Aura reliability upgrade (2026-03)
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Query, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.auth import require_api_key

@@ -1,14 +1,14 @@
 # aura/cli/watch_mode.py
 """Watch mode — monitor files for AI comments and auto-respond."""
 from __future__ import annotations
+
 import os
 import re
-import time
 import threading
+import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Dict, Optional, Callable, Set
-from dataclasses import dataclass, field
-
+from typing import Callable, Dict, List, Optional, Set
 
 # Patterns that trigger watch mode
 WATCH_PATTERNS = [

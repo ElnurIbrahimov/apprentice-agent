@@ -12,7 +12,7 @@ import json
 import logging
 import re
 import time
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from .types import Candidate, EvalExample, GEPAConfig, Trajectory
 

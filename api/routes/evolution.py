@@ -12,7 +12,7 @@ import threading
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
@@ -36,8 +36,8 @@ class EvolutionRunRequest(BaseModel):
     skill_ids: Optional[List[str]] = Field(None, description="Specific skill IDs (None = all)")
     max_iterations: int = Field(5, ge=1, le=50)
     dry_run: bool = Field(False, description="Preview without running")
-    reflection_model: str = Field(default=None, description="Model for reflection (default: Config.MODEL_THINK)")
-    eval_model: str = Field(default=None, description="Model for evaluation (default: Config.MODEL_FAST)")
+    reflection_model: Optional[str] = Field(default=None, max_length=128, pattern=r'^[a-zA-Z0-9._:\-/]+$', description="Model for reflection (default: Config.MODEL_THINK)")
+    eval_model: Optional[str] = Field(default=None, max_length=128, pattern=r'^[a-zA-Z0-9._:\-/]+$', description="Model for evaluation (default: Config.MODEL_FAST)")
     timeout_seconds: int = Field(600, ge=60, le=3600)
 
 

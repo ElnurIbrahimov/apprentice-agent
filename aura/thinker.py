@@ -18,9 +18,9 @@ import json
 import logging
 import threading
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,7 @@ class ThinkerEngine:
         self,
         user_message: str,
         assistant_response: str,
-        conversation_history: list = None,
+        conversation_history: list | None = None,
     ) -> None:
         """Kick off the Thinker asynchronously. Non-blocking.
 
@@ -345,7 +345,7 @@ class ThinkerEngine:
         self,
         user_message: str,
         assistant_response: str,
-        conversation_history: list = None,
+        conversation_history: list | None = None,
     ) -> str:
         """Build a short conversation summary for the goal tracker."""
         parts = []

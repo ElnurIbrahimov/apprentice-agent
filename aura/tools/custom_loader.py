@@ -48,7 +48,7 @@ def load_custom_tools(custom_dir: Path | None = None) -> dict:
 
         # SECURITY: Verify tool signature if available (OpenFang-inspired Ed25519 signing)
         try:
-            from aura.security.tool_signing import verify_tool, is_tool_signed
+            from aura.security.tool_signing import is_tool_signed, verify_tool
             if is_tool_signed(str(tool_file)):
                 sig_valid, sig_error = verify_tool(str(tool_file))
                 if not sig_valid:

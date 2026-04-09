@@ -4,10 +4,10 @@ This tool provides git operations using subprocess calls to the git CLI,
 avoiding external dependencies like GitPython.
 """
 
-import subprocess
 import os
-from typing import Optional
+import subprocess
 from pathlib import Path
+from typing import Optional
 
 
 class GitTool:
@@ -89,7 +89,7 @@ class GitTool:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Failed to run git command: {str(e)}"
+                "error": f"Failed to run git command: {e!s}"
             }
 
     def _parse_git_error(self, error_msg: str, args: list) -> dict:
@@ -224,7 +224,7 @@ class GitTool:
         ahead_behind = self._get_ahead_behind(repo_path)
 
         # Build formatted output string
-        lines = [f"ACTUAL GIT STATUS:"]
+        lines = ["ACTUAL GIT STATUS:"]
         lines.append(f"Branch: {branch}")
 
         if ahead_behind.get("ahead", 0) > 0:
@@ -719,7 +719,7 @@ class GitTool:
 
         return response
 
-    def smart_commit(self, repo_path: str = ".", paths: list = None) -> dict:
+    def smart_commit(self, repo_path: str = ".", paths: list | None = None) -> dict:
         """Generate an AI-powered commit message from staged/unstaged changes.
 
         Stages files if paths provided, analyzes the diff, and uses an LLM
@@ -775,6 +775,7 @@ class GitTool:
         # Try LLM-powered message generation
         try:
             import ollama
+
             from aura.config import Config
 
             prompt = (
@@ -832,7 +833,7 @@ class GitTool:
                 "suggested_message": suggested,
                 "files_changed": files_changed,
                 "diff_preview": diff_preview,
-                "warning": f"LLM generation failed ({str(e)}), used fallback"
+                "warning": f"LLM generation failed ({e!s}), used fallback"
             }
 
     def diff_summary(self, repo_path: str = ".") -> dict:
@@ -871,6 +872,7 @@ class GitTool:
 
         try:
             import ollama
+
             from aura.config import Config
 
             prompt = (
@@ -903,10 +905,10 @@ class GitTool:
                 "success": True,
                 "summary": stat_output or "Changes detected.",
                 "files_changed": files_changed,
-                "warning": f"LLM summary failed ({str(e)}), returning stat output"
+                "warning": f"LLM summary failed ({e!s}), returning stat output"
             }
 
-    def blame(self, file: str, line: int = None, repo_path: str = ".") -> dict:
+    def blame(self, file: str, line: int | None = None, repo_path: str = ".") -> dict:
         """Show git blame information for a file.
 
         Args:
@@ -1030,7 +1032,7 @@ class GitTool:
 
         return result
 
-    def auto_commit(self, message: str, paths: list = None, repo_path: str = ".") -> dict:
+    def auto_commit(self, message: str, paths: list | None = None, repo_path: str = ".") -> dict:
         """Stage specified paths (or all) and commit. Returns commit hash."""
         if paths:
             for p in paths:

@@ -13,10 +13,10 @@ import logging
 import os
 import re
 import uuid
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta, date, time
+from dataclasses import asdict, dataclass, field
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 #  Optional imports — never break if missing
 # ---------------------------------------------------------------------------
 try:
+    from dateutil import tz as dateutil_tz
     from dateutil.parser import parse as dateutil_parse
     from dateutil.rrule import rrulestr
-    from dateutil import tz as dateutil_tz
     HAS_DATEUTIL = True
 except ImportError:
     dateutil_parse = None
@@ -35,16 +35,17 @@ except ImportError:
     HAS_DATEUTIL = False
 
 try:
+    from google.auth.transport.requests import Request as GRequest
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request as GRequest
     from googleapiclient.discovery import build as google_build
     HAS_GOOGLE_CAL = True
 except ImportError:
     HAS_GOOGLE_CAL = False
 
 try:
-    from icalendar import Calendar as iCalCalendar, Event as iCalEvent
+    from icalendar import Calendar as iCalCalendar
+    from icalendar import Event as iCalEvent
     HAS_ICAL = True
 except ImportError:
     HAS_ICAL = False
@@ -157,7 +158,7 @@ class GoogleCalendarBackend:
 
     def create_event(self, title: str, start: str, end: str,
                      description: str = "", location: str = "",
-                     timezone: str = None) -> Dict[str, Any]:
+                     timezone: str | None = None) -> Dict[str, Any]:
         """Create a Google Calendar event."""
         service = self._get_service()
         tz = timezone or self._get_user_timezone()
@@ -662,9 +663,9 @@ class CalendarTool:
     # ------------------------------------------------------------------
     #  Core CRUD (local events, unchanged interface)
     # ------------------------------------------------------------------
-    def add_event(self, title: str, start: str, end: str = None,
+    def add_event(self, title: str, start: str, end: str | None = None,
                   description: str = "", location: str = "",
-                  recurrence: str = None, reminders: List[int] = None) -> dict:
+                  recurrence: str | None = None, reminders: List[int] | None = None) -> dict:
         """Create a new calendar event."""
         if not title:
             return {"success": False, "error": "No title provided"}
@@ -739,7 +740,7 @@ class CalendarTool:
         return {"success": True, "event_id": event_id, "event": target,
                 "response": f"Updated event {event_id}"}
 
-    def list_events(self, date: str = None, range_days: int = 1) -> dict:
+    def list_events(self, date: str | None = None, range_days: int = 1) -> dict:
         """List events for a specific date or range. Merges local + ICS + Google sources."""
         if date:
             target_dt = self._parse_datetime(date)
@@ -938,7 +939,7 @@ class CalendarTool:
     # ------------------------------------------------------------------
     #  Calendar Intelligence
     # ------------------------------------------------------------------
-    def find_free_slots(self, date: str = None, duration_min: int = 30,
+    def find_free_slots(self, date: str | None = None, duration_min: int = 30,
                         work_start: int = 9, work_end: int = 18) -> dict:
         """Find available time slots on a given date.
 

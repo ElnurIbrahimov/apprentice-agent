@@ -1,25 +1,33 @@
 """Chat endpoints with WebSocket streaming support."""
 
+import asyncio
 import json
 import logging
-import asyncio
 import os
-import time
 import threading
+import time
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from starlette.responses import StreamingResponse
-from api.auth import verify_api_key_ws, require_api_key
-from api.utils import safe_error_detail, get_agent_service as _get_agent_service, get_agent, run_sync
 
+from api.auth import require_api_key, verify_api_key_ws
 from api.models.schemas import (
-    ChatRequest, ChatResponse, RunRequest, RunResponse,
-    ClearHistoryResponse, MoodState, AttachmentType,
-    ConversationSummary, CreateConversationRequest, RenameConversationRequest,
-    ConversationResponse, SaveToMemoryResponse,
+    AttachmentType,
+    ChatRequest,
+    ChatResponse,
+    ClearHistoryResponse,
+    ConversationResponse,
+    CreateConversationRequest,
+    MoodState,
+    RenameConversationRequest,
+    RunRequest,
+    RunResponse,
+    SaveToMemoryResponse,
 )
+from api.utils import get_agent_service as _get_agent_service
+from api.utils import safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -302,11 +310,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 timeout=180.0
             )
         except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="Request timed out after 180 seconds")
+            raise HTTPException(status_code=504, detail="Request timed out after 180 seconds") from None
 
         # === Track assistant response and emotion in ContextHeatmap ===
         try:
-            from api.routes.context import track_context_from_message, track_context_from_emotion
+            from api.routes.context import track_context_from_emotion, track_context_from_message
             track_context_from_message(result["response"], is_user=False)
             mood_raw = result.get("mood")
             if mood_raw and isinstance(mood_raw, dict) and mood_raw.get("emotion"):
@@ -327,7 +335,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
     except Exception as e:
         logger.error(f"[Chat] Error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.post("/sse")
@@ -441,7 +449,7 @@ async def run(request: RunRequest) -> RunResponse:
                 timeout=300.0
             )
         except asyncio.TimeoutError:
-            raise HTTPException(status_code=504, detail="Request timed out after 300 seconds")
+            raise HTTPException(status_code=504, detail="Request timed out after 300 seconds") from None
 
         # === Track goal as user message in ContextHeatmap ===
         try:
@@ -465,7 +473,7 @@ async def run(request: RunRequest) -> RunResponse:
 
     except Exception as e:
         logger.error(f"[Run] Error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.post("/clear", response_model=ClearHistoryResponse)
@@ -482,7 +490,7 @@ async def clear_history() -> ClearHistoryResponse:
 
     except Exception as e:
         logger.error(f"[Clear] Error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 # =========================================================================
@@ -551,7 +559,7 @@ async def list_conversations():
         return conversations
     except Exception as e:
         logger.error(f"[Conversations] List error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.post("/conversations", response_model=ConversationResponse)
@@ -570,7 +578,7 @@ async def create_conversation(request: CreateConversationRequest = None):
         raise
     except Exception as e:
         logger.error(f"[Conversations] Create error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.put("/conversations/{conversation_id}")
@@ -590,7 +598,7 @@ async def rename_conversation(conversation_id: str, request: RenameConversationR
         raise
     except Exception as e:
         logger.error(f"[Conversations] Rename error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.delete("/conversations/{conversation_id}")
@@ -610,7 +618,7 @@ async def delete_conversation(conversation_id: str):
         raise
     except Exception as e:
         logger.error(f"[Conversations] Delete error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.post("/conversations/{conversation_id}/switch", response_model=ConversationResponse)
@@ -630,7 +638,7 @@ async def switch_conversation(conversation_id: str):
         raise
     except Exception as e:
         logger.error(f"[Conversations] Switch error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.post("/conversations/{conversation_id}/save-to-memory", response_model=SaveToMemoryResponse)
@@ -646,7 +654,7 @@ async def save_conversation_to_memory(conversation_id: str):
         return SaveToMemoryResponse(**result)
     except Exception as e:
         logger.error(f"[Conversations] Save to memory error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 # =========================================================================
@@ -698,7 +706,7 @@ async def get_conversation_messages(conversation_id: str):
         # ConversationManager not initialized — fall back to brain
         svc = _get_agent_service()
         if not svc.is_ready:
-            raise HTTPException(status_code=503, detail="Agent not initialized")
+            raise HTTPException(status_code=503, detail="Agent not initialized") from None
         loop = asyncio.get_running_loop()
         messages = await loop.run_in_executor(
             None, lambda: svc.agent.brain.get_conversation_messages(conversation_id)
@@ -706,7 +714,7 @@ async def get_conversation_messages(conversation_id: str):
         return {"messages": messages, "conversation_id": conversation_id}
     except Exception as e:
         logger.error(f"[ConvMessages] Error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.websocket("/stream")
@@ -815,7 +823,9 @@ async def websocket_chat(websocket: WebSocket):
                 hand_name = msg.get("hand", "")
                 command = msg.get("command", "")
                 new_goal = msg.get("new_goal")
-                if command in ("stop", "redirect") and hand_name:
+                # Validate hand_name: alphanumeric + underscore/hyphen only
+                import re as _re_ws
+                if command in ("stop", "redirect") and hand_name and _re_ws.match(r'^[a-zA-Z0-9_\-]{1,64}$', hand_name):
                     try:
                         from aura.hands.manager import get_hand_manager
                         get_hand_manager().send_command(hand_name, command, new_goal)
@@ -856,7 +866,10 @@ async def websocket_chat(websocket: WebSocket):
             action_mode = msg.get("action_mode")  # Optional action mode for auto-model selection
             conversation_id = routing.get("conversation_id") or msg.get("conversation_id")  # Optional conversation context
             attachments = msg.get("attachments", [])  # Optional attachments
-            surface = msg.get("surface", "web")  # Cross-surface sync: which surface sent this
+            _VALID_SURFACES = {"web", "telegram", "extension", "cli", "miniapp"}
+            surface = msg.get("surface", "web")
+            if surface not in _VALID_SURFACES:
+                surface = "web"  # Reject unknown surfaces to prevent injection
             # Build routing_opts for agent_service
             routing_opts = {
                 "model": model_override,
@@ -881,7 +894,7 @@ async def websocket_chat(websocket: WebSocket):
                     current_conv = svc.agent.brain.get_current_conversation_id() if svc.is_ready else None
                     if current_conv and current_conv != conversation_id:
                         await asyncio.get_running_loop().run_in_executor(
-                            None, lambda: svc.switch_conversation(conversation_id)
+                            None, lambda _s=svc, _c=conversation_id: _s.switch_conversation(_c)
                         )
                         logger.info(f"[WebSocket] Auto-switched to conversation: {conversation_id}")
                 except Exception as e:
@@ -961,19 +974,19 @@ async def websocket_chat(websocket: WebSocket):
                 chunk_queue: asyncio.Queue = asyncio.Queue()
                 full_response = ""
 
-                def stream_worker():
+                def stream_worker(_msg=message, _model=model_override, _action=action_mode, _ropts=routing_opts, _loop=loop, _queue=chunk_queue):
                     """Run streaming in a separate thread."""
                     try:
-                        for item in _get_agent_service().chat_stream(message, model_override=model_override, action_mode=action_mode, routing_opts=routing_opts):
+                        for item in _get_agent_service().chat_stream(_msg, model_override=_model, action_mode=_action, routing_opts=_ropts):
                             if stop_generation.is_set():
                                 logger.info("[WebSocket] Generation stopped by user")
                                 break
                             # Thread-safe put into asyncio.Queue
-                            loop.call_soon_threadsafe(chunk_queue.put_nowait, item)
+                            _loop.call_soon_threadsafe(_queue.put_nowait, item)
                     except Exception as e:
-                        loop.call_soon_threadsafe(chunk_queue.put_nowait, {"type": "error", "error": safe_error_detail(e)})
+                        _loop.call_soon_threadsafe(_queue.put_nowait, {"type": "error", "error": safe_error_detail(e)})
                     finally:
-                        loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+                        _loop.call_soon_threadsafe(_queue.put_nowait, None)
 
                 # Start streaming in background thread
                 stream_thread = threading.Thread(target=stream_worker, daemon=True)
