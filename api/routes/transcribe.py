@@ -45,6 +45,12 @@ async def transcribe(file: UploadFile = File(...)):
             "(also requires ffmpeg on PATH)",
         )
 
+    # Validate file extension BEFORE reading the body to avoid buffering disallowed files
+    suffix = os.path.splitext(file.filename or ".webm")[1] or ".webm"
+    _ALLOWED_AUDIO_SUFFIXES = {".webm", ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".mp4", ".mpeg", ".mpga"}
+    if suffix.lower() not in _ALLOWED_AUDIO_SUFFIXES:
+        raise HTTPException(400, f"Unsupported audio format: {suffix}")
+
     # 100 MB limit — stream to avoid buffering entire file in memory
     _MAX_AUDIO_SIZE = 100 * 1024 * 1024
     chunks = []
@@ -55,10 +61,6 @@ async def transcribe(file: UploadFile = File(...)):
             raise HTTPException(413, "Audio file too large. Maximum size is 100 MB.")
         chunks.append(chunk)
     data = b"".join(chunks)
-    suffix = os.path.splitext(file.filename or ".webm")[1] or ".webm"
-    _ALLOWED_AUDIO_SUFFIXES = {".webm", ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".mp4", ".mpeg", ".mpga"}
-    if suffix.lower() not in _ALLOWED_AUDIO_SUFFIXES:
-        raise HTTPException(400, f"Unsupported audio format: {suffix}")
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
         f.write(data)

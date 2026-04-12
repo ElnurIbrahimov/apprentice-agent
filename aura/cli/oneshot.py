@@ -27,6 +27,7 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
     display_model = model or f"auto-route ({tier})"
 
     permissions = PermissionManager()
+    permissions.set_mode("careful")
     if aura_config:
         permissions.apply_aura_md_overrides(aura_config)
 
@@ -45,7 +46,7 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
 
     permissions.set_confirm_callback(_confirm)
     if args.trust:
-        permissions.set_trust_mode(True)
+        permissions.set_mode("full_auto")
 
     console.print(f"  [dim]Model: {display_model} | Tier: {tier}[/dim]")
     console.print()

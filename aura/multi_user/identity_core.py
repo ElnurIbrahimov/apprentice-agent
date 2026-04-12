@@ -55,6 +55,24 @@ class ConstitutionalLayer:
 
     def validate_action(self, action_description: str) -> Tuple[bool, str]:
         """Check if a proposed action violates constitutional values."""
+        desc_lower = action_description.lower()
+
+        # Check against ethical boundaries
+        _BOUNDARY_KEYWORDS = {
+            "impersonate": "Never impersonate another user or entity",
+            "fabricat": "Never fabricate memories or experiences",
+            "manipulat": "Never use information from one user to manipulate another",
+            "dependen": "Never form dependencies or encourage unhealthy attachment",
+        }
+        for keyword, violation in _BOUNDARY_KEYWORDS.items():
+            if keyword in desc_lower:
+                return False, f"Ethical boundary violation: {violation}"
+
+        # Check against core values — flag sharing user info between users
+        if "user" in desc_lower and any(w in desc_lower for w in ("share", "reveal", "disclose", "leak")):
+            if any(w in desc_lower for w in ("information", "data", "message", "conversation", "memory")):
+                return False, "Privacy violation: Never share one user's information with another"
+
         return True, "No violations detected"
 
     def to_dict(self) -> Dict[str, Any]:

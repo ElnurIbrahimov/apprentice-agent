@@ -1,6 +1,8 @@
 """Authentication routes for external providers (ChatGPT OAuth, etc.)."""
 
 import logging
+import threading as _threading
+import time as _time
 from html import escape as html_escape
 
 from fastapi import APIRouter, Depends, Query
@@ -9,12 +11,6 @@ from pydantic import BaseModel
 from api.auth import require_api_key
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-
-# Fallback server-side PKCE verifier store (keyed by OAuth state).
-# Used only if aura.auth.chatgpt_oauth.store_pkce_verifier is unavailable.
-# Entries are (verifier, timestamp) tuples; evicted after _PKCE_TTL seconds.
-import threading as _threading
-import time as _time
 
 _pkce_store: dict[str, tuple[str, float]] = {}
 _pkce_lock = _threading.Lock()
@@ -168,15 +164,14 @@ _PKCE_REDIRECT_TTL = 600  # 10 minutes
 
 def _pkce_redirect_put(state: str, redirect_uri: str):
     """Store a redirect_uri with TTL and bounded size."""
-    import time
-    now = time.time()
+    now = _time.time()
     with _pkce_redirect_lock:
         # Evict expired entries
         expired = [k for k, (_, ts) in _pkce_redirect_store.items() if now - ts > _PKCE_REDIRECT_TTL]
         for k in expired:
             del _pkce_redirect_store[k]
         # Hard cap
-        if len(_pkce_redirect_store) > 100:
+        while len(_pkce_redirect_store) >= 100:
             oldest = min(_pkce_redirect_store, key=lambda k: _pkce_redirect_store[k][1])
             del _pkce_redirect_store[oldest]
         _pkce_redirect_store[state] = (redirect_uri, now)
@@ -276,8 +271,7 @@ async def chatgpt_oauth_callback(
                 status_code=502,
             )
 
-        import time
-        expires = int(time.time() * 1000) + expires_in * 1000
+        expires = int(_time.time() * 1000) + expires_in * 1000
         _save_tokens(access, refresh, expires)
 
         account_id = _extract_account_id(access) or ""

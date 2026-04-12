@@ -138,6 +138,8 @@ class MCPClientConnection:
             self.process.stdin.flush()
         except Exception as e:
             logger.debug(f"[MCPClient] non-critical: {e}")
+
+
 class MCPClientManager:
     """Manage multiple MCP server connections."""
 

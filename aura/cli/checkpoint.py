@@ -27,7 +27,7 @@ class CheckpointManager:
     def _load_index(self) -> List[Dict]:
         if self._index_path.exists():
             try:
-                return json.loads(self._index_path.read_text())
+                return json.loads(self._index_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 return []
         return []
@@ -35,7 +35,7 @@ class CheckpointManager:
     def _save_index(self):
         tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
         try:
-            with os.fdopen(tmp_fd, 'w') as f:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
                 json.dump(self._index, f, indent=2)
             os.replace(tmp_path, str(self._index_path))
         except Exception:
@@ -73,7 +73,16 @@ class CheckpointManager:
                     files_info.append({
                         "original_path": str(src.resolve()),
                         "backup_name": dest.name,
+                        "original_exists": True,
                     })
+                else:
+                    files_info.append(
+                        {
+                            "original_path": str(src.resolve()),
+                            "backup_name": None,
+                            "original_exists": False,
+                        }
+                    )
 
             entry = {
                 "id": cp_id,
@@ -105,12 +114,23 @@ class CheckpointManager:
             if not cp_dir.exists():
                 return False
             for f_info in entry["files"]:
-                backup_name = os.path.basename(f_info["backup_name"])  # strip path components
-                src = cp_dir / backup_name
                 dest = Path(f_info["original_path"]).resolve()
-                # Reject paths with traversal components
-                if ".." in dest.parts:
+                backup_name = f_info.get("backup_name")
+                if not f_info.get("original_exists", True):
+                    try:
+                        if dest.is_file() or dest.is_symlink():
+                            dest.unlink()
+                        elif dest.is_dir():
+                            shutil.rmtree(dest)
+                    except OSError:
+                        continue
                     continue
+
+                if not backup_name:
+                    continue
+
+                backup_name = os.path.basename(backup_name)  # strip path components
+                src = cp_dir / backup_name
                 if src.exists():
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(str(src), str(dest))

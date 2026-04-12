@@ -313,33 +313,34 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
             logger.warning(f"[ReasoningTreeTool] Init failed: {e}")
 
         # Initialize NeuroDream (Tool #24) - Sleep/Dream Memory Consolidation
-        self.neurodream = NeuroDreamEngine(
-            knowledge_graph=self.tools.get("knowledge_graph"),
-            evoemo=self.tools.get("evoemo"),
-            inner_monologue=self.monologue,
-            idle_threshold_minutes=30,
-        )
-        logger.debug("[LOADED] NeuroDream - Sleep/dream memory consolidation")
+        self._neurodream_stop_event = threading.Event()
+        self._nd_poll_thread = None
+        try:
+            self.neurodream = NeuroDreamEngine(
+                knowledge_graph=self.tools.get("knowledge_graph"),
+                evoemo=self.tools.get("evoemo"),
+                inner_monologue=self.monologue,
+                idle_threshold_minutes=30,
+            )
+            self.tools['neurodream'] = self.neurodream
+            logger.debug("[LOADED] NeuroDream - Sleep/dream memory consolidation")
 
-        # ===== Phase 3 Fix 3B: NeuroDream true idle polling thread =====
-        # Polls check_idle_trigger() every 60s so NeuroDream can sleep autonomously
-        import threading as _threading
-        # time is already imported at module level
-        self._neurodream_stop_event = _threading.Event()
-        def _neurodream_idle_poll():
-            while not self._neurodream_stop_event.wait(timeout=60):
-                try:
-                    if self.neurodream and self.neurodream.current_phase.value == "awake":
-                        self.neurodream.check_idle_trigger()
-                except Exception as e:  # Catch-all: protects daemon polling thread
-                    logger.debug(f"[NeuroDream] Idle poll error: {e}")
-        self._nd_poll_thread = _threading.Thread(
-            target=_neurodream_idle_poll, daemon=True, name="NeuroDream-IdlePoll"
-        )
-        self._nd_poll_thread.start()
-        logger.debug("[NeuroDream] Idle polling thread started (60s interval)")
-
-        self.tools['neurodream'] = self.neurodream
+            # Idle polling thread — only start AFTER successful NeuroDream init
+            def _neurodream_idle_poll():
+                while not self._neurodream_stop_event.wait(timeout=60):
+                    try:
+                        if self.neurodream and self.neurodream.current_phase.value == "awake":
+                            self.neurodream.check_idle_trigger()
+                    except Exception as e:
+                        logger.debug(f"[NeuroDream] Idle poll error: {e}")
+            self._nd_poll_thread = threading.Thread(
+                target=_neurodream_idle_poll, daemon=True, name="NeuroDream-IdlePoll"
+            )
+            self._nd_poll_thread.start()
+            logger.debug("[NeuroDream] Idle polling thread started (60s interval)")
+        except Exception as e:
+            self.neurodream = None
+            logger.warning(f"[NeuroDream] Init failed: {e}")
 
         # AURA v3.0 ALIVE — AURAEngine removed; context/humanization via ALMA helpers.
         # self.aura_enabled controls whether _build_aura_context runs.

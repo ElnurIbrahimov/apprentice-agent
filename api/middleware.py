@@ -7,7 +7,7 @@ import secrets
 import time
 import uuid
 from collections import defaultdict
-from typing import Dict
+from typing import ClassVar, Dict
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -44,7 +44,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     """
 
     # Endpoints that don't require authentication
-    PUBLIC_PATHS = {
+    PUBLIC_PATHS: ClassVar[set[str]] = {
         "/",
         "/health",
         "/api/health",
@@ -118,7 +118,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """
 
     # Paths exempt from rate limiting (health checks, monitoring)
-    EXEMPT_PATHS = {"/", "/health", "/api/health", "/api/health/deep", "/api/status", "/api/init"}
+    EXEMPT_PATHS: ClassVar[set[str]] = {
+        "/",
+        "/health",
+        "/api/health",
+        "/api/health/deep",
+        "/api/status",
+        "/api/init",
+    }
 
     def __init__(self, app, requests_per_minute: int = 300, enabled: bool = True):
         super().__init__(app)

@@ -104,12 +104,18 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = ["-vv", "--strict-markers", "--tb=short", "--maxfail=3"]
+addopts = ["-vv", "--strict-markers", "--tb=short", "--maxfail=3", "-p", "no:cacheprovider"]
 markers = [
     "unit: unit tests (no external calls)",
     "integration: integration tests (may call real APIs unless mocked)",
     "slow: slow tests (>10s)",
     "llm: tests involving LLM calls (mocked)",
+]
+filterwarnings = [
+    "ignore:urllib3 \\(.*\\) or chardet \\(.*\\)/charset_normalizer \\(.*\\) doesn't match a supported version:requests.exceptions.RequestsDependencyWarning",
+    "ignore:builtin type SwigPyPacked has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type SwigPyObject has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
 ]
 # timeout = 30  # requires pytest-timeout (pip install pytest-timeout)
 

@@ -471,7 +471,6 @@ class ALMAEngine:
         # Buffered emotion history writer
         self._log_buffer: List[dict] = []
         self._log_buffer_lock = threading.RLock()  # RLock: _save_state and close() both acquire this
-        self._log_file_handle: Optional[Any] = None
         self._LOG_FLUSH_THRESHOLD = 10
 
         # Instance vars (formerly class-level, now per-instance for thread safety)
@@ -1059,12 +1058,6 @@ class ALMAEngine:
             return
         try:
             rotate_jsonl_if_needed(self.history_file)
-            # Close stale handle before rotation check — on Windows, rotation
-            # cannot rename an open file, and the old handle would write to
-            # the wrong inode on Linux after rotation.
-            if self._log_file_handle and not self._log_file_handle.closed:
-                self._log_file_handle.close()
-                self._log_file_handle = None
             # Open-write-close per flush: negligible cost since flushing is batched
             with open(self.history_file, "a", encoding="utf-8") as f:
                 for entry in self._log_buffer:
@@ -1072,7 +1065,6 @@ class ALMAEngine:
             self._log_buffer.clear()
         except Exception as e:
             logger.error(f"Failed to flush emotion log: {e}")
-            self._log_file_handle = None
 
     def close(self):
         """Save state, flush log buffer and close the log file handle."""
@@ -1083,9 +1075,6 @@ class ALMAEngine:
         try:
             with self._log_buffer_lock:
                 self._flush_emotion_log()
-            if self._log_file_handle and not self._log_file_handle.closed:
-                self._log_file_handle.close()
-                self._log_file_handle = None
         except Exception as e:
             logger.debug(f"[ALMA] close error: {e}")
 

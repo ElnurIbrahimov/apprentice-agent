@@ -30,10 +30,18 @@ BLOCKED = PermissionTier.BLOCKED
 
 # Shell commands that are auto-approved (first word of command)
 SAFE_SHELL_COMMANDS = {
-    "mkdir", "ls", "dir", "cat", "head", "tail", "echo", "pwd", "cd",
-    "npm", "npx", "yarn", "pnpm", "pip", "pip3",
-    "git", "touch", "cp", "mv",
-    "find", "grep", "which", "env", "export",
+    "ls",
+    "dir",
+    "pwd",
+    "find",
+    "grep",
+    "which",
+    "where",
+    "rg",
+    "type",
+    "get-childitem",
+    "get-content",
+    "select-string",
 }
 
 # Default permission map for each tool (or tool.subaction)
@@ -45,15 +53,15 @@ DEFAULT_PERMISSIONS = {
     "list_dir": AUTO,
     "search_web": AUTO,
     "project_structure": AUTO,
-    # Git ops: all auto-approved
+    # Git ops: read-only auto-approved, mutations require explicit approval
     "git.status": AUTO,
     "git.log": AUTO,
     "git.diff": AUTO,
     "git.branch": AUTO,
-    "git.add": AUTO,
-    "git.commit": AUTO,
-    "git.push": AUTO,
-    "git.pull": AUTO,
+    "git.add": PROMPT,
+    "git.commit": PROMPT,
+    "git.push": PROMPT,
+    "git.pull": PROMPT,
     # File edits: auto-approved (like Claude Code)
     "edit_file": AUTO,
     "write_file": AUTO,
@@ -61,6 +69,10 @@ DEFAULT_PERMISSIONS = {
     "shell": PROMPT,
     # Sub-agent spawning
     "spawn_agent": PROMPT,
+    # Command-layer destructive or agentic follow-up flows
+    "clear_history": PROMPT,
+    "auto_fix_tests": PROMPT,
+    "retry_tier_escalation": PROMPT,
 }
 
 # Git actions that are read-only
@@ -72,6 +84,7 @@ class PermissionManager:
 
     def __init__(self, confirm_callback=None):
         self._permissions = dict(DEFAULT_PERMISSIONS)
+        self._mode = "careful"
         self._trust_mode = False
         self._confirm_callback = confirm_callback
         self._always_approved: set[str] = set()
@@ -83,6 +96,10 @@ class PermissionManager:
     @property
     def trust_mode(self) -> bool:
         return self._trust_mode
+
+    @property
+    def has_confirm_callback(self) -> bool:
+        return self._confirm_callback is not None
 
     def set_confirm_callback(self, callback) -> None:
         self._confirm_callback = callback
@@ -144,7 +161,7 @@ class PermissionManager:
         # Shell commands: auto-approve if the first word is in SAFE_SHELL_COMMANDS
         if tool_name == "shell":
             cmd = args.get("command", "").strip()
-            first_word = cmd.split()[0].split("/")[-1].split("\\")[-1] if cmd else ""
+            first_word = cmd.split()[0].split("/")[-1].split("\\")[-1].lower() if cmd else ""
             if first_word in SAFE_SHELL_COMMANDS:
                 return True
 
@@ -165,15 +182,24 @@ class PermissionManager:
         """Return current permission mode name for display/checks."""
         if self._trust_mode:
             return "full_auto"
-        return self._mode if hasattr(self, '_mode') else "careful"
+        return self._mode
+
+    @property
+    def mode(self) -> str:
+        """Compatibility alias for code paths that read permissions.mode."""
+        return self.current_mode
 
     def set_mode(self, mode: str) -> None:
-        """Set the permission mode."""
-        self._mode = mode
+        """Set the base permission mode.
+
+        Full-auto is modeled as a trust override so disabling trust can
+        return to the previously selected base mode.
+        """
         if mode == "full_auto":
             self._trust_mode = True
-        elif mode in ("plan", "plan_approve"):
-            self._trust_mode = False
+            return
+        self._mode = mode
+        self._trust_mode = False
 
     def _format_action_description(self, tool_name: str, args: dict) -> str:
         """Format a human-readable description for the approval prompt."""
@@ -196,4 +222,32 @@ class PermissionManager:
             if msg:
                 return f"git {action}: {msg}"
             return f"git {action}"
+        elif tool_name == "spawn_agent":
+            task = args.get("task", "").strip()
+            specialist = args.get("specialist", "").strip()
+            if specialist and task:
+                return f"Spawn agent '{specialist}'\n  task: {task[:120]}"
+            if task:
+                return f"Spawn agent\n  task: {task[:120]}"
+            return "Spawn agent"
+        elif tool_name == "clear_history":
+            return "Clear conversation history"
+        elif tool_name == "auto_fix_tests":
+            command = args.get("command", "").strip()
+            failure_count = args.get("failure_count")
+            if command and failure_count is not None:
+                return f"Auto-fix failing tests\n  command: {command}\n  failures: {failure_count}"
+            if command:
+                return f"Auto-fix failing tests\n  command: {command}"
+            return "Auto-fix failing tests"
+        elif tool_name == "retry_tier_escalation":
+            from_tier = args.get("from_tier", "").strip()
+            to_tier = args.get("to_tier", "").strip()
+            prompt = args.get("prompt", "").strip()
+            if from_tier and to_tier:
+                desc = f"Escalate retry tier\n  {from_tier} -> {to_tier}"
+                if prompt:
+                    desc += f"\n  prompt: {prompt[:120]}"
+                return desc
+            return "Escalate retry tier"
         return f"{tool_name}({args})"

@@ -168,10 +168,14 @@ class HandManager:
 
         async def _step_cb(step: int, description: str):
             try:
-                from api.routes.chat import broadcast_action_trace
+                from api.services.websocket_hub import websocket_hub
+
                 asyncio.get_running_loop()  # raises RuntimeError if no loop
                 from aura.pools import fire_and_forget
-                fire_and_forget(broadcast_action_trace(name, step, description))
+
+                fire_and_forget(
+                    websocket_hub.broadcast_action_trace(name, step, description),
+                )
             except Exception:
                 pass
 
@@ -546,7 +550,13 @@ class HandManager:
         return req.approved
 
     def request_approval(self, hand_name: str, tool_name: str, args: dict) -> bool:
-        """Sync fallback — blocks the calling thread. Prefer request_approval_async."""
+        """Sync fallback — blocks the calling thread for up to 60s.
+
+        WARNING: This blocks a thread pool worker. Use request_approval_async
+        in async contexts (which run_hand already does).
+        """
+        logger.warning(f"[HandManager] Sync approval requested for {hand_name}/{tool_name} — "
+                       "this blocks a thread for up to 60s. Prefer request_approval_async.")
         request_id = f"apr_{uuid.uuid4().hex}"
         request = ApprovalRequest(
             request_id=request_id,
@@ -642,7 +652,7 @@ class HandManager:
             return
 
         try:
-            from api.routes.chat import broadcast_hand_approval_request
+            from api.services.websocket_hub import websocket_hub
 
             payload = {
                 "request_id": request.request_id,
@@ -655,7 +665,7 @@ class HandManager:
             # Schedule the broadcast coroutine on the main event loop from this thread
             self._approval_loop.call_soon_threadsafe(
                 self._approval_loop.create_task,
-                broadcast_hand_approval_request(payload),
+                websocket_hub.broadcast_hand_approval_request(payload),
             )
         except Exception as e:
             logger.debug(f"[HandManager] WebSocket approval broadcast failed: {e}")

@@ -66,3 +66,30 @@ def test_clear(tmp_path):
     assert len(mgr.list_checkpoints()) == 1
     mgr.clear()
     assert len(mgr.list_checkpoints()) == 0
+
+
+def test_restore_removes_new_file_created_after_snapshot(tmp_path):
+    mgr = CheckpointManager(checkpoint_dir=tmp_path / ".aura_checkpoints")
+    new_file = tmp_path / "new_file.py"
+
+    cp_id = mgr.snapshot(str(new_file), label="before create")
+    new_file.write_text("generated later")
+    assert new_file.exists()
+
+    assert mgr.restore(cp_id) is True
+    assert not new_file.exists()
+
+
+def test_restore_mixed_existing_and_new_files(tmp_path):
+    mgr = CheckpointManager(checkpoint_dir=tmp_path / ".aura_checkpoints")
+    existing = tmp_path / "existing.py"
+    created = tmp_path / "created.py"
+    existing.write_text("before")
+
+    cp_id = mgr.snapshot_multi([str(existing), str(created)], label="mixed")
+    existing.write_text("after")
+    created.write_text("brand new")
+
+    assert mgr.restore(cp_id) is True
+    assert existing.read_text() == "before"
+    assert not created.exists()

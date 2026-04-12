@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+MAX_TRACE_EVENTS = 200
 
 
 def _is_safe_session_id(session_id: str) -> bool:
@@ -27,6 +28,7 @@ class AgenticSession:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.session_id: str = ""
         self.messages: list[dict] = []
+        self.events: list[dict] = []
         self.metadata: dict = {}
         self._dirty = False
         self._save_counter = 0
@@ -37,6 +39,7 @@ class AgenticSession:
         short_id = uuid.uuid4().hex[:8]
         self.session_id = f"ses_{ts}_{short_id}"
         self.messages = []
+        self.events = []
         self.metadata = {
             "id": self.session_id,
             "project_root": project_root,
@@ -44,7 +47,7 @@ class AgenticSession:
             "updated_at": ts,
             "title": "",
             "model": model,
-            "stats": {"iterations": 0, "tool_calls": 0},
+            "stats": {"iterations": 0, "tool_calls": 0, "event_count": 0},
         }
         self._dirty = True
         self._save_counter = 0
@@ -65,8 +68,9 @@ class AgenticSession:
 
         self.metadata["updated_at"] = int(time.time())
         self.metadata["stats"]["message_count"] = len(self.messages)
+        self.metadata["stats"]["event_count"] = len(self.events)
 
-        data = {**self.metadata, "messages": self.messages}
+        data = {**self.metadata, "messages": self.messages, "events": self.events}
 
         try:
             with open(tmp, "w", encoding="utf-8") as f:
@@ -106,7 +110,8 @@ class AgenticSession:
 
         self.session_id = session_id
         self.messages = data.get("messages", [])
-        self.metadata = {k: v for k, v in data.items() if k != "messages"}
+        self.events = data.get("events", [])
+        self.metadata = {k: v for k, v in data.items() if k not in {"messages", "events"}}
         self._dirty = False
         self._save_counter = 0
         return self.messages
@@ -138,6 +143,7 @@ class AgenticSession:
                     "created_at": data.get("created_at", 0),
                     "updated_at": data.get("updated_at", 0),
                     "message_count": len(data.get("messages", [])),
+                    "event_count": len(data.get("events", [])),
                     "project": data.get("project_root", ""),
                     "model": data.get("model", ""),
                 })
@@ -167,6 +173,7 @@ class AgenticSession:
             if self.session_id == session_id:
                 self.session_id = ""
                 self.messages = []
+                self.events = []
                 self.metadata = {}
             return True
         except Exception as e:
@@ -192,6 +199,16 @@ class AgenticSession:
         stats = self.metadata.setdefault("stats", {})
         stats["iterations"] = iterations
         stats["tool_calls"] = tool_calls
+        stats["event_count"] = len(self.events)
+        self._dirty = True
+
+    def append_event(self, event: dict) -> None:
+        """Append a sanitized loop event to the bounded session trace."""
+        serialized = self._serialize_event(event)
+        self.events.append(serialized)
+        if len(self.events) > MAX_TRACE_EVENTS:
+            self.events = self.events[-MAX_TRACE_EVENTS:]
+        self.metadata.setdefault("stats", {})["event_count"] = len(self.events)
         self._dirty = True
 
     def _serialize_message(self, msg: dict) -> dict:
@@ -227,6 +244,29 @@ class AgenticSession:
             else:
                 result[key] = value
         return result
+
+    def _serialize_event(self, event: dict) -> dict:
+        """Convert event payloads into bounded JSON-safe structures."""
+        return {
+            key: self._serialize_event_value(value)
+            for key, value in event.items()
+        }
+
+    def _serialize_event_value(self, value):
+        if isinstance(value, dict):
+            return {
+                str(k): self._serialize_event_value(v)
+                for k, v in list(value.items())[:20]
+            }
+        if isinstance(value, list):
+            return [self._serialize_event_value(v) for v in value[:20]]
+        if isinstance(value, tuple):
+            return [self._serialize_event_value(v) for v in value[:20]]
+        if isinstance(value, str):
+            return value[:2000]
+        if isinstance(value, (int, float, bool)) or value is None:
+            return value
+        return str(value)[:2000]
 
     def _auto_title(self, content: str) -> str:
         """Title from first user message (first 60 chars), sanitized."""

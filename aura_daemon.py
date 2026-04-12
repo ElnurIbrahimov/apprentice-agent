@@ -761,40 +761,17 @@ def main():
         sys.exit(1)
 
     daemon = AuraDaemon()
-    _stop_event = threading.Event()
 
+    # Wire OS signals to daemon shutdown (replaces duplicated startup logic)
     def _signal_handler(signum, frame):
-        _stop_event.set()
+        daemon._running = False
 
     signal.signal(signal.SIGTERM, _signal_handler)
     if hasattr(signal, "SIGINT"):
         signal.signal(signal.SIGINT, _signal_handler)
 
-    # Start agent loading and IPC in background, then run loop checking stop_event
-    daemon._write_pid()
-    daemon._running = True
-    logger.info("AURA daemon starting... (headless=%s, pid=%d)", daemon._headless, os.getpid())
-
-    daemon._load_agent_thread = threading.Thread(target=daemon._load_agent, daemon=True)
-    daemon._load_agent_thread.start()
-
-    try:
-        daemon._ipc.start()
-    except Exception as e:
-        logger.error("IPC server failed to start: %s", e)
-
-    try:
-        # Reuse the daemon's _run_loop() to avoid duplicating tick logic.
-        # _run_loop checks self._running; wire _stop_event to it.
-        def _on_stop(*_):
-            daemon._running = False
-        _stop_event_cb = threading.Thread(target=lambda: (_stop_event.wait(), _on_stop()), daemon=True)
-        _stop_event_cb.start()
-        daemon._run_loop()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        daemon.stop()
+    # Use daemon.start() — no duplication of _write_pid, _load_agent, _ipc.start
+    daemon.start()
 
 
 if __name__ == "__main__":

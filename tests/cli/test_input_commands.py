@@ -21,7 +21,7 @@ EXPECTED_SLASH_COMMANDS = [
     "/quit", "/exit", "/clear", "/model", "/compact", "/plan", "/shell",
     "/bash", "/run", "/grep", "/search", "/find", "/edit", "/project",
     "/agent", "/sessions", "/browse", "/hook", "/speak", "/say", "/recall",
-    "/goal", "/trust", "/cost", "/context", "/rewind", "/theme", "/fleet",
+    "/goal", "/trust", "/cost", "/context", "/trace", "/rewind", "/theme", "/fleet",
     "/tasks", "/research", "/sources", "/export", "/mood", "/pr", "/branch",
     "/stash", "/blame", "/test", "/watch", "/evolve", "/diff", "/git",
     "/mcp", "/audit", "/hand", "/retry", "/undo",
@@ -35,7 +35,7 @@ def test_slash_commands_has_all_expected():
 
 
 def test_slash_commands_count():
-    assert len(SLASH_COMMANDS) == 56
+    assert len(SLASH_COMMANDS) == 57
 
 
 def test_every_command_has_description():
@@ -99,6 +99,16 @@ def test_subcommands_has_sessions():
     assert "list" in session_subs
     assert "new" in session_subs
     assert "delete" in session_subs
+
+
+def test_subcommands_has_trace():
+    assert "/trace" in SUBCOMMANDS
+    trace_subs = [name for name, _ in SUBCOMMANDS["/trace"]]
+    assert "last" in trace_subs
+    assert "runs" in trace_subs
+    assert "failures" in trace_subs
+    assert "10" in trace_subs
+    assert "25" in trace_subs
 
 
 def test_subcommands_has_theme():

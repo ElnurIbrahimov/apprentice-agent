@@ -267,10 +267,17 @@ class ICSBackend:
                 logger.warning(f"[Calendar] ICS source error ({source}): {e}")
         return all_events
 
+    _BLOCKED_ICS_HOSTS = {"169.254.169.254", "metadata.google.internal", "localhost", "127.0.0.1", "0.0.0.0", "[::1]"}
+
     def _read_source(self, source: str) -> Optional[str]:
         """Read ICS content from file or URL."""
         if source.startswith(("http://", "https://")):
             try:
+                from urllib.parse import urlparse
+                parsed = urlparse(source)
+                if parsed.hostname and (parsed.hostname in self._BLOCKED_ICS_HOSTS or parsed.hostname.startswith("10.") or parsed.hostname.startswith("192.168.")):
+                    logger.warning(f"[Calendar] Blocked ICS URL to internal host: {parsed.hostname}")
+                    return None
                 import urllib.request
                 with urllib.request.urlopen(source, timeout=15) as resp:
                     return resp.read().decode("utf-8", errors="replace")

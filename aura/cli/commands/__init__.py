@@ -40,6 +40,7 @@ from .session_commands import (
     handle_merge,
     handle_rewind,
     handle_sessions,
+    handle_trace,
 )
 from .snippet_command import handle_snippet
 from .system_commands import (
@@ -112,6 +113,7 @@ COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {
     "/theme": handle_theme,
     "/trust": handle_trust,
     "/context": handle_context,
+    "/trace": handle_trace,
     "/rewind": handle_rewind,
     "/cost": handle_cost,
     "/undo": handle_undo,

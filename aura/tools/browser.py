@@ -159,6 +159,15 @@ class BrowserTool:
         self._downloads: Dict[str, dict] = {}  # Download tracking
         self.session_file = self.output_dir / "session.json"
 
+    def _validate_file_path(self, path: Optional[str], default: Path) -> tuple:
+        """Validate that a user-provided path is within output_dir. Returns (Path, error_str|None)."""
+        if not path:
+            return default, None
+        resolved = Path(path).resolve()
+        if not str(resolved).startswith(str(self.output_dir.resolve())):
+            return None, f"Path outside allowed directory: {path}"
+        return resolved, None
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -504,6 +513,12 @@ class BrowserTool:
         except Exception as e:
             return {"success": False, "error": str(e), "selector": selector}
 
+    # Paths that should never be uploaded to external sites
+    _UPLOAD_BLOCKED_PATTERNS = {
+        ".ssh", ".gnupg", ".aws", ".azure", ".kube", ".env",
+        "credentials", "secrets", "private", ".pem", ".key",
+    }
+
     @_auto_retry()
     def upload_file(self, selector: str, path: str) -> dict:
         """Upload a file to a file input element.
@@ -517,9 +532,20 @@ class BrowserTool:
         """
         try:
             self._ensure_browser()
-            file_path = Path(path)
+            file_path = Path(path).resolve()
             if not file_path.exists():
                 return {"success": False, "error": f"File not found: {path}"}
+
+            # Block uploads of sensitive files
+            path_str = str(file_path).lower()
+            if any(p in path_str for p in self._UPLOAD_BLOCKED_PATTERNS):
+                return {"success": False, "error": f"Upload blocked: path contains sensitive pattern"}
+
+            # Restrict uploads to output_dir or the current working directory
+            cwd = Path.cwd().resolve()
+            out = self.output_dir.resolve()
+            if not (str(file_path).startswith(str(out)) or str(file_path).startswith(str(cwd))):
+                return {"success": False, "error": f"Upload restricted to project/output directories"}
 
             self._page.wait_for_selector(selector, timeout=5000)
             self._page.set_input_files(selector, str(file_path))
@@ -788,7 +814,9 @@ class BrowserTool:
         try:
             self._ensure_browser()
             cookies = self._context.cookies()
-            save_path = Path(path) if path else self.cookies_path
+            save_path, err = self._validate_file_path(path, self.cookies_path)
+            if err:
+                return {"success": False, "error": err}
             save_path.parent.mkdir(parents=True, exist_ok=True)
             save_path.write_text(json.dumps(cookies, indent=2), encoding="utf-8")
             return {
@@ -811,7 +839,9 @@ class BrowserTool:
         """
         try:
             self._ensure_browser()
-            load_path = Path(path) if path else self.cookies_path
+            load_path, err = self._validate_file_path(path, self.cookies_path)
+            if err:
+                return {"success": False, "error": err}
             if not load_path.exists():
                 return {"success": False, "error": f"Cookie file not found: {load_path}"}
 
@@ -1245,6 +1275,9 @@ class BrowserTool:
             self._ensure_browser()
             is_url = url_or_selector.startswith(("http://", "https://"))
 
+            if is_url and self._is_blocked_url(url_or_selector):
+                return {"success": False, "error": "URL blocked by safety policy"}
+
             with self._page.expect_download(timeout=30000) as dl_info:
                 if is_url:
                     self._page.goto(url_or_selector)
@@ -1277,7 +1310,9 @@ class BrowserTool:
                     scroll = {"x": 0, "y": 0}
                 tabs.append({"tab_id": tid, "url": page.url, "title": page.title(), "scroll": scroll})
 
-            save_path = Path(path) if path else self.session_file
+            save_path, err = self._validate_file_path(path, self.session_file)
+            if err:
+                return {"success": False, "error": err}
             save_path.parent.mkdir(parents=True, exist_ok=True)
             save_path.write_text(json.dumps({"active_tab": self._active_tab, "tabs": tabs}, indent=2))
             return {"success": True, "path": str(save_path), "tab_count": len(tabs)}
@@ -1288,7 +1323,9 @@ class BrowserTool:
         """Restore tabs and scroll positions from saved session."""
         try:
             self._ensure_browser()
-            load_path = Path(path) if path else self.session_file
+            load_path, err = self._validate_file_path(path, self.session_file)
+            if err:
+                return {"success": False, "error": err}
             if not load_path.exists():
                 return {"success": False, "error": f"Session file not found: {load_path}"}
 
@@ -1296,16 +1333,25 @@ class BrowserTool:
             restored = 0
             for i, tab_data in enumerate(session.get("tabs", [])):
                 try:
+                    tab_url = tab_data.get("url", "")
+                    if not tab_url or self._is_blocked_url(tab_url):
+                        logger.debug(f"[BrowserTool] Skipping blocked/empty URL in session: {tab_url}")
+                        continue
                     if i == 0 and self._page:
-                        self._page.goto(tab_data["url"], wait_until="domcontentloaded", timeout=15000)
+                        self._page.goto(tab_url, wait_until="domcontentloaded", timeout=15000)
                     else:
                         page = self._context.new_page()
                         tid = self._make_tab_id()
                         self._tabs[tid] = page
-                        page.goto(tab_data["url"], wait_until="domcontentloaded", timeout=15000)
+                        page.goto(tab_url, wait_until="domcontentloaded", timeout=15000)
 
                     scroll = tab_data.get("scroll", {})
-                    self._page.evaluate(f"window.scrollTo({scroll.get('x', 0)}, {scroll.get('y', 0)})")
+                    try:
+                        sx = int(scroll.get('x', 0))
+                        sy = int(scroll.get('y', 0))
+                    except (ValueError, TypeError):
+                        sx, sy = 0, 0
+                    self._page.evaluate("([x, y]) => window.scrollTo(x, y)", [sx, sy])
                     restored += 1
                 except Exception as e:
                     logger.debug(f"[BrowserTool] Tab restore failed: {e}")

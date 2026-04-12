@@ -1,4 +1,5 @@
 """Smoke tests for command handlers — verify they don't crash with mock agent/context."""
+import os
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from typing import Optional
@@ -105,6 +106,24 @@ def test_handle_clear_with_agentic_loop(capsys):
     cli_ctx.agentic_loop.clear_history.assert_called_once()
     out = capsys.readouterr().out
     assert "cleared" in out.lower()
+
+
+def test_handle_clear_uses_permissions_manager_for_confirmation(capsys):
+    from aura.cli.commands.handlers import handle_clear
+
+    agent = _make_mock_agent()
+    cli_ctx = _make_mock_cli_ctx(agent, with_permissions=True)
+    cli_ctx.permissions.check.return_value = False
+
+    with _patch_ctx(cli_ctx), patch("builtins.input", side_effect=AssertionError("unexpected prompt")):
+        handle_clear(agent, "", _ctx())
+
+    cli_ctx.permissions.check.assert_called_once_with(
+        "clear_history",
+        {"scope": "conversation_history"},
+    )
+    out = capsys.readouterr().out
+    assert "cancelled" in out.lower()
 
 
 # ── handle_speak ──────────────────────────────────────────────────────────
@@ -222,6 +241,61 @@ def test_handle_edit_no_arg(capsys):
     assert "Usage" in out
 
 
+def test_handle_test_autofix_uses_permissions_manager_to_deny():
+    from aura.cli.commands.handlers import handle_test
+
+    agent = _make_mock_agent()
+    cli_ctx = _make_mock_cli_ctx(agent, with_loop=True, with_permissions=True)
+    cli_ctx.permissions.check.return_value = False
+
+    fake_result = MagicMock()
+    fake_result.success = False
+    fake_result.failures = ["tests/test_app.py::test_fail"]
+    fake_result.output = "failure output"
+
+    with (
+        _patch_ctx(cli_ctx),
+        patch("aura.cli.test_runner.run_tests", return_value=fake_result),
+        patch("aura.cli.test_runner.render_test_results"),
+        patch("builtins.input", side_effect=AssertionError("unexpected prompt")),
+    ):
+        handle_test(agent, "pytest -q", _ctx())
+
+    cli_ctx.permissions.check.assert_called_once_with(
+        "auto_fix_tests",
+        {"command": "pytest -q", "failure_count": 1},
+    )
+    cli_ctx.agentic_loop.run.assert_not_called()
+
+
+def test_handle_test_autofix_uses_permissions_manager_to_allow():
+    from aura.cli.commands.handlers import handle_test
+
+    agent = _make_mock_agent()
+    cli_ctx = _make_mock_cli_ctx(agent, with_loop=True, with_permissions=True)
+    cli_ctx.permissions.check.return_value = True
+    cli_ctx.agentic_loop.run.return_value = {"response": "fixed"}
+
+    fake_result = MagicMock()
+    fake_result.success = False
+    fake_result.failures = ["tests/test_app.py::test_fail"]
+    fake_result.output = "failure output"
+
+    with (
+        _patch_ctx(cli_ctx),
+        patch("aura.cli.test_runner.run_tests", return_value=fake_result),
+        patch("aura.cli.test_runner.render_test_results"),
+        patch("builtins.input", side_effect=AssertionError("unexpected prompt")),
+    ):
+        handle_test(agent, "pytest -q", _ctx())
+
+    cli_ctx.permissions.check.assert_called_once_with(
+        "auto_fix_tests",
+        {"command": "pytest -q", "failure_count": 1},
+    )
+    cli_ctx.agentic_loop.run.assert_called_once()
+
+
 # ── handle_shell ──────────────────────────────────────────────────────────
 
 def test_handle_shell_no_arg(capsys):
@@ -231,6 +305,39 @@ def test_handle_shell_no_arg(capsys):
     assert "Usage" in out or "shell" in out.lower()
 
 
+def test_handle_shell_prompts_when_not_full_auto():
+    from aura.cli.commands.handlers import handle_shell
+
+    agent = _make_mock_agent()
+    shell_tool = MagicMock()
+    agent.tools["shell_executor"] = shell_tool
+    cli_ctx = _make_mock_cli_ctx(agent, with_permissions=True)
+    cli_ctx.permissions.check.return_value = False
+
+    with _patch_ctx(cli_ctx), patch("builtins.input", side_effect=AssertionError("unexpected prompt")):
+        handle_shell(agent, "echo hi", _ctx())
+
+    cli_ctx.permissions.check.assert_called_once_with("shell", {"command": "echo hi", "cwd": os.getcwd()})
+    shell_tool.run_streaming.assert_not_called()
+
+
+def test_handle_shell_skips_prompt_in_full_auto():
+    from aura.cli.commands.handlers import handle_shell
+
+    agent = _make_mock_agent()
+    shell_tool = MagicMock()
+    shell_tool.run_streaming.return_value = {"success": True, "exit_code": 0, "elapsed": 0.1}
+    agent.tools["shell_executor"] = shell_tool
+    cli_ctx = _make_mock_cli_ctx(agent, with_permissions=True)
+    cli_ctx.permissions.check.return_value = True
+
+    with _patch_ctx(cli_ctx), patch("builtins.input", side_effect=AssertionError("unexpected prompt")):
+        handle_shell(agent, "echo hi", _ctx())
+
+    cli_ctx.permissions.check.assert_called_once_with("shell", {"command": "echo hi", "cwd": os.getcwd()})
+    shell_tool.run_streaming.assert_called_once()
+
+
 # ── handle_fleet ──────────────────────────────────────────────────────────
 
 @patch("aura.cli.display.console")
@@ -238,6 +345,45 @@ def test_handle_fleet_no_arg(mock_console):
     from aura.cli.commands.handlers import handle_fleet
     handle_fleet(_make_mock_agent(), "", _ctx())
     mock_console.print.assert_called()
+
+
+def test_handle_agent_prompts_when_not_full_auto():
+    from aura.cli.commands.handlers import handle_agent
+
+    agent = _make_mock_agent()
+    agent.permissions = MagicMock()
+    agent.permissions.check.return_value = False
+    agent.orchestrator = MagicMock()
+    agent.orchestrator.specialists = {"coder": MagicMock(description="Writes code")}
+
+    with patch("builtins.input", side_effect=AssertionError("unexpected prompt")):
+        handle_agent(agent, "coder investigate", _ctx())
+
+    agent.permissions.check.assert_called_once_with(
+        "spawn_agent",
+        {"task": "investigate", "specialist": "coder"},
+    )
+    agent.orchestrator._execute_single.assert_not_called()
+
+
+def test_handle_agent_skips_prompt_in_full_auto():
+    from aura.cli.commands.handlers import handle_agent
+
+    agent = _make_mock_agent()
+    agent.permissions = MagicMock()
+    agent.permissions.check.return_value = True
+    agent.orchestrator = MagicMock()
+    agent.orchestrator.specialists = {"coder": MagicMock(description="Writes code")}
+    agent.orchestrator._execute_single.return_value = MagicMock(success=True, response="done")
+
+    with patch("builtins.input", side_effect=AssertionError("unexpected prompt")):
+        handle_agent(agent, "coder investigate", _ctx())
+
+    agent.permissions.check.assert_called_once_with(
+        "spawn_agent",
+        {"task": "investigate", "specialist": "coder"},
+    )
+    agent.orchestrator._execute_single.assert_called_once()
 
 
 # ── handle_tasks ──────────────────────────────────────────────────────────
@@ -476,6 +622,114 @@ def test_handle_sessions_delete_not_found(capsys):
         handle_sessions(agent, "delete nonexistent", _ctx())
     out = capsys.readouterr().out
     assert "not found" in out.lower()
+
+
+def test_handle_trace_no_active_session(capsys):
+    from aura.cli.commands.handlers import handle_trace
+
+    agent = _make_mock_agent()
+    cli_ctx = _make_mock_cli_ctx(agent)
+    with _patch_ctx(cli_ctx):
+        handle_trace(agent, "", _ctx())
+
+    out = capsys.readouterr().out
+    assert "No active session trace" in out
+
+
+@patch("aura.cli.display.console")
+def test_handle_trace_renders_recent_events(mock_console):
+    from aura.cli.commands.handlers import handle_trace
+
+    agent = _make_mock_agent()
+    cli_ctx = _make_mock_cli_ctx(agent, with_session=True)
+    cli_ctx.session.session_id = "ses_demo"
+    cli_ctx.session.events = [
+        {"type": "response", "run_id": "run_a", "iteration": 1, "payload": {"text": "Started work"}},
+        {"type": "tool_start", "run_id": "run_a", "iteration": 2, "payload": {"tool_name": "shell", "tool_args": {"command": "pytest -q"}}},
+        {"type": "tool_result", "run_id": "run_a", "iteration": 2, "payload": {"tool_name": "shell", "tool_result": "{\"ok\": true}"}},
+        {"type": "run_finished", "run_id": "run_a", "iteration": 2, "payload": {"status": "completed", "model": "qwen"}},
+    ]
+
+    with _patch_ctx(cli_ctx):
+        handle_trace(agent, "3", _ctx())
+
+    printed = [call.args[0] for call in mock_console.print.call_args_list]
+    assert "Trace for ses_demo recent (3/4 events)" in printed[0]
+    assert "[2] tool start: shell pytest -q" in printed[1]
+    assert "[2] tool result: shell ok" in printed[2]
+    assert "[2] run finished: completed (qwen)" in printed[3]
+
+
+@patch("aura.cli.display.console")
+def test_handle_trace_last_groups_latest_run(mock_console):
+    from aura.cli.commands.handlers import handle_trace
+
+    agent = _make_mock_agent()
+    cli_ctx = _make_mock_cli_ctx(agent, with_session=True)
+    cli_ctx.session.session_id = "ses_demo"
+    cli_ctx.session.events = [
+        {"type": "response", "run_id": "run_old", "iteration": 1, "payload": {"text": "old run"}},
+        {"type": "run_finished", "run_id": "run_old", "iteration": 1, "payload": {"status": "completed", "model": "qwen"}},
+        {"type": "tool_start", "run_id": "run_new", "iteration": 1, "payload": {"tool_name": "grep", "tool_args": {"pattern": "todo"}}},
+        {"type": "tool_result", "run_id": "run_new", "iteration": 1, "payload": {"tool_name": "grep", "tool_result": "{\"ok\": true}"}},
+        {"type": "run_finished", "run_id": "run_new", "iteration": 1, "payload": {"status": "guard_tripped", "model": "qwen"}},
+    ]
+
+    with _patch_ctx(cli_ctx):
+        handle_trace(agent, "last", _ctx())
+
+    printed = [call.args[0] for call in mock_console.print.call_args_list]
+    assert "Trace for ses_demo last run (3/5 events)" in printed[0]
+    assert "[1] tool start: grep todo" in printed[1]
+    assert "[1] tool result: grep ok" in printed[2]
+    assert "[1] run finished: guard_tripped (qwen)" in printed[3]
+
+
+@patch("aura.cli.display.console")
+def test_handle_trace_failures_renders_failed_run_summaries(mock_console):
+    from aura.cli.commands.handlers import handle_trace
+
+    agent = _make_mock_agent()
+    cli_ctx = _make_mock_cli_ctx(agent, with_session=True)
+    cli_ctx.session.session_id = "ses_demo"
+    cli_ctx.session.events = [
+        {"type": "run_finished", "run_id": "run_ok", "iteration": 1, "payload": {"status": "completed", "model": "qwen", "tool_calls": 1, "response": "ok"}},
+        {"type": "response", "run_id": "run_timeout", "iteration": 1, "payload": {"text": "trying again"}},
+        {"type": "run_finished", "run_id": "run_timeout", "iteration": 1, "payload": {"status": "model_timeout", "model": "qwen", "tool_calls": 0, "response": "timed out"}},
+        {"type": "tool_start", "run_id": "run_guard", "iteration": 2, "payload": {"tool_name": "shell", "tool_args": {"command": "pytest"}}},
+        {"type": "run_finished", "run_id": "run_guard", "iteration": 2, "payload": {"status": "guard_tripped", "model": "qwen", "tool_calls": 1, "response": "blocked"}},
+    ]
+
+    with _patch_ctx(cli_ctx):
+        handle_trace(agent, "failures", _ctx())
+
+    printed = [call.args[0] for call in mock_console.print.call_args_list]
+    assert "Trace for ses_demo failed runs (2 runs)" in printed[0]
+    assert "run 1 [run_timeout]: model_timeout (qwen), 0 tool calls -> timed out" in printed[1]
+    assert "run 2 [run_guard]: guard_tripped (qwen), 1 tool calls -> blocked" in printed[2]
+
+
+@patch("aura.cli.display.console")
+def test_handle_trace_runs_renders_recent_run_summaries_with_run_ids(mock_console):
+    from aura.cli.commands.handlers import handle_trace
+
+    agent = _make_mock_agent()
+    cli_ctx = _make_mock_cli_ctx(agent, with_session=True)
+    cli_ctx.session.session_id = "ses_demo"
+    cli_ctx.session.events = [
+        {"type": "response", "run_id": "run_a", "iteration": 1, "payload": {"text": "first"}},
+        {"type": "run_finished", "run_id": "run_a", "iteration": 1, "payload": {"status": "completed", "model": "qwen", "tool_calls": 1, "response": "done one"}},
+        {"type": "tool_start", "run_id": "run_b", "iteration": 1, "payload": {"tool_name": "shell", "tool_args": {"command": "pytest"}}},
+        {"type": "run_finished", "run_id": "run_b", "iteration": 1, "payload": {"status": "cancelled", "model": "qwen", "tool_calls": 1, "response": "stopped"}},
+    ]
+
+    with _patch_ctx(cli_ctx):
+        handle_trace(agent, "runs", _ctx())
+
+    printed = [call.args[0] for call in mock_console.print.call_args_list]
+    assert "Trace for ses_demo recent runs (2 runs)" in printed[0]
+    assert "run 1 [run_a]: completed (qwen), 1 tool calls -> done one" in printed[1]
+    assert "run 2 [run_b]: cancelled (qwen), 1 tool calls -> stopped" in printed[2]
 
 
 # ── handle_theme ──────────────────────────────────────────────────────────

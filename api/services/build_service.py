@@ -243,7 +243,7 @@ class BuildTaskRecord:
             "task_id": self.task_id,
             "description": self.description,
             "framework": self.framework,
-            "workspace": self.workspace,
+            "workspace": self.task_id,  # Don't leak filesystem paths to clients
             "plan": self.plan,
             "status": self.status,
             "files_created": self.files_created,

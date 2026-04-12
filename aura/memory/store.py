@@ -204,7 +204,7 @@ class MemoryStore:
                 self._db_path = _DEFAULT_DB_PATH
 
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # RLock to allow reentrant access (e.g. reinforce -> get)
         self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
         atexit.register(self.close)
@@ -215,6 +215,7 @@ class MemoryStore:
         self._faiss_str_map: Dict[str, int] = {}  # memory_id string → faiss int64 id
         self._faiss_next_id: int = 0
         self._faiss_built = False
+        self._faiss_lock = threading.Lock()  # Separate lock for FAISS index operations
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -266,12 +267,15 @@ class MemoryStore:
         with self._lock:
             conn = self._get_conn()
             try:
-                conn.execute(sql, values)
+                cur = conn.execute(sql, values)
                 conn.commit()
+                if cur.rowcount == 0:
+                    logger.warning(f"[MemoryStore] INSERT OR IGNORE skipped for id={record.id} (duplicate)")
+                    return record.id
             except Exception:
                 conn.rollback()
                 raise
-        # Sync FAISS index
+        # Sync FAISS index only if the row was actually inserted
         if embedding is not None:
             self._faiss_add(record.id, embedding)
         return record.id
@@ -394,7 +398,8 @@ class MemoryStore:
 
         if not rows:
             # Empty index — detect dimension from first future insert
-            self._faiss_built = True
+            with self._faiss_lock:
+                self._faiss_built = True
             return True
 
         # Detect dimension from first row
@@ -407,9 +412,9 @@ class MemoryStore:
 
         vectors = []
         ids = []
-        self._faiss_id_map.clear()
-        self._faiss_str_map.clear()
-        self._faiss_next_id = 0
+        id_map: Dict[int, str] = {}
+        str_map: Dict[str, int] = {}
+        next_id = 0
 
         for row in rows:
             blob = row[emb_idx]
@@ -424,10 +429,10 @@ class MemoryStore:
             vec = vec / norm  # L2-normalize for cosine via IP
 
             mem_id = row[id_idx]
-            faiss_id = self._faiss_next_id
-            self._faiss_next_id += 1
-            self._faiss_id_map[faiss_id] = mem_id
-            self._faiss_str_map[mem_id] = faiss_id
+            faiss_id = next_id
+            next_id += 1
+            id_map[faiss_id] = mem_id
+            str_map[mem_id] = faiss_id
 
             vectors.append(vec)
             ids.append(faiss_id)
@@ -436,8 +441,12 @@ class MemoryStore:
             mat = np.array(vectors, dtype=np.float32)
             index.add_with_ids(mat, np.array(ids, dtype=np.int64))
 
-        self._faiss_index = index
-        self._faiss_built = True
+        with self._faiss_lock:
+            self._faiss_index = index
+            self._faiss_id_map = id_map
+            self._faiss_str_map = str_map
+            self._faiss_next_id = next_id
+            self._faiss_built = True
         logger.info(f"[MemoryStore] FAISS index built: {len(vectors)} vectors, dim={dim}")
         return True
 
@@ -445,24 +454,30 @@ class MemoryStore:
         """Add or update a single vector in the FAISS index."""
         if not self._faiss_built or self._faiss_index is None:
             return
-        # Remove old entry if updating
-        if memory_id in self._faiss_str_map:
-            self._faiss_remove(memory_id)
+        with self._faiss_lock:
+            # Remove old entry if updating
+            if memory_id in self._faiss_str_map:
+                self._faiss_remove_unlocked(memory_id)
 
-        vec = embedding.astype(np.float32)
-        norm = np.linalg.norm(vec)
-        if norm < 1e-8:
-            return
-        vec = (vec / norm).reshape(1, -1)
+            vec = embedding.astype(np.float32)
+            norm = np.linalg.norm(vec)
+            if norm < 1e-8:
+                return
+            vec = (vec / norm).reshape(1, -1)
 
-        faiss_id = self._faiss_next_id
-        self._faiss_next_id += 1
-        self._faiss_id_map[faiss_id] = memory_id
-        self._faiss_str_map[memory_id] = faiss_id
-        self._faiss_index.add_with_ids(vec, np.array([faiss_id], dtype=np.int64))
+            faiss_id = self._faiss_next_id
+            self._faiss_next_id += 1
+            self._faiss_id_map[faiss_id] = memory_id
+            self._faiss_str_map[memory_id] = faiss_id
+            self._faiss_index.add_with_ids(vec, np.array([faiss_id], dtype=np.int64))
 
     def _faiss_remove(self, memory_id: str) -> None:
-        """Remove a vector from the FAISS index."""
+        """Remove a vector from the FAISS index (acquires _faiss_lock)."""
+        with self._faiss_lock:
+            self._faiss_remove_unlocked(memory_id)
+
+    def _faiss_remove_unlocked(self, memory_id: str) -> None:
+        """Remove a vector from the FAISS index (caller must hold _faiss_lock)."""
         if not self._faiss_built or self._faiss_index is None:
             return
         faiss_id = self._faiss_str_map.pop(memory_id, None)
@@ -493,7 +508,8 @@ class MemoryStore:
             if self._faiss_index is not None and self._faiss_index.ntotal > 0:
                 return self._search_semantic_faiss(query_embedding, k, lifecycle_states, user_id)
 
-        # Fallback: brute-force linear scan
+        # Fallback: brute-force linear scan (O(N) — log warning for monitoring)
+        logger.warning("[MemoryStore] FAISS unavailable or empty — using O(N) brute-force semantic search")
         return self._search_semantic_brute(query_embedding, k, lifecycle_states, user_id)
 
     def _search_semantic_faiss(
@@ -512,9 +528,12 @@ class MemoryStore:
 
         states = set(lifecycle_states or ["candidate", "stable", "summary"])
 
-        # Over-fetch to account for post-filtering (3x k, min 50)
-        fetch_k = min(max(k * 3, 50), self._faiss_index.ntotal)
-        scores, ids = self._faiss_index.search(q_unit, fetch_k)
+        with self._faiss_lock:
+            # Over-fetch to account for post-filtering (3x k, min 50)
+            fetch_k = min(max(k * 3, 50), self._faiss_index.ntotal)
+            scores, ids = self._faiss_index.search(q_unit, fetch_k)
+            # Snapshot the id map under the lock
+            id_map_snapshot = dict(self._faiss_id_map)
 
         results: List[Tuple[MemoryRecord, float]] = []
         for i in range(ids.shape[1]):
@@ -522,7 +541,7 @@ class MemoryStore:
             if faiss_id < 0:  # FAISS returns -1 for missing
                 continue
             sim = float(scores[0][i])
-            mem_id = self._faiss_id_map.get(faiss_id)
+            mem_id = id_map_snapshot.get(faiss_id)
             if not mem_id:
                 continue
             record = self.get(mem_id)

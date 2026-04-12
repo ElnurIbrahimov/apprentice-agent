@@ -16,6 +16,20 @@ from aura.tools.deep_research import (
     deep_research,
 )
 
+
+@pytest.fixture(autouse=True)
+def _isolate_research_cache():
+    """Restore ResearchCache after each test to prevent mock leakage.
+
+    Earlier test modules may @patch ResearchCache at the module level.
+    If those patches' teardown interleaves with our imports, the name
+    binding can be left pointing at a MagicMock.
+    """
+    import aura.tools.deep_research as dr
+    real_cls = ResearchCache
+    yield
+    dr.ResearchCache = real_cls
+
 EXPECTED_KEYS = {
     "success", "topic", "depth", "queries_run", "urls_found", "pages_read",
     "time_seconds", "timed_out", "sources", "content", "summary",
@@ -62,10 +76,13 @@ def test_set_llm(mock_cache_cls):
 # ---------------------------------------------------------------------------
 @patch("aura.tools.deep_research.ResearchCache")
 def test_research_returns_all_keys(mock_cache_cls):
+    mock_cache_cls.return_value.get_research_session.return_value = None
     tool = DeepResearchTool()
-    # No searcher/tavily → immediate graceful return
+    # No search backends → immediate graceful return
     tool.searcher = None
     tool.tavily = None
+    tool.brave = None
+    tool.firecrawl = None
     result = tool.research("test topic", "quick")
     assert isinstance(result, dict)
     missing = EXPECTED_KEYS - set(result.keys())
@@ -77,9 +94,12 @@ def test_research_returns_all_keys(mock_cache_cls):
 # ---------------------------------------------------------------------------
 @patch("aura.tools.deep_research.ResearchCache")
 def test_graceful_no_backend(mock_cache_cls):
+    mock_cache_cls.return_value.get_research_session.return_value = None
     tool = DeepResearchTool()
     tool.searcher = None
     tool.tavily = None
+    tool.brave = None
+    tool.firecrawl = None
     result = tool.research("anything", "standard")
     assert result["success"] is False
     assert result["phases_completed"] == 0

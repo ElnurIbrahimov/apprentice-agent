@@ -3,6 +3,7 @@ import os
 from typing import Optional
 
 from ..context import get_ctx
+from ._permissions import confirm_action
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,167 @@ def handle_export_session(agent, arg, context) -> "str | None":
     outpath.write_text(content, encoding="utf-8")
     show_info(f"Exported to {outpath.name} ({len(content)} chars)")
     return None
+
+
+def _summarize_trace_event(event: dict) -> str:
+    event_type = str(event.get("type", "event"))
+    payload = event.get("payload", {}) if isinstance(event.get("payload"), dict) else {}
+
+    if event_type == "tool_start":
+        tool_name = payload.get("tool_name", "?")
+        tool_args = payload.get("tool_args", {})
+        desc = ""
+        if isinstance(tool_args, dict):
+            desc = (
+                tool_args.get("path")
+                or tool_args.get("command")
+                or tool_args.get("query")
+                or tool_args.get("pattern")
+                or ""
+            )
+        desc_text = f" {str(desc)[:60]}" if desc else ""
+        return f"tool start: {tool_name}{desc_text}"
+
+    if event_type == "tool_result":
+        tool_name = payload.get("tool_name", "?")
+        result = payload.get("tool_result")
+        result_text = str(result)
+        if isinstance(result, str) and '"error"' in result.lower():
+            return f"tool result: {tool_name} error"
+        if "Permission denied by user" in result_text:
+            return f"tool result: {tool_name} denied"
+        return f"tool result: {tool_name} ok"
+
+    if event_type == "response":
+        text = str(payload.get("text", "")).strip().replace("\n", " ")
+        return f"response: {text[:80]}" if text else "response"
+
+    if event_type == "run_finished":
+        status = payload.get("status", "unknown")
+        model = payload.get("model", "")
+        suffix = f" ({model})" if model else ""
+        return f"run finished: {status}{suffix}"
+
+    return event_type.replace("_", " ")
+
+
+def _split_trace_runs(events: list[dict]) -> list[list[dict]]:
+    runs: list[list[dict]] = []
+    grouped_by_id: dict[str, list[dict]] = {}
+    ordered_ids: list[str] = []
+    for event in events:
+        run_id = str(event.get("run_id", "")).strip()
+        if run_id:
+            if run_id not in grouped_by_id:
+                grouped_by_id[run_id] = []
+                ordered_ids.append(run_id)
+            grouped_by_id[run_id].append(event)
+    if ordered_ids:
+        return [grouped_by_id[run_id] for run_id in ordered_ids]
+
+    current: list[dict] = []
+    for event in events:
+        current.append(event)
+        if event.get("type") == "run_finished":
+            runs.append(current)
+            current = []
+    if current:
+        runs.append(current)
+    return runs
+
+
+def _render_trace_events(console, session_id: str, events: list[dict], total_events: int, label: str) -> None:
+    console.print(f"  Trace for {session_id} {label} ({len(events)}/{total_events} events)")
+    for event in events:
+        iteration = event.get("iteration", "-")
+        summary = _summarize_trace_event(event)
+        console.print(f"    [{iteration}] {summary}")
+
+
+def _render_trace_run_summaries(console, session_id: str, runs: list[list[dict]], label: str) -> None:
+    console.print(f"  Trace for {session_id} {label} ({len(runs)} runs)")
+    for idx, run in enumerate(runs, start=1):
+        finish = run[-1] if run and run[-1].get("type") == "run_finished" else {}
+        run_id = str((finish or run[0]).get("run_id", "")).strip() if run else ""
+        payload = finish.get("payload", {}) if isinstance(finish.get("payload"), dict) else {}
+        status = payload.get("status", "in_progress")
+        model = payload.get("model", "")
+        tool_calls = payload.get("tool_calls", 0)
+        response = str(payload.get("response", "")).strip().replace("\n", " ")
+        suffix = f" ({model})" if model else ""
+        run_tag = f" [{run_id}]" if run_id else ""
+        summary = f"run {idx}{run_tag}: {status}{suffix}, {tool_calls} tool calls"
+        if response:
+            summary += f" -> {response[:70]}"
+        console.print(f"    {summary}")
+
+
+def handle_trace(agent, arg, context) -> Optional[str]:
+    from ..display import console, show_error
+
+    ctx = get_ctx()
+    session = None
+    if ctx and ctx.session:
+        session = ctx.session
+    elif ctx and ctx.agentic_loop and getattr(ctx.agentic_loop, "session", None):
+        session = ctx.agentic_loop.session
+
+    if not session:
+        show_error("No active session trace available.")
+        return
+
+    events = list(getattr(session, "events", []) or [])
+    if not events:
+        show_error("No trace events recorded for this session yet.")
+        return
+
+    session_id = getattr(session, "session_id", "") or "session"
+    arg = (arg or "").strip()
+
+    if not arg:
+        recent = events[-12:]
+        _render_trace_events(console, session_id, recent, len(events), "recent")
+        return
+
+    if arg == "last":
+        runs = _split_trace_runs(events)
+        last_run = runs[-1] if runs else []
+        if not last_run:
+            show_error("No trace run available yet.")
+            return
+        _render_trace_events(console, session_id, last_run, len(events), "last run")
+        return
+
+    if arg == "runs":
+        runs = _split_trace_runs(events)
+        recent_runs = runs[-5:]
+        _render_trace_run_summaries(console, session_id, recent_runs, "recent runs")
+        return
+
+    if arg == "failures":
+        runs = _split_trace_runs(events)
+        failed_runs = [
+            run
+            for run in runs
+            if run
+            and run[-1].get("type") == "run_finished"
+            and str(run[-1].get("payload", {}).get("status", "completed")) != "completed"
+        ]
+        if not failed_runs:
+            show_error("No failed runs in this session trace.")
+            return
+        _render_trace_run_summaries(console, session_id, failed_runs[-5:], "failed runs")
+        return
+
+    try:
+        limit = max(1, min(50, int(arg)))
+    except ValueError:
+        show_error("Usage: /trace [count|last|runs|failures]")
+        return
+
+    recent = events[-limit:]
+    _render_trace_events(console, session_id, recent, len(events), "recent")
+    return
 
 
 def handle_sessions(agent, arg, context) -> Optional[str]:
@@ -153,8 +315,13 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
 def handle_clear(agent, arg, context) -> Optional[str]:
     if arg.strip() != "--force":
         from ..display import console
-        response = console.input("  Clear conversation history? [y/N] ").strip().lower()
-        if response not in ("y", "yes"):
+        approved = confirm_action(
+            agent,
+            "clear_history",
+            {"scope": "conversation_history"},
+            fallback_prompt="  Clear conversation history? [y/N] ",
+        )
+        if not approved:
             console.print("  [dim]Cancelled.[/dim]")
             return
     agent.brain.clear_history()
@@ -213,12 +380,18 @@ def handle_retry(agent, arg, context) -> Optional[str]:
             except ImportError:
                 _retry_info(f"Last attempt failed on '{current_tier}' tier.")
 
-            try:
-                choice = input(f"  Retry with '{next_tier}' tier? (y/n): ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                return
+            approved = confirm_action(
+                agent,
+                "retry_tier_escalation",
+                {
+                    "from_tier": current_tier,
+                    "to_tier": next_tier,
+                    "prompt": last_prompt,
+                },
+                fallback_prompt=f"  Retry with '{next_tier}' tier? (y/n): ",
+            )
 
-            if choice in ("y", "yes"):
+            if approved:
                 # Temporarily override the tier for this retry
                 if hasattr(loop, 'router') and loop.router:
                     loop.router.tier = next_tier

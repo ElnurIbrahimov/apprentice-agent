@@ -6,6 +6,7 @@ routing, collaboration, and response synthesis.
 
 import concurrent.futures
 import logging
+import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -68,8 +69,9 @@ class MultiAgentOrchestrator:
         from aura.pools import bg_pool
         self._executor = bg_pool()
 
-        # Conversation history
+        # Conversation history (protected by _history_lock for concurrent access)
         self.history: List[ConversationTurn] = []
+        self._history_lock = threading.Lock()
 
         logger.info(f"[Orchestrator] Initialized with {len(self.specialists)} specialists")
 
@@ -105,10 +107,11 @@ class MultiAgentOrchestrator:
         )
 
         # Add conversation context
-        if self.history:
-            last_turn = self.history[-1]
-            message.context["previous_query"] = last_turn.user_message.content
-            message.context["previous_response"] = last_turn.final_response[:500]
+        with self._history_lock:
+            if self.history:
+                last_turn = self.history[-1]
+                message.context["previous_query"] = last_turn.user_message.content
+                message.context["previous_response"] = last_turn.final_response[:500]
 
         # Route to specialists
         routing = self.router.route(query, self.llm_func)
@@ -141,11 +144,11 @@ class MultiAgentOrchestrator:
             results=results,
             final_response=final_response
         )
-        self.history.append(turn)
-
-        # Keep history manageable
-        if len(self.history) > 20:
-            self.history = self.history[-15:]
+        with self._history_lock:
+            self.history.append(turn)
+            # Keep history manageable
+            if len(self.history) > 20:
+                self.history = self.history[-15:]
 
         exec_time = time.time() - start_time
         logger.info(f"[Orchestrator] Completed in {exec_time:.2f}s")

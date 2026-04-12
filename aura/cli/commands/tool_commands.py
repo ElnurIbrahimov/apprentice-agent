@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from ._permissions import confirm_action
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,12 +45,13 @@ def handle_test(agent, arg, context) -> Optional[str]:
     result = run_tests(test_cmd)
     render_test_results(_test_console, result)
     if not result.success and result.failures:
-        _test_console.print("[dim]Auto-fix failures? (y/n)[/dim]")
-        try:
-            choice = input("> ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            return
-        if choice in ("y", "yes"):
+        approved = confirm_action(
+            agent,
+            "auto_fix_tests",
+            {"command": test_cmd, "failure_count": len(result.failures)},
+            fallback_prompt="  Auto-fix failing tests? (y/n): ",
+        )
+        if approved:
             from aura.cli.context import get_ctx
             ctx = get_ctx()
             agentic_loop = ctx.agentic_loop if ctx else None
@@ -144,17 +147,15 @@ def _handle_shell_command(agent, arg: str):
         return
 
     try:
-        from aura.core.permissions import PermissionTier
-
-        from ..context import get_ctx
-        ctx = get_ctx()
-        pm = ctx.permissions if ctx else None
-        if pm and pm.current_mode != PermissionTier.FULL_AUTO:
-            confirm = input(f"  Execute shell command: {arg}\n  Confirm? (y/n): ").strip().lower()
-            if confirm not in ("y", "yes"):
-                _shell_console.print("  Cancelled.")
-                return
-    except (ImportError, AttributeError, EOFError, KeyboardInterrupt):
+        if not confirm_action(
+            agent,
+            "shell",
+            {"command": arg, "cwd": os.getcwd()},
+            fallback_prompt=f"  Execute shell command: {arg}\n  Confirm? (y/n): ",
+        ):
+            _shell_console.print("  Cancelled.")
+            return
+    except (AttributeError, EOFError, KeyboardInterrupt, OSError):
         logger.debug("shell_permission_check_skipped", exc_info=True)
 
     tool = agent.tools.get("shell_executor")

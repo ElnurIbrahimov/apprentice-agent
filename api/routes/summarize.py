@@ -29,7 +29,7 @@ class SummarizeRequest(BaseModel):
     url: str = Field("", max_length=2048)
     title: str = Field("", max_length=500)
     format: str = "bullets"   # "bullets" | "paragraph" | "tldr"
-    model: Optional[str] = None
+    model: Optional[str] = Field(default=None, max_length=128, pattern=r"^[a-zA-Z0-9._:\-/]+$")
 
 
 PROMPTS = {

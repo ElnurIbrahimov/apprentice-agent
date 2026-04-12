@@ -25,180 +25,38 @@ import os
 import sqlite3
 import threading
 import time
-import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
-from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from aura.consciousness.world_model_types import (
+    Belief,
+    BeliefCategory,
+    ChangeType,
+    Contradiction,
+    Goal,
+    GoalHorizon,
+    Project,
+    ProjectHealth,
+    ProjectStatus,
+    Relationship,
+    StateChange,
+)
+from aura.consciousness.world_model_types import (
+    gen_id as _gen_id,
+)
+from aura.consciousness.world_model_types import (
+    json_dumps as _json_dumps,
+)
+from aura.consciousness.world_model_types import (
+    json_loads as _json_loads,
+)
+from aura.consciousness.world_model_types import (
+    now_iso as _now_iso,
+)
+
 logger = logging.getLogger(__name__)
-
-
-# ============================================================================
-# Enums
-# ============================================================================
-
-class ProjectStatus(str, Enum):
-    ACTIVE = "active"
-    PAUSED = "paused"
-    COMPLETED = "completed"
-    ABANDONED = "abandoned"
-
-
-class ProjectHealth(str, Enum):
-    GREEN = "green"      # On track, recent activity
-    YELLOW = "yellow"    # Slowing down or minor blockers
-    RED = "red"          # Stale, major blockers, or at risk
-
-
-class GoalHorizon(str, Enum):
-    SHORT_TERM = "short_term"    # Days to weeks
-    MEDIUM_TERM = "medium_term"  # Weeks to months
-    LONG_TERM = "long_term"      # Months to years
-
-
-class BeliefCategory(str, Enum):
-    USER_INTENT = "user_intent"
-    TECHNICAL_CONSTRAINT = "technical_constraint"
-    PREFERENCE = "preference"
-    PROJECT_STATE = "project_state"
-    RELATIONSHIP = "relationship"
-    SCHEDULE = "schedule"
-    HABIT = "habit"
-    ENVIRONMENT = "environment"
-
-
-class ChangeType(str, Enum):
-    PROJECT_UPDATE = "project_update"
-    GOAL_UPDATE = "goal_update"
-    BELIEF_FORMED = "belief_formed"
-    BELIEF_REVISED = "belief_revised"
-    CONTRADICTION_DETECTED = "contradiction_detected"
-    RELATIONSHIP_UPDATE = "relationship_update"
-    ENVIRONMENT_UPDATE = "environment_update"
-    BLOCKER_ADDED = "blocker_added"
-    BLOCKER_RESOLVED = "blocker_resolved"
-
-
-# ============================================================================
-# Dataclasses
-# ============================================================================
-
-@dataclass
-class Project:
-    """A user project tracked by the world model."""
-    id: str
-    name: str
-    status: ProjectStatus = ProjectStatus.ACTIVE
-    description: str = ""
-    created_at: str = ""
-    last_mentioned: str = ""
-    last_activity: str = ""
-    mention_count: int = 1
-    priority: float = 0.5
-    health: ProjectHealth = ProjectHealth.GREEN
-    technologies: List[str] = field(default_factory=list)
-
-
-@dataclass
-class Goal:
-    """A user goal at a specific time horizon."""
-    id: str
-    description: str
-    horizon: GoalHorizon = GoalHorizon.SHORT_TERM
-    created_at: str = ""
-    target_date: Optional[str] = None
-    progress: float = 0.0
-    status: str = "active"
-    related_project_ids: List[str] = field(default_factory=list)
-    evidence: List[str] = field(default_factory=list)
-
-
-@dataclass
-class Belief:
-    """A structured belief about the user's world."""
-    id: str
-    statement: str
-    confidence: float = 0.7
-    category: BeliefCategory = BeliefCategory.USER_INTENT
-    evidence: List[str] = field(default_factory=list)
-    first_formed: str = ""
-    last_reinforced: str = ""
-    valid_from: str = ""
-    valid_to: Optional[str] = None
-    superseded_by: Optional[str] = None
-    source_conversation_ids: List[str] = field(default_factory=list)
-
-
-@dataclass
-class Relationship:
-    """A person mentioned in conversations."""
-    id: str
-    name: str
-    role: str = ""
-    relationship_type: str = "mentioned_person"
-    first_mentioned: str = ""
-    last_mentioned: str = ""
-    mention_count: int = 1
-    context_notes: List[str] = field(default_factory=list)
-    sentiment: str = "neutral"
-
-
-@dataclass
-class Contradiction:
-    """A detected contradiction between beliefs."""
-    id: str
-    belief_a_id: str
-    belief_b_id: str
-    description: str
-    detected_at: str
-    resolution: Optional[str] = None
-    resolution_details: Optional[str] = None
-    resolved_at: Optional[str] = None
-
-
-@dataclass
-class StateChange:
-    """A logged change to the world model."""
-    timestamp: str
-    conversation_id: Optional[str]
-    change_type: ChangeType
-    entity_type: str
-    entity_id: str
-    old_value: Optional[Dict] = None
-    new_value: Optional[Dict] = None
-    reasoning: str = ""
-
-
-# ============================================================================
-# Helper
-# ============================================================================
-
-def _now_iso() -> str:
-    """Return current UTC time as ISO 8601 string."""
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _gen_id(prefix: str = "") -> str:
-    """Generate a unique ID with an optional prefix."""
-    short = uuid.uuid4().hex[:12]
-    return f"{prefix}_{short}" if prefix else short
-
-
-def _json_dumps(obj: Any) -> str:
-    """Safe JSON serialization."""
-    return json.dumps(obj, default=str)
-
-
-def _json_loads(s: Optional[str]) -> Any:
-    """Safe JSON deserialization."""
-    if not s:
-        return None
-    try:
-        return json.loads(s)
-    except (json.JSONDecodeError, TypeError):
-        return None
 
 
 # ============================================================================
@@ -237,14 +95,18 @@ class WorldModel:
 
         # Resolve paths
         if db_path:
-            self._db_path = str(Path(db_path))
+            db_file = Path(db_path)
+            db_file.parent.mkdir(parents=True, exist_ok=True)
+            self._db_path = str(db_file)
         else:
             data_dir = Path(os.getenv("AURA_DATA_DIR", "data"))
             data_dir.mkdir(parents=True, exist_ok=True)
             self._db_path = str(data_dir / "world_model.db")
 
         if snapshot_path:
-            self._snapshot_path = str(Path(snapshot_path))
+            snapshot_file = Path(snapshot_path)
+            snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+            self._snapshot_path = str(snapshot_file)
         else:
             data_dir = Path(os.getenv("AURA_DATA_DIR", "data"))
             data_dir.mkdir(parents=True, exist_ok=True)
@@ -574,17 +436,18 @@ class WorldModel:
                         _json_dumps(project.technologies),
                     ),
                 )
+                # Audit row in same transaction for atomicity
+                self._log_state_change(
+                    ChangeType.PROJECT_UPDATE, "project", project.id,
+                    None, asdict(project), conversation_id,
+                    reasoning=f"New project created: {name}",
+                    conn=conn,
+                )
                 conn.commit()
             finally:
                 conn.close()
 
             self._projects[project.id] = project
-
-            self._log_state_change(
-                ChangeType.PROJECT_UPDATE, "project", project.id,
-                None, asdict(project), conversation_id,
-                reasoning=f"New project created: {name}",
-            )
 
             self._update_snapshot()
             logger.info(f"[WorldModel] Added project: {name} ({project.id})")
@@ -635,14 +498,14 @@ class WorldModel:
                         project.id,
                     ),
                 )
+                self._log_state_change(
+                    ChangeType.PROJECT_UPDATE, "project", project.id,
+                    old_state, asdict(project), conversation_id,
+                    conn=conn,
+                )
                 conn.commit()
             finally:
                 conn.close()
-
-            self._log_state_change(
-                ChangeType.PROJECT_UPDATE, "project", project.id,
-                old_state, asdict(project), conversation_id,
-            )
 
             self._update_snapshot()
             return project
@@ -978,7 +841,7 @@ class WorldModel:
                 source_conversation_ids=[conversation_id] if conversation_id else [],
             )
 
-            # Single transaction: mark old as superseded + insert new belief
+            # Single transaction: mark old as superseded + insert new belief + audit rows
             conn = self._connect()
             try:
                 conn.execute("BEGIN")
@@ -1001,6 +864,21 @@ class WorldModel:
                         _json_dumps(new_belief.source_conversation_ids),
                     ),
                 )
+                # Audit rows in same transaction
+                self._log_state_change(
+                    ChangeType.BELIEF_REVISED, "belief", old_id,
+                    {"statement": old_belief.statement},
+                    {"statement": new_statement, "new_id": new_belief.id},
+                    conversation_id,
+                    reasoning=f"Belief revised: '{old_belief.statement}' -> '{new_statement}'",
+                    conn=conn,
+                )
+                self._log_state_change(
+                    ChangeType.BELIEF_FORMED, "belief", new_belief.id,
+                    None, asdict(new_belief), conversation_id,
+                    reasoning=f"New belief formed: {new_statement}",
+                    conn=conn,
+                )
                 conn.execute("COMMIT")
             except Exception:
                 conn.execute("ROLLBACK")
@@ -1013,20 +891,6 @@ class WorldModel:
             old_belief.superseded_by = new_belief.id
             del self._beliefs[old_id]
             self._beliefs[new_belief.id] = new_belief
-
-            self._log_state_change(
-                ChangeType.BELIEF_REVISED, "belief", old_id,
-                {"statement": old_belief.statement},
-                {"statement": new_statement, "new_id": new_belief.id},
-                conversation_id,
-                reasoning=f"Belief revised: '{old_belief.statement}' -> '{new_statement}'",
-            )
-
-            self._log_state_change(
-                ChangeType.BELIEF_FORMED, "belief", new_belief.id,
-                None, asdict(new_belief), conversation_id,
-                reasoning=f"New belief formed: {new_statement}",
-            )
 
             self._update_snapshot()
             return new_belief
@@ -1312,10 +1176,18 @@ class WorldModel:
         new_value: Any,
         conversation_id: Optional[str] = None,
         reasoning: str = "",
+        conn: Optional[sqlite3.Connection] = None,
     ) -> None:
-        """Insert an audit row into state_changes."""
+        """Insert an audit row into state_changes.
+
+        If ``conn`` is provided, the row is inserted using that connection
+        (and NOT committed — the caller is responsible for committing),
+        making the audit row atomic with the data write.
+        """
         now = _now_iso()
-        conn = self._connect()
+        own_conn = conn is None
+        if own_conn:
+            conn = self._connect()
         try:
             conn.execute(
                 """INSERT INTO state_changes
@@ -1329,9 +1201,11 @@ class WorldModel:
                     reasoning,
                 ),
             )
-            conn.commit()
+            if own_conn:
+                conn.commit()
         finally:
-            conn.close()
+            if own_conn:
+                conn.close()
 
     def get_state_change_counts(
         self, entity_type: str, since: str, until: Optional[str] = None
@@ -2092,7 +1966,7 @@ class WorldModel:
 
             evidence_text = data.get("evidence", "")
             if evidence_text:
-                new_evidence = list(existing.evidence) + [evidence_text]
+                new_evidence = [*existing.evidence, evidence_text]
                 update_fields["evidence"] = new_evidence
 
             self.update_goal(existing.id, conversation_id=conv_id, **update_fields)
@@ -2116,7 +1990,7 @@ class WorldModel:
             # "mention" of existing goal — just reinforce
             evidence_text = data.get("evidence", "")
             if evidence_text:
-                update_fields = {"evidence": list(existing.evidence) + [evidence_text]}
+                update_fields = {"evidence": [*existing.evidence, evidence_text]}
                 self.update_goal(existing.id, conversation_id=conv_id, **update_fields)
             return 1
 

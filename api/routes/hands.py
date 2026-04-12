@@ -380,13 +380,14 @@ async def deactivate_hand(name: str) -> Dict[str, Any]:
 async def pause_hand(name: str) -> Dict[str, Any]:
     """Pause a Hand (suspend scheduling without deactivating)."""
     manager = _get_manager()
-    hand = manager._hands.get(name)
-    if not hand:
-        raise HTTPException(status_code=404, detail=f"Unknown hand: {name}")
     from aura.hands.base import HandState
-    if hand.state in (HandState.ACTIVE, HandState.RUNNING):
-        hand._state = HandState.PAUSED
-        return {"status": "paused", "hand": name}
+    with manager._lock:
+        hand = manager._hands.get(name)
+        if not hand:
+            raise HTTPException(status_code=404, detail=f"Unknown hand: {name}")
+        if hand.state in (HandState.ACTIVE, HandState.RUNNING):
+            hand._state = HandState.PAUSED
+            return {"status": "paused", "hand": name}
     raise HTTPException(status_code=400, detail=f"Hand {name} is {hand.state.value}, cannot pause")
 
 

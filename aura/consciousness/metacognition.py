@@ -392,7 +392,8 @@ class MetacognitiveEngine:
 
         This runs the selected strategy and records the result.
         """
-        goal = next((g for g in self._goals if g.id == goal_id), None)
+        with self._lock:
+            goal = next((g for g in self._goals if g.id == goal_id), None)
         if not goal:
             logger.warning(f"[Metacognition] Goal not found: {goal_id}")
             return None

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
-from api.utils import safe_error_detail
+from api.utils import EndpointRateLimiter, safe_error_detail
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class SaveRequest(BaseModel):
     text: str = Field(..., max_length=50_000)
     url: Optional[str] = Field("", max_length=2048)
     title: Optional[str] = Field("", max_length=500)
-    tags: Optional[List[str]] = []
+    tags: List[str] = Field(default_factory=list)
     importance: Optional[float] = Field(0.7, ge=0.0, le=1.0)
     source_type: Optional[str] = "selection"
 
@@ -62,9 +62,6 @@ class SearchResponse(BaseModel):
 
 
 # -- Endpoints -------------------------------------------------------------
-
-from api.utils import EndpointRateLimiter
-
 _knowledge_save_limiter = EndpointRateLimiter(max_per_minute=30)
 
 @router.post("/save", response_model=SaveResponse)
@@ -101,7 +98,7 @@ async def save_knowledge(body: SaveRequest):
         )
     except Exception as e:
         logger.error("[Knowledge] Save failed: %s", e)
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.get("/list")
@@ -140,7 +137,7 @@ async def list_knowledge(
 
     except Exception as e:
         logger.error("[Knowledge] List failed: %s", e)
-        raise HTTPException(500, safe_error_detail(e))
+        raise HTTPException(500, safe_error_detail(e)) from None
 
 
 @router.delete("/{episode_id}")
@@ -165,7 +162,7 @@ async def delete_knowledge(episode_id: str):
         raise
     except Exception as e:
         logger.error("[Knowledge] Delete failed: %s", e)
-        raise HTTPException(500, safe_error_detail(e))
+        raise HTTPException(500, safe_error_detail(e)) from None
 
 
 @router.get("/search", response_model=SearchResponse)
@@ -197,4 +194,4 @@ async def search_knowledge(
         return SearchResponse(query=q, results=results, count=len(results))
     except Exception as e:
         logger.error("[Knowledge] Search failed: %s", e)
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None

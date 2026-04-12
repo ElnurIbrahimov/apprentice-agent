@@ -6,6 +6,7 @@ Uses keyword matching with LLM fallback for complex queries.
 
 import logging
 import re
+import threading
 from collections import OrderedDict
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -91,11 +92,13 @@ class IntentRouter:
         """
         self.specialists = specialists
         self._intent_cache: OrderedDict = OrderedDict()
+        self._cache_lock = threading.Lock()
 
     def _cache_set(self, key: str, value) -> None:
-        if len(self._intent_cache) >= MAX_CACHE_SIZE:
-            self._intent_cache.popitem(last=False)  # evict oldest
-        self._intent_cache[key] = value
+        with self._cache_lock:
+            if len(self._intent_cache) >= MAX_CACHE_SIZE:
+                self._intent_cache.popitem(last=False)  # evict oldest
+            self._intent_cache[key] = value
 
     def route(
         self,
@@ -114,8 +117,9 @@ class IntentRouter:
         query_lower = query.lower().strip()
 
         # Check cache for exact matches
-        if query_lower in self._intent_cache:
-            return self._intent_cache[query_lower]
+        with self._cache_lock:
+            if query_lower in self._intent_cache:
+                return self._intent_cache[query_lower]
 
         # Step 1: Check for multi-agent patterns
         multi_result = self._check_multi_agent_patterns(query_lower)

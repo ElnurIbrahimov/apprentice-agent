@@ -269,14 +269,6 @@ class PatternProphet:
             if len(self.interactions) > 1000:
                 self.interactions = self.interactions[-1000:]
 
-            # Record to file
-            try:
-                rotate_jsonl_if_needed(self.interactions_file)
-                with open(self.interactions_file, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(asdict(interaction)) + "\n")
-            except IOError as e:
-                logger.error(f"Error recording interaction: {e}")
-
             # Update working memory
             if previous_topic:
                 self._topic_sequences[previous_topic][topic] += 1
@@ -286,17 +278,25 @@ class PatternProphet:
             for kw in keywords:
                 self._keyword_cooccurrence[kw].update(keywords)
 
-            # Trigger pattern detection
+            # Trigger pattern detection (in-memory analysis only)
             self._detect_patterns()
+
+        # Disk I/O outside the lock to avoid blocking other callers
+        try:
+            rotate_jsonl_if_needed(self.interactions_file)
+            with open(self.interactions_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(asdict(interaction)) + "\n")
+        except IOError as e:
+            logger.error(f"Error recording interaction: {e}")
+        self._save_patterns()
 
         return interaction
 
     def _detect_patterns(self) -> None:
-        """Analyze data and detect patterns."""
+        """Analyze data and detect patterns (in-memory only, no disk I/O)."""
         self._detect_sequence_patterns()
         self._detect_temporal_patterns()
         self._detect_cluster_patterns()
-        self._save_patterns()
 
     def _detect_sequence_patterns(self) -> None:
         """Detect topic sequence patterns (A -> B)."""

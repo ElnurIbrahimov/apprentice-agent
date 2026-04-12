@@ -3,6 +3,7 @@
 import asyncio
 import functools
 import logging
+import re
 import threading
 import time
 from collections import deque
@@ -140,7 +141,7 @@ _tracker_lock = threading.Lock()
 
 
 _MAX_TRACKERS = 50
-_SESSION_ID_RE = __import__("re").compile(r'^[a-zA-Z0-9_\-]{1,128}$')
+_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,128}$")
 
 def _get_tracker(session_id: str) -> MemoryRecallTracker:
     if not _SESSION_ID_RE.match(session_id):
@@ -175,7 +176,7 @@ class RecallEventResponse(BaseModel):
     query: str
     memories: List[str]
     timestamp: str
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class RecallStatusResponse(BaseModel):
@@ -321,7 +322,7 @@ async def get_recent_memories(limit: int = Query(default=20, le=100)):
         return {"memories": [{"content": m.get("content", ""), "timestamp": m.get("timestamp", ""), "category": m.get("category", "general"), "relevance": m.get("relevance", 0)} for m in (memories if memories else [])]}
     except Exception as e:
         logger.warning(f"[Memory] recent endpoint: {e}")
-        raise HTTPException(status_code=503, detail="Memory store unavailable")
+        raise HTTPException(status_code=503, detail="Memory store unavailable") from None
 
 
 @router.get("/search")
@@ -340,7 +341,7 @@ async def search_memories(q: str = Query(..., min_length=1, max_length=500)):
         return {"results": [{"content": m.get("content", ""), "timestamp": m.get("timestamp", ""), "category": m.get("category", "general"), "relevance": m.get("relevance", 0)} for m in (results if results else [])]}
     except Exception as e:
         logger.warning(f"[Memory] search endpoint: {e}")
-        raise HTTPException(status_code=503, detail="Memory store unavailable")
+        raise HTTPException(status_code=503, detail="Memory store unavailable") from None
 
 
 class AddMemoryBody(BaseModel):
@@ -364,7 +365,7 @@ async def add_memory(body: AddMemoryBody):
         return {"ok": True, "message": "Memory stored"}
     except Exception as e:
         logger.warning(f"[Memory] add endpoint failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to store memory")
+        raise HTTPException(status_code=500, detail="Failed to store memory") from None
 
 
 # ============================================================================

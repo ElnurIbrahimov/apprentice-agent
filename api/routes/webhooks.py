@@ -131,15 +131,16 @@ async def _notify_surfaces(text: str, channel: str = "all"):
     # Also broadcast via proactive WebSocket channel
     if channel in ("web", "all"):
         try:
-            from api.routes.chat import broadcast_proactive_message
+            from api.services.websocket_hub import websocket_hub
             from aura.proactive import EventPriority, ProactiveAction, ProactiveMessage
+
             msg = ProactiveMessage(
                 action=ProactiveAction.NOTIFY,
                 content=text,
                 priority=EventPriority.HIGH,
                 metadata={"source": "webhook"},
             )
-            await broadcast_proactive_message(msg)
+            await websocket_hub.broadcast_proactive_message(msg)
         except Exception as e:
             logger.debug(f"[Webhooks] WebSocket broadcast failed: {e}")
 
@@ -231,7 +232,7 @@ async def github_webhook(
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from None
 
     event_type = x_github_event or payload.get("action", "unknown")
     repo = payload.get("repository", {}).get("full_name", "unknown")
@@ -406,29 +407,30 @@ _WEBHOOK_REGISTRY_MAX = 500
 
 def _ensure_subscription(source: str, name: str, event_types: List[str]):
     """Auto-register a subscription when a webhook fires (idempotent)."""
-    for sub in _webhook_registry:
-        if sub["source"] == source and sub["name"] == name:
-            # Update event types
-            for et in event_types:
-                if et not in sub["event_types"]:
-                    sub["event_types"].append(et)
-            sub["last_seen"] = datetime.utcnow().isoformat() + "Z"
-            return
-    # Cap registry size to prevent unbounded memory growth
-    if len(_webhook_registry) >= _WEBHOOK_REGISTRY_MAX:
-        # Evict oldest entry by last_seen
-        oldest = min(range(len(_webhook_registry)), key=lambda i: _webhook_registry[i].get("last_seen", ""))
-        _webhook_registry.pop(oldest)
-    _webhook_registry.append({
-        "id": uuid.uuid4().hex[:8],
-        "source": source,
-        "name": name,
-        "event_types": event_types,
-        "url": f"/api/webhooks/{source}",
-        "created_at": datetime.utcnow().isoformat() + "Z",
-        "last_seen": datetime.utcnow().isoformat() + "Z",
-        "active": True,
-    })
+    with _webhook_lock:
+        for sub in _webhook_registry:
+            if sub["source"] == source and sub["name"] == name:
+                # Update event types
+                for et in event_types:
+                    if et not in sub["event_types"]:
+                        sub["event_types"].append(et)
+                sub["last_seen"] = datetime.utcnow().isoformat() + "Z"
+                return
+        # Cap registry size to prevent unbounded memory growth
+        if len(_webhook_registry) >= _WEBHOOK_REGISTRY_MAX:
+            # Evict oldest entry by last_seen
+            oldest = min(range(len(_webhook_registry)), key=lambda i: _webhook_registry[i].get("last_seen", ""))
+            _webhook_registry.pop(oldest)
+        _webhook_registry.append({
+            "id": uuid.uuid4().hex[:8],
+            "source": source,
+            "name": name,
+            "event_types": event_types,
+            "url": f"/api/webhooks/{source}",
+            "created_at": datetime.utcnow().isoformat() + "Z",
+            "last_seen": datetime.utcnow().isoformat() + "Z",
+            "active": True,
+        })
 
 
 @router.get("/list")

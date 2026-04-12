@@ -1,3 +1,12 @@
+> **SUPERSEDED 2026-04-12.** Archived. Most critical items flagged here have been fixed by
+> `ENGINEERING_REVIEW_2026-04-09-R1` through `R8`. Verified against current code: `_think_lock`
+> removed (R2), stream stale timeouts added, provider read timeouts set to `(10, 90)`, hooks wired
+> (`SESSION_START`/`PRE_TOOL_CALL`/`POST_TOOL_CALL`/`POST_EDIT`), `run_chat_mode` refactored from
+> 800 lines to 6, banner + status bar + diff-viewer + autocomplete all fixed. Do not use this
+> document as a todo list — refer to R8's "Remaining" section for current open items.
+
+---
+
 # AURA CLI v4.6.0 — Total Fix & Overhaul Plan
 
 > Generated: 2026-03-25 by 10-agent parallel audit + 4-agent competitive CLI research

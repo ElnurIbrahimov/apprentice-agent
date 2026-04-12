@@ -12,7 +12,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from starlette.responses import StreamingResponse
 
-from api.auth import require_api_key, verify_api_key_ws
+from api.auth import _auth_is_enabled, require_api_key, verify_api_key_ws
 from api.models.schemas import (
     AttachmentType,
     ChatRequest,
@@ -26,6 +26,8 @@ from api.models.schemas import (
     RunResponse,
     SaveToMemoryResponse,
 )
+from api.services.chat_events import ensure_conversation_listener
+from api.services.websocket_hub import websocket_hub
 from api.utils import get_agent_service as _get_agent_service
 from api.utils import safe_error_detail
 
@@ -41,125 +43,6 @@ UPLOAD_DIR = Path(__file__).parent.parent / "data" / "uploads"
 UPLOAD_DIR_RESOLVED = Path(UPLOAD_DIR).resolve()
 
 router = APIRouter(prefix="/api/chat", tags=["chat"], dependencies=[Depends(require_api_key)])
-
-# ---------------------------------------------------------------------------
-# WebSocket connection registry for server-push (proactive messages, etc.)
-# ---------------------------------------------------------------------------
-_active_websockets: List[WebSocket] = []
-_ws_lock = threading.Lock()
-
-
-def register_websocket(ws: WebSocket) -> None:
-    """Add a WebSocket to the active connection set."""
-    with _ws_lock:
-        _active_websockets.append(ws)
-
-
-def unregister_websocket(ws: WebSocket) -> None:
-    """Remove a WebSocket from the active connection set."""
-    with _ws_lock:
-        try:
-            _active_websockets.remove(ws)
-        except ValueError:
-            pass
-
-
-async def _broadcast_json(payload: dict) -> None:
-    """Send a JSON message to all active WebSocket connections."""
-    with _ws_lock:
-        targets = list(_active_websockets)
-    for ws in targets:
-        try:
-            await ws.send_json(payload)
-        except Exception:
-            logger.debug("broadcast_ws_send_failed", exc_info=True)
-            unregister_websocket(ws)
-
-
-# ---------------------------------------------------------------------------
-# ConversationManager async listener (registered once)
-# ---------------------------------------------------------------------------
-_conv_listener_registered = False
-_conv_listener_lock = threading.Lock()
-
-
-def _ensure_conv_listener():
-    """Register the ConversationManager -> WebSocket broadcast listener once."""
-    global _conv_listener_registered
-    if _conv_listener_registered:
-        return
-    with _conv_listener_lock:
-        if _conv_listener_registered:
-            return
-        try:
-            manager = _get_conversation_manager()
-
-            async def _on_conv_event(event):
-                payload = {
-                    "type": "conv_sync",
-                    "event": event.event_type,
-                    "conversation_id": event.conversation_id,
-                    "surface": event.surface,
-                    "data": event.data,
-                    "timestamp": event.timestamp,
-                }
-                await _broadcast_json(payload)
-
-            manager.register_async_listener(_on_conv_event)
-            _conv_listener_registered = True
-            logger.info("[Chat] ConversationManager async listener registered")
-        except Exception as e:
-            logger.debug(f"[Chat] ConvManager listener registration deferred: {e}")
-
-
-async def broadcast_proactive_message(msg) -> None:
-    """Push a Gateway Daemon ProactiveMessage to all connected clients.
-
-    Called from the notification callback wired in api/main.py.
-    """
-    payload = {
-        "type": "proactive",
-        "content": msg.content,
-        "action": msg.action.value if hasattr(msg.action, "value") else str(msg.action),
-        "priority": msg.priority.name if hasattr(msg.priority, "name") else str(msg.priority),
-        "timestamp": msg.timestamp.isoformat() if hasattr(msg.timestamp, "isoformat") else str(msg.timestamp),
-        "metadata": getattr(msg, "metadata", {}),
-    }
-    await _broadcast_json(payload)
-
-
-async def broadcast_hand_event(result_dict: dict) -> None:
-    """Push a Hand execution result to all connected WebSocket clients.
-
-    Called from HandManager notification callback.
-    """
-    payload = {
-        "type": "hand_event",
-        **result_dict,
-    }
-    await _broadcast_json(payload)
-
-
-async def broadcast_action_trace(hand_name: str, step: int, description: str) -> None:
-    """Push a live step update during Hand execution."""
-    import time as _time
-    payload = {
-        "type": "action_trace",
-        "hand": hand_name,
-        "step": step,
-        "description": description,
-        "timestamp": _time.time(),
-    }
-    await _broadcast_json(payload)
-
-
-async def broadcast_hand_approval_request(request_dict: dict) -> None:
-    """Push a Hand approval request to all connected WebSocket clients."""
-    payload = {
-        "type": "hand_approval_request",
-        **request_dict,
-    }
-    await _broadcast_json(payload)
 
 
 async def process_attachments(attachments: List[dict], loop) -> str:
@@ -728,24 +611,45 @@ async def websocket_chat(websocket: WebSocket):
         Server -> Client: {"type": "done", "response": "Hi there!", "mood": {...}}
         Server -> Client: {"type": "stopped"} - Generation was stopped
     """
-    # Accept API key via header OR query param (browsers cannot send custom
-    # headers on WebSocket connections, so the extension passes it as ?api_key=)
+    # Auth strategy (in priority order):
+    # 1. X-API-Key header (best — not logged)
+    # 2. First-message auth: {"type": "auth", "api_key": "..."} (good — not logged)
+    # 3. ?api_key= query param (fallback — appears in access logs, avoid if possible)
     api_key = websocket.headers.get("X-API-Key", "")
+    _auth_deferred = False
     if not api_key:
+        # Check query param but prefer first-message auth
         api_key = websocket.query_params.get("api_key", "")
-    if not verify_api_key_ws(api_key):
+        if not api_key and _auth_is_enabled():
+            _auth_deferred = True  # Will require auth in first message
+
+    if not _auth_deferred and not verify_api_key_ws(api_key):
         await websocket.close(code=1008)
         return
 
     # Reject if too many concurrent WebSocket connections
-    with _ws_lock:
-        if len(_active_websockets) >= 50:
-            await websocket.close(code=1013)
-            return
+    if websocket_hub.connection_count >= 50:
+        await websocket.close(code=1013)
+        return
 
     await websocket.accept()
-    register_websocket(websocket)
-    _ensure_conv_listener()
+
+    # If auth was deferred, require it as the first message
+    if _auth_deferred:
+        try:
+            first_msg = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+            auth_data = json.loads(first_msg)
+            if auth_data.get("type") != "auth" or not verify_api_key_ws(auth_data.get("api_key", "")):
+                await websocket.send_json({"type": "error", "error": "Authentication required"})
+                await websocket.close(code=1008)
+                return
+            await websocket.send_json({"type": "auth_ok"})
+        except (asyncio.TimeoutError, json.JSONDecodeError, Exception):
+            await websocket.close(code=1008)
+            return
+
+    websocket_hub.register(websocket)
+    ensure_conversation_listener()
     logger.info("[WebSocket] Client connected")
 
     # Flag to signal stop to the streaming thread
@@ -789,10 +693,8 @@ async def websocket_chat(websocket: WebSocket):
                 })
                 continue
 
-            # Handle auth message (extension sends this right after connect)
+            # Handle auth message (may arrive after header-based auth — just ack)
             if msg.get("type") == "auth":
-                # Auth is already handled during connection via header/query param.
-                # Acknowledge it so the client knows it was received.
                 await websocket.send_json({"type": "auth_ok"})
                 continue
 
@@ -1167,7 +1069,7 @@ async def websocket_chat(websocket: WebSocket):
             pass  # Intentional: client already gone, nothing to send to
     finally:
         keepalive_task.cancel()
-        unregister_websocket(websocket)
+        websocket_hub.unregister(websocket)
         # Safety net: cleanup leftover attachment files if the outer loop
         # broke mid-message before the per-message finally could run.
         if _last_attachments:

@@ -67,9 +67,24 @@ class TestSafeErrorDetail:
 
         old = os.environ.get("AURA_ENV")
         try:
-            os.environ.pop("AURA_ENV", None)
+            # Must explicitly set AURA_ENV=development to get details
+            os.environ["AURA_ENV"] = "development"
             result = safe_error_detail(ValueError("secret db info"))
             assert result == "secret db info"
+        finally:
+            if old is None:
+                os.environ.pop("AURA_ENV", None)
+            else:
+                os.environ["AURA_ENV"] = old
+
+    def test_unset_env_defaults_safe(self):
+        from api.utils import safe_error_detail
+
+        old = os.environ.get("AURA_ENV")
+        try:
+            os.environ.pop("AURA_ENV", None)
+            result = safe_error_detail(ValueError("secret db info"))
+            assert result == "Internal server error"
         finally:
             if old is None:
                 os.environ.pop("AURA_ENV", None)

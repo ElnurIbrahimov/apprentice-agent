@@ -236,6 +236,7 @@ class EmbeddingCache:
     def __init__(self, cache_path: str = "data/codebase_index/embedding_cache.db"):
         self._path = Path(cache_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()  # Protect shared connection across threads
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
@@ -255,9 +256,10 @@ class EmbeddingCache:
     def get(self, content: str) -> Optional[list]:
         """Look up cached embedding by content hash."""
         h = hashlib.sha256(content.encode()).hexdigest()
-        row = self._conn.execute(
-            "SELECT embedding FROM chunk_embeddings WHERE content_hash = ?", (h,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT embedding FROM chunk_embeddings WHERE content_hash = ?", (h,)
+            ).fetchone()
         if row:
             import numpy as np
             self._hits += 1
@@ -270,12 +272,13 @@ class EmbeddingCache:
         h = hashlib.sha256(content.encode()).hexdigest()
         import numpy as np
         blob = np.array(embedding, dtype=np.float32).tobytes()
-        self._conn.execute(
-            "INSERT OR REPLACE INTO chunk_embeddings "
-            "(content_hash, embedding, file_path, chunk_type) VALUES (?, ?, ?, ?)",
-            (h, blob, file_path, chunk_type),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO chunk_embeddings "
+                "(content_hash, embedding, file_path, chunk_type) VALUES (?, ?, ?, ?)",
+                (h, blob, file_path, chunk_type),
+            )
+            self._conn.commit()
 
     def get_or_compute(self, content: str, file_path: str, chunk_type: str) -> Optional[list]:
         """Return cached embedding or compute + cache a new one."""

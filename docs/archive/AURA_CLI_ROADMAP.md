@@ -1,3 +1,11 @@
+> **SUPERSEDED 2026-04-12.** Archived. The "table-stakes missing" list in this doc is outdated.
+> As of 2026-04-12, Aura CLI has: token-by-token streaming, inline diffs (`render_diff_compact`
+> post-edit), `/context` fuel gauge, `/rewind` checkpoint system, persistent status bar with
+> priority-tiered indicators, gradient banner, per-tool icons, and hooks wired in the agentic
+> loop. Refer to `ENGINEERING_REVIEW_2026-04-09-R8.md` §9 for current open items.
+
+---
+
 # AURA CLI Roadmap — World-Class Terminal Agent
 **Created:** 2026-03-17
 **Goal:** Make Aura's CLI the best AI terminal agent across all three use cases: coding, general AI assistant, and autonomous agent orchestration.

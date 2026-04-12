@@ -74,6 +74,7 @@ SLASH_COMMANDS = [
     ("/trust", "Enable trust mode (auto-approve all tools)"),
     ("/cost", "Show session cost breakdown"),
     ("/context", "Show context window usage"),
+    ("/trace", "Show structured session trace and run summaries"),
     ("/rewind", "Rewind file changes to a checkpoint"),
     ("/theme", "Switch color theme"),
     ("/fleet", "Run parallel sub-agents"),
@@ -133,6 +134,13 @@ SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
         ("new", "Start a new session"),
         ("delete", "Delete a session"),
         ("export", "Export session to markdown"),
+    ],
+    "/trace": [
+        ("last", "Show the last run's events"),
+        ("runs", "Show recent run summaries"),
+        ("failures", "Show recent failed runs"),
+        ("10", "Show the last 10 events"),
+        ("25", "Show the last 25 events"),
     ],
     "/agent": [
         ("research", "Research specialist"),

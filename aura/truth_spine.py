@@ -453,9 +453,10 @@ class ContainsTextCheck(VerificationCheck):
         elif isinstance(raw, dict):
             text = str(raw.get("stdout", "")) + str(raw.get("result", ""))
 
+        suffix = '...' if len(expected) > 30 else ''
         if expected.lower() in text.lower():
-            return True, f"Contains '{expected[:30]}...'"
-        return False, f"Missing '{expected[:30]}...'"
+            return True, f"Contains '{expected[:30]}{suffix}'"
+        return False, f"Missing '{expected[:30]}{suffix}'"
 
 
 class SandboxPathCheck(VerificationCheck):
@@ -1063,7 +1064,7 @@ class VerifiedMemory:
     @staticmethod
     def _cosine_similarity(a: List[float], b: List[float]) -> float:
         """Compute cosine similarity between two vectors."""
-        dot = sum(x * y for x, y in zip(a, b, strict=True))
+        dot = sum(x * y for x, y in zip(a, b))
         norm_a = math.sqrt(sum(x * x for x in a))
         norm_b = math.sqrt(sum(x * x for x in b))
         if norm_a == 0 or norm_b == 0:
@@ -1346,10 +1347,9 @@ class SecureToolExecutor:
         if not path_str:
             return None
 
-        # Block obvious traversal attempts
-        if ".." in path_str or path_str.startswith("/") or path_str.startswith("\\"):
-            # Only allow if it resolves inside sandbox anyway
-            pass
+        # Early reject obvious traversal attempts
+        if ".." in path_str:
+            return None
 
         requested = Path(path_str)
         if not requested.is_absolute():
@@ -1506,8 +1506,8 @@ class SecureToolExecutor:
             if not pending:
                 return {"success": False, "error": f"No pending confirmation: {confirmation_id}"}
 
-            # Check session binding
-            if session_id and pending.session_id != session_id:
+            # Check session binding — require matching session when pending has one
+            if pending.session_id and session_id != pending.session_id:
                 # Different user/session trying to confirm - possible attack
                 pending.attempt_count += 1
                 if pending.attempt_count >= pending.max_attempts:
@@ -1680,6 +1680,9 @@ class SecureToolExecutor:
         try:
             files = []
             for item in path.iterdir():
+                # Skip items that resolve outside the sandbox (e.g. symlinks)
+                if not self._is_in_sandbox(item.resolve()):
+                    continue
                 files.append({
                     "name": item.name,
                     "is_dir": item.is_dir(),
@@ -1733,7 +1736,7 @@ class SecureToolExecutor:
         code_file = self.sandbox_dir / f"_exec_{uuid.uuid4().hex[:8]}.py"
 
         try:
-            code_file.write_text(code)
+            code_file.write_text(code, encoding="utf-8")
 
             # Sanitize environment — do not leak API keys to executed code
             import sys as _sys

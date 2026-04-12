@@ -298,12 +298,15 @@ async def serve_shared_file(share_id: str, path: str = ""):
     if not mime_type:
         mime_type = "application/octet-stream"
 
-    # Security headers — prevent stored XSS via uploaded HTML/SVG
+    # Security headers — prevent stored XSS via uploaded HTML/SVG/JS
     headers = {
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "DENY",
     }
-    if mime_type in ("text/html", "application/xhtml+xml", "image/svg+xml"):
+    # Apply restrictive CSP to all content types that could execute code
+    _NEEDS_CSP = {"text/html", "application/xhtml+xml", "image/svg+xml",
+                  "application/javascript", "text/javascript", "application/json"}
+    if mime_type in _NEEDS_CSP or mime_type.startswith("text/"):
         headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src 'self'; script-src 'none'; object-src 'none'; frame-ancestors 'none'"
 
     return FileResponse(file_path, media_type=mime_type, headers=headers)

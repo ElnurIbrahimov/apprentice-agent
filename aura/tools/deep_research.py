@@ -30,6 +30,7 @@ import math
 import os
 import re
 import sqlite3
+import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from concurrent.futures import as_completed
@@ -357,6 +358,7 @@ class ResearchCache:
     def __init__(self, db_path: Optional[str] = None):
         self._db_path = db_path or str(Path("data") / "research_cache.db")
         self._conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.Lock()  # Protect shared connection across threads
         self._init_db()
 
     def _init_db(self):
@@ -406,10 +408,11 @@ class ResearchCache:
         if not self._conn:
             return None
         try:
-            row = self._conn.execute(
-                "SELECT results_json FROM search_cache WHERE query_hash = ? AND expires_at > ?",
-                (self._hash(query), time.time())
-            ).fetchone()
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT results_json FROM search_cache WHERE query_hash = ? AND expires_at > ?",
+                    (self._hash(query), time.time())
+                ).fetchone()
             return json.loads(row[0]) if row else None
         except Exception:
             return None
@@ -418,11 +421,12 @@ class ResearchCache:
         if not self._conn:
             return
         try:
-            self._conn.execute(
-                "INSERT OR REPLACE INTO search_cache (query_hash, results_json, expires_at) VALUES (?, ?, ?)",
-                (self._hash(query), json.dumps(results, default=str), time.time() + ttl_hours * 3600)
-            )
-            self._conn.commit()
+            with self._lock:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO search_cache (query_hash, results_json, expires_at) VALUES (?, ?, ?)",
+                    (self._hash(query), json.dumps(results, default=str), time.time() + ttl_hours * 3600)
+                )
+                self._conn.commit()
         except Exception:
             pass
 
@@ -432,10 +436,11 @@ class ResearchCache:
         if not self._conn:
             return None
         try:
-            row = self._conn.execute(
-                "SELECT content FROM page_cache WHERE url_hash = ? AND expires_at > ?",
-                (self._hash(url), time.time())
-            ).fetchone()
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT content FROM page_cache WHERE url_hash = ? AND expires_at > ?",
+                    (self._hash(url), time.time())
+                ).fetchone()
             return row[0] if row else None
         except Exception:
             return None
@@ -444,11 +449,12 @@ class ResearchCache:
         if not self._conn:
             return
         try:
-            self._conn.execute(
-                "INSERT OR REPLACE INTO page_cache (url_hash, content, expires_at) VALUES (?, ?, ?)",
-                (self._hash(url), content, time.time() + ttl_days * 86400)
-            )
-            self._conn.commit()
+            with self._lock:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO page_cache (url_hash, content, expires_at) VALUES (?, ?, ?)",
+                    (self._hash(url), content, time.time() + ttl_days * 86400)
+                )
+                self._conn.commit()
         except Exception:
             pass
 
@@ -2007,7 +2013,7 @@ Return as JSON (no markdown fences):
         # Reset saturation detector for this run
         self.saturation = SaturationDetector(threshold=0.05)
 
-        if not self.searcher and not self.tavily:
+        if not any([self.searcher, self.tavily, getattr(self, 'brave', None), getattr(self, 'firecrawl', None)]):
             return {
                 "success": False, "error": "No search backend available",
                 "topic": topic, "depth": depth,

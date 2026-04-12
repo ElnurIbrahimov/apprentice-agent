@@ -1,233 +1,226 @@
-"""Functional tests for API routes — endpoint behavior, response shapes, error paths.
+"""Functional tests for stable API route contracts."""
 
-Complements test_api_routes.py (input validation) with actual endpoint behavior tests.
-Uses FastAPI TestClient with mocked agent service.
-"""
+from __future__ import annotations
 
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="module")
+@pytest.fixture
 def client():
-    """Create TestClient with auth disabled and agent service mocked."""
-    os.environ["AURA_API_AUTH_ENABLED"] = "false"
-    os.environ["AURA_ENV"] = "development"
-    os.environ.pop("AURA_API_KEY", None)
-
-    with patch("api.services.agent_service.agent_service") as mock_svc:
-        mock_svc.is_ready = True
-        mock_svc.start_background_init = MagicMock()
+    """Create a TestClient with auth disabled for deterministic route tests."""
+    env = {
+        "AURA_API_AUTH_ENABLED": "false",
+        "AURA_ENV": "development",
+    }
+    with patch.dict(os.environ, env, clear=False):
         from api.main import app
+
         yield TestClient(app, raise_server_exceptions=False)
 
 
-@pytest.fixture
-def mock_agent():
-    """Provide a mock agent with brain for chat tests."""
-    agent = MagicMock()
-    agent.brain = MagicMock()
-    agent.brain.think = MagicMock(return_value="Hello! How can I help?")
-    agent.brain.get_last_model_used = MagicMock(return_value="test-model:latest")
-    agent.brain._query_count = 5
-    agent.brain._total_query_count = 100
-    agent.brain.conversation_history = []
-    return agent
-
-
-# ---------------------------------------------------------------------------
-# Health endpoints
-# ---------------------------------------------------------------------------
-
 class TestHealthEndpoints:
-    """Health check endpoints should always respond."""
-
     def test_health_returns_200(self, client):
-        r = client.get("/api/health")
-        assert r.status_code == 200
-        data = r.json()
+        response = client.get("/api/health")
+
+        assert response.status_code == 200
+        data = response.json()
         assert data["status"] == "ok"
         assert "version" in data
 
-    def test_deep_health_returns_200(self, client):
-        r = client.get("/api/health/deep")
-        assert r.status_code == 200
-        data = r.json()
-        assert data["status"] in ("ok", "degraded", "down")
-        assert "subsystems" in data
+    def test_deep_health_returns_expected_shape(self, client):
+        response = client.get("/api/health/deep")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] in {"ok", "degraded", "down"}
+        assert isinstance(data["subsystems"], list)
         assert "uptime_seconds" in data
         assert "environment" in data
 
-    def test_health_no_auth_required(self, client):
-        """Health endpoint must work even if auth were enabled."""
-        r = client.get("/api/health")
-        assert r.status_code == 200
-
-
-# ---------------------------------------------------------------------------
-# Chat endpoints
-# ---------------------------------------------------------------------------
 
 class TestChatEndpoints:
-    """Chat endpoint request/response contract."""
-
     def test_chat_missing_message_returns_422(self, client):
-        r = client.post("/api/chat", json={})
-        assert r.status_code == 422
+        response = client.post("/api/chat", json={})
+        assert response.status_code == 422
 
     def test_chat_empty_message_returns_422(self, client):
-        r = client.post("/api/chat", json={"message": ""})
-        assert r.status_code == 422
+        response = client.post("/api/chat", json={"message": ""})
+        assert response.status_code == 422
 
-    def test_chat_valid_request_shape(self, client, mock_agent):
-        """Valid chat request should return ChatResponse shape."""
-        with patch("api.routes.chat._get_agent_service") as mock_svc:
-            svc = MagicMock()
-            svc.is_ready = True
-            svc.chat.return_value = "Test response"
-            mock_svc.return_value = svc
-            r = client.post("/api/chat", json={"message": "hello"})
-            if r.status_code == 200:
-                data = r.json()
-                assert "response" in data
+    def test_chat_valid_request_returns_chat_response_shape(self, client):
+        with patch("api.routes.chat._get_agent_service") as mock_get_service:
+            service = MagicMock()
+            service.chat.return_value = {
+                "response": "Test response",
+                "fast_path": False,
+                "mood": {
+                    "emotion": "neutral",
+                    "confidence": 50,
+                    "valence": 0.0,
+                    "arousal": 0.0,
+                    "dominance": 0.0,
+                    "emoji": "🙂",
+                },
+                "model_used": "test-model:latest",
+            }
+            mock_get_service.return_value = service
 
-    def test_chat_oversized_message_returns_422(self, client):
-        r = client.post("/api/chat", json={"message": "x" * 200_000})
-        assert r.status_code == 422
+            response = client.post("/api/chat", json={"message": "hello"})
 
-    def test_conversations_list(self, client):
-        """GET /api/chat/conversations should return JSON."""
-        r = client.get("/api/chat/conversations")
-        # May return 200 or 500 (no agent) — either is valid wiring
-        assert r.status_code in (200, 500)
-        if r.status_code == 200:
-            data = r.json()
-            assert isinstance(data, (list, dict))
+        assert response.status_code == 200
+        data = response.json()
+        assert data["response"] == "Test response"
+        assert data["model_used"] == "test-model:latest"
+        assert data["mood"]["emotion"] == "neutral"
 
+    def test_conversations_list_returns_json(self, client):
+        with patch("api.routes.chat._get_agent_service") as mock_get_service:
+            service = MagicMock()
+            service.list_conversations.return_value = [
+                {"id": "conv-1", "title": "First conversation"},
+            ]
+            mock_get_service.return_value = service
 
-# ---------------------------------------------------------------------------
-# Models endpoints
-# ---------------------------------------------------------------------------
+            response = client.get("/api/chat/conversations")
+
+        assert response.status_code == 200
+        assert response.json() == [{"id": "conv-1", "title": "First conversation"}]
+
 
 class TestModelsEndpoints:
-    """Model listing and configuration endpoints."""
+    def test_models_list_returns_expected_shape(self, client):
+        with patch("api.routes.models._get_verified_models") as mock_verified:
+            mock_verified.return_value = {
+                "cloud": [{"name": "cloud-a"}],
+                "local": [{"name": "local-a"}],
+                "chatgpt": [{"name": "chatgpt:gpt-test"}],
+                "direct_api": [{"name": "direct-a"}],
+                "total": 4,
+            }
 
-    def test_models_list_returns_json(self, client):
-        r = client.get("/api/models")
-        assert r.status_code in (200, 404, 500)
-        if r.status_code == 200:
-            data = r.json()
-            assert isinstance(data, (list, dict))
+            response = client.get("/api/models")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["chatgpt_models"] == ["chatgpt:gpt-test"]
+        assert data["cloud_models"] == ["cloud-a"]
+        assert data["local_models"] == ["local-a"]
+        assert data["direct_api_models"] == ["direct-a"]
+        assert data["total"] == 4
 
     def test_models_roles_returns_json(self, client):
-        r = client.get("/api/models/roles")
-        assert r.status_code in (200, 404, 500)
+        response = client.get("/api/models/roles")
 
+        assert response.status_code == 200
+        assert isinstance(response.json(), dict)
 
-# ---------------------------------------------------------------------------
-# Memory endpoints
-# ---------------------------------------------------------------------------
 
 class TestMemoryEndpoints:
-    """Memory recall tracking endpoints."""
+    def test_memory_recall_stats_returns_json(self, client):
+        response = client.get("/api/memory/recalls/stats")
 
-    def test_memory_stats_returns_json(self, client):
-        r = client.get("/api/memory/stats")
-        assert r.status_code in (200, 404, 500)
-        if r.status_code == 200:
-            data = r.json()
-            assert isinstance(data, dict)
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, dict)
+        assert "total_recalls" in data
+        assert "recent_count" in data
 
-    def test_memory_recalls_returns_json(self, client):
-        r = client.get("/api/memory/recalls")
-        assert r.status_code in (200, 404, 500)
-        if r.status_code == 200:
-            data = r.json()
-            assert isinstance(data, (list, dict))
+    def test_memory_recent_recalls_returns_json(self, client):
+        response = client.get("/api/memory/recalls/recent")
 
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] >= 0
+        assert isinstance(data["events"], list)
 
-# ---------------------------------------------------------------------------
-# Hands endpoints
-# ---------------------------------------------------------------------------
 
 class TestHandsEndpoints:
-    """Autonomous Hands API endpoints."""
-
     def test_hands_list_returns_json(self, client):
-        r = client.get("/api/hands")
-        assert r.status_code in (200, 404, 500)
-        if r.status_code == 200:
-            data = r.json()
-            assert isinstance(data, dict)
-            assert "hands" in data
+        with patch("api.routes.hands._get_manager") as mock_get_manager:
+            manager = MagicMock()
+            manager.list_hands.return_value = [{"name": "guardian"}]
+            mock_get_manager.return_value = manager
 
-    def test_hands_nonexistent_returns_error(self, client):
-        r = client.get("/api/hands/nonexistent_hand_xyz")
-        assert r.status_code in (404, 500)
+            response = client.get("/api/hands")
 
-    def test_hands_run_nonexistent_returns_error(self, client):
-        r = client.post("/api/hands/nonexistent_hand_xyz/run")
-        assert r.status_code in (404, 422, 500)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hands"] == [{"name": "guardian"}]
+        assert data["count"] == 1
 
+    def test_hands_nonexistent_returns_404(self, client):
+        with patch("api.routes.hands._get_manager") as mock_get_manager:
+            manager = MagicMock()
+            manager.get_hand.return_value = None
+            mock_get_manager.return_value = manager
 
-# ---------------------------------------------------------------------------
-# Status endpoints
-# ---------------------------------------------------------------------------
+            response = client.get("/api/hands/nonexistent_hand_xyz")
+
+        assert response.status_code == 404
+
+    def test_hands_run_nonexistent_returns_404(self, client):
+        with patch("api.routes.hands._get_manager") as mock_get_manager:
+            manager = MagicMock()
+            manager.get_hand.return_value = None
+            mock_get_manager.return_value = manager
+
+            response = client.post("/api/hands/nonexistent_hand_xyz/run")
+
+        assert response.status_code == 404
+
 
 class TestStatusEndpoints:
-    """Status and admin endpoints."""
-
     def test_status_returns_json(self, client):
-        r = client.get("/api/status")
-        assert r.status_code in (200, 404, 500)
-        if r.status_code == 200:
-            data = r.json()
-            assert "online" in data or "status" in data
+        with patch("api.routes.status._get_agent_service") as mock_get_service:
+            service = MagicMock()
+            service.is_ready = False
+            mock_get_service.return_value = service
 
-    def test_status_models_returns_json(self, client):
-        r = client.get("/api/status/models")
-        assert r.status_code in (200, 404, 500)
+            response = client.get("/api/status")
 
+        assert response.status_code == 200
+        data = response.json()
+        assert data["online"] is True
+        assert "model" in data
 
-# ---------------------------------------------------------------------------
-# Auth enforcement
-# ---------------------------------------------------------------------------
+    def test_models_detailed_returns_json(self, client):
+        with patch("api.routes.status._get_agent_service") as mock_get_service:
+            service = MagicMock()
+            service.is_ready = False
+            mock_get_service.return_value = service
+
+            response = client.get("/api/models/detailed")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "local_models" in data
+        assert "cloud_models" in data
+        assert "current_model" in data
+
 
 class TestAuthEnforcement:
-    """Auth middleware behavior when enabled."""
-
     def test_auth_enabled_rejects_without_key(self):
-        """When auth is enabled with a key, requests without key are rejected."""
         env = {
             "AURA_API_AUTH_ENABLED": "true",
             "AURA_API_KEY": "test-secret-key-12345",
             "AURA_ENV": "development",
         }
         with patch.dict(os.environ, env, clear=False):
-            with patch("api.services.agent_service.agent_service") as mock_svc:
-                mock_svc.is_ready = True
-                mock_svc.start_background_init = MagicMock()
-                # Re-import to pick up new env
-                import importlib
-                import api.auth
-                importlib.reload(api.auth)
-                from api.main import app
-                c = TestClient(app, raise_server_exceptions=False)
-                r = c.get("/api/status")
-                # Should be 401 or 403 (rejected)
-                assert r.status_code in (401, 403)
+            from api.main import app
+
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/status")
+
+        assert response.status_code == 401
 
     def test_auth_enabled_accepts_valid_key(self):
-        """When auth is enabled, valid key is accepted."""
         key = "test-secret-key-12345"
         env = {
             "AURA_API_AUTH_ENABLED": "true",
@@ -235,74 +228,46 @@ class TestAuthEnforcement:
             "AURA_ENV": "development",
         }
         with patch.dict(os.environ, env, clear=False):
-            with patch("api.services.agent_service.agent_service") as mock_svc:
-                mock_svc.is_ready = True
-                mock_svc.start_background_init = MagicMock()
-                import importlib
-                import api.auth
-                importlib.reload(api.auth)
-                from api.main import app
-                c = TestClient(app, raise_server_exceptions=False)
-                r = c.get("/api/health", headers={"X-API-Key": key})
-                # Health is on public router, should always work
-                assert r.status_code == 200
+            from api.main import app
 
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/api/status", headers={"X-API-Key": key})
 
-# ---------------------------------------------------------------------------
-# Error handling
-# ---------------------------------------------------------------------------
+        assert response.status_code == 200
+
 
 class TestErrorHandling:
-    """API should return clean error responses, not stack traces."""
-
     def test_404_on_unknown_api_route(self, client):
-        r = client.get("/api/nonexistent_endpoint_xyz")
-        assert r.status_code in (404, 405)
+        response = client.get("/api/nonexistent_endpoint_xyz")
+        assert response.status_code == 404
 
     def test_chat_returns_json_on_error(self, client):
-        """Even on internal errors, chat should return JSON, not HTML."""
-        with patch("api.routes.chat._get_agent_service") as mock_svc:
-            svc = MagicMock()
-            svc.is_ready = False
-            mock_svc.return_value = svc
-            r = client.post("/api/chat", json={"message": "test"})
-            # Should be a JSON error, not a 500 HTML page
-            if r.status_code >= 400:
-                assert r.headers.get("content-type", "").startswith("application/json")
+        with patch("api.routes.chat._get_agent_service") as mock_get_service:
+            service = MagicMock()
+            service.chat.side_effect = RuntimeError("boom")
+            mock_get_service.return_value = service
+
+            response = client.post("/api/chat", json={"message": "test"})
+
+        assert response.status_code == 500
+        assert response.headers.get("content-type", "").startswith("application/json")
 
     def test_method_not_allowed(self, client):
-        """PUT on health should return 405."""
-        r = client.put("/api/health")
-        assert r.status_code == 405
+        response = client.put("/api/health")
+        assert response.status_code == 405
 
 
-# ---------------------------------------------------------------------------
-# Rate limiting headers
-# ---------------------------------------------------------------------------
-
-class TestRateLimiting:
-    """Rate limit middleware should set tracking headers."""
-
+class TestHeadersAndCors:
     def test_request_id_header_present(self, client):
-        """Every response should have X-Request-ID."""
-        r = client.get("/api/health")
-        assert "x-request-id" in r.headers
+        response = client.get("/api/health")
+        assert "x-request-id" in response.headers
 
-
-# ---------------------------------------------------------------------------
-# CORS
-# ---------------------------------------------------------------------------
-
-class TestCORS:
-    """CORS headers should be present on responses."""
-
-    def test_cors_allows_localhost(self, client):
-        r = client.options(
+    def test_cors_preflight_is_not_blocked(self, client):
+        response = client.options(
             "/api/health",
             headers={
                 "Origin": "http://localhost:3000",
                 "Access-Control-Request-Method": "GET",
             },
         )
-        # Should not be blocked
-        assert r.status_code in (200, 204, 400)
+        assert response.status_code in {200, 204, 400}

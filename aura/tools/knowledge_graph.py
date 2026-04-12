@@ -1430,54 +1430,57 @@ class KnowledgeGraphTool:
     def _prune_lowest_confidence_nodes(self, count: int = 100):
         """Remove lowest confidence nodes to free quota space.
 
-        Args:
-            count: Number of nodes to prune
+        Uses _consolidating flag to suppress per-deletion save() calls,
+        doing one save at the end instead of N saves.
         """
         if not self._nodes:
             return
 
-        # Sort by confidence (ascending) and access_count
         sorted_nodes = sorted(
             self._nodes.values(),
             key=lambda n: (n.confidence, n.access_count)
         )
 
-        # Prune the lowest confidence nodes
+        self._consolidating = True
         pruned = 0
-        for node in sorted_nodes[:count]:
-            if node.confidence < 0.5 and node.access_count < 3:
-                self.delete_node(node.id)
-                pruned += 1
+        try:
+            for node in sorted_nodes[:count]:
+                if node.confidence < 0.5 and node.access_count < 3:
+                    self.delete_node(node.id)
+                    pruned += 1
+        finally:
+            self._consolidating = False
 
         if pruned > 0:
+            self.save()
             logger.debug(f"[KG] Auto-pruned {pruned} low-confidence nodes")
 
     def _prune_weak_edges(self, min_weight: float = 0.2, count: int = 200):
         """Remove weak edges to free quota space.
 
-        Args:
-            min_weight: Edges below this weight are candidates for pruning
-            count: Maximum number of edges to prune
+        Uses _consolidating flag to suppress per-deletion save() calls,
+        doing one save at the end instead of N saves.
         """
         if not self._edges:
             return
 
-        # Find weak edges
         weak_edges = [
             edge for edge in self._edges.values()
             if edge.weight < min_weight
         ]
-
-        # Sort by weight (ascending)
         weak_edges.sort(key=lambda e: e.weight)
 
-        # Prune weakest edges
+        self._consolidating = True
         pruned = 0
-        for edge in weak_edges[:count]:
-            self.delete_edge(edge.id)
-            pruned += 1
+        try:
+            for edge in weak_edges[:count]:
+                self.delete_edge(edge.id)
+                pruned += 1
+        finally:
+            self._consolidating = False
 
         if pruned > 0:
+            self.save()
             logger.debug(f"[KG] Auto-pruned {pruned} weak edges")
 
     def _merge_nodes(self, keeper_id: str, remove_id: str):

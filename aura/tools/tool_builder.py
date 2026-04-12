@@ -1047,16 +1047,23 @@ that would make it pass. Return ONLY the corrected tool code between ```python a
                             code_match = re.search(r'```python\s*([\s\S]*?)```', fix_response)
                             if code_match:
                                 fixed_code = code_match.group(1).strip()
-                                # Re-scan for safety
+                                # Re-scan for safety — full AST validation, not just pattern scan
                                 is_dangerous, reason = self._scan_for_dangerous_code(fixed_code)
-                                if not is_dangerous:
-                                    tool_code = fixed_code
-                                    with open(tool_file, "w", encoding="utf-8") as f:
-                                        f.write(tool_code)
-                                    logger.info(f"[AutoTest] Applied LLM fix for {safe_name}, retrying...")
-                                else:
+                                if is_dangerous:
                                     logger.warning(f"[AutoTest] LLM fix contained dangerous code: {reason}")
                                     break
+                                try:
+                                    from aura.security.tool_validator import validate_custom_tool_code
+                                    is_valid, val_reason = validate_custom_tool_code(fixed_code, safe_name)
+                                    if not is_valid:
+                                        logger.warning(f"[AutoTest] LLM fix failed AST validation: {val_reason}")
+                                        break
+                                except ImportError:
+                                    pass
+                                tool_code = fixed_code
+                                with open(tool_file, "w", encoding="utf-8") as f:
+                                    f.write(tool_code)
+                                logger.info(f"[AutoTest] Applied LLM fix for {safe_name}, retrying...")
             except subprocess.TimeoutExpired:
                 logger.warning(f"[AutoTest] Tests timed out for {safe_name}")
                 retry_count += 1

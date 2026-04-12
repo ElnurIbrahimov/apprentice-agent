@@ -1700,10 +1700,14 @@ class GatewayDaemon:
         }
 
     def get_pending_messages(self) -> List[ProactiveMessage]:
-        """Get and clear pending messages."""
-        messages = list(self._pending_messages)
-        self._pending_messages.clear()
-        return messages
+        """Get and clear pending messages (atomic drain)."""
+        result = []
+        while self._pending_messages:
+            try:
+                result.append(self._pending_messages.popleft())
+            except IndexError:
+                break
+        return result
 
 
 # Singleton instance for global access

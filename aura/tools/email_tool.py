@@ -109,7 +109,12 @@ def _decrypt(ciphertext: str) -> tuple:
 
 
 def _sanitize_imap_string(value: str) -> str:
-    return value.replace('"', '').replace('\\', '').replace('\r', '').replace('\n', '').strip()
+    return value.replace('"', '').replace('\\', '').replace('\r', '').replace('\n', '').replace('{', '').replace('}', '').strip()
+
+
+def _validate_email_id(email_id: str) -> bool:
+    """Validate IMAP email ID is a digit-only sequence number."""
+    return bool(email_id and re.match(r'^\d+$', email_id))
 
 
 def _sanitize_error(error: Exception) -> str:
@@ -889,6 +894,8 @@ class EmailTool:
         """Read full email content via IMAP."""
         if not self._is_configured():
             return {"success": False, "error": "Email not configured. Use 'setup' first."}
+        if not _validate_email_id(email_id):
+            return {"success": False, "error": "Invalid email ID (must be numeric)"}
 
         conn = None
         try:
@@ -1154,6 +1161,8 @@ class EmailTool:
     def _imap_download_attachment(self, email_id: str, index: int, save_dir: str | None = None) -> dict:
         if not self._is_configured():
             return {"success": False, "error": "Email not configured."}
+        if not _validate_email_id(email_id):
+            return {"success": False, "error": "Invalid email ID (must be numeric)"}
 
         conn = None
         try:
@@ -1211,6 +1220,8 @@ class EmailTool:
     def _set_flag(self, email_id: str, flag: str, add: bool = True) -> dict:
         if not self._is_configured():
             return {"success": False, "error": "Email not configured."}
+        if not _validate_email_id(email_id):
+            return {"success": False, "error": "Invalid email ID (must be numeric)"}
 
         conn = None
         try:

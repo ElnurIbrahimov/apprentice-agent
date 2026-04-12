@@ -34,6 +34,7 @@ from .session_commands import (
     handle_cost,
     handle_rewind,
     handle_sessions,
+    handle_trace,
 )
 from .system_commands import (
     handle_audit,
@@ -97,6 +98,7 @@ __all__ = [
     "handle_routing",
     "handle_search",
     "handle_sessions",
+    "handle_trace",
     "handle_shell",
     "handle_sources",
     "handle_speak",

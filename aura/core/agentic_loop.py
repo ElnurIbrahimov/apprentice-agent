@@ -12,904 +12,32 @@ Features wired in:
 import json
 import logging
 import os
-import re
 import sys
 import threading
-from pathlib import Path
+import uuid
 from typing import Optional
 
+from . import agentic_loop_support as _loop_support
+from .agentic_loop_events import LoopEventEmitter
+from .agentic_loop_support import (
+    AGENTIC_SYSTEM_PROMPT,
+    _compact_history,
+    _ensure_console,
+    _recall_memories,
+    _store_interaction,
+)
+from .agentic_loop_model_step import ModelStepController
+from .agentic_loop_outcomes import LoopOutcome
+from .agentic_loop_tool_calls import ToolCallCoordinator
 from .permissions import PermissionManager
 from .session import AgenticSession
 from .token_manager import ContextWindowManager
+from .tool_executor import ToolExecutor
 from .tool_schemas import AGENTIC_TOOLS
 
 logger = logging.getLogger(__name__)
 
-# Lazy import — set on first use to decouple core from CLI
-console = None
-def _ensure_console():
-    global console
-    if console is None:
-        try:
-            from aura.cli.display import console as _c
-            console = _c
-        except ImportError:
-            from rich.console import Console
-            console = Console()
-
-from aura.pools import tool_pool as _tool_pool_fn
-
 MAX_ITERATIONS = 50
-MAX_TOOL_OUTPUT_CHARS = 15000
-
-
-def _get_tool_pool():
-    """Lazy accessor — pool created on first parallel tool call, not at import."""
-    return _tool_pool_fn()
-
-
-AGENTIC_SYSTEM_PROMPT = """You are Aura, an AI coding agent. Act, don't talk. First response must be a tool call.
-
-BEHAVIOR: Never ask permission, present options, or narrate plans. Just execute.
-
-HOW TO CODE WELL:
-1. Read before writing — ALWAYS read_file before editing.
-2. Search, don't guess — grep for definitions/usages, glob to find files by name.
-3. Plan multi-file changes before starting edits.
-4. Minimal edits — surgical edit_file, don't rewrite working code.
-5. Test after changes — run tests via shell. If they fail, read the error and fix.
-6. One thing at a time — finish one logical change before the next.
-7. Check errors — if a command fails, read output and fix the root cause.
-8. When asked about a specific file, ALWAYS read it with read_file — never answer from memory.
-
-TOOLS:
-- read_file: ALWAYS read before editing. Read related files for context.
-- grep: Find where things are defined or used.
-- glob: Find files by name pattern.
-- edit_file: Surgical string-match edits. Prefer over write_file for existing files.
-- write_file: New files only.
-- shell: Run commands, build, test. Always check output.
-- search_web/fetch_url: Look up docs when needed.
-
-RULES:
-- Never modify files outside the project without permission.
-- Use exact string matches from file content when editing.
-- Past session memories are below when available.
-
-{context}
-
-{memories}
-"""
-
-
-def _extract_action_summary(msg: dict) -> str | None:
-    """Extract a concise action description from a conversation message.
-
-    Returns a short summary line like:
-      - User asked to fix the auth bug in login.py
-      - Agent read login.py, found the issue on line 42
-      - Agent edited login.py to fix the token refresh logic
-    Returns None for messages that don't contain useful info (empty, tool noise).
-    """
-    role = msg.get("role", "")
-    content = msg.get("content", "") or ""
-    content = content.strip()
-
-    if role == "user":
-        if not content or len(content) < 5:
-            return None
-        # Strip [Auto-test result] prefix for cleaner summaries
-        if content.startswith("[Auto-test result]"):
-            result_text = content[len("[Auto-test result]"):].strip()
-            if "PASS" in result_text.upper() or "OK" in result_text.upper():
-                return "- Tests were run and passed"
-            return f"- Tests were run and failed: {result_text[:80]}"
-        # Summarize user request
-        first_line = content.split("\n", 1)[0]
-        return f"- User: {first_line[:120]}"
-
-    if role == "assistant":
-        # Check for tool_calls first — they describe what the agent DID
-        tc = msg.get("tool_calls")
-        if tc:
-            tool_summaries = []
-            for t in tc:
-                if isinstance(t, dict):
-                    func = t.get("function", {})
-                    name = func.get("name", "?")
-                    args = func.get("arguments", {})
-                else:
-                    func = getattr(t, "function", None)
-                    name = getattr(func, "name", "?") if func else "?"
-                    args = getattr(func, "arguments", {}) if func else {}
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except (json.JSONDecodeError, TypeError):
-                        args = {}
-                if not isinstance(args, dict):
-                    args = {}
-                # Build human-readable tool description
-                if name in ("read_file", "read"):
-                    tool_summaries.append(f"read {args.get('path', args.get('file_path', '?'))}")
-                elif name == "edit_file":
-                    tool_summaries.append(f"edited {args.get('path', '?')}")
-                elif name == "write_file":
-                    tool_summaries.append(f"wrote {args.get('path', '?')}")
-                elif name == "run_command":
-                    cmd = args.get("command", "?")
-                    tool_summaries.append(f"ran `{cmd[:60]}`")
-                elif name == "grep":
-                    tool_summaries.append(f"searched for '{args.get('pattern', '?')}'")
-                elif name == "glob":
-                    tool_summaries.append(f"found files matching '{args.get('pattern', '?')}'")
-                elif name == "git":
-                    sub = args.get("subcommand", args.get("command", "?"))
-                    tool_summaries.append(f"git {sub}")
-                elif name == "web_search":
-                    tool_summaries.append(f"searched web for '{args.get('query', '?')[:50]}'")
-                else:
-                    tool_summaries.append(name)
-            return f"- Agent {', '.join(tool_summaries)}"
-        # Plain text response
-        if content:
-            first_line = content.split("\n", 1)[0]
-            return f"- Agent responded: {first_line[:100]}"
-        return None
-
-    if role == "tool":
-        # Skip tool results — they're bulky and the tool_call already captures the action
-        return None
-
-    return None
-
-
-def _compact_history(history: list[dict]) -> list[dict]:
-    """Summarize the oldest 2/3 of messages into a single summary message.
-
-    Instead of just dropping old messages (losing all context), this builds
-    a compact programmatic summary of what happened, so the LLM retains
-    awareness of earlier conversation.
-    """
-    if len(history) < 6:
-        return history
-
-    keep_count = max(4, len(history) // 3)
-    old_msgs = history[:-keep_count]
-    recent_msgs = history[-keep_count:]
-
-    summary_lines = []
-    for msg in old_msgs:
-        line = _extract_action_summary(msg)
-        if line:
-            summary_lines.append(line)
-
-    if not summary_lines:
-        summary_text = "(earlier conversation with no notable actions)"
-    else:
-        summary_text = "\n".join(summary_lines)
-
-    n_compressed = len(old_msgs)
-    summary_msg = {
-        "role": "user",
-        "content": (
-            f"[Previous conversation summary]\n"
-            f"{summary_text}\n"
-            f"[End summary — {n_compressed} messages compressed]"
-        ),
-    }
-
-    try:
-        _ensure_console()
-        console.print(
-            f"  [dim italic]Context compacted: {n_compressed} messages summarized into conversation summary[/]"
-        )
-    except Exception as e:
-        logger.debug(f"[AgenticLoop] Compaction console print failed: {e}")
-
-    return [summary_msg, *recent_msgs]
-
-
-def _truncate(text: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:
-    """Truncate tool output to prevent context explosion."""
-    if len(text) <= max_chars:
-        return text
-    half = max_chars // 2
-    return text[:half] + f"\n\n... ({len(text) - max_chars} chars truncated) ...\n\n" + text[-half:]
-
-
-def _recall_memories(prompt: str, max_results: int = 5) -> str:
-    """Query UnifiedMemory for relevant context. Returns formatted string or empty."""
-    try:
-        from aura.memory.unified_memory import get_unified_memory
-        um = get_unified_memory()
-        results = um.query(prompt, k=max_results, min_score=0.2)
-        if not results:
-            return ""
-
-        lines = ["## Relevant Memories"]
-        for r in results:
-            content = r.content[:300] if hasattr(r, 'content') else str(r)[:300]
-            source = getattr(r, 'source', 'memory')
-            score = getattr(r, 'score', 0)
-            lines.append(f"- [{source}, relevance={score:.2f}] {content}")
-        return "\n".join(lines)
-    except Exception as e:
-        logger.debug(f"[AgenticLoop] Memory recall failed (non-fatal): {e}")
-        return ""
-
-
-def _store_interaction(prompt: str, response: str) -> None:
-    """Store the interaction in memory for future recall."""
-    try:
-        from aura.memory.unified_memory import get_unified_memory
-        um = get_unified_memory()
-        # Only store substantial interactions (not greetings)
-        if len(response) > 50 and len(prompt) > 10:
-            um.store(
-                content=f"User asked: {prompt[:200]}\nAura responded: {response[:500]}",
-                source="agentic_conversation",
-                importance=0.4,
-                tags=["agentic", "conversation"],
-            )
-    except Exception as e:
-        logger.debug(f"[AgenticLoop] Memory store failed (non-fatal): {e}")
-
-
-class ToolExecutor:
-    """Executes tool calls by dispatching to existing Aura tool classes."""
-
-    def __init__(self, project_root: str, sub_agent_mgr=None, permissions=None, mcp_client=None):
-        self.project_root = project_root
-        self.sub_agent_mgr = sub_agent_mgr
-        self.permissions = permissions
-        self._mcp_client = mcp_client
-        self._fs = None
-        self._code_edit = None
-        self._search = None
-        self._shell = None
-        self._git = None
-        self._brave = None
-        self._tavily = None
-
-    @property
-    def fs(self):
-        if self._fs is None:
-            from aura.tools.filesystem import FileSystemTool
-            # Disable sandbox since ToolExecutor._resolve_path handles path containment
-            self._fs = FileSystemTool(sandbox_enabled=False)
-        return self._fs
-
-    @property
-    def code_edit(self):
-        if self._code_edit is None:
-            from aura.tools.code_edit import CodeEditTool
-            self._code_edit = CodeEditTool()
-        return self._code_edit
-
-    @property
-    def search(self):
-        if self._search is None:
-            from aura.tools.code_search import CodeSearchTool
-            self._search = CodeSearchTool()
-        return self._search
-
-    @property
-    def shell(self):
-        if self._shell is None:
-            from aura.tools.shell_executor import ShellExecutorTool
-            self._shell = ShellExecutorTool()
-        return self._shell
-
-    @property
-    def git(self):
-        if self._git is None:
-            from aura.tools.git_tool import GitTool
-            self._git = GitTool()
-        return self._git
-
-    def _resolve_path(self, path: str) -> str:
-        """Resolve relative paths against project root with containment check."""
-        if os.path.isabs(path):
-            resolved = os.path.realpath(path)
-        else:
-            resolved = os.path.realpath(os.path.join(self.project_root, path))
-
-        # LLM often prefixes paths with the project folder name (e.g., "Aura/main.py"
-        # when project root is already D:/Aura). If resolved doesn't exist, try stripping.
-        if not os.path.exists(resolved) and not os.path.isabs(path):
-            project_name = os.path.basename(self.project_root)
-            if path.startswith(project_name + "/") or path.startswith(project_name + "\\"):
-                stripped = path[len(project_name) + 1:]
-                alt = os.path.realpath(os.path.join(self.project_root, stripped))
-                if os.path.exists(alt):
-                    resolved = alt
-
-        # Allow project root and specific safe subdirs under home
-        allowed_roots = [os.path.realpath(self.project_root)]
-        home = os.path.realpath(os.path.expanduser("~"))
-        if home:
-            # Only allow Aura's own data directories, not the entire home
-            for subdir in [".aura", "Desktop"]:
-                candidate = os.path.join(home, subdir)
-                if os.path.isdir(candidate):
-                    allowed_roots.append(os.path.realpath(candidate))
-        # Block sensitive directories even if they're under an allowed root
-        _SENSITIVE_DIRS = {".ssh", ".gnupg", ".aws", ".azure", ".kube",
-                           ".docker", ".config/gcloud", "AppData/Roaming/1Password"}
-        for sensitive in _SENSITIVE_DIRS:
-            sensitive_path = os.path.realpath(os.path.join(home, sensitive))
-            if resolved.startswith(sensitive_path + os.sep) or resolved == sensitive_path:
-                raise PermissionError(f"Access to sensitive directory blocked: {path}")
-        for root in allowed_roots:
-            if resolved.startswith(root + os.sep) or resolved == root:
-                return resolved
-        raise PermissionError(f"Path outside allowed directories: {path}")
-
-    def execute(self, tool_name: str, args: dict) -> str:
-        """Execute a tool call, return result as string for the LLM."""
-        try:
-            result = self._dispatch(tool_name, args)
-            if isinstance(result, dict):
-                return _truncate(json.dumps(result, indent=2, default=str))
-            return _truncate(str(result))
-        except Exception as e:
-            logger.error(f"[ToolExecutor] {tool_name} failed: {e}")
-            return json.dumps({"error": str(e)})
-
-    # Aliases for when the LLM uses agent-style names instead of dev-tool names
-    _TOOL_ALIASES: dict = {
-        "filesystem": "list_dir",
-        "code_search": "grep",
-        "code_edit": "edit_file",
-        "shell_executor": "shell",
-        "web_search": "search_web",
-        "tavily_search": "search_web",
-        "brave_search": "search_web",
-        "ls": "list_dir",
-        "find": "glob",
-        "cat": "read_file",
-    }
-
-    def _dispatch(self, tool_name: str, args: dict) -> dict:
-        # Resolve aliases first
-        tool_name = self._TOOL_ALIASES.get(tool_name, tool_name)
-
-        # If args has 'action' but no structured params, try to parse it
-        if "action" in args and len(args) == 1:
-            args = self._parse_action_to_args(tool_name, args["action"])
-            if "error" in args:
-                return args  # Surface the parse error directly to the LLM
-
-        if tool_name == "read_file":
-            return self._read_file(args)
-        elif tool_name == "grep":
-            return self.search.grep(
-                pattern=args["pattern"],
-                path=self._resolve_path(args.get("path", ".")),
-                file_type=args.get("file_type"),
-                case_insensitive=args.get("case_insensitive", False),
-                context_lines=2,
-                max_results=50,
-            )
-        elif tool_name == "glob":
-            return self.search.glob(
-                pattern=args["pattern"],
-                path=self._resolve_path(args.get("path", ".")),
-            )
-        elif tool_name == "list_dir":
-            path = self._resolve_path(args.get("path", "."))
-            return self._list_dir(path)
-        elif tool_name == "edit_file":
-            return self._edit_file(args)
-        elif tool_name == "write_file":
-            return self._write_file(args)
-        elif tool_name == "shell":
-            cwd = self._resolve_path(args.get("cwd", "."))
-            result = self.shell.run_sandboxed(
-                command=args["command"],
-                cwd=cwd,
-                timeout=min(args.get("timeout", 60), 300),
-            )
-            return self._enrich_shell_error(result, args.get("command", ""))
-        elif tool_name == "git":
-            return self._git_dispatch(args)
-        elif tool_name == "search_web":
-            return self._web_search(args)
-        elif tool_name == "project_structure":
-            return self.search.project_structure(
-                path=self._resolve_path(args.get("path", ".")),
-                max_depth=args.get("max_depth", 3),
-            )
-        elif tool_name == "fetch_url":
-            return self._fetch_url(args)
-        elif tool_name == "create_directory":
-            path = self._resolve_path(args.get("path", ""))
-            os.makedirs(path, exist_ok=True)
-            return {"success": True, "path": path}
-        elif tool_name == "move_file":
-            src = self._resolve_path(args.get("source", ""))
-            dst = self._resolve_path(args.get("destination", ""))
-            import shutil
-            shutil.move(src, dst)
-            return {"success": True, "source": src, "destination": dst}
-        elif tool_name == "multi_edit":
-            return self.code_edit.multi_edit(
-                path=self._resolve_path(args["path"]),
-                edits=args.get("edits", []),
-            )
-        elif tool_name == "run_tests":
-            return self._run_tests(args)
-        elif tool_name == "spawn_agent":
-            if self.sub_agent_mgr is None:
-                return {"error": "Sub-agents not available"}
-            return self.sub_agent_mgr.spawn(
-                task=args.get("task", ""),
-                role=args.get("role", "reader"),
-            )
-        elif tool_name.startswith("mcp_"):
-            # Route to MCP client
-            if self._mcp_client:
-                return {"result": self._mcp_client.call_tool(tool_name, args)}
-            return {"error": f"MCP client not available for: {tool_name}"}
-        else:
-            return {"error": f"Unknown tool: {tool_name}"}
-
-    def _parse_action_to_args(self, tool_name: str, action: str) -> dict:
-        """Convert a freeform 'action' string into structured args for a tool.
-
-        When the LLM uses a generic {action: "..."} schema (from ToolRAG-generated schemas),
-        we need to extract the actual parameters the tool expects.
-        """
-        action = action.strip()
-
-        if tool_name == "read_file":
-            # Strip common prefixes: "read README.md" → "README.md"
-            for prefix in ("read ", "cat ", "open "):
-                if action.lower().startswith(prefix):
-                    action = action[len(prefix):].strip()
-                    break
-            return {"path": action}
-        elif tool_name == "list_dir":
-            # Strip common prefixes: "list ." → ".", "ls src/" → "src/"
-            for prefix in ("list ", "ls ", "dir ", "list_directory "):
-                if action.lower().startswith(prefix):
-                    action = action[len(prefix):].strip()
-                    break
-            return {"path": action or "."}
-        elif tool_name == "grep":
-            parts = action.split(maxsplit=1)
-            if len(parts) >= 2:
-                return {"pattern": parts[0], "path": parts[1]}
-            return {"pattern": action, "path": "."}
-        elif tool_name == "glob":
-            return {"pattern": action or "*"}
-        elif tool_name == "shell":
-            return {"command": action}
-        elif tool_name == "search_web":
-            return {"query": action}
-        elif tool_name == "write_file":
-            # Try to parse JSON
-            try:
-                import json as _json
-                parsed = _json.loads(action)
-                if isinstance(parsed, dict):
-                    return parsed
-            except Exception as e:
-                logger.debug(f"[AgenticLoop] write_file JSON parse failed: {e}")
-            return {"error": f"Could not parse write_file arguments from: {action[:100]}"}
-        elif tool_name == "edit_file":
-            try:
-                import json as _json
-                parsed = _json.loads(action)
-                if isinstance(parsed, dict):
-                    return parsed
-            except Exception as e:
-                logger.debug(f"[AgenticLoop] edit_file JSON parse failed: {e}")
-            return {"error": "Could not parse edit_file arguments"}
-        elif tool_name == "git":
-            return {"action": action}
-        elif tool_name == "project_structure":
-            return {"path": action or "."}
-
-        # Default: keep as action
-        return {"action": action}
-
-    def _list_dir(self, path: str) -> dict:
-        """List directory contents — direct filesystem access, no sandbox."""
-        try:
-            entries = []
-            for entry in sorted(os.listdir(path)):
-                full = os.path.join(path, entry)
-                if os.path.isdir(full):
-                    entries.append(f"  {entry}/")
-                else:
-                    try:
-                        size = os.path.getsize(full)
-                        if size < 1024:
-                            size_str = f"{size}B"
-                        elif size < 1024 * 1024:
-                            size_str = f"{size // 1024}KB"
-                        else:
-                            size_str = f"{size // (1024 * 1024)}MB"
-                        entries.append(f"  {entry} ({size_str})")
-                    except OSError:
-                        entries.append(f"  {entry}")
-            return {
-                "success": True,
-                "path": path,
-                "count": len(entries),
-                "entries": "\n".join(entries),
-            }
-        except FileNotFoundError:
-            return {"error": f"Directory not found: {path}"}
-        except PermissionError:
-            return {"error": f"Permission denied: {path}"}
-
-    def _read_file(self, args: dict) -> dict:
-        path = self._resolve_path(args["path"])
-        try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                lines = f.readlines()
-        except FileNotFoundError:
-            return self._read_file_not_found(path, args.get("path", ""))
-        except PermissionError:
-            return {"error": f"Permission denied: {path}"}
-
-        offset = args.get("offset", 0)
-        limit = args.get("limit", 0)
-        if limit > 0:
-            selected = lines[offset:offset + limit]
-        else:
-            selected = lines[offset:]
-
-        # Add line numbers
-        numbered = []
-        for i, line in enumerate(selected, start=offset + 1):
-            numbered.append(f"{i:>5}\t{line.rstrip()}")
-
-        return {
-            "success": True,
-            "path": path,
-            "total_lines": len(lines),
-            "showing": f"{offset + 1}-{offset + len(selected)}",
-            "content": "\n".join(numbered),
-        }
-
-    def _read_file_not_found(self, resolved_path: str, original_path: str) -> dict:
-        """Enrich a file-not-found error with suggestions from glob search."""
-        basename = os.path.basename(original_path or resolved_path)
-        if not basename:
-            return {"error": f"File not found: {resolved_path}"}
-
-        suggestions = []
-        try:
-            # Search for files with the same name anywhere in project
-            result = self.search.glob(
-                pattern=f"**/{basename}",
-                path=self.project_root,
-                max_results=5,
-            )
-            if result.get("success") and result.get("files"):
-                suggestions = [f["path"] for f in result["files"][:5]]
-        except Exception as e:
-            logger.debug(f"[AgenticLoop] File suggestion glob failed: {e}")
-
-        if not suggestions:
-            # Try partial match — strip extension and search broader
-            stem = os.path.splitext(basename)[0]
-            if len(stem) >= 3:
-                try:
-                    result = self.search.glob(
-                        pattern=f"**/{stem}*",
-                        path=self.project_root,
-                        max_results=5,
-                    )
-                    if result.get("success") and result.get("files"):
-                        suggestions = [f["path"] for f in result["files"][:5]]
-                except Exception as e:
-                    logger.debug(f"[AgenticLoop] Partial file suggestion failed: {e}")
-
-        error_msg = f"File not found: {resolved_path}"
-        if suggestions:
-            return {"error": error_msg, "did_you_mean": suggestions}
-        return {"error": error_msg}
-
-    # Common command alternatives for "command not found" enrichment
-    _COMMAND_ALTERNATIVES: dict = {
-        "python": ["python3", "py"],
-        "python3": ["python", "py"],
-        "py": ["python", "python3"],
-        "pip": ["pip3", "python -m pip"],
-        "pip3": ["pip", "python3 -m pip"],
-        "npx": ["npm exec", "pnpm exec"],
-        "npm": ["pnpm", "yarn"],
-        "pnpm": ["npm", "yarn"],
-        "yarn": ["npm", "pnpm"],
-        "node": ["nodejs"],
-        "nodejs": ["node"],
-        "make": ["cmake", "nmake"],
-        "gcc": ["cc", "clang"],
-        "g++": ["c++", "clang++"],
-        "curl": ["wget", "Invoke-WebRequest"],
-        "wget": ["curl"],
-        "cat": ["type", "Get-Content"],
-        "ls": ["dir", "Get-ChildItem"],
-        "rm": ["del", "Remove-Item"],
-        "cp": ["copy", "Copy-Item"],
-        "mv": ["move", "Move-Item"],
-        "grep": ["findstr", "Select-String"],
-    }
-
-    def _enrich_shell_error(self, result: dict, command: str) -> dict:
-        """Enrich shell errors with actionable suggestions."""
-        if result.get("success", False):
-            return result
-
-        stderr = result.get("stderr", "") or result.get("error", "") or ""
-        # Detect "command not found" patterns (bash, PowerShell, cmd)
-        not_found_patterns = [
-            "command not found",
-            "not recognized as an internal or external command",
-            "is not recognized as",
-            "No such file or directory",
-            "The term",  # PowerShell: "The term 'X' is not recognized"
-        ]
-
-        is_cmd_not_found = any(p.lower() in stderr.lower() for p in not_found_patterns)
-        if not is_cmd_not_found:
-            return result
-
-        # Extract the failed command name (first token)
-        cmd_name = command.strip().split()[0] if command.strip() else ""
-        # Strip path prefixes if present
-        cmd_name = os.path.basename(cmd_name)
-
-        alternatives = self._COMMAND_ALTERNATIVES.get(cmd_name, [])
-        if alternatives:
-            result["suggestion"] = f"'{cmd_name}' not found. Try: {', '.join(alternatives)}"
-
-        return result
-
-    def _edit_file(self, args: dict) -> dict:
-        """Edit file with diff preview and approval. Uses CodeEditTool for fuzzy matching."""
-        path = self._resolve_path(args["path"])
-
-        # Checkpoint: snapshot file before editing
-        _cp = getattr(self, '_checkpoint_mgr', None)
-        if _cp:
-            try:
-                _cp.snapshot(path, label=f"before edit: {Path(path).name}")
-            except Exception as e:
-                logger.debug(f"[AgenticLoop] Edit checkpoint failed (non-fatal): {e}")
-
-        # Step 1: dry-run to preview
-        preview = self.code_edit.edit(
-            path=path,
-            old_string=args["old_string"],
-            new_string=args["new_string"],
-            dry_run=True,
-        )
-        if not preview.get("success"):
-            return preview
-
-        # Step 2: show diff — auto-approve if edit_file is AUTO in permissions (like Claude Code)
-        # The PermissionManager already approved this tool at the outer gate (line 988).
-        # No second prompt needed — just show the diff for visibility.
-        from .diff_display import show_diff
-        try:
-            show_diff(path, args["old_string"], args["new_string"])
-        except Exception as e:
-            logger.debug(f"[AgenticLoop] non-critical: {e}")
-
-        # H2: Interactive accept/reject for careful mode
-        if not getattr(self, '_trust_all_edits', False):
-            perm_mode = getattr(self.permissions, 'mode', 'auto_edit') if self.permissions else 'auto_edit'
-            if perm_mode == 'careful':
-                try:
-                    import sys
-                    sys.stderr.write("  Apply this edit? [y/n/all]: ")
-                    sys.stderr.flush()
-                    choice = input().strip().lower()
-                    if choice == "all":
-                        self._trust_all_edits = True
-                    elif choice not in ("y", "yes", ""):
-                        return {"success": False, "skipped": True, "message": "Edit rejected by user"}
-                except (EOFError, KeyboardInterrupt):
-                    return {"success": False, "skipped": True, "message": "Edit cancelled"}
-
-        # Step 3: apply for real
-        result = self.code_edit.edit(
-            path=path,
-            old_string=args["old_string"],
-            new_string=args["new_string"],
-        )
-
-        # Broadcast to Artifacts live-preview if file is previewable
-        if result.get("success"):
-            self._maybe_broadcast_artifact(path)
-
-        return result
-
-    def _write_file(self, args: dict) -> dict:
-        path = self._resolve_path(args["path"])
-        # Checkpoint: snapshot existing file before overwriting
-        _cp = getattr(self, '_checkpoint_mgr', None)
-        if _cp and os.path.exists(path):
-            try:
-                _cp.snapshot(path, label=f"before write: {Path(path).name}")
-            except Exception as e:
-                logger.debug(f"[AgenticLoop] Write checkpoint failed (non-fatal): {e}")
-        result = self.fs.write_file(path=path, content=args["content"], overwrite=True)
-
-        # Broadcast to Artifacts live-preview if file is previewable
-        if result.get("success"):
-            self._maybe_broadcast_artifact(path, content=args.get("content"))
-
-        return result
-
-    def _maybe_broadcast_artifact(self, path: str, content: str | None = None) -> None:
-        """Broadcast file content to the Artifacts live-preview panel if previewable."""
-        try:
-            from api.routes.artifacts import broadcast_artifact, is_previewable
-            if not is_previewable(path):
-                return
-            # Read file content if not provided (edit_file case)
-            if content is None:
-                try:
-                    with open(path, "r", encoding="utf-8", errors="replace") as f:
-                        content = f.read()
-                except Exception as e:
-                    logger.debug(f"[AgenticLoop] Artifact file read failed: {e}")
-                    return
-            if content:
-                try:
-                    filename = os.path.relpath(path, self.project_root)
-                except Exception as e:
-                    logger.debug(f"[AgenticLoop] relpath failed, using basename: {e}")
-                    filename = Path(path).name
-                filename = filename.replace("\\", "/")
-                broadcast_artifact(filename, content)
-                logger.debug(f"[AgenticLoop] Artifact broadcast: {filename} ({len(content)} chars)")
-        except ImportError:
-            pass  # API routes not available (CLI-only mode)
-        except Exception as e:
-            logger.debug(f"[AgenticLoop] Artifact broadcast failed (non-fatal): {e}")
-
-    def _git_dispatch(self, args: dict) -> dict:
-        action = args.get("action", "status")
-        repo = self.project_root
-
-        if action == "status":
-            return self.git.status(repo)
-        elif action == "diff":
-            return self.git.diff(repo, file=args.get("file"))
-        elif action == "log":
-            return self.git.log(repo, count=args.get("count", 5))
-        elif action == "branch":
-            return self.git.branch(repo)
-        elif action == "add":
-            return self.git.add(repo, files=args.get("files", "."))
-        elif action == "commit":
-            return self.git.commit(repo, message=args.get("message", ""))
-        elif action == "push":
-            return self.git.push(repo)
-        elif action == "pull":
-            return self.git.pull(repo)
-        else:
-            return {"error": f"Unknown git action: {action}"}
-
-    def _web_search(self, args: dict) -> dict:
-        query = args["query"]
-        max_results = args.get("max_results", 8)
-
-        # Shared fallback chain: Tavily → Brave → Firecrawl
-        from aura.tools.search_fallback import web_search_with_fallback
-        return web_search_with_fallback(query=query, max_results=max_results)
-
-    def _fetch_url(self, args: dict) -> dict:
-        """Fetch a URL and return stripped text content."""
-        url = args.get("url", "")
-        if not url:
-            return {"error": "No URL provided"}
-        # SSRF protection: block internal/private network requests
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            if parsed.scheme not in ("http", "https"):
-                return {"error": f"Only http/https URLs allowed, got: {parsed.scheme}"}
-            host = (parsed.hostname or "").lower()
-            if not host:
-                return {"error": "No hostname in URL"}
-            _blocked = {"localhost", "127.0.0.1", "::1", "0.0.0.0",
-                        "169.254.169.254", "metadata.google.internal"}
-            if (host in _blocked or host.startswith("10.")
-                    or host.startswith("192.168.")
-                    or host.startswith("172.16.") or host.startswith("172.17.")
-                    or host.startswith("172.18.") or host.startswith("172.19.")
-                    or host.startswith("172.2") or host.startswith("172.3")
-                    or host.endswith(".internal") or host.endswith(".local")):
-                return {"error": f"Requests to internal/private addresses blocked: {host}"}
-            # DNS rebinding protection: resolve hostname and check resolved IP
-            import socket
-            try:
-                resolved_ip = socket.gethostbyname(host)
-                import ipaddress
-                ip_obj = ipaddress.ip_address(resolved_ip)
-                if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved:
-                    return {"error": f"Requests to internal/private addresses blocked: {host} -> {resolved_ip}"}
-            except (socket.gaierror, ValueError):
-                return {"error": f"Cannot resolve hostname: {host}"}
-        except Exception as e:
-            return {"error": f"URL validation failed: {e}"}
-        try:
-            import requests
-            with requests.get(url, timeout=15, headers={"User-Agent": "Aura-Dev-Agent/1.0"}, stream=False) as resp:
-                resp.raise_for_status()
-                content = resp.text
-        except Exception as e:
-            return {"error": f"Failed to fetch {url}: {e}"}
-        # Strip HTML tags
-        try:
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(content, "html.parser")
-            # Remove script/style elements
-            for tag in soup(["script", "style", "nav", "footer", "header"]):
-                tag.decompose()
-            text = soup.get_text(separator="\n", strip=True)
-        except ImportError:
-            # Fallback: simple regex strip
-            text = re.sub(r"<script[^>]*>.*?</script>", "", content, flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
-            text = re.sub(r"<[^>]+>", " ", text)
-            text = re.sub(r"\s+", " ", text).strip()
-        # Truncate to 15000 chars
-        if len(text) > 15000:
-            text = text[:15000] + "\n... [truncated]"
-        return {"success": True, "url": url, "length": len(text), "content": text}
-
-    def _run_tests(self, args: dict) -> dict:
-        """Run project tests, auto-detecting the test framework."""
-        target = args.get("target", "")
-        cwd = self.project_root
-
-        # Try auto_verify if available
-        try:
-            from aura.tools.auto_verify import AutoVerifyTool
-            av = AutoVerifyTool()
-            result = av.run(project_root=cwd, target=target)
-            if result and "error" not in result:
-                return result
-        except (ImportError, Exception) as e:
-            logger.debug(f"[ToolExecutor] auto_verify unavailable: {e}")
-
-        # Detect test framework and run
-        cmd = None
-        if os.path.exists(os.path.join(cwd, "pytest.ini")) or os.path.exists(os.path.join(cwd, "pyproject.toml")) or os.path.exists(os.path.join(cwd, "setup.py")):
-            cmd = f"python -m pytest {target} -x -q --tb=short" if target else "python -m pytest -x -q --tb=short"
-        elif os.path.exists(os.path.join(cwd, "package.json")):
-            # Check for vitest or jest
-            try:
-                with open(os.path.join(cwd, "package.json"), "r") as f:
-                    import json as _json
-                    pkg = _json.load(f)
-                deps = {**pkg.get("devDependencies", {}), **pkg.get("dependencies", {})}
-                if "vitest" in deps:
-                    cmd = f"npx vitest run {target}" if target else "npx vitest run"
-                else:
-                    cmd = f"npx jest {target}" if target else "npx jest"
-            except Exception as e:
-                logger.debug(f"[AgenticLoop] package.json test detection failed: {e}")
-                cmd = f"npm test -- {target}" if target else "npm test"
-        elif os.path.exists(os.path.join(cwd, "Cargo.toml")):
-            cmd = f"cargo test {target}" if target else "cargo test"
-        elif os.path.exists(os.path.join(cwd, "go.mod")):
-            cmd = f"go test {target}" if target else "go test ./..."
-
-        if not cmd:
-            return {"error": "Could not detect test framework. Use shell tool to run tests manually."}
-
-        return self.shell.run_sandboxed(command=cmd, cwd=cwd, timeout=120)
 
 
 class AgenticLoop:
@@ -944,6 +72,7 @@ class AgenticLoop:
         self.tool_calls_total = 0
         self._edits_this_turn = 0  # Track edits for auto-test
         self._is_sub_agent = False  # Prevent sub-agent-ception
+        self._current_run_id = ""
 
         # Context window management
         effective_model = model_override or ""
@@ -975,6 +104,8 @@ class AgenticLoop:
 
         # Cancellation event for mid-loop abort (Ctrl+C)
         self._cancel_event = threading.Event()
+        self._tool_call_coordinator = ToolCallCoordinator(self)
+        self._model_step_controller = ModelStepController(self)
 
         # Completion verification: one extra LLM call to check task was actually done
         self._verify_completion = True
@@ -1306,7 +437,16 @@ class AgenticLoop:
         plan = parse_plan_from_llm(response)
         return {"plan_text": response, "plan": plan, "prompt": prompt}
 
-    def run(self, prompt: str, on_tool_call=None, on_response=None, steering_queue=None, on_chunk=None, on_tool_start=None) -> dict:
+    def run(
+        self,
+        prompt: str,
+        on_tool_call=None,
+        on_response=None,
+        steering_queue=None,
+        on_chunk=None,
+        on_tool_start=None,
+        on_event=None,
+    ) -> dict:
         """Run the agentic loop until completion.
 
         Args:
@@ -1316,6 +456,7 @@ class AgenticLoop:
             steering_queue: Optional SteeringQueue for mid-turn user messages
             on_chunk: Callback(text) for live token streaming
             on_tool_start: Callback(tool_name, args) fired before tool execution
+            on_event: Callback(LoopEvent) for structured loop events
 
         Returns:
             {success, response, iterations, tool_calls, model}
@@ -1334,6 +475,7 @@ class AgenticLoop:
         self._verification_done = False  # Only verify once per run
         self._empty_response_count = 0
         self._thinking_nudge_count = 0
+        self._current_run_id = f"run_{uuid.uuid4().hex[:8]}"
 
         # Capture baseline cost for per-turn cost tracking (C2)
         _prev_cost = 0.0
@@ -1350,6 +492,27 @@ class AgenticLoop:
         _session_id = self.session.session_id if self.session else "default"
         guard = get_guard(_session_id)
         guard.reset()
+
+        def _persist_loop_event(event) -> None:
+            if self.session and event.type != "chunk":
+                self.session.append_event(
+                    {
+                        "type": event.type,
+                        "run_id": event.run_id,
+                        "iteration": event.iteration,
+                        "payload": event.payload,
+                    }
+                )
+
+        event_emitter = LoopEventEmitter(
+            self,
+            on_emit=_persist_loop_event,
+            on_event=on_event,
+            on_tool_call=on_tool_call,
+            on_response=on_response,
+            on_chunk=on_chunk,
+            on_tool_start=on_tool_start,
+        )
 
         # ── Intent classification & model routing (same as web UI) ──
         self._current_action_mode = None
@@ -1380,7 +543,7 @@ class AgenticLoop:
                         logger.info(f"[AgenticLoop] Plan generated: {len(plan.steps)} steps")
                         try:
                             _ensure_console()
-                            console.print(
+                            _loop_support.console.print(
                                 f"  [dim cyan]plan[/dim cyan] {len(plan.steps)} steps generated",
                                 highlight=False,
                             )
@@ -1424,6 +587,7 @@ class AgenticLoop:
 
         final_response = ""
         model_used = ""
+        outcome: LoopOutcome | None = None
 
         # ── Visual feedback loop for frontend mode ──
         if self._current_action_mode == "frontend" and not getattr(self.brain, '_model_override', None):
@@ -1449,20 +613,27 @@ class AgenticLoop:
                         except Exception as e:
                             logger.debug(f"[AgenticLoop] Store interaction failed: {e}")
                         self._current_action_mode = None
-                        return {
-                            "success": True,
-                            "response": final_response,
-                            "iterations": 1,
-                            "tool_calls": 0,
-                            "model": model_used,
-                        }
+                        result = LoopOutcome.visual_feedback(final_response).to_result_dict(
+                            iterations=1,
+                            tool_calls=0,
+                            model=model_used,
+                        )
+                        event_emitter.emit(
+                            "run_finished",
+                            status=result["status"],
+                            success=result["success"],
+                            response=final_response,
+                            model=model_used,
+                            tool_calls=0,
+                        )
+                        return result
             except Exception as e:
                 logger.warning(f"[AgenticLoop] Visual feedback failed, falling back to normal: {e}")
 
         while self.iteration < self.max_iterations:
             # ── Cancellation check: top of iteration ──
             if self._cancel_event.is_set():
-                final_response = "Cancelled by user."
+                outcome = LoopOutcome.cancelled("Cancelled by user.")
                 break
 
             self.iteration += 1
@@ -1489,7 +660,7 @@ class AgenticLoop:
                 pct = cost / self.budget_usd if self.budget_usd > 0 else 0
 
                 if cost >= self.budget_usd:
-                    final_response = f"Budget limit reached (${self.budget_usd:.2f}). Stopping."
+                    outcome = LoopOutcome.budget_limit(self.budget_usd)
                     self._loop_error = True
                     break
 
@@ -1525,314 +696,86 @@ class AgenticLoop:
             # Note: ChatGPT models can't do tool calling — brain.react_step()
             # auto-falls back to default Ollama model for tool steps.
 
-            # Try streaming first, fall back to blocking
-            accumulated = ""
-            tool_calls = None
-            content = ""
-            stream_error = None
+            step_result = self._model_step_controller.request_step(
+                messages=messages,
+                active_tools=active_tools,
+                step_model=step_model,
+                event_emitter=event_emitter,
+            )
 
-            try:
-                # Show spinner (suppressed when on_chunk handles display)
-                if not on_chunk:
-                    model_tag = f" [{step_model.split(':')[0]}]" if step_model else ""
-                    sys.stdout.write(f"  \033[90m● thinking{model_tag}...\033[0m")
-                    sys.stdout.flush()
-
-                for chunk_type, data in self.brain.think_with_tools_stream(
-                    messages=messages, tools=active_tools,
-                    model_override=step_model,
-                ):
-                    if chunk_type == "content":
-                        if not on_chunk and not accumulated:
-                            # Clear the "thinking..." spinner but keep cursor on same line
-                            sys.stdout.write("\r\033[K")
-                            sys.stdout.write("  \033[90m● generating...\033[0m")
-                            sys.stdout.flush()
-                        accumulated += data
-                        if on_chunk:
-                            on_chunk(data)
-                    elif chunk_type == "tool_calls":
-                        if not on_chunk and not accumulated:
-                            sys.stdout.write("\r\033[K")
-                        tool_calls = data
-                    elif chunk_type == "done":
-                        model_used = data.get("model", "")
-                        # Use cleaned content from adapter (strips <tool_call> tags)
-                        if data.get("content"):
-                            content = data["content"]
-                    elif chunk_type == "error":
-                        stream_error = data.get("error", "Unknown stream error")
-                        break
-
-                if not on_chunk:
-                    if accumulated:
-                        sys.stdout.write("\r\033[K")  # Clear "generating..." status
-                        sys.stdout.flush()
-                    elif not tool_calls:
-                        sys.stdout.write("\r\033[K")  # Clear spinner if no output
-                        sys.stdout.flush()
-
-            except ConnectionError:
-                sys.stdout.write("\r\033[K")
-                sys.stdout.flush()
-                _model_label = step_model or "default model"
-                final_response = (
-                    f"Connection failed to {_model_label}.\n"
-                    f"  - Is Ollama running? Try: ollama serve\n"
-                    f"  - Check your network connection."
-                )
-                self._loop_error = True
+            if step_result.status == "terminal":
+                outcome = step_result.outcome
                 break
-            except TimeoutError:
-                sys.stdout.write("\r\033[K")
-                sys.stdout.flush()
-                _model_label = step_model or "default model"
-                final_response = (
-                    f"Request timed out for {_model_label}.\n"
-                    f"  - The model may be overloaded or too large.\n"
-                    f"  - Try a smaller model with: /model <name>"
-                )
-                self._loop_error = True
-                break
-            except Exception as e:
-                stream_error = str(e)
 
-            # Fallback to non-streaming if streaming failed
-            if stream_error:
-                sys.stdout.write("\r\033[K")
-                sys.stdout.flush()
-                logger.debug(f"[AgenticLoop] Streaming failed ({stream_error}), falling back to blocking call")
-                result = self.brain.think_with_tools(
-                    messages=messages, tools=active_tools,
-                    model_override=step_model,
+            tool_calls = step_result.tool_calls
+            content = step_result.content
+            if step_result.model_used:
+                model_used = step_result.model_used
+
+            if step_result.status == "content_ready":
+                content_result = self._model_step_controller.resolve_content_only(
+                    prompt=prompt,
+                    content=content,
+                    delivery=step_result.delivery,
                 )
-                if "error" in result:
-                    final_response = f"Error: {result['error']}"
-                    self._loop_error = True
+                if content_result.status == "terminal":
+                    outcome = content_result.outcome
+                    if (
+                        outcome
+                        and outcome.status == "completed"
+                        and event_emitter.listens_for("response")
+                        and step_result.delivery == "blocking"
+                    ):
+                        event_emitter.emit(
+                            "response",
+                            text=outcome.response,
+                            delivery=step_result.delivery,
+                        )
                     break
-
-                msg = result["message"]
-                model_used = result.get("model", "")
-                if isinstance(msg, dict):
-                    tool_calls = msg.get("tool_calls")
-                    content = msg.get("content", "") or ""
-                else:
-                    tool_calls = getattr(msg, "tool_calls", None)
-                    content = getattr(msg, "content", "") or ""
-            else:
-                content = content or accumulated  # prefer cleaned content from "done" event
-
-            # Strip any lingering tool XML from content
-            content = re.sub(r'</?tool_call>|</?tool_result[^>]*>', '', content).strip()
-            content = re.sub(r'\n{3,}', '\n\n', content)
-
-            if not tool_calls:
-                if not content:
-                    # Empty response — retry with a nudge instead of showing "(No response)"
-                    self._empty_response_count = getattr(self, '_empty_response_count', 0) + 1
-                    if self._empty_response_count > 3:
-                        logger.error(f"[AgenticLoop] {self._empty_response_count} consecutive empty responses — aborting loop")
-                        final_response = "The model failed to generate a response after multiple attempts. Please try again with a clearer prompt."
-                        break
-                    logger.warning(f"[AgenticLoop] Empty response #{self._empty_response_count} from model on iteration {self.iteration}, nudging")
-                    messages.append({"role": "assistant", "content": ""})
-                    messages.append({"role": "user", "content": "Continue. Execute the task using tools."})
+                if content_result.extra_messages:
+                    messages.extend(content_result.extra_messages)
                     continue
-
-                # Detect "thinking without acting" — model said it would use tools
-                # but didn't actually call any. Nudge it to execute.
-                _thinking_phrases = (
-                    "let me search", "let me look", "let me find", "i'll search",
-                    "i will search", "let me do a", "let me check", "let me research",
-                    "i'll look up", "let me query", "searching for",
-                )
-                _content_lower = content.lower().strip()
-                _is_thinking_without_acting = (
-                    self.iteration <= 2
-                    and len(content) < 500
-                    and any(_content_lower.startswith(p) or f"\n{p}" in _content_lower for p in _thinking_phrases)
-                    and self.tool_calls_total == 0
-                )
-                if _is_thinking_without_acting:
-                    _nudge_count = getattr(self, '_thinking_nudge_count', 0) + 1
-                    self._thinking_nudge_count = _nudge_count
-                    if _nudge_count <= 2:
-                        logger.warning(f"[AgenticLoop] Model is thinking without acting (nudge #{_nudge_count}): '{content[:80]}...'")
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append({"role": "user", "content": "Don't just describe what you'll do — actually use the available tools now. Call web_search or the appropriate tool to execute."})
-                        continue
-
-                self._empty_response_count = 0  # Reset on successful response
-
-                # ── Completion verification ──
-                # Only verify when: verification enabled, 2+ iterations ran,
-                # tools were actually used (not simple chat), and not already verified.
-                if (
-                    self._verify_completion
-                    and not self._verification_done
-                    and self.iteration >= 2
-                    and self.tool_calls_total > 0
-                ):
-                    self._verification_done = True
-                    incomplete_reason = self._verify_task_completion(prompt, content)
-                    if incomplete_reason:
-                        # Re-enter the loop with the missing context
-                        logger.info("[AgenticLoop] Verification found incomplete work, continuing")
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append({
-                            "role": "user",
-                            "content": (
-                                f"[Verification check] You said you were done, but verification found: "
-                                f"{incomplete_reason}\n\n"
-                                f"Please complete the remaining work."
-                            ),
-                        })
-                        continue
-
-                final_response = content
-                if on_response and not accumulated:
-                    on_response(final_response, self.iteration)
+                outcome = LoopOutcome.completed(content_result.content or content)
+                if event_emitter.listens_for("response"):
+                    event_emitter.emit(
+                        "response",
+                        text=outcome.response,
+                        delivery=step_result.delivery,
+                    )
                 break
+
+            # Reset empty response counter — tool calls are productive activity
+            self._empty_response_count = 0
 
             # Append assistant message with tool_calls to history
-            assistant_msg = {
-                "role": "assistant",
-                "content": content,
-                "tool_calls": tool_calls,
-            }
-            messages.append(assistant_msg)
-            if self.session:
-                self.session.append(assistant_msg)
-
-            # Show intermediate thinking if present
-            if content and on_response:
-                on_response(content, self.iteration)
-
-            # Parse all tool calls first
-            parsed_calls = []
-            for tc in tool_calls:
-                if isinstance(tc, dict):
-                    func = tc.get("function", {})
-                    tool_name = func.get("name", "")
-                    args = func.get("arguments", {})
-                else:
-                    func = getattr(tc, "function", None)
-                    tool_name = getattr(func, "name", "") if func else ""
-                    args = getattr(func, "arguments", {}) if func else {}
-                try:
-                    if isinstance(args, str):
-                        args = json.loads(args)
-                    if args is None:
-                        args = {}
-                except (json.JSONDecodeError, TypeError) as _parse_err:
-                    logger.warning(f"[AgenticLoop] Failed to parse tool args for {tool_name}: {str(args)[:200]}")
-                    # Return error instead of calling tool with empty/wrong args
-                    error_result = json.dumps({
-                        "error": f"Malformed arguments for {tool_name}: could not parse JSON. "
-                                 f"Please provide valid JSON arguments. Raw: {str(args)[:200]}"
-                    })
-                    messages.append({"role": "tool", "content": error_result})
-                    if self.session:
-                        self.session.append({"role": "tool", "content": error_result})
-                    continue
-                parsed_calls.append((tool_name, args))
-
-            # Permission checks + status display on main thread
-            approved = []
-            for tool_name, args in parsed_calls:
-                self.tool_calls_total += 1
-                # Resolve aliases BEFORE permission check (LLM may send "find", "Glob", "cat", etc.)
-                resolved_name = self.executor._TOOL_ALIASES.get(tool_name, tool_name).lower()
-                if not self.permissions.check(resolved_name, args):
-                    approved.append((tool_name, args, json.dumps({"error": "Permission denied by user"})))
-                    # Only show tool status here when there's no external on_tool_call callback
-                    # (the callback in chat_loop already handles display, so this avoids double display)
-                    if not on_tool_call:
-                        self._show_tool_status(tool_name, args, denied=True)
-                else:
-                    if not on_tool_call:
-                        self._show_tool_status(tool_name, args)
-                    approved.append((tool_name, args, None))  # None = needs execution
+            self._tool_call_coordinator.append_assistant_tool_message(
+                messages,
+                content,
+                tool_calls,
+                event_emitter=event_emitter,
+            )
+            parsed_calls = self._tool_call_coordinator.parse_tool_calls(tool_calls, messages)
+            approved = self._tool_call_coordinator.approve_and_execute(
+                parsed_calls,
+                event_emitter=event_emitter,
+            )
 
             # ── Cancellation check: before tool execution ──
             if self._cancel_event.is_set():
-                final_response = f"Cancelled after {self.iteration} iterations."
+                outcome = LoopOutcome.cancelled(
+                    f"Cancelled after {self.iteration} iterations."
+                )
                 break
 
-            # Fire on_tool_start before execution so UI can show tool immediately
-            needs_exec = [(i, t, a) for i, (t, a, r) in enumerate(approved) if r is None]
-            if on_tool_start:
-                for _idx, _t, _a in needs_exec:
-                    on_tool_start(_t, _a)
+            batch_result = self._tool_call_coordinator.collect_results(
+                approved,
+                messages,
+                guard,
+                event_emitter=event_emitter,
+            )
 
-            # Execute: parallel if 2+ calls, direct if 1
-            if len(needs_exec) == 1:
-                idx, t, a = needs_exec[0]
-                result = self.executor.execute(t, a)
-                approved[idx] = (t, a, result)
-            elif len(needs_exec) > 1:
-                futures = {}
-                _pool = _get_tool_pool()
-                for idx, t, a in needs_exec:
-                    fut = _pool.submit(self.executor.execute, t, a)
-                    futures[idx] = fut
-                for idx, fut in futures.items():
-                    try:
-                        result = fut.result(timeout=300)
-                    except Exception as e:
-                        result = json.dumps({"error": f"Tool execution failed: {e}"})
-                    t, a, _ = approved[idx]
-                    approved[idx] = (t, a, result)
-
-            # Collect results in original order
-            _guard_tripped = False
-            for tool_name, args, tool_result in approved:
-                if tool_name in ("edit_file", "write_file") and not self._tool_result_has_error(tool_result):
-                    self._edits_this_turn += 1
-                    self._has_edits = True
-                    self._last_tools_were_reads = False
-                elif tool_name in ("read_file", "grep", "glob", "list_dir", "project_structure"):
-                    self._last_tools_were_reads = True
-                else:
-                    self._last_tools_were_reads = False
-
-                # Track hot files for context injection
-                self._track_hot_file(tool_name, args, tool_result)
-
-                # Adaptive planner: advance step on successful tool completions
-                try:
-                    if (self._planner and self._planner.current_plan
-                            and not self._tool_result_has_error(tool_result)):
-                        # Advance on substantive actions (edits, writes, shell commands)
-                        if tool_name in ("edit_file", "write_file", "shell", "run_tests"):
-                            result_snippet = tool_result[:100] if tool_result else ""
-                            self._planner.advance_step(result=result_snippet)
-                except Exception as e:
-                    logger.debug(f"[AgenticLoop] Planner advance failed: {e}")
-
-                if on_tool_call:
-                    on_tool_call(tool_name, args, tool_result)
-                tool_msg = {"role": "tool", "content": tool_result}
-                messages.append(tool_msg)
-                if self.session:
-                    self.session.append(tool_msg)
-
-                # Loop guard: detect infinite tool cycles
-                guard_result = guard.record(tool_name, str(args))
-                if guard_result and guard_result.triggered:
-                    final_response = guard_result.fallback_message
-                    self._loop_error = True
-                    _guard_tripped = True
-                    break
-
-                # ── Cancellation check: after each tool result ──
-                if self._cancel_event.is_set():
-                    final_response = f"Cancelled after {self.iteration} iterations."
-                    self._loop_error = True
-                    _guard_tripped = True  # reuse flag to break outer loop
-                    break
-
-            if _guard_tripped:
+            if batch_result.should_break:
+                outcome = batch_result.outcome
                 break
 
             # Auto-test: after processing all tool calls in this iteration,
@@ -1848,13 +791,22 @@ class AgenticLoop:
 
         else:
             # Max iterations reached
-            final_response = f"Reached maximum iterations ({self.max_iterations}). Last response:\n{final_response}"
+            outcome = LoopOutcome.max_iterations(
+                self.max_iterations,
+                outcome.response if outcome else final_response,
+            )
 
-        # Save user message and final assistant response to conversation history
+        if outcome is None:
+            outcome = LoopOutcome.completed(final_response)
+        final_response = outcome.response
+
+        # Save user message and final assistant response to conversation history and session
         self._conversation_history.append({"role": "user", "content": prompt})
+        if self.session is not None:
+            self.session.append({"role": "user", "content": prompt})
         if final_response:
             self._conversation_history.append({"role": "assistant", "content": final_response})
-            if self.session:
+            if self.session is not None:
                 self.session.append({"role": "assistant", "content": final_response})
 
         # Keep history bounded — summarize old messages instead of dropping them
@@ -1887,14 +839,20 @@ class AgenticLoop:
         except Exception:
             self.last_turn_cost = 0.0
 
-        hit_error = getattr(self, '_loop_error', False)
-        return {
-            "success": not hit_error,
-            "response": final_response,
-            "iterations": self.iteration,
-            "tool_calls": self.tool_calls_total,
-            "model": model_used,
-        }
+        result = outcome.to_result_dict(
+            iterations=self.iteration,
+            tool_calls=self.tool_calls_total,
+            model=model_used,
+        )
+        event_emitter.emit(
+            "run_finished",
+            status=result["status"],
+            success=result["success"],
+            response=final_response,
+            model=model_used,
+            tool_calls=self.tool_calls_total,
+        )
+        return result
 
     @staticmethod
     def _tool_result_has_error(tool_result: str) -> bool:
@@ -1930,7 +888,7 @@ class AgenticLoop:
             )
 
             _ensure_console()
-            console.print("  [dim cyan]verify[/dim cyan] checking completion...", highlight=False)
+            _loop_support.console.print("  [dim cyan]verify[/dim cyan] checking completion...", highlight=False)
 
             result = self.brain.think(
                 verify_prompt,
@@ -1947,11 +905,11 @@ class AgenticLoop:
             if result.upper().startswith("INCOMPLETE"):
                 # Extract the reason after "INCOMPLETE:" prefix
                 reason = result.split(":", 1)[1].strip() if ":" in result else result
-                console.print(f"  [yellow]incomplete[/yellow] {reason[:120]}", highlight=False)
+                _loop_support.console.print(f"  [yellow]incomplete[/yellow] {reason[:120]}", highlight=False)
                 logger.info(f"[AgenticLoop] Verification: INCOMPLETE — {reason[:200]}")
                 return reason
             else:
-                console.print("  [green]verified[/green] task complete", highlight=False)
+                _loop_support.console.print("  [green]verified[/green] task complete", highlight=False)
                 logger.info("[AgenticLoop] Verification: COMPLETE")
                 return None
 
@@ -1965,20 +923,20 @@ class AgenticLoop:
         try:
             from aura.tools.auto_verify import auto_verify
             _ensure_console()
-            console.print("  [dim cyan]auto[/dim cyan] running tests...", highlight=False)
+            _loop_support.console.print("  [dim cyan]auto[/dim cyan] running tests...", highlight=False)
             result = auto_verify(self.project_root, self.executor.shell)
 
             if result.get("skipped"):
                 return None  # No test runner — don't inject anything
 
             if result.get("success"):
-                console.print("  [green]tests passed[/green]", highlight=False)
+                _loop_support.console.print("  [green]tests passed[/green]", highlight=False)
                 return None  # Tests passed — no need to tell LLM
 
             # Tests failed — feed output back to LLM so it can fix
             output = result.get("output", "Tests failed")
             cmd = result.get("test_command", "tests")
-            console.print(f"  [red]tests failed[/red] ({cmd})", highlight=False)
+            _loop_support.console.print(f"  [red]tests failed[/red] ({cmd})", highlight=False)
             return json.dumps({
                 "auto_test_result": "FAILED",
                 "test_command": cmd,
@@ -2059,7 +1017,7 @@ class AgenticLoop:
     def _show_tool_status(self, tool_name: str, args: dict, denied: bool = False):
         """Show compact tool call status in the console."""
         if denied:
-            console.print(f"  [red]DENIED[/red] {tool_name}", highlight=False)
+            _loop_support.console.print(f"  [red]DENIED[/red] {tool_name}", highlight=False)
             return
 
         # Compact description
@@ -2096,7 +1054,7 @@ class AgenticLoop:
         elif tool_name.startswith("mcp_"):
             desc = f"mcp {tool_name[4:]}"
 
-        console.print(f"  [dim cyan]tool[/dim cyan] {desc}", highlight=False)
+        _loop_support.console.print(f"  [dim cyan]tool[/dim cyan] {desc}", highlight=False)
 
 
 def run_agentic(
@@ -2131,6 +1089,6 @@ def run_agentic(
     )
 
     def on_response(text, iteration):
-        console.print(f"\n{text}\n")
+        _loop_support.console.print(f"\n{text}\n")
 
     return loop.run(prompt, on_response=on_response)

@@ -2,6 +2,7 @@ import logging
 from typing import Optional
 
 from ..context import get_ctx
+from ._permissions import confirm_action
 
 logger = logging.getLogger(__name__)
 
@@ -170,15 +171,20 @@ def handle_hand(agent, arg, context) -> Optional[str]:
 def _handle_agent_command(agent, arg: str):
     from ..display import console as _agent_console
     try:
-        from aura.core.permissions import PermissionTier
-        pm = getattr(agent, "permissions", None)
-        if pm and pm.current_mode != PermissionTier.FULL_AUTO:
-            if arg:
-                confirm = input(f"  Spawn agent for: {arg[:60]}\n  Confirm? (y/n): ").strip().lower()
-                if confirm not in ("y", "yes"):
-                    _agent_console.print("  Cancelled.")
-                    return
-    except (ImportError, AttributeError, EOFError, KeyboardInterrupt):
+        if arg:
+            parts = arg.split(maxsplit=1)
+            specialist = parts[0].lower() if parts else ""
+            task = parts[1] if len(parts) > 1 else ""
+            approval_args = {"task": task or arg, "specialist": specialist}
+            if not confirm_action(
+                agent,
+                "spawn_agent",
+                approval_args,
+                fallback_prompt=f"  Spawn agent for: {arg[:60]}\n  Confirm? (y/n): ",
+            ):
+                _agent_console.print("  Cancelled.")
+                return
+    except (AttributeError, EOFError, KeyboardInterrupt):
         logger.debug("agent_permission_check_skipped", exc_info=True)
 
     if not hasattr(agent, 'orchestrator') or agent.orchestrator is None:

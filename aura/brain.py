@@ -10,18 +10,39 @@ import time
 from collections import deque
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Optional
 
 import ollama
-import requests
-from tenacity import (
-    before_sleep_log,
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
+from aura.pools import bg_submit as _bg_submit
+from aura.pools import llm_pool as _llm_pool_fn
+
+from .brain_support import (
+    LLM_TIMEOUT,
+    _llm_retry,
+    call_with_timeout,
+)
+from .brain_support import (
+    get_neuromodulator_levels as _get_neuromodulator_levels,
+)
+from .brain_support import (
+    is_rate_limit_error as _is_rate_limit_error,
+)
+from .brain_support import (
+    neuro_scale as _neuro_scale,
+)
+from .brain_support import (
+    resp_content as _resp_content,
+)
+from .brain_support import (
+    resp_get as _resp_get,
+)
+from .brain_support import (
+    run_world_model_extraction as _run_world_model_extraction,
+)
+from .brain_support import (
+    user_facing_llm_error as _user_facing_llm_error,
+)
 from .config import Config
 from .core.conversation_mixin import ConversationMixin
 from .core.model_router_mixin import ModelRouterMixin
@@ -51,297 +72,14 @@ except ImportError:
     ALMA_AVAILABLE = False
     logger.debug("[BRAIN] ALMA emotional system not available")
 
-# Default timeouts (in seconds)
-LLM_TIMEOUT = 120  # 120 seconds for LLM calls (cloud models need more time)
 WARMUP_TIMEOUT = 10  # 10 seconds for warmup
 STREAM_STALE_TIMEOUT = 45  # seconds without a chunk before aborting stream
-
-# Neuromodulator bounds for safety (multipliers on default values)
-NEURO_MIN_MULTIPLIER = 0.7   # Never reduce below 70% of default
-NEURO_MAX_MULTIPLIER = 1.4   # Never increase above 140% of default
-
-
-_wm_extraction_lock = threading.Lock()  # Rate limiter: skip if previous extraction still running
-_wm_consecutive_failures = 0  # Circuit breaker: disable after repeated failures
-_WM_CIRCUIT_BREAKER_THRESHOLD = 3  # Disable after N consecutive failures
-_WM_CIRCUIT_BREAKER_RESET_AFTER = 300  # Re-enable after 5 minutes
-_wm_circuit_broken_at: float = 0.0
-_wm_lock = threading.Lock()  # Protect circuit breaker globals
-
-
-def _resp_content(response) -> str:
-    """Extract content from an Ollama response (dict or Pydantic object)."""
-    if response is None:
-        return ""
-    if isinstance(response, dict):
-        msg = response.get("message", {})
-        return msg.get("content", "") if isinstance(msg, dict) else ""
-    # Pydantic ChatResponse object
-    msg = getattr(response, "message", None)
-    if msg is not None:
-        return getattr(msg, "content", "") or ""
-    return ""
-
-
-def _resp_get(response, key, default=None):
-    """Get a field from an Ollama response (dict or Pydantic)."""
-    if isinstance(response, dict):
-        return response.get(key, default)
-    return getattr(response, key, default)
-
-def _run_world_model_extraction(conversation_id, messages, user_inference_event=None):
-    """Background thread target for world model extraction (ADV-02 Phase 2).
-
-    Includes circuit breaker: after 3 consecutive failures, disables extraction
-    for 5 minutes to prevent thread pool starvation.
-    Skips if user inference is active to avoid contention.
-    """
-    global _wm_consecutive_failures, _wm_circuit_broken_at
-
-    # Yield to user inference
-    if user_inference_event and user_inference_event.is_set():
-        logger.debug("[BRAIN] World model extraction skipped — user inference active")
-        return
-
-    # Circuit breaker check (protected by lock)
-    with _wm_lock:
-        if _wm_consecutive_failures >= _WM_CIRCUIT_BREAKER_THRESHOLD:
-            if time.time() - _wm_circuit_broken_at < _WM_CIRCUIT_BREAKER_RESET_AFTER:
-                logger.debug("[BRAIN] World model extraction circuit breaker OPEN — skipping")
-                return
-            else:
-                logger.info("[BRAIN] World model extraction circuit breaker RESET — retrying")
-                _wm_consecutive_failures = 0
-                _wm_circuit_broken_at = 0.0
-
-    if not _wm_extraction_lock.acquire(blocking=False):
-        logger.debug("[BRAIN] Skipping world model extraction — previous still running")
-        return
-    try:
-        from aura.consciousness.world_model import get_world_model
-        wm = get_world_model()
-        wm.process_conversation(conversation_id, messages)
-        with _wm_lock:
-            _wm_consecutive_failures = 0
-            _wm_circuit_broken_at = 0.0
-    except Exception as e:
-        with _wm_lock:
-            _wm_consecutive_failures += 1
-            if _wm_consecutive_failures >= _WM_CIRCUIT_BREAKER_THRESHOLD:
-                _wm_circuit_broken_at = time.time()
-                logger.warning(f"[BRAIN] World model extraction failed {_wm_consecutive_failures}x — circuit breaker OPEN for {_WM_CIRCUIT_BREAKER_RESET_AFTER}s")
-            else:
-                logger.debug(f"[BRAIN] World model extraction failed ({_wm_consecutive_failures}/{_WM_CIRCUIT_BREAKER_THRESHOLD}): {e}")
-    finally:
-        _wm_extraction_lock.release()
-
-    # ADV-02 Phase 3: Quick proactive awareness analysis after extraction
-    # Runs OUTSIDE the extraction lock so it doesn't block subsequent extractions
-    try:
-        if getattr(Config, "PROACTIVE_AWARENESS_QUICK_AFTER_CHAT", True):
-            from aura.consciousness.proactive_awareness import get_proactive_awareness_engine
-            engine = get_proactive_awareness_engine()
-            engine.run_quick_analysis()
-    except Exception as e:
-        logger.debug(f"[BRAIN] Proactive awareness quick analysis failed: {e}")
-
-
-_NEURO_DEFAULTS = {"dopamine": 0.5, "serotonin": 0.5, "norepinephrine": 0.5, "oxytocin": 0.5}
-
-
-def _get_neuromodulator_levels() -> dict:
-    """Get current neuromodulator levels from ALMA, with safe defaults.
-
-    Returns dict with dopamine, serotonin, norepinephrine, oxytocin (all 0-1).
-    Returns 0.5 for all if ALMA is unavailable.
-    During sleep, applies NeuroDream oscillation-based neuromodulator offsets.
-    """
-    if not ALMA_AVAILABLE:
-        return _NEURO_DEFAULTS.copy()
-    try:
-        state = alma_engine.get_emotional_state()
-        base = (state or {}).get("neuromodulators") or {}
-        if not base:
-            return _NEURO_DEFAULTS.copy()
-        # Apply sleep neuromodulator influence from NeuroDream
-        try:
-            from aura.tools.neurodream import get_neurodream
-            nd = get_neurodream()
-            if nd.current_phase.value != "awake":
-                influence = nd.get_sleep_neuromodulator_influence()
-                return {k: max(0.0, min(1.0, base[k] + influence.get(k, 0.0))) for k in base}
-        except Exception as e:
-            logger.debug(f"[Brain] non-critical: {e}")
-        return base
-    except Exception as e:
-        logger.debug(f"[Brain] non-critical: {e}")
-    return _NEURO_DEFAULTS.copy()
-
-
-def _neuro_scale(base_value: float, neuro_level: float, sensitivity: float = 0.5) -> float:
-    """Scale a base value by a neuromodulator level.
-
-    neuro_level=0.5 -> no change (returns base_value)
-    neuro_level=1.0 -> increase by sensitivity * (NEURO_MAX_MULTIPLIER - 1)
-    neuro_level=0.0 -> decrease by sensitivity * (1 - NEURO_MIN_MULTIPLIER)
-
-    Safety: result is always clamped to [base * NEURO_MIN_MULTIPLIER, base * NEURO_MAX_MULTIPLIER]
-    """
-    # Map neuro_level 0-1 to multiplier centered at 1.0
-    offset = (neuro_level - 0.5) * 2 * sensitivity  # -sensitivity to +sensitivity
-    multiplier = 1.0 + offset
-
-    # Clamp to safety bounds
-    multiplier = max(NEURO_MIN_MULTIPLIER, min(NEURO_MAX_MULTIPLIER, multiplier))
-    return base_value * multiplier
 
 # Shared pools — centralized in aura.pools (2026-03-22)
 # Use functions instead of cached references to avoid stale pool handles
 # after pool re-initialization (e.g., in tests or daemon restarts).
-from aura.pools import bg_submit as _bg_submit
-from aura.pools import llm_pool as _llm_pool_fn
-
 # Don't cache pool references — call functions to get fresh handles
 # atexit cleanup now handled by aura.pools
-
-
-
-
-
-# --- Retry decorator for transient network/connection errors ---
-try:
-    import httpx as _httpx
-    _RETRYABLE_ERRORS = (ConnectionError, TimeoutError, OSError, _httpx.TimeoutException)
-except ImportError:
-    _RETRYABLE_ERRORS = (ConnectionError, TimeoutError, OSError)
-
-# 2 attempts max (not 3) — fail fast, let model fallback chain handle it
-_llm_retry = retry(
-    retry=retry_if_exception_type(_RETRYABLE_ERRORS),
-    stop=stop_after_attempt(2),
-    wait=wait_exponential(multiplier=1, min=1, max=3),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-    reraise=True,
-)
-
-
-def _ollama_health_check() -> tuple[bool, list[str]]:
-    """Quick check if Ollama is reachable. Returns (is_ok, available_model_names)."""
-    try:
-        resp = requests.get(f"{Config.OLLAMA_HOST}/api/tags", timeout=3)
-        if resp.status_code == 200:
-            models = [m.get("name", "") for m in resp.json().get("models", [])]
-            return True, models
-        return False, []
-    except Exception:
-        return False, []
-
-
-def _user_facing_llm_error(original_error: Exception | None = None, model: str | None = None) -> str:
-    """Return a user-friendly error message after LLM call failure, with Ollama health context."""
-    model_tag = f" ({model})" if model else ""
-    ollama_ok, available_models = _ollama_health_check()
-
-    if not ollama_ok:
-        return (
-            f"[LLM Error] Could not connect to Ollama{model_tag}.\n"
-            f"  - Is Ollama running? Try: ollama serve\n"
-            f"  - Is the model available? Try: ollama list\n"
-            f"  - For cloud models, check OLLAMA_API_KEY in .env"
-        )
-
-    # Ollama is reachable — check if the requested model exists
-    if model and available_models:
-        # Normalize: strip :latest tag for comparison
-        normalized = [m.split(":")[0] for m in available_models]
-        model_base = model.split(":")[0]
-        if model_base not in normalized and model not in available_models:
-            return (
-                f"[LLM Error] Model '{model}' not found on this Ollama instance.\n"
-                f"  - Available models: {', '.join(available_models[:8])}\n"
-                f"  - Pull it with: ollama pull {model}\n"
-                f"  - For cloud models, check OLLAMA_API_KEY in .env"
-            )
-
-    if original_error:
-        err_type = type(original_error).__name__
-        if isinstance(original_error, (ConnectionError, OSError)):
-            return (
-                f"[LLM Error] Connection failed for {model or 'model'}: {err_type}\n"
-                f"  - Ollama is reachable but the request failed.\n"
-                f"  - The model may have crashed. Try: ollama run {model or '<model>'}"
-            )
-        if isinstance(original_error, TimeoutError) or "timeout" in str(original_error).lower():
-            return (
-                f"[LLM Error] Request timed out for {model or 'model'}.\n"
-                f"  - The model may be too large for your hardware.\n"
-                f"  - Try a smaller model or increase timeout."
-            )
-        return f"[LLM Error] {err_type} for {model or 'model'}: {original_error}"
-
-    return (
-        f"[LLM Error] No response from {model or 'the language model'}.\n"
-        f"  - Try again or run: aura doctor"
-    )
-
-
-def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any = None) -> Any:
-    """Execute a function with timeout protection using shared thread pool.
-
-    Wraps the callable with tenacity retry (3 attempts, exponential backoff)
-    for transient ConnectionError/TimeoutError/OSError before submitting.
-
-    Args:
-        func: Function to execute (should be a lambda or callable with no args)
-        timeout: Timeout in seconds
-        default: Value to return on timeout
-
-    Returns:
-        Function result or default on timeout
-    """
-    # No retry wrapping here — caller-level _retry_on_rate_limit handles retries.
-    # Double retry (tenacity + caller) caused timeout multiplication.
-
-    try:
-        future = _llm_pool_fn().submit(func)
-        try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            logger.warning(f"LLM call timed out after {timeout}s")
-            future.cancel()
-            return default
-        except concurrent.futures.CancelledError:
-            logger.warning("LLM call was cancelled")
-            return default
-        except (ConnectionError, OSError) as e:
-            logger.error(f"LLM connection error: {e}")
-            return default
-        except ValueError as e:
-            logger.error(f"LLM value error (bad response?): {e}")
-            return default
-        except Exception as e:
-            logger.exception(f"Unexpected LLM error: {type(e).__name__}: {e}")
-            return default
-    except RuntimeError as e:
-        # Executor might be shut down, create a one-off
-        logger.warning(f"Shared executor unavailable ({e}), using fallback")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func)
-            try:
-                return future.result(timeout=timeout)
-            except concurrent.futures.TimeoutError:
-                logger.warning("Fallback LLM call timed out")
-                return default
-            except (ConnectionError, OSError, ValueError) as e:
-                logger.error(f"Fallback LLM error: {e}")
-                return default
-
-
-def _is_rate_limit_error(e: Exception) -> bool:
-    """Check if an exception is a rate limit (429) error."""
-    msg = str(e).lower()
-    return "429" in msg or "rate" in msg or "too many" in msg
-
 
 class TaskType(Enum):
     """Types of tasks for model routing."""
@@ -436,6 +174,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         self._user_inference_active = threading.Event()
         self._inference_refcount = 0
         self._inference_rc_lock = threading.Lock()
+        self._user_inference_started_at: float = 0.0
 
         # Adaptive timeout based on recent LLM latencies (replaces serotonin-modulated timeout)
         self._recent_latencies: deque = deque(maxlen=100)
@@ -1074,6 +813,10 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
 
             self._record_tokens(actual_model, input_tokens, output_tokens)
 
+            # Reset circuit breaker on successful stream completion
+            with self._cb_lock:
+                self._consecutive_think_failures = 0
+
             yield ("done", {
                 "content": accumulated_content,
                 "tool_calls": tool_calls,
@@ -1249,14 +992,18 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         fast_model = Config.MODEL_FAST
         try:
             client, actual_model = self._get_client_for_model(fast_model)
-            response = call_with_timeout(
-                lambda: client.chat(
-                    model=actual_model,
-                    messages=[{"role": "user", "content": prompt}]
-                ),
-                timeout=timeout,
-                default=None,
-            )
+            # Use bg_pool (not llm_pool) to avoid competing with user inference
+            from aura.pools import bg_pool as _bg_pool_fn
+            try:
+                future = _bg_pool_fn().submit(
+                    lambda: client.chat(
+                        model=actual_model,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                )
+                response = future.result(timeout=timeout)
+            except Exception:
+                response = None
             if response is None:
                 logger.warning(f"[BRAIN] Quick generate timed out after {timeout}s")
                 return ""
@@ -1347,21 +1094,35 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         logger.info(f"[BRAIN] Compacted {len(old_messages)} messages into summary, kept {len(recent_messages)} recent")
         return summary
 
-    def _retry_on_rate_limit(self, func, max_retries=2, base_delay=1.0):
-        """Retry a function call with exponential backoff on rate limit (429) errors.
+    def _call_with_rate_limit_retry(self, func, timeout, max_retries=2, base_delay=1.0):
+        """Submit func to the pool with timeout, retrying on 429 rate-limit errors.
 
-        Uses short delays (max ~3s total) to avoid starving the shared llm_pool.
+        Unlike _retry_on_rate_limit, this sleeps on the *calling* thread between
+        pool submissions — not inside the pool thread — preventing pool starvation.
+
+        Returns None if all attempts fail or time out.
         """
         for attempt in range(max_retries + 1):
             try:
-                return func()
+                future = _llm_pool_fn().submit(func)
+                return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                logger.warning(f"LLM call timed out after {timeout}s")
+                future.cancel()
+                return None
+            except concurrent.futures.CancelledError:
+                return None
             except Exception as e:
                 if attempt < max_retries and _is_rate_limit_error(e):
                     delay = min(base_delay * (2 ** attempt), 3.0)
                     logger.warning(f"[BRAIN] Rate limited (attempt {attempt+1}/{max_retries}), retrying in {delay:.1f}s")
-                    time.sleep(delay)
+                    time.sleep(delay)  # Sleep on CALLING thread, not pool thread
                 else:
+                    if isinstance(e, (ConnectionError, OSError)):
+                        logger.error(f"LLM connection error: {e}")
+                        return None
                     raise
+        return None
 
     def _get_context_limit(self) -> int:
         """Return the context window size for the current model."""
@@ -1679,16 +1440,21 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             neuro = _get_neuromodulator_levels()
             llm_options = self._build_neuro_llm_options(prompt, neuro)
 
-            # Taint tracking: scan user messages for secrets (OpenFang-inspired)
+            # Taint tracking: scan user messages for secrets and redact before LLM
             try:
                 from aura.security.taint_tracker import get_tracker
                 tracker = get_tracker()
-                taint_matches, _ = tracker.check_and_track(prompt, session_id="brain")
+                taint_matches, redacted_prompt = tracker.check_and_track(prompt, session_id="brain")
                 if taint_matches:
                     logger.warning(
                         f"[BRAIN] Detected {len(taint_matches)} secret(s) in user message — "
-                        f"taint level tracked for session"
+                        f"redacting before LLM call"
                     )
+                    # Replace the prompt in messages with the redacted version
+                    for msg in reversed(messages):
+                        if msg.get("role") == "user" and msg.get("content") == prompt:
+                            msg["content"] = redacted_prompt
+                            break
             except Exception as e:
                 logger.warning(f"[BRAIN] Taint tracker failed — secrets may pass through undetected: {e}")
 
@@ -1716,13 +1482,12 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             _llm_start_ts = time.time()
             logger.debug(f"[BRAIN] Calling {model} with adaptive timeout={adjusted_timeout}s")
 
-            # Call with timeout protection (adaptive latency-based) + 429 retry
-            response = call_with_timeout(
-                lambda: self._retry_on_rate_limit(
-                    lambda: client.chat(model=actual_model, messages=messages, options=llm_options)
-                ),
+            # Call with timeout protection (adaptive latency-based) + 429 retry.
+            # Rate-limit retries sleep on the calling thread, not in the pool,
+            # to prevent pool starvation.
+            response = self._call_with_rate_limit_retry(
+                lambda: client.chat(model=actual_model, messages=messages, options=llm_options),
                 timeout=adjusted_timeout + 20,
-                default=None
             )
 
             if response is None:
@@ -1912,6 +1677,11 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
 
             if _stream_in_tok or _stream_out_tok:
                 self._record_tokens(actual_model, _stream_in_tok, _stream_out_tok)
+
+            # Reset circuit breaker on successful stream completion
+            if not _all_models_failed:
+                with self._cb_lock:
+                    self._consecutive_think_failures = 0
 
             # Update history (skip if all models failed to avoid polluting history)
             if not _all_models_failed:

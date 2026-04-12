@@ -454,7 +454,8 @@ class TestWebSocketProtocol:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        # Disable auth for testing
+        # Save and restore auth env vars to avoid cross-test pollution
+        _saved = {k: os.environ.get(k) for k in ("AURA_API_AUTH_ENABLED", "AURA_REQUIRE_AUTH")}
         os.environ["AURA_API_AUTH_ENABLED"] = "false"
         os.environ["AURA_REQUIRE_AUTH"] = "false"
 
@@ -463,7 +464,14 @@ class TestWebSocketProtocol:
         from api.routes.chat import router
         app.include_router(router)
 
-        return TestClient(app)
+        yield TestClient(app)
+
+        # Restore original env state
+        for k, v in _saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
     def test_websocket_chat_protocol(self, test_app):
         """Connect, send a chat message, and verify chunk+done response."""

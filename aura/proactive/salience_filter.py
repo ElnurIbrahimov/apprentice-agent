@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import re
+import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
@@ -134,8 +135,9 @@ class SalienceFilter:
         self.context_keywords: Set[str] = set()
         self.current_activity: Optional[str] = None
 
-        # Tracking seen events for novelty
+        # Tracking seen events for novelty (protected by _seen_lock for thread safety)
         self._seen_events: Dict[str, float] = {}  # hash -> timestamp
+        self._seen_lock = threading.Lock()
         self._seen_event_count_since_cleanup = 0
         self._last_cleanup_time: float = time.monotonic()
 
@@ -306,23 +308,23 @@ class SalienceFilter:
 
         # Check if seen recently
         now = time.time()
-        if event_hash in self._seen_events:
-            last_seen = self._seen_events[event_hash]
-            age = now - last_seen
+        with self._seen_lock:
+            if event_hash in self._seen_events:
+                last_seen = self._seen_events[event_hash]
+                age = now - last_seen
 
-            if age < 60:  # Seen in last minute
-                novelty = 0.1
-            elif age < 300:  # Seen in last 5 minutes
-                novelty = 0.3
-            elif age < self.seen_event_ttl:  # Seen within TTL
-                novelty = 0.5
+                if age < 60:
+                    novelty = 0.1
+                elif age < 300:
+                    novelty = 0.3
+                elif age < self.seen_event_ttl:
+                    novelty = 0.5
+                else:
+                    novelty = 1.0
             else:
                 novelty = 1.0
-        else:
-            novelty = 1.0  # Never seen
 
-        # Update seen events
-        self._seen_events[event_hash] = now
+            self._seen_events[event_hash] = now
 
         # Persist seen event
         try:
@@ -346,12 +348,13 @@ class SalienceFilter:
     def _cleanup_seen_events(self) -> None:
         """Remove expired entries from seen events (TTL-based, runs periodically)."""
         now = time.time()
-        expired = [
-            h for h, t in self._seen_events.items()
-            if now - t > self.seen_event_ttl
-        ]
-        for h in expired:
-            del self._seen_events[h]
+        with self._seen_lock:
+            expired = [
+                h for h, t in self._seen_events.items()
+                if now - t > self.seen_event_ttl
+            ]
+            for h in expired:
+                del self._seen_events[h]
 
     # ================================================================
     # LLM-Powered Scoring

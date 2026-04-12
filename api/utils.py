@@ -21,10 +21,13 @@ _VALID_EMOTIONS = frozenset({
 
 
 def safe_error_detail(e: Exception, default: str = "Internal server error") -> str:
-    """Return detailed error in dev, generic in production."""
-    if os.environ.get("AURA_ENV") == "production":
-        return default
-    return str(e)
+    """Return detailed error in dev, generic in production.
+
+    Defaults to safe (production) behavior when AURA_ENV is not explicitly set to 'development'.
+    """
+    if os.environ.get("AURA_ENV") == "development":
+        return str(e)
+    return default
 
 
 def validate_id(value: str, name: str = "id") -> str:

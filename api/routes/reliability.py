@@ -38,7 +38,7 @@ async def telemetry_recent(
         from aura.reliability.telemetry import get_telemetry
         return {"events": get_telemetry().recent(n=n, kind=kind)}
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "Telemetry unavailable"))
+        raise HTTPException(500, safe_error_detail(e, "Telemetry unavailable")) from None
 
 
 @router.get("/api/telemetry/stats")
@@ -48,7 +48,7 @@ async def telemetry_stats():
         from aura.reliability.telemetry import get_telemetry
         return get_telemetry().stats()
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "Telemetry unavailable"))
+        raise HTTPException(500, safe_error_detail(e, "Telemetry unavailable")) from None
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +108,6 @@ async def run_eval(req: EvalRunRequest):
         results = run_suite(req.suite, user_id=req.user_id, max_cases=req.max_cases)
         return {"suite": req.suite, "results": results}
     except ImportError:
-        raise HTTPException(501, "Eval harness not yet implemented for this suite")
+        raise HTTPException(501, "Eval harness not yet implemented for this suite") from None
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "Eval failed"))
+        raise HTTPException(500, safe_error_detail(e, "Eval failed")) from None

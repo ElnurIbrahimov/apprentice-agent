@@ -6,7 +6,7 @@ import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.auth import require_api_key
 from api.utils import safe_error_detail
@@ -38,7 +38,7 @@ def _get_daemon_for_session(session_id: str):
                 logger.info(f"[Proactive API] Using shared Gateway Daemon singleton for session={session_id}")
             except ImportError as e:
                 logger.error(f"[Proactive API] Failed to import GatewayDaemon: {e}")
-                raise HTTPException(status_code=503, detail="Proactive system not available")
+                raise HTTPException(status_code=503, detail="Proactive system not available") from None
         return _daemons[session_id]
 
 
@@ -74,7 +74,7 @@ class ProactiveMessageResponse(BaseModel):
     content: str
     priority: str
     timestamp: str
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class BeliefUpdateRequest(BaseModel):
@@ -152,7 +152,7 @@ async def start_daemon(background_tasks: BackgroundTasks, session_id: str = Quer
             }
         except Exception as e:
             logger.error(f"[Proactive API] Start error: {e}")
-            raise HTTPException(status_code=500, detail=safe_error_detail(e))
+            raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.post("/stop")
@@ -172,7 +172,7 @@ async def stop_daemon(session_id: str = Query(default="default")):
         }
     except Exception as e:
         logger.error(f"[Proactive API] Stop error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 @router.post("/pause")
@@ -369,7 +369,7 @@ async def create_test_message(request: TestMessageRequest, session_id: str = Que
 
     except Exception as e:
         logger.error(f"[Proactive API] Test message error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 # ============================================================================
@@ -407,7 +407,7 @@ async def publish_event(
         }
     except Exception as e:
         logger.error(f"[Proactive API] Event publish error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from None
 
 
 # ============================================================================

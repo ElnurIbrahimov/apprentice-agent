@@ -22,17 +22,39 @@ import math
 import time
 import uuid
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 # Optional embedding support — graceful fallback to Jaccard if unavailable
 try:
-    from aura.memory.embedding import get_embedding as _get_embedding
+    from aura.memory.embedding import get_embedding as _get_embedding_raw
     _HAS_EMBEDDINGS = True
 except Exception:
     _HAS_EMBEDDINGS = False
-    _get_embedding = None  # type: ignore[assignment]
+    _get_embedding_raw = None  # type: ignore[assignment]
+
+
+# Bounded LRU cache for embeddings — prevents unbounded memory growth
+# from caching embeddings directly on graph nodes.
+@lru_cache(maxsize=2048)
+def _get_embedding_cached(text: str):
+    """Cached embedding lookup. Returns tuple (hashable) or None."""
+    if _get_embedding_raw is None:
+        return None
+    result = _get_embedding_raw(text)
+    if result is not None:
+        return tuple(result)  # lru_cache needs hashable values
+    return None
+
+
+def _get_embedding(text: str):
+    """Get embedding for text, using bounded LRU cache."""
+    result = _get_embedding_cached(text)
+    if result is not None:
+        return list(result)  # convert back to list for cosine similarity
+    return None
 
 # ---------------------------------------------------------------------------
 # Edge types for contradiction/supersession
@@ -337,13 +359,8 @@ class KGContradictionDetector:
             other_label = data.get("label", "")
             if not other_label:
                 continue
-            # Check if node already has a cached embedding
-            other_emb = data.get("_embedding")
-            if other_emb is None:
-                other_emb = _get_embedding(other_label)
-                if other_emb is not None:
-                    # Cache on the node to avoid recomputing
-                    g.nodes[nid]["_embedding"] = other_emb
+            # Use LRU-cached embedding lookup (bounded memory, no graph mutation)
+            other_emb = _get_embedding(other_label)
             if other_emb is None:
                 continue
             sim = self._cosine_similarity(new_emb, other_emb)

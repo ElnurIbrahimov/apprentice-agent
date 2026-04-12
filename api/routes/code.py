@@ -10,6 +10,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 
 from api.auth import require_api_key
+from api.utils import EndpointRateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -249,9 +250,6 @@ def _get_executor(timeout: int = 30):
         max_output_length=MAX_TEXT_OUTPUT,
         allowed_modules=DATA_SCIENCE_MODULES,
     )
-
-
-from api.utils import EndpointRateLimiter
 
 _code_exec_limiter = EndpointRateLimiter(max_per_minute=20)
 

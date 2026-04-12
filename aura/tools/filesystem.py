@@ -5,7 +5,7 @@ SECURITY: All operations are sandboxed to prevent path traversal attacks.
 
 import logging
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import ClassVar, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class FileSystemTool:
     description = "Read, write, list, and manage files and directories (sandboxed)"
 
     # Directories that are always blocked
-    BLOCKED_PATHS = {
+    BLOCKED_PATHS: ClassVar[set[str]] = {
         "/etc", "/var", "/usr", "/bin", "/sbin", "/root", "/home",
         "/sys", "/proc", "/dev", "/boot", "/lib", "/lib64",
         "C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)",

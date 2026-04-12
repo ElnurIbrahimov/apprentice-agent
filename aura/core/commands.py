@@ -13,6 +13,36 @@ import subprocess
 from pathlib import Path
 
 
+def _create_subcommand_permission_manager():
+    """Create a permission manager for top-level subcommands.
+
+    Subcommands don't have a live CLIContext, so they need a lightweight
+    confirm callback to preserve the same policy model used in chat mode.
+    """
+    from aura.core.permissions import PermissionManager
+
+    permissions = PermissionManager()
+    permissions.set_mode("careful")
+
+    def _confirm(tool_name: str, description: str) -> bool | str:
+        print()
+        print("  Permission required:")
+        print(f"    {tool_name}")
+        if description:
+            for line in description.split("\n"):
+                print(f"    {line}")
+        try:
+            response = input("    Allow? [y/n/always]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        if response == "always":
+            return "always"
+        return response in ("y", "yes")
+
+    permissions.set_confirm_callback(_confirm)
+    return permissions
+
+
 def handle_subcommand(command: str, args) -> int:
     """Dispatch subcommand. Returns exit code."""
     handlers = {
@@ -272,6 +302,7 @@ def cmd_commit(args) -> int:
 
     git = GitTool()
     cwd = os.getcwd()
+    permissions = _create_subcommand_permission_manager()
 
     # Check for changes
     status = git.status(cwd)
@@ -288,7 +319,13 @@ def cmd_commit(args) -> int:
 
     # Stage all if --all flag
     if getattr(args, 'all', False):
-        git.add(cwd, files=".")
+        if not permissions.check("git", {"action": "add", "files": "."}):
+            print("  Cancelled.")
+            return 0
+        add_result = git.add(cwd, files=".")
+        if not add_result.get("success"):
+            print(f"Stage failed: {add_result.get('error', 'unknown error')}")
+            return 1
 
     # Get diff of staged changes
     try:
@@ -341,7 +378,7 @@ Diff:
 
     print(f"\n  Commit message: {message}\n")
     try:
-        confirm = input("  Commit with this message? [y/n/edit]: ").strip().lower()
+        confirm = input("  Edit commit message before approval? [y/N]: ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         return 1
 
@@ -350,7 +387,16 @@ Diff:
             message = input("  Enter message: ").strip()
         except (EOFError, KeyboardInterrupt):
             return 1
-    elif confirm not in ("y", "yes", ""):
+    elif confirm in ("y", "yes"):
+        try:
+            message = input("  Enter message: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return 1
+    elif confirm not in ("n", "no", ""):
+        print("  Cancelled.")
+        return 0
+
+    if not permissions.check("git", {"action": "commit", "message": message}):
         print("  Cancelled.")
         return 0
 

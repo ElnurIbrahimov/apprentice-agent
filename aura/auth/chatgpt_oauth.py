@@ -145,21 +145,32 @@ class _OAuthCallbackHandler(BaseHTTPRequestHandler):
 
 
 def _get_fernet_key():
-    """Derive a Fernet key from machine-specific data (user + hostname).
+    """Get or create a random Fernet key stored in a key file.
 
-    This is NOT high-security encryption — it prevents casual reading of
-    the token file but any process running as the same user can derive the key.
-    Good enough for a personal AI OS.
+    Uses a randomly generated key (not derived from public info like
+    username/hostname). The key file is created once and reused.
     """
     try:
         import base64
-        import getpass
-        import hashlib
-        import socket
+        from pathlib import Path
 
         from cryptography.fernet import Fernet
-        seed = f"{getpass.getuser()}@{socket.gethostname()}:aura-oauth-tokens"
-        key = base64.urlsafe_b64encode(hashlib.sha256(seed.encode()).digest())
+
+        key_file = Path("data") / ".oauth_key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+
+        if key_file.exists():
+            key = key_file.read_bytes().strip()
+        else:
+            # Generate a truly random key and persist it
+            key = Fernet.generate_key()
+            key_file.write_bytes(key)
+            # Restrict permissions (best-effort on Windows)
+            try:
+                key_file.chmod(0o600)
+            except OSError:
+                pass
+
         return Fernet(key)
     except ImportError:
         return None

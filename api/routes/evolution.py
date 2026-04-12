@@ -87,7 +87,7 @@ async def start_evolution(request: EvolutionRunRequest, background_tasks: Backgr
         if _current_run["status"] in ("running", "starting"):
             raise HTTPException(status_code=409, detail="Evolution already running")
         run_id = uuid.uuid4().hex[:12]
-        _current_run["status"] = "starting"
+        _current_run["status"] = "running"  # Set running while holding lock to prevent race
         _current_run["result"] = None
         _current_run["run_id"] = run_id
 

@@ -41,4 +41,4 @@ async def get_activity_events(
         return {"events": events, "count": len(events)}
     except Exception as e:
         logger.error(f"[Activity] {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch activity events")
+        raise HTTPException(status_code=500, detail="Failed to fetch activity events") from None
