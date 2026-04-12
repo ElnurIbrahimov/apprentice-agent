@@ -454,10 +454,12 @@ class TestWebSocketProtocol:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        # Save and restore auth env vars to avoid cross-test pollution
+        # Save and restore auth env vars to avoid cross-test pollution.
+        # AURA_API_AUTH_ENABLED is the canonical flag; AURA_REQUIRE_AUTH is
+        # legacy and no longer needed alongside it.
         _saved = {k: os.environ.get(k) for k in ("AURA_API_AUTH_ENABLED", "AURA_REQUIRE_AUTH")}
         os.environ["AURA_API_AUTH_ENABLED"] = "false"
-        os.environ["AURA_REQUIRE_AUTH"] = "false"
+        os.environ.pop("AURA_REQUIRE_AUTH", None)
 
         app = FastAPI()
 

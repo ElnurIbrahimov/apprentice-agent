@@ -18,15 +18,23 @@ def _get_configured_key() -> str | None:
 def _auth_is_enabled() -> bool:
     """Returns True if API authentication is enabled.
 
-    Checks AURA_API_AUTH_ENABLED first (canonical flag, defaults true),
-    then falls back to legacy AURA_REQUIRE_AUTH for backward compat.
+    Canonical flag is AURA_API_AUTH_ENABLED (secure default: true).
+    Legacy AURA_REQUIRE_AUTH is accepted as an alias with a one-time
+    deprecation warning. If neither is set, auth is ON.
     """
-    # Canonical flag — used by middleware and route deps
     api_auth = os.environ.get("AURA_API_AUTH_ENABLED")
     if api_auth is not None:
         return api_auth.lower() in ("true", "1", "yes")
-    # Legacy fallback
-    return os.environ.get(_AUTH_REQUIRED_ENV, "false").lower() in ("true", "1", "yes")
+    legacy = os.environ.get(_AUTH_REQUIRED_ENV)
+    if legacy is not None:
+        if not _auth_is_enabled._warned:
+            logger.warning(
+                "AURA_REQUIRE_AUTH is deprecated; use AURA_API_AUTH_ENABLED"
+            )
+            _auth_is_enabled._warned = True
+        return legacy.lower() in ("true", "1", "yes")
+    return True  # Secure default
+_auth_is_enabled._warned = False
 
 
 async def require_api_key(x_api_key: str = Header(default="")) -> str:

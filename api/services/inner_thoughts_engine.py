@@ -348,7 +348,10 @@ class InnerThoughtsEngine:
                         # We scale the interval inversely: dopamine 1.0 -> 0.7x interval, 0.0 -> 1.4x
                         inverted_dopamine = 1.0 - neuro["dopamine"]
                         interval = _neuro_scale(base_interval, inverted_dopamine, sensitivity=0.4)
-                    except Exception:
+                    except Exception as _neuro_err:
+                        logger.debug(
+                            f"[InnerThoughts] neuromodulator scaling unavailable, using base interval: {_neuro_err}"
+                        )
                         interval = base_interval
                     time.sleep(interval)
 

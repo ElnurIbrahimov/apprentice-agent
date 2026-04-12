@@ -99,6 +99,14 @@ class MemoryRecord:
             self.last_accessed = now
 
 
+# Pagination bounds for the FAISS-less brute-force semantic fallback.
+# Peak memory during a scan is bounded by _BRUTE_FORCE_CHUNK_SIZE rows +
+# the top-k heap, regardless of total table size — avoids loading a 100K+
+# row table into RAM on FAISS-less installs.
+_BRUTE_FORCE_CHUNK_SIZE = 1000
+_BRUTE_FORCE_WARN_ROWS = 50_000
+
+
 # Column order for INSERT (must match _CREATE_TABLE)
 _COLUMNS = [
     "id", "content", "title", "source", "memory_type", "importance",
@@ -564,17 +572,13 @@ class MemoryStore:
         lifecycle_states: Optional[List[str]],
         user_id: Optional[str],
     ) -> List[Tuple[MemoryRecord, float]]:
-        """Brute-force linear scan fallback (no FAISS)."""
-        states = lifecycle_states or ["candidate", "stable", "summary"]
-        state_placeholders = ",".join(["?"] * len(states))
+        """Brute-force linear scan fallback (no FAISS).
 
-        sql = f"""SELECT {','.join(_COLUMNS)} FROM memories
-                  WHERE embedding IS NOT NULL
-                  AND lifecycle_state IN ({state_placeholders})"""
-        params: list = list(states)
-        if user_id:
-            sql += " AND user_id=?"
-            params.append(user_id)
+        Paginated: pulls _BRUTE_FORCE_CHUNK_SIZE rows at a time, maintains a
+        size-k min-heap of top similarities, discards chunk rows between
+        iterations. Memory is bounded regardless of table size.
+        """
+        import heapq
 
         q = query_embedding.astype(np.float32)
         q_norm = np.linalg.norm(q)
@@ -582,28 +586,66 @@ class MemoryStore:
             return []
         q_unit = q / q_norm
 
+        states = lifecycle_states or ["candidate", "stable", "summary"]
+        state_placeholders = ",".join(["?"] * len(states))
+        sql = f"""SELECT {','.join(_COLUMNS)} FROM memories
+                  WHERE embedding IS NOT NULL
+                  AND lifecycle_state IN ({state_placeholders})"""
+        params_base: list = list(states)
+        if user_id:
+            sql += " AND user_id=?"
+            params_base.append(user_id)
+        sql += " ORDER BY rowid LIMIT ? OFFSET ?"
+
         emb_idx = _COLUMNS.index("embedding")
-        scored: List[Tuple[MemoryRecord, float]] = []
+        # Min-heap of (similarity, tiebreak, record); pop min when full.
+        heap: list[tuple[float, int, MemoryRecord]] = []
+        tiebreak = 0
+        offset = 0
+        total = 0
 
-        with self._lock:
-            cursor = self._get_conn().execute(sql, params)
-            all_rows = cursor.fetchall()
+        while True:
+            with self._lock:
+                rows = self._get_conn().execute(
+                    sql, params_base + [_BRUTE_FORCE_CHUNK_SIZE, offset]
+                ).fetchall()
+            if not rows:
+                break
 
-        for row in all_rows:
-            emb_blob = row[emb_idx]
-            if not emb_blob:
-                continue
-            vec = _blob_to_float32(emb_blob)
-            if vec.shape != q.shape:
-                continue
-            vec_norm = np.linalg.norm(vec)
-            if vec_norm < 1e-8:
-                continue
-            sim = float(np.dot(q_unit, vec / vec_norm))
-            scored.append((self._row_to_record(row), sim))
+            for row in rows:
+                emb_blob = row[emb_idx]
+                if not emb_blob:
+                    continue
+                vec = _blob_to_float32(emb_blob)
+                if vec.shape != q.shape:
+                    continue
+                vec_norm = np.linalg.norm(vec)
+                if vec_norm < 1e-8:
+                    continue
+                sim = float(np.dot(q_unit, vec / vec_norm))
+                tiebreak += 1
+                if len(heap) < k:
+                    heapq.heappush(heap, (sim, tiebreak, self._row_to_record(row)))
+                elif sim > heap[0][0]:
+                    heapq.heapreplace(heap, (sim, tiebreak, self._row_to_record(row)))
 
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return scored[:k]
+            total += len(rows)
+            offset += _BRUTE_FORCE_CHUNK_SIZE
+            if len(rows) < _BRUTE_FORCE_CHUNK_SIZE:
+                break
+            if total == _BRUTE_FORCE_WARN_ROWS:
+                logger.warning(
+                    "[MemoryStore] brute-force semantic scan crossed %d rows — "
+                    "install faiss-cpu for scalable search",
+                    total,
+                )
+
+        # Heap holds top-k by similarity; sort descending for output.
+        return sorted(
+            [(rec, sim) for (sim, _, rec) in heap],
+            key=lambda x: x[1],
+            reverse=True,
+        )
 
     def search_bm25(
         self,

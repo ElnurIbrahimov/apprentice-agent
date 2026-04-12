@@ -470,6 +470,9 @@ except Exception as _e:
             _ast.Call,
         )
         MATH_FUNCS = {"abs", "round", "min", "max", "sum", "pow", "int", "float"}
+        # Threads can't be force-killed, so block math.* calls that can burn CPU
+        # or memory in pure-Python loops before the watchdog would trip.
+        DANGEROUS_MATH_ATTRS = {"factorial", "perm", "comb"}
         for node in _ast.walk(tree):
             if not isinstance(node, ALLOWED_NODES):
                 return {"success": False, "output": "", "error": f"Expression contains disallowed construct: {type(node).__name__}"}
@@ -477,6 +480,8 @@ except Exception as _e:
             if isinstance(node, _ast.Attribute):
                 if node.attr.startswith("__"):
                     return {"success": False, "output": "", "error": f"Attribute '{node.attr}' not allowed in math expressions"}
+                if node.attr in DANGEROUS_MATH_ATTRS:
+                    return {"success": False, "output": "", "error": f"math.{node.attr} is not allowed (unbounded work)"}
             # Block huge exponents like 10**10**10 which cause CPU hang
             if isinstance(node, _ast.BinOp) and isinstance(node.op, _ast.Pow):
                 if isinstance(node.right, _ast.Constant) and isinstance(node.right.value, (int, float)):
@@ -490,15 +495,33 @@ except Exception as _e:
                     if not (isinstance(node.func.value, _ast.Name) and node.func.value.id == "math"):
                         return {"success": False, "output": "", "error": "Only math.* functions allowed"}
 
-        # Evaluate directly in-process with a restricted namespace — avoids spawning a
-        # subprocess just for math and bypasses the blocked-'math'-import safety check.
+        # Evaluate in-process with a restricted namespace. A subprocess would add
+        # ~200ms on Windows per call; math eval is a hot agent path, so we keep it
+        # in-process and enforce a wall-clock watchdog. On timeout the caller
+        # returns immediately but the worker thread leaks until the expression
+        # finishes on its own — DANGEROUS_MATH_ATTRS and the exponent guard are
+        # the actual CPU bounds that prevent runaway leaks in practice.
+        # Do NOT use `with ThreadPoolExecutor(...)` — its __exit__ blocks until
+        # running futures complete, which defeats the timeout.
+        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import TimeoutError as _FuturesTimeout
         safe_globals = {"__builtins__": {}, "math": _math}
         safe_locals = {f: getattr(__builtins__, f, None) or getattr(_math, f, None)
                        for f in MATH_FUNCS}
+        compiled = compile(tree, "<math>", "eval")
+        def _eval_math():
+            return eval(compiled, safe_globals, safe_locals)
+        _ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix="math-watchdog")
         try:
-            result = eval(compile(tree, "<math>", "eval"), safe_globals, safe_locals)
+            result = _ex.submit(_eval_math).result(timeout=self.timeout)
+            _ex.shutdown(wait=False)
             return {"success": True, "output": str(result), "errors": None, "code": expression}
+        except _FuturesTimeout:
+            _ex.shutdown(wait=False, cancel_futures=True)
+            return {"success": False, "output": "", "error": f"Math evaluation timed out after {self.timeout}s"}
         except ZeroDivisionError:
+            _ex.shutdown(wait=False)
             return {"success": False, "output": "", "error": "Division by zero"}
         except Exception as e:
+            _ex.shutdown(wait=False)
             return {"success": False, "output": "", "error": str(e)}

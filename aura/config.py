@@ -160,7 +160,7 @@ class Config:
     KG_BRAIN_ENABLED: bool = os.getenv("KG_BRAIN_ENABLED", "true").lower() in ("true", "1", "yes")
     SKILL_LIBRARY_ENABLED: bool = os.getenv("SKILL_LIBRARY_ENABLED", "true").lower() in ("true", "1", "yes")
 
-    # Auth (canonical flag — used by middleware + route dependency)
+    # Auth (init-time default for middleware; runtime truth lives in api/auth.py::_auth_is_enabled)
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
 
     # SearXNG search instance (configurable)

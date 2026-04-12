@@ -181,8 +181,8 @@ class TestAgenticLoop:
 class TestHealthCheck:
     def test_health_check_ok_with_mock(self, mock_ollama, patched_config):
         """Health check should return (True, models) when mock Ollama is running."""
-        from aura.brain import _ollama_health_check
-        ok, models = _ollama_health_check()
+        from aura.brain_support import ollama_health_check
+        ok, models = ollama_health_check()
         assert ok is True, f"Expected ok=True, got: {ok}"
         assert isinstance(models, list)
 
@@ -194,8 +194,8 @@ class TestHealthCheck:
         from aura.config import Config
         Config.OLLAMA_HOST = "http://127.0.0.1:19999"
 
-        from aura.brain import _ollama_health_check
-        ok, models = _ollama_health_check()
+        from aura.brain_support import ollama_health_check
+        ok, models = ollama_health_check()
         assert ok is False, f"Expected ok=False, got: {ok}"
         assert models == []
 

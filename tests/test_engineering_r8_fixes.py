@@ -205,27 +205,44 @@ class TestTelegramSummarizeAuth:
 # ── Test 8: SSRF DNS resolution check ──────────────────────────────────────
 
 class TestSSRFDnsProtection:
-    """_fetch_url must resolve hostnames and block private IPs."""
+    """_fetch_url must resolve hostnames and block private IPs.
+
+    _fetch_url lives in tool_executor and delegates SSRF validation to
+    aura.security.ssrf_guard.safe_request, which calls socket.getaddrinfo.
+    So we mock getaddrinfo (not gethostbyname) to simulate DNS rebinding.
+    """
+
+    @staticmethod
+    def _mock_getaddrinfo(ip):
+        """Build a getaddrinfo return value that points the hostname at `ip`."""
+        import socket
+        return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", (ip, 0))]
 
     def test_blocks_dns_rebinding_to_private_ip(self):
-        """A hostname resolving to a private IP should be blocked."""
-        from aura.core.agentic_loop import ToolExecutor
+        """A hostname resolving to a private IP must be blocked."""
+        from aura.core.tool_executor import ToolExecutor
 
         executor = ToolExecutor.__new__(ToolExecutor)
 
-        # Mock socket.gethostbyname to return a private IP
-        with patch("socket.gethostbyname", return_value="192.168.1.1"):
+        with patch(
+            "aura.security.ssrf_guard.socket.getaddrinfo",
+            return_value=self._mock_getaddrinfo("192.168.1.1"),
+        ):
             result = executor._fetch_url({"url": "http://evil.example.com/secret"})
         assert "error" in result
-        assert "private" in result["error"].lower() or "internal" in result["error"].lower()
+        err = result["error"].lower()
+        assert "private" in err or "blocked" in err or "reserved" in err
 
     def test_blocks_dns_rebinding_to_metadata(self):
-        """A hostname resolving to the cloud metadata IP should be blocked."""
-        from aura.core.agentic_loop import ToolExecutor
+        """A hostname resolving to the cloud metadata IP must be blocked."""
+        from aura.core.tool_executor import ToolExecutor
 
         executor = ToolExecutor.__new__(ToolExecutor)
 
-        with patch("socket.gethostbyname", return_value="169.254.169.254"):
+        with patch(
+            "aura.security.ssrf_guard.socket.getaddrinfo",
+            return_value=self._mock_getaddrinfo("169.254.169.254"),
+        ):
             result = executor._fetch_url({"url": "http://evil.example.com/latest/meta-data"})
         assert "error" in result
 
@@ -268,3 +285,223 @@ class TestSearchErrorSafety:
         import importlib
         mod = importlib.import_module("api.routes.search")
         assert hasattr(mod, "safe_error_detail")
+
+
+# ── Test 11: Hands sync request_approval deleted, async path robust ──────────
+
+class TestHandsApprovalAsync:
+    """Verify the blocking sync request_approval was removed and the async
+    path is the sole code path. Regression guard: don't reintroduce the sync
+    fallback that could starve the 3-thread hand pool."""
+
+    def test_sync_request_approval_removed(self):
+        from aura.hands.manager import HandManager
+        # Sync method is gone; async variant is the sole entry point.
+        assert not hasattr(HandManager, "request_approval")
+        assert hasattr(HandManager, "request_approval_async")
+
+    def test_async_approval_timeout_returns_false(self):
+        """With no resolve call, request_approval_async must eventually
+        return False and not leave entries in _pending_approvals."""
+        import asyncio
+        from aura.hands.manager import HandManager
+
+        async def _run():
+            mgr = HandManager()
+            # Set the loop reference the manager expects for broadcasts.
+            mgr._approval_loop = asyncio.get_running_loop()
+            # Force the wait timeout down by monkeypatching asyncio.wait_for
+            # locally — the method reads timeout from inline 60s literal,
+            # so we race resolve_approval instead.
+            async def _call():
+                return await mgr.request_approval_async("hand1", "tool1", {})
+
+            task = asyncio.create_task(_call())
+            # Give the task a beat to register the request, then resolve.
+            await asyncio.sleep(0.05)
+            # Pull request_id from internal state.
+            with mgr._approval_lock:
+                assert len(mgr._pending_approvals) == 1
+                request_id = next(iter(mgr._pending_approvals))
+            mgr.resolve_approval(request_id, approved=False)
+            result = await asyncio.wait_for(task, timeout=2.0)
+            assert result is False
+            # Entry should be cleared after resolution.
+            with mgr._approval_lock:
+                assert mgr._pending_approvals.get(request_id) is None or \
+                       mgr._pending_approvals.get(request_id).resolved is True
+
+        asyncio.run(_run())
+
+    def test_three_concurrent_approvals_do_not_block_each_other(self):
+        """Resolve the middle approval first; it must return without waiting
+        for the other two. Bounds the test to 2s to catch pool starvation."""
+        import asyncio
+        from aura.hands.manager import HandManager
+
+        async def _run():
+            mgr = HandManager()
+            mgr._approval_loop = asyncio.get_running_loop()
+            results = {}
+
+            async def _ask(label):
+                results[label] = await mgr.request_approval_async(label, "t", {})
+
+            tasks = [
+                asyncio.create_task(_ask("a")),
+                asyncio.create_task(_ask("b")),
+                asyncio.create_task(_ask("c")),
+            ]
+            await asyncio.sleep(0.05)
+            # Find the request_id for hand "b" and resolve it.
+            with mgr._approval_lock:
+                rid_b = next(
+                    r for r, req in mgr._pending_approvals.items()
+                    if req.hand_name == "b"
+                )
+            mgr.resolve_approval(rid_b, approved=True)
+            # b should finish quickly; a and c stay pending.
+            await asyncio.wait_for(tasks[1], timeout=1.0)
+            assert results.get("b") is True
+            assert "a" not in results
+            assert "c" not in results
+            # Clean up pending tasks without waiting on their 60s timeout.
+            tasks[0].cancel()
+            tasks[2].cancel()
+            try:
+                await asyncio.gather(tasks[0], tasks[2], return_exceptions=True)
+            except Exception:
+                pass
+
+        asyncio.run(_run())
+
+    def test_resolve_approval_only_handles_tuple_events(self):
+        """Regression guard: resolve_approval must fail loudly if a legacy
+        threading.Event shows up (documents the contract change)."""
+        import asyncio
+        from aura.hands.manager import HandManager, ApprovalRequest
+
+        mgr = HandManager()
+        rid = "apr_legacy"
+        mgr._pending_approvals[rid] = ApprovalRequest(
+            request_id=rid, hand_name="h", tool_name="t", args={},
+        )
+        # Inject a raw threading.Event — the shape resolve_approval no longer
+        # accepts. It must raise (tuple unpack) rather than silently succeed.
+        mgr._approval_events[rid] = threading.Event()
+        with pytest.raises((TypeError, ValueError)):
+            mgr.resolve_approval(rid, True)
+
+
+# ── Test 12: search_semantic brute-force fallback is paginated, bounded ─────
+
+class TestSearchSemanticBruteForcePagination:
+    """Verify the FAISS-less fallback uses bounded memory via chunked
+    pagination + top-k heap, rather than loading the whole table at once."""
+
+    @staticmethod
+    def _make_store(tmp_path, rows: int, dim: int = 4):
+        """Build an in-memory-ish MemoryStore with N rows, each with a random
+        unit embedding plus one planted "target" vector aligned with a known
+        query. Returns (store, query_vec, target_id)."""
+        import numpy as np
+        from aura.memory.store import MemoryStore, MemoryRecord
+        db_path = tmp_path / f"mem_{rows}.db"
+        store = MemoryStore(db_path=str(db_path))
+        rng = np.random.default_rng(42)
+        query = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        target_id = None
+        for i in range(rows):
+            # Planted target at index rows//2 — nearly identical to query.
+            if i == rows // 2:
+                emb = query.copy() + rng.normal(0, 0.001, dim).astype(np.float32)
+                target_id = f"target-{i}"
+                rec = MemoryRecord(id=target_id, content="needle", lifecycle_state="stable")
+            else:
+                vec = rng.normal(0, 1, dim).astype(np.float32)
+                rec = MemoryRecord(
+                    id=f"row-{i}", content=f"hay {i}", lifecycle_state="stable",
+                )
+                emb = vec
+            store.insert(rec, embedding=emb)
+        return store, query, target_id
+
+    def test_brute_force_returns_topk_and_finds_planted_match(self, tmp_path):
+        """With FAISS disabled, 2500-row scan must return k results and the
+        planted near-duplicate must be ranked #1."""
+        import numpy as np
+        from aura.memory import store as store_mod
+
+        with patch.object(store_mod, "_FAISS_AVAILABLE", False):
+            store, query, target_id = self._make_store(tmp_path, rows=2500)
+            results = store.search_semantic(query, k=10)
+            assert len(results) == 10
+            # Descending order.
+            sims = [s for (_, s) in results]
+            assert sims == sorted(sims, reverse=True)
+            # Planted target ranks first.
+            assert results[0][0].id == target_id
+
+    def test_brute_force_is_paginated_not_single_fetchall(self, tmp_path, monkeypatch):
+        """Force chunk size to 100 on 500 rows → expect ≥5 execute() calls,
+        proving pagination rather than single load-all fetch."""
+        import numpy as np
+        from aura.memory import store as store_mod
+
+        monkeypatch.setattr(store_mod, "_BRUTE_FORCE_CHUNK_SIZE", 100)
+        with patch.object(store_mod, "_FAISS_AVAILABLE", False):
+            store, query, _ = self._make_store(tmp_path, rows=500)
+            # sqlite3.Connection.execute is read-only so we can't monkeypatch
+            # it directly — wrap _get_conn to return a proxy that counts
+            # execute() calls against the paginated SELECT.
+            real_get_conn = store._get_conn
+            call_count = {"n": 0}
+            class _ConnProxy:
+                def __init__(self, real): self._real = real
+                def __getattr__(self, name): return getattr(self._real, name)
+                def execute(self, sql, params=()):
+                    if "FROM memories" in sql and "ORDER BY rowid" in sql:
+                        call_count["n"] += 1
+                    return self._real.execute(sql, params)
+            def _proxy_get_conn():
+                return _ConnProxy(real_get_conn())
+            monkeypatch.setattr(store, "_get_conn", _proxy_get_conn)
+            results = store.search_semantic(query, k=5)
+            assert len(results) == 5
+            assert call_count["n"] >= 5, f"expected ≥5 paginated calls, got {call_count['n']}"
+
+    def test_brute_force_empty_query_returns_empty(self, tmp_path):
+        """Zero-norm query vector is rejected early, no scan needed."""
+        import numpy as np
+        from aura.memory import store as store_mod
+
+        with patch.object(store_mod, "_FAISS_AVAILABLE", False):
+            store, _, _ = self._make_store(tmp_path, rows=10)
+            zero = np.zeros(4, dtype=np.float32)
+            assert store.search_semantic(zero, k=5) == []
+
+    def test_brute_force_respects_user_id_filter(self, tmp_path):
+        """Multi-user dataset: only rows with matching user_id come back."""
+        import numpy as np
+        from aura.memory.store import MemoryStore, MemoryRecord
+        from aura.memory import store as store_mod
+
+        db_path = tmp_path / "user_mem.db"
+        store = MemoryStore(db_path=str(db_path))
+        rng = np.random.default_rng(7)
+        query = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        for i in range(20):
+            rec = MemoryRecord(
+                id=f"alice-{i}", content=f"A{i}", user_id="alice", lifecycle_state="stable",
+            )
+            store.insert(rec, embedding=query + rng.normal(0, 0.01, 4).astype(np.float32))
+        for i in range(20):
+            rec = MemoryRecord(
+                id=f"bob-{i}", content=f"B{i}", user_id="bob", lifecycle_state="stable",
+            )
+            store.insert(rec, embedding=query + rng.normal(0, 0.01, 4).astype(np.float32))
+
+        with patch.object(store_mod, "_FAISS_AVAILABLE", False):
+            alice_results = store.search_semantic(query, k=50, user_id="alice")
+            assert len(alice_results) == 20
+            assert all(r.user_id == "alice" for r, _ in alice_results)

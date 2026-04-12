@@ -49,9 +49,10 @@ class HandManager:
         # Notification callback (set by API/Telegram to receive results)
         self._notify_callback: Optional[Callable[[HandResult], None]] = None
 
-        # Approval workflow
+        # Approval workflow. Each entry is (asyncio.Event, owning_loop), produced
+        # by request_approval_async and consumed by resolve_approval.
         self._pending_approvals: dict[str, ApprovalRequest] = {}
-        self._approval_events: dict[str, threading.Event] = {}
+        self._approval_events: dict[str, tuple[asyncio.Event, asyncio.AbstractEventLoop]] = {}
         self._approval_lock = threading.Lock()
 
         # Event loop reference for thread-safe broadcast (set by API at startup)
@@ -549,38 +550,6 @@ class HandManager:
         logger.info(f"[HandManager] Approval {'granted' if req.approved else 'denied'} for {hand_name}/{tool_name}")
         return req.approved
 
-    def request_approval(self, hand_name: str, tool_name: str, args: dict) -> bool:
-        """Sync fallback — blocks the calling thread for up to 60s.
-
-        WARNING: This blocks a thread pool worker. Use request_approval_async
-        in async contexts (which run_hand already does).
-        """
-        logger.warning(f"[HandManager] Sync approval requested for {hand_name}/{tool_name} — "
-                       "this blocks a thread for up to 60s. Prefer request_approval_async.")
-        request_id = f"apr_{uuid.uuid4().hex}"
-        request = ApprovalRequest(
-            request_id=request_id,
-            hand_name=hand_name,
-            tool_name=tool_name,
-            args=args,
-        )
-        event = threading.Event()
-
-        with self._approval_lock:
-            self._pending_approvals[request_id] = request
-            self._approval_events[request_id] = event
-
-        self._notify_approval(request_id, hand_name, tool_name, args)
-        resolved = event.wait(timeout=60)
-
-        with self._approval_lock:
-            req = self._pending_approvals.pop(request_id, request)
-            self._approval_events.pop(request_id, None)
-
-        if not resolved:
-            return False
-        return req.approved
-
     def _notify_approval(self, request_id: str, hand_name: str, tool_name: str, args: dict):
         """Send approval notifications via WebSocket and Telegram."""
         request = self._pending_approvals.get(request_id)
@@ -603,7 +572,9 @@ class HandManager:
     def resolve_approval(self, request_id: str, approved: bool):
         """Resolve a pending approval request (called by API or Telegram).
 
-        Thread-safe: works with both asyncio.Event and threading.Event.
+        Thread-safe: the only producer is request_approval_async, which stores
+        (asyncio.Event, owning_loop) tuples. Signalling goes through the loop
+        via call_soon_threadsafe, so this can be called from any thread.
         """
         with self._approval_lock:
             request = self._pending_approvals.get(request_id)
@@ -616,14 +587,8 @@ class HandManager:
         request.approved = approved
         request.resolved = True
 
-        # Handle both async and sync event types
-        if isinstance(event_entry, tuple):
-            # (asyncio.Event, loop) — must set from the owning loop's thread
-            async_event, owner_loop = event_entry
-            owner_loop.call_soon_threadsafe(async_event.set)
-        else:
-            # threading.Event (sync fallback)
-            event_entry.set()
+        async_event, owner_loop = event_entry
+        owner_loop.call_soon_threadsafe(async_event.set)
 
     def get_pending_approvals(self) -> list[dict]:
         """Get all pending approval requests."""
