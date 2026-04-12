@@ -121,17 +121,17 @@ filterwarnings = [
 
 [tool.coverage.run]
 source = ["aura/"]
-branch = true
-omit = ["*/tests/*", "*/__pycache__/*", "*/web/*"]
+branch = false
+omit = ["tests/*", "aura/cli/banner.py", "aura/cli/themes.py", "aura_data/*", "*/__pycache__/*"]
 
 [tool.coverage.report]
 show_missing = true
 precision = 2
+skip_empty = true
 exclude_lines = [
     "pragma: no cover",
-    "if TYPE_CHECKING:",
     "raise NotImplementedError",
-    "def __repr__",
+    "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
 ]
 

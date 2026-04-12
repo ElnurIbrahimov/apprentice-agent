@@ -1,5 +1,7 @@
 # AURA
 
+![CI](https://github.com/ElnurIbrahimov/apprentice-agent/actions/workflows/ci.yml/badge.svg)
+
 AURA is a personal AI assistant platform that spans a CLI, FastAPI backend, React web app, browser extension, and Telegram surfaces. This repository contains a lot of real functionality, but it also contains research-heavy systems that are still evolving.
 
 This README is intentionally conservative. It separates what is working in the repo today from what is experimental and what is still roadmap material.

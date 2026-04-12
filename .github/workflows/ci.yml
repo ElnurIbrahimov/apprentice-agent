@@ -50,9 +50,20 @@ jobs:
       - name: Run unit tests
         run: |
           python -m pytest tests/ \
-            --maxfail=10 \
             --ignore=tests/integration \
-            -q
+            --maxfail=10 \
+            -q \
+            --cov=aura \
+            --cov=api \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml
+            # TODO: add --cov-fail-under once baseline is known
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
 
       - name: Run integration tests
         run: |
