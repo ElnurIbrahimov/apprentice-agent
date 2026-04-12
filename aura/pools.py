@@ -33,6 +33,14 @@ _llm_pool: Optional[ThreadPoolExecutor] = None
 _bg_pool: Optional[ThreadPoolExecutor] = None
 _tool_pool: Optional[ThreadPoolExecutor] = None
 
+# Shutdown flag — set True before pools are torn down so callers can bail early
+_shutting_down: bool = False
+
+
+def is_shutting_down() -> bool:
+    """Return True once pool shutdown has been initiated (atexit or explicit call)."""
+    return _shutting_down
+
 
 def llm_pool() -> ThreadPoolExecutor:
     """Pool for all LLM/Ollama calls. 4 workers.
@@ -78,6 +86,8 @@ def tool_pool() -> ThreadPoolExecutor:
 
 
 def _shutdown_all():
+    global _shutting_down
+    _shutting_down = True
     kwargs = {"wait": False}
     if sys.version_info >= (3, 9):
         kwargs["cancel_futures"] = True

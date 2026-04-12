@@ -958,7 +958,7 @@ class DreamConsolidator:
             return routines
 
         # Cold-start fallback: no metacognition logs yet
-        logger.warning(
+        logger.info(
             "[DreamConsolidator] No metacognition logs found — "
             "falling back to bag-of-words routine extraction. "
             "Behavioral sequences will appear once interaction logs accumulate."

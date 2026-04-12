@@ -228,6 +228,12 @@ def user_facing_llm_error(original_error: Exception | None = None, model: str | 
 def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any = None) -> Any:
     """Execute a function with timeout protection using the shared LLM pool."""
     try:
+        from aura.pools import is_shutting_down
+        if is_shutting_down():
+            return default
+    except Exception:
+        pass
+    try:
         future = _llm_pool_fn().submit(func)
         try:
             return future.result(timeout=timeout)
@@ -248,6 +254,14 @@ def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any =
             logger.exception("Unexpected LLM error: %s: %s", type(exc).__name__, exc)
             return default
     except RuntimeError as exc:
+        # If pool is shutting down, skip the fallback entirely to avoid
+        # "cannot schedule new futures after interpreter shutdown" noise.
+        try:
+            from aura.pools import is_shutting_down
+            if is_shutting_down():
+                return default
+        except Exception:
+            pass
         logger.warning("Shared executor unavailable (%s), using fallback", exc)
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(func)

@@ -133,6 +133,13 @@ def update_profile_from_memories(
     Called during Dream consolidation. Uses the LLM to extract preferences,
     goals, and facts from recent conversation memories.
     """
+    try:
+        from aura.pools import is_shutting_down
+        if is_shutting_down():
+            return load_profile(user_id, store) if store else UserProfile(user_id=user_id)
+    except Exception:
+        pass
+
     if store is None:
         store = get_memory_store()
 

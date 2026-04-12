@@ -983,6 +983,13 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         Returns:
             Generated response string
         """
+        try:
+            from aura.pools import is_shutting_down
+            if is_shutting_down():
+                return ""
+        except Exception:
+            pass
+
         # Yield to user inference — wait briefly in case it finishes soon
         if self._user_inference_active.is_set():
             self._user_inference_active.wait(timeout=5.0)
@@ -1420,6 +1427,13 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             tone_modifier: Optional emotional tone modifier from EvoEmo/ALMA
             model_override: Explicit model to use (bypasses all routing and stats)
         """
+        try:
+            from aura.pools import is_shutting_down
+            if is_shutting_down():
+                return _user_facing_llm_error(model="shutdown")
+        except Exception:
+            pass
+
         # Circuit breaker: if too many consecutive failures, return degraded response
         cb_response = self._check_think_circuit_breaker()
         if cb_response is not None:
