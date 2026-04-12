@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # OpenFang → Aura Wiring Roadmap
 
 > Stolen from [RightNow-AI/openfang](https://github.com/RightNow-AI/openfang) — an open-source Agent OS built in Rust.

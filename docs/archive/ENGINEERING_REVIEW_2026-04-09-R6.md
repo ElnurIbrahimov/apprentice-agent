@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # Engineering Review — 2026-04-09 Round 6
 
 **Scope:** Security hardening, input validation, thread safety, dead code removal — addressing R5 cataloged items  

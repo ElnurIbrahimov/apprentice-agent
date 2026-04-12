@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # Engineering Review — 2026-04-09 Round 3
 
 **Scope:** Full-project audit of Aura v4.7.0 (~200+ Python files, 1338 tests)  

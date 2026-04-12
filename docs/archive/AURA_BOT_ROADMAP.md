@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # AURA Bot Roadmap — Telegram, Messaging & Cross-Surface Integration
 
 ## Current State (v4.5.0, March 24 2026)

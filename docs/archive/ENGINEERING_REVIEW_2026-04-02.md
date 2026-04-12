@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # Engineering Review — 2026-04-02
 
 **Scope:** Full-project audit and improvement pass

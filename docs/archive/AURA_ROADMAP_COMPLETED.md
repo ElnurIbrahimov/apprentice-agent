@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # Aura Roadmap — Completed Work
 
 **Last Updated:** 2026-03-22

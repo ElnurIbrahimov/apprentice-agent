@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # AURA Extension Panels — Dev Roadmap
 > Making Artifacts, WebCreator, and Code panels state-of-the-art
 > Created: 2026-03-21 | Status: Planning

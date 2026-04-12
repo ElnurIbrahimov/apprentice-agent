@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # Aura UI Polish Roadmap — State of the Art
 
 **Created:** 2026-03-20

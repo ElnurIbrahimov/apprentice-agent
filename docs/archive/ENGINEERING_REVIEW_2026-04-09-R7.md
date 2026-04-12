@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # Engineering Review — 2026-04-09 Round 7
 
 **Scope:** R6 should-do items, security hardening, reliability, dead code, resource leaks  

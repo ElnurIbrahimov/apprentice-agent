@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # Engineering Review — 2026-04-09 Round 2
 
 **Scope:** Second full-project audit pass — targeting deferred items from Round 1 plus deep audit of previously unreviewed subsystems

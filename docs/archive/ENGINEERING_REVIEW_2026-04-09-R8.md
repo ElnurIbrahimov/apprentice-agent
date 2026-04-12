@@ -1,3 +1,5 @@
+> SUPERSEDED 2026-04-13. Current source of truth: D:/Aura/CURRENT_STATE.md
+
 # Engineering Review — 2026-04-09 Round 8
 
 **Scope:** Full-project deep audit with 5 parallel audit agents (core engine, API layer, memory/consciousness, tools/messaging, web/extension) + manual verification and fixes  
