@@ -539,13 +539,13 @@ class BrowserTool:
             # Block uploads of sensitive files
             path_str = str(file_path).lower()
             if any(p in path_str for p in self._UPLOAD_BLOCKED_PATTERNS):
-                return {"success": False, "error": f"Upload blocked: path contains sensitive pattern"}
+                return {"success": False, "error": "Upload blocked: path contains sensitive pattern"}
 
             # Restrict uploads to output_dir or the current working directory
             cwd = Path.cwd().resolve()
             out = self.output_dir.resolve()
             if not (str(file_path).startswith(str(out)) or str(file_path).startswith(str(cwd))):
-                return {"success": False, "error": f"Upload restricted to project/output directories"}
+                return {"success": False, "error": "Upload restricted to project/output directories"}
 
             self._page.wait_for_selector(selector, timeout=5000)
             self._page.set_input_files(selector, str(file_path))

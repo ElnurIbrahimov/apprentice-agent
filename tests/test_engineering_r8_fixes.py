@@ -205,11 +205,11 @@ class TestTelegramSummarizeAuth:
 # ── Test 8: SSRF DNS resolution check ──────────────────────────────────────
 
 class TestSSRFDnsProtection:
-    """_fetch_url must resolve hostnames and block private IPs.
+    """The SSRF guard (aura.security.ssrf_guard) must resolve hostnames and
+    block any that map to private / reserved / metadata IPs.
 
-    _fetch_url lives in tool_executor and delegates SSRF validation to
-    aura.security.ssrf_guard.safe_request, which calls socket.getaddrinfo.
-    So we mock getaddrinfo (not gethostbyname) to simulate DNS rebinding.
+    Tests the guard directly rather than going through tool_executor._fetch_url,
+    because _fetch_url also imports bs4 which isn't a hard dependency in CI.
     """
 
     @staticmethod
@@ -220,31 +220,29 @@ class TestSSRFDnsProtection:
 
     def test_blocks_dns_rebinding_to_private_ip(self):
         """A hostname resolving to a private IP must be blocked."""
-        from aura.core.tool_executor import ToolExecutor
-
-        executor = ToolExecutor.__new__(ToolExecutor)
+        from aura.security import ssrf_guard
 
         with patch(
             "aura.security.ssrf_guard.socket.getaddrinfo",
             return_value=self._mock_getaddrinfo("192.168.1.1"),
         ):
-            result = executor._fetch_url({"url": "http://evil.example.com/secret"})
-        assert "error" in result
-        err = result["error"].lower()
-        assert "private" in err or "blocked" in err or "reserved" in err
+            with pytest.raises(ValueError) as excinfo:
+                ssrf_guard.validate_url_safe("http://evil.example.com/secret")
+        msg = str(excinfo.value).lower()
+        assert "private" in msg or "blocked" in msg or "reserved" in msg
 
     def test_blocks_dns_rebinding_to_metadata(self):
         """A hostname resolving to the cloud metadata IP must be blocked."""
-        from aura.core.tool_executor import ToolExecutor
-
-        executor = ToolExecutor.__new__(ToolExecutor)
+        from aura.security import ssrf_guard
 
         with patch(
             "aura.security.ssrf_guard.socket.getaddrinfo",
             return_value=self._mock_getaddrinfo("169.254.169.254"),
         ):
-            result = executor._fetch_url({"url": "http://evil.example.com/latest/meta-data"})
-        assert "error" in result
+            with pytest.raises(ValueError) as excinfo:
+                ssrf_guard.validate_url_safe("http://evil.example.com/latest/meta-data")
+        msg = str(excinfo.value).lower()
+        assert "private" in msg or "blocked" in msg or "reserved" in msg or "link" in msg
 
 
 # ── Test 9: Provider stream response cleanup ────────────────────────────────
