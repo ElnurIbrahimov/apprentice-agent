@@ -181,7 +181,33 @@ class ToolCallCoordinator:
                     tool_args=args,
                     tool_result=tool_result,
                 )
-            tool_msg = {"role": "tool", "content": tool_result}
+
+            # Context-saving: mask verbose tool outputs before they enter the LLM
+            # message history. expand_observation is exempt so its response
+            # reaches the LLM in full. Short outputs pass through unchanged.
+            if tool_name == "expand_observation":
+                llm_content = tool_result
+            else:
+                try:
+                    from aura.memory.observation_masker import mask_tool_output
+                    origin = (
+                        args.get("path")
+                        or args.get("pattern")
+                        or args.get("command")
+                        or args.get("query")
+                        or ""
+                    )
+                    masked = mask_tool_output(
+                        tool_result,
+                        tool_name=tool_name,
+                        origin=str(origin)[:60],
+                    )
+                    llm_content = masked.display
+                except Exception as _mask_exc:
+                    logger.debug("[AgenticLoop] observation masker failed: %s", _mask_exc)
+                    llm_content = tool_result
+
+            tool_msg = {"role": "tool", "content": llm_content}
             messages.append(tool_msg)
             if self._loop.session:
                 self._loop.session.append(tool_msg)

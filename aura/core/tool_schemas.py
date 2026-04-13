@@ -365,6 +365,20 @@ AGENTIC_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "expand_observation",
+            "description": "Retrieve the full text of a previously-masked tool output by its observation ID. Use this when you see a placeholder like ⟦OBS:abc123...⟧ in prior tool results and need the complete content. Example: {\"obs_id\": \"a3f9c2d014\"}",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "obs_id": {"type": "string", "description": "Observation ID from the ⟦OBS:...⟧ placeholder"},
+                },
+                "required": ["obs_id"],
+            },
+        },
+    },
 ]
 
 # Quick lookup: tool name -> schema
@@ -374,6 +388,7 @@ TOOL_SCHEMA_MAP = {t["function"]["name"]: t for t in AGENTIC_TOOLS}
 READ_ONLY_TOOLS = frozenset({
     "read_file", "grep", "glob", "list_dir",
     "search_web", "project_structure", "fetch_url",
+    "expand_observation",
 })
 
 # Tool names that mutate state (need approval in non-trust mode)

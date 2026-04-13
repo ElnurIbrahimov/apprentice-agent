@@ -172,6 +172,10 @@ class ToolExecutor:
         """Execute a tool call and serialize the result for the LLM."""
         try:
             result = self._dispatch(tool_name, args)
+            # expand_observation intentionally returns full content — skip truncation
+            # so the masker's round-trip actually works for >15k items.
+            if tool_name == "expand_observation" and isinstance(result, str):
+                return result
             if isinstance(result, dict):
                 return _truncate(json.dumps(result, indent=2, default=str))
             return _truncate(str(result))
@@ -250,6 +254,15 @@ class ToolExecutor:
             if self.sub_agent_mgr is None:
                 return {"error": "Sub-agents not available"}
             return self.sub_agent_mgr.spawn(task=args.get("task", ""), role=args.get("role", "reader"))
+        if tool_name == "expand_observation":
+            from aura.memory.observation_masker import expand_observation as _expand
+            obs_id = args.get("obs_id") or args.get("id") or ""
+            if not obs_id:
+                return {"error": "expand_observation requires obs_id"}
+            full = _expand(str(obs_id))
+            if full is None:
+                return {"error": f"No observation found for ID: {obs_id}"}
+            return full
         if tool_name.startswith("mcp_"):
             if self._mcp_client:
                 return {"result": self._mcp_client.call_tool(tool_name, args)}
