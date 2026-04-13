@@ -439,7 +439,7 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
                 _project_root = find_project_root() or _project_root
             except (ImportError, OSError):
                 pass
-            self._tool_executor = ToolExecutor(project_root=_project_root)
+            self._tool_executor = ToolExecutor(project_root=_project_root, brain=self.brain)
             logger.debug(f"[ToolExecutor] Initialized at {_project_root}")
         except (ImportError, AttributeError, TypeError, OSError) as e:
             logger.debug(f"[ToolExecutor] Init failed: {e}")

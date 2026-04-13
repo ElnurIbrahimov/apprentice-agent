@@ -1,13 +1,28 @@
-"""Shared web search fallback chain.
+"""Hybrid web search pipeline with parallel provider fan-out.
 
-Provides a single function that tries Tavily → Brave → Firecrawl in order,
-with retry logic, result normalization, and deduplication.
+Pipeline:
+  1. Optional LLM query decomposition (3-5 sub-queries for complex asks).
+  2. Parallel fan-out across Tavily (advanced depth, raw content),
+     Brave Search, and Firecrawl.search — every provider gets every
+     sub-query at the same time.
+  3. Dedupe by URL + BM25 rerank against the original query.
+  4. Parallel Firecrawl.scrape on the top N URLs that don't already
+     have full content, so the LLM reads pages instead of snippets.
+
+This replaces the previous sequential Tavily → Brave → Firecrawl
+fallback, which returned whichever provider responded first even
+if the result was thin. The new pipeline always calls all three,
+always merges, and always reranks — same pattern ChatGPT / Claude /
+Perplexity use.
 """
+
+from __future__ import annotations
 
 import logging
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Session-level query cache (5-minute TTL)
 # ---------------------------------------------------------------------------
 _search_cache: Dict[Tuple[str, int], Tuple[float, dict]] = {}
-_CACHE_TTL = 300  # 5 minutes
+_CACHE_TTL = 300
 
 
 def _cache_get(query: str, max_results: int):
@@ -23,7 +38,7 @@ def _cache_get(query: str, max_results: int):
     if key in _search_cache:
         ts, result = _search_cache[key]
         if time.time() - ts < _CACHE_TTL:
-            logger.debug(f"[SearchFallback] Cache hit for '{key[0][:40]}…'")
+            logger.debug("[SearchFallback] Cache hit for '%s…'", key[0][:40])
             return result
         del _search_cache[key]
     return None
@@ -34,182 +49,385 @@ def _cache_put(query: str, max_results: int, result: dict):
     _search_cache[key] = (time.time(), result)
 
 
-def _is_good_result(result) -> bool:
-    """Check if a search result is valid and usable."""
-    if not isinstance(result, dict):
-        return False
-    # Explicit success flag
-    if result.get("success") is False:
-        return False
-    # Explicit error
-    if result.get("error"):
-        return False
-    # Has actual results
-    results = result.get("results", [])
-    if isinstance(results, list) and len(results) > 0:
-        return True
-    # Tavily returns "answer" sometimes
-    if result.get("answer"):
-        return True
-    return False
+# ---------------------------------------------------------------------------
+# Module-level LLM wiring (optional — agent sets this at startup)
+# ---------------------------------------------------------------------------
+_default_llm_func: Optional[Callable] = None
+_llm_lock = threading.Lock()
 
 
-def _normalize_results(result: dict, source: str) -> dict:
-    """Normalize results to a consistent format: {success, query, source, results[{title, url, snippet}]}."""
-    raw_results = result.get("results", [])
-    if isinstance(raw_results, str):
-        # Some tools return results as a string
-        return {"success": True, "source": source, "results": [], "raw_text": raw_results}
+def set_search_llm(llm_func: Optional[Callable]) -> None:
+    """Register an LLM function used for query decomposition.
 
-    normalized = []
-    for r in raw_results:
-        if isinstance(r, dict):
-            normalized.append({
-                "title": r.get("title", ""),
-                "url": r.get("url", ""),
-                "snippet": r.get("snippet") or r.get("content") or r.get("description") or r.get("markdown", "")[:300] or "",
-                "source": source,
-            })
-
-    return {
-        "success": True,
-        "query": result.get("query", ""),
-        "source": source,
-        "results": normalized,
-        "num_results": len(normalized),
-        # Preserve extra fields from Tavily
-        "answer": result.get("answer"),
-    }
+    The agent calls this at startup with ``brain.think`` so the search
+    pipeline can fan out multi-angle queries without every caller
+    having to thread the LLM through.
+    """
+    global _default_llm_func
+    with _llm_lock:
+        _default_llm_func = llm_func
 
 
-def _deduplicate(results: List[dict]) -> List[dict]:
-    """Remove duplicate results by URL."""
-    seen_urls = set()
-    deduped = []
-    for r in results:
-        url = r.get("url", "").rstrip("/").lower()
-        if url and url not in seen_urls:
-            seen_urls.add(url)
-            deduped.append(r)
-        elif not url:
-            deduped.append(r)  # Keep results without URLs
-    return deduped
-
-
-def _retry_call(fn, retries: int = 1, delay: float = 1.0):
-    """Simple retry with exponential backoff."""
-    last_err = None
-    for attempt in range(retries + 1):
-        try:
-            return fn()
-        except Exception as e:
-            last_err = e
-            if attempt < retries:
-                time.sleep(delay * (2 ** attempt))
-                logger.debug(f"[SearchFallback] Retry {attempt + 1}/{retries} after: {e}")
-    raise last_err  # type: ignore
-
-
-# Lazy-initialized tool instances (module-level singletons)
+# ---------------------------------------------------------------------------
+# Lazy provider singletons
+# ---------------------------------------------------------------------------
 _tavily = None
 _brave = None
 _firecrawl = None
 _singleton_lock = threading.Lock()
 
 
+def _get_tavily():
+    global _tavily
+    if _tavily is None:
+        with _singleton_lock:
+            if _tavily is None:
+                try:
+                    from aura.tools.tavily_tool import TavilyTool
+                    _tavily = TavilyTool()
+                except Exception as e:
+                    logger.debug("[SearchFallback] Tavily init failed: %s", e)
+                    _tavily = False
+    return _tavily or None
+
+
+def _get_brave():
+    global _brave
+    if _brave is None:
+        with _singleton_lock:
+            if _brave is None:
+                try:
+                    from aura.tools.brave_search import BraveSearchTool
+                    _brave = BraveSearchTool()
+                except Exception as e:
+                    logger.debug("[SearchFallback] Brave init failed: %s", e)
+                    _brave = False
+    return _brave or None
+
+
+def _get_firecrawl():
+    global _firecrawl
+    if _firecrawl is None:
+        with _singleton_lock:
+            if _firecrawl is None:
+                try:
+                    from aura.tools.firecrawl_tool import FirecrawlTool
+                    _firecrawl = FirecrawlTool()
+                except Exception as e:
+                    logger.debug("[SearchFallback] Firecrawl init failed: %s", e)
+                    _firecrawl = False
+    return _firecrawl or None
+
+
+# ---------------------------------------------------------------------------
+# Normalization — every provider maps to a uniform record shape
+# ---------------------------------------------------------------------------
+def _normalize_tavily(result: dict, query: str) -> List[dict]:
+    if not isinstance(result, dict):
+        return []
+    out = []
+    for r in result.get("results", []):
+        if not isinstance(r, dict):
+            continue
+        content = r.get("raw_content") or r.get("content") or ""
+        out.append({
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": (content[:500] if content else "") or r.get("content", "")[:500],
+            "content": content,
+            "source": "tavily",
+            "score": float(r.get("score", 0.0) or 0.0),
+            "query": query,
+        })
+    return out
+
+
+def _normalize_brave(result: dict, query: str) -> List[dict]:
+    if not isinstance(result, dict):
+        return []
+    out = []
+    for r in result.get("results", []):
+        if not isinstance(r, dict):
+            continue
+        desc = r.get("description") or r.get("snippet") or ""
+        out.append({
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": desc[:500] if desc else "",
+            "content": desc,
+            "source": "brave",
+            "score": 0.0,
+            "query": query,
+        })
+    return out
+
+
+def _normalize_firecrawl(result: dict, query: str) -> List[dict]:
+    if not isinstance(result, dict):
+        return []
+    out = []
+    for r in result.get("results", []):
+        if not isinstance(r, dict):
+            continue
+        md = r.get("markdown", "") or ""
+        out.append({
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": md[:500] if md else "",
+            "content": md,
+            "source": "firecrawl",
+            "score": 0.0,
+            "query": query,
+        })
+    return out
+
+
+def _deduplicate(results: List[dict]) -> List[dict]:
+    """Remove duplicate URLs, keeping the first (highest-priority) occurrence.
+
+    When a duplicate URL is seen, prefer keeping the version with more
+    content — a Brave snippet gets replaced by a Firecrawl scrape for
+    the same URL, not the other way around.
+    """
+    by_url: Dict[str, dict] = {}
+    order: List[str] = []
+    keyless: List[dict] = []
+
+    for r in results:
+        url = (r.get("url") or "").rstrip("/").lower()
+        if not url:
+            keyless.append(r)
+            continue
+        if url not in by_url:
+            by_url[url] = r
+            order.append(url)
+        else:
+            existing = by_url[url]
+            new_content = len(r.get("content", "") or "")
+            old_content = len(existing.get("content", "") or "")
+            if new_content > old_content:
+                by_url[url] = r
+
+    return [by_url[u] for u in order] + keyless
+
+
+# ---------------------------------------------------------------------------
+# Provider callers — each returns list[dict], empty on failure
+# ---------------------------------------------------------------------------
+def _call_tavily(query: str, max_results: int) -> List[dict]:
+    tool = _get_tavily()
+    if not tool:
+        return []
+    try:
+        result = tool.search(
+            query=query,
+            max_results=max_results,
+            search_depth="advanced",
+            include_raw_content=True,
+            include_answer=False,
+        )
+        return _normalize_tavily(result, query)
+    except Exception as e:
+        logger.debug("[SearchFallback] Tavily call failed: %s", e)
+        return []
+
+
+def _call_brave(query: str, max_results: int) -> List[dict]:
+    tool = _get_brave()
+    if not tool:
+        return []
+    try:
+        result = tool.run(query=query, count=max_results)
+        return _normalize_brave(result, query)
+    except Exception as e:
+        logger.debug("[SearchFallback] Brave call failed: %s", e)
+        return []
+
+
+def _call_firecrawl(query: str, max_results: int) -> List[dict]:
+    tool = _get_firecrawl()
+    if not tool:
+        return []
+    try:
+        result = tool.search(query=query, limit=max_results)
+        return _normalize_firecrawl(result, query)
+    except Exception as e:
+        logger.debug("[SearchFallback] Firecrawl call failed: %s", e)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Top-N scrape — fill full markdown for results that came back thin
+# ---------------------------------------------------------------------------
+def _scrape_top_urls(results: List[dict], n: int = 3) -> List[dict]:
+    tool = _get_firecrawl()
+    if not tool or n <= 0 or not results:
+        return results
+
+    needing_scrape: List[Tuple[int, str]] = []
+    for idx in range(min(len(results), n * 2)):
+        url = results[idx].get("url", "")
+        content = results[idx].get("content", "") or ""
+        if url and url.startswith(("http://", "https://")) and len(content) < 800:
+            needing_scrape.append((idx, url))
+        if len(needing_scrape) >= n:
+            break
+
+    if not needing_scrape:
+        return results
+
+    def _do_scrape(job: Tuple[int, str]) -> Tuple[int, str]:
+        idx, url = job
+        try:
+            data = tool.scrape(url)
+            if isinstance(data, dict):
+                return idx, data.get("markdown", "") or ""
+            return idx, ""
+        except Exception as e:
+            logger.debug("[SearchFallback] scrape %s failed: %s", url, e)
+            return idx, ""
+
+    with ThreadPoolExecutor(max_workers=min(len(needing_scrape), 3)) as pool:
+        futures = [pool.submit(_do_scrape, job) for job in needing_scrape]
+        for fut in as_completed(futures, timeout=25):
+            try:
+                idx, md = fut.result(timeout=0)
+            except Exception:
+                continue
+            if md and 0 <= idx < len(results):
+                results[idx]["content"] = md
+                results[idx]["snippet"] = md[:500]
+                results[idx]["scraped"] = True
+    return results
+
+
+# ---------------------------------------------------------------------------
+# BM25 rerank — reuses the scorer from web_search.py
+# ---------------------------------------------------------------------------
+def _rerank(results: List[dict], query: str) -> List[dict]:
+    try:
+        from aura.tools.web_search import _rerank_results
+        return _rerank_results(results, query)
+    except Exception as e:
+        logger.debug("[SearchFallback] rerank failed: %s", e)
+        return results
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 def web_search_with_fallback(
     query: str,
     max_results: int = 8,
-    tool_registry: Optional[dict] = None,
+    tool_registry: Optional[dict] = None,  # kept for API compatibility, ignored
+    llm_func: Optional[Callable] = None,
+    scrape_top_n: int = 3,
+    decompose: bool = True,
 ) -> dict:
-    """Execute a web search with Tavily → Brave → Firecrawl fallback chain.
+    """Hybrid parallel web search with optional query decomposition.
 
     Args:
-        query: Search query string.
-        max_results: Maximum results to return.
-        tool_registry: Optional agent tool registry. If provided, uses
-            registered tool instances instead of creating new ones.
+        query: The user query.
+        max_results: Final merged result count.
+        tool_registry: Unused; retained for backwards compatibility.
+        llm_func: LLM callable for query decomposition. Falls back to
+            the module-level default registered via ``set_search_llm``.
+        scrape_top_n: Firecrawl-scrape this many top URLs to get full
+            markdown content. Set to 0 to disable scraping for speed.
+        decompose: When True, decompose complex queries into sub-queries
+            and fan out in parallel. Skipped automatically for short
+            or already-specific queries.
 
     Returns:
-        dict with normalized search results, or {"error": "..."} on total failure.
+        dict with keys: success, query, sub_queries, num_results,
+        total_raw, results, source. Each result has title, url,
+        snippet, content, source, score, scraped.
     """
-    global _tavily, _brave, _firecrawl
+    if not query or not query.strip():
+        return {"success": False, "error": "Empty query", "results": [], "query": ""}
+    query = query.strip()
 
-    # --- Check cache first ---
     cached = _cache_get(query, max_results)
     if cached is not None:
         return cached
 
-    errors: list[str] = []
+    # ------------------------------------------------------------
+    # Phase 1: decompose (optional)
+    # ------------------------------------------------------------
+    sub_queries: List[str] = [query]
+    if decompose:
+        active_llm = llm_func or _default_llm_func
+        try:
+            from aura.tools.search_planner import decompose_query
+            sub_queries = decompose_query(query, llm_func=active_llm)
+        except Exception as e:
+            logger.debug("[SearchFallback] decompose failed: %s", e)
+            sub_queries = [query]
+        if not sub_queries:
+            sub_queries = [query]
 
-    # --- Tavily (best quality, AI-optimized) ---
-    try:
-        if tool_registry and "tavily_search" in tool_registry:
-            result = tool_registry["tavily_search"].execute(f"search {query}")
-        else:
-            with _singleton_lock:
-                if _tavily is None:
-                    from aura.tools.tavily_tool import TavilyTool
-                    _tavily = TavilyTool()
-            result = _retry_call(lambda: _tavily.search(query=query, max_results=max_results))
+    per_query_results = max(4, (max_results // max(len(sub_queries), 1)) + 2)
 
-        if _is_good_result(result):
-            normalized = _normalize_results(result, "tavily")
-            normalized["results"] = _deduplicate(normalized["results"])
-            _cache_put(query, max_results, normalized)
-            logger.debug(f"[SearchFallback] Tavily returned {len(normalized['results'])} results")
-            return normalized
-        errors.append(f"Tavily: {result.get('error', 'no results') if isinstance(result, dict) else 'bad response'}")
-    except Exception as e:
-        errors.append(f"Tavily: {e}")
-        logger.debug(f"[SearchFallback] Tavily failed: {e}")
+    # ------------------------------------------------------------
+    # Phase 2: parallel provider fan-out
+    # ------------------------------------------------------------
+    provider_calls = [
+        ("tavily", _call_tavily),
+        ("brave", _call_brave),
+        ("firecrawl", _call_firecrawl),
+    ]
 
-    # --- Brave (fresh results, good for news) ---
-    try:
-        if tool_registry and "brave_search" in tool_registry:
-            result = tool_registry["brave_search"].execute(f"search {query}")
-        else:
-            with _singleton_lock:
-                if _brave is None:
-                    from aura.tools.brave_search import BraveSearchTool
-                    _brave = BraveSearchTool()
-            result = _retry_call(lambda: _brave.run(query=query, count=max_results))
+    all_results: List[dict] = []
+    max_parallel = min(len(sub_queries) * len(provider_calls), 9)
 
-        if _is_good_result(result):
-            normalized = _normalize_results(result, "brave")
-            normalized["results"] = _deduplicate(normalized["results"])
-            _cache_put(query, max_results, normalized)
-            logger.debug(f"[SearchFallback] Brave returned {len(normalized['results'])} results")
-            return normalized
-        errors.append(f"Brave: {result.get('error', 'no results') if isinstance(result, dict) else 'bad response'}")
-    except Exception as e:
-        errors.append(f"Brave: {e}")
-        logger.debug(f"[SearchFallback] Brave failed: {e}")
+    with ThreadPoolExecutor(max_workers=max_parallel) as pool:
+        future_map = {}
+        for sq in sub_queries:
+            for name, fn in provider_calls:
+                fut = pool.submit(fn, sq, per_query_results)
+                future_map[fut] = (name, sq)
 
-    # --- Firecrawl (search + scrape, last resort) ---
-    try:
-        if tool_registry and "firecrawl" in tool_registry:
-            fc = tool_registry["firecrawl"]
-            result = fc.search(query, limit=max_results) if hasattr(fc, 'search') else fc.execute(query)
-        else:
-            with _singleton_lock:
-                if _firecrawl is None:
-                    from aura.tools.firecrawl_tool import FirecrawlTool
-                    _firecrawl = FirecrawlTool()
-            result = _retry_call(lambda: _firecrawl.search(query=query, limit=max_results))
+        for fut in as_completed(future_map, timeout=25):
+            name, sq = future_map[fut]
+            try:
+                batch = fut.result(timeout=0)
+                if batch:
+                    all_results.extend(batch)
+            except Exception as e:
+                logger.debug("[SearchFallback] %s[%s] failed: %s", name, sq[:40], e)
 
-        if _is_good_result(result):
-            normalized = _normalize_results(result, "firecrawl")
-            normalized["results"] = _deduplicate(normalized["results"])
-            _cache_put(query, max_results, normalized)
-            logger.debug(f"[SearchFallback] Firecrawl returned {len(normalized['results'])} results")
-            return normalized
-        errors.append(f"Firecrawl: {result.get('error', 'no results') if isinstance(result, dict) else 'bad response'}")
-    except Exception as e:
-        errors.append(f"Firecrawl: {e}")
-        logger.debug(f"[SearchFallback] Firecrawl failed: {e}")
+    if not all_results:
+        return {
+            "success": False,
+            "error": "All search providers failed or returned nothing",
+            "results": [],
+            "query": query,
+            "sub_queries": sub_queries if len(sub_queries) > 1 else None,
+        }
 
-    # --- All providers failed ---
-    error_summary = "; ".join(errors) if errors else "Unknown error"
-    logger.error(f"[SearchFallback] All search providers failed: {error_summary}")
-    return {"success": False, "error": f"All search providers failed: {error_summary}", "results": []}
+    # ------------------------------------------------------------
+    # Phase 3: dedupe + rerank
+    # ------------------------------------------------------------
+    deduped = _deduplicate(all_results)
+    ranked = _rerank(deduped, query)
+    top = ranked[: max_results]
+
+    # ------------------------------------------------------------
+    # Phase 4: scrape top N for full content
+    # ------------------------------------------------------------
+    top = _scrape_top_urls(top, n=scrape_top_n)
+
+    out = {
+        "success": True,
+        "query": query,
+        "sub_queries": sub_queries if len(sub_queries) > 1 else None,
+        "num_results": len(top),
+        "total_raw": len(all_results),
+        "results": top,
+        "source": "hybrid",
+    }
+    _cache_put(query, max_results, out)
+    return out
+
+
+__all__ = ["web_search_with_fallback", "set_search_llm"]

@@ -67,7 +67,7 @@ class AgenticLoop:
 
         from .sub_agent import SubAgentManager
         self._sub_agent_mgr = SubAgentManager(self)
-        self.executor = ToolExecutor(self.project_root, sub_agent_mgr=self._sub_agent_mgr, permissions=self.permissions)
+        self.executor = ToolExecutor(self.project_root, sub_agent_mgr=self._sub_agent_mgr, permissions=self.permissions, brain=self.brain)
         self.iteration = 0
         self.tool_calls_total = 0
         self._edits_this_turn = 0  # Track edits for auto-test

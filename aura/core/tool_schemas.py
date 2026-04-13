@@ -368,6 +368,25 @@ AGENTIC_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "research",
+            "description": "Conduct thorough multi-step research on a topic using STORM outline-first planning, parallel sub-query decomposition, MMR diversity, citation scoring, and page-by-page synthesis. Use this (NOT search_web) when the user asks to investigate, research, deep dive, compare, review literature on, or thoroughly analyze something — or when a single search_web call would leave you guessing. Returns a synthesized summary, citations, and knowledge gaps. Example: {\"query\": \"compare GEPA vs DSPy for prompt evolution\", \"depth\": \"standard\"}",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The topic or question to research"},
+                    "depth": {
+                        "type": "string",
+                        "enum": ["quick", "standard", "deep"],
+                        "description": "quick=~30s 1 phase, standard=~2min 4 phases (default), deep=~5min full pipeline",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "expand_observation",
             "description": "Retrieve the full text of a previously-masked tool output by its observation ID. Use this when you see a placeholder like ⟦OBS:abc123...⟧ in prior tool results and need the complete content. Example: {\"obs_id\": \"a3f9c2d014\"}",
             "parameters": {
@@ -388,7 +407,7 @@ TOOL_SCHEMA_MAP = {t["function"]["name"]: t for t in AGENTIC_TOOLS}
 READ_ONLY_TOOLS = frozenset({
     "read_file", "grep", "glob", "list_dir",
     "search_web", "project_structure", "fetch_url",
-    "expand_observation",
+    "expand_observation", "research",
 })
 
 # Tool names that mutate state (need approval in non-trust mode)

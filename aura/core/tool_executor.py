@@ -64,17 +64,28 @@ class ToolExecutor:
         "grep": ["findstr", "Select-String"],
     }
 
-    def __init__(self, project_root: str, sub_agent_mgr=None, permissions=None, mcp_client=None):
+    def __init__(self, project_root: str, sub_agent_mgr=None, permissions=None, mcp_client=None, brain=None):
         self.project_root = project_root
         self.sub_agent_mgr = sub_agent_mgr
         self.permissions = permissions
         self._mcp_client = mcp_client
+        self._brain = brain
         self._init_lock = threading.Lock()
         self._fs = None
         self._code_edit = None
         self._search = None
         self._shell = None
         self._git = None
+        self._deep_research = None
+
+        # Wire the agent's LLM into the hybrid search pipeline so it can
+        # decompose complex queries into parallel sub-queries.
+        if brain is not None:
+            try:
+                from aura.tools.search_fallback import set_search_llm
+                set_search_llm(brain.think)
+            except Exception as exc:
+                logger.debug("[ToolExecutor] set_search_llm failed: %s", exc)
 
     @property
     def fs(self):
@@ -225,6 +236,8 @@ class ToolExecutor:
             return self._git_dispatch(args)
         if tool_name == "search_web":
             return self._web_search(args)
+        if tool_name == "research":
+            return self._deep_research_dispatch(args)
         if tool_name == "project_structure":
             return self.search.project_structure(
                 path=self._resolve_path(args.get("path", ".")),
@@ -518,7 +531,63 @@ class ToolExecutor:
     def _web_search(self, args: dict) -> dict:
         from aura.tools.search_fallback import web_search_with_fallback
 
-        return web_search_with_fallback(query=args["query"], max_results=args.get("max_results", 8))
+        llm_func = getattr(self._brain, "think", None) if self._brain is not None else None
+        return web_search_with_fallback(
+            query=args["query"],
+            max_results=args.get("max_results", 8),
+            llm_func=llm_func,
+            scrape_top_n=args.get("scrape_top_n", 3),
+        )
+
+    def _deep_research_dispatch(self, args: dict) -> dict:
+        query = args.get("query", "").strip()
+        if not query:
+            return {"error": "research requires a 'query' field"}
+        depth = args.get("depth", "standard")
+        if depth not in ("quick", "standard", "deep"):
+            depth = "standard"
+
+        if self._deep_research is None:
+            with self._init_lock:
+                if self._deep_research is None:
+                    try:
+                        from aura.tools.deep_research import DeepResearchTool
+
+                        llm_func = getattr(self._brain, "think", None) if self._brain is not None else None
+                        self._deep_research = DeepResearchTool(llm_func=llm_func)
+                    except Exception as exc:
+                        logger.error("[ToolExecutor] DeepResearchTool init failed: %s", exc)
+                        return {"error": f"research tool unavailable: {exc}"}
+
+        try:
+            result = self._deep_research.research(topic=query, depth=depth)
+        except Exception as exc:
+            logger.error("[ToolExecutor] research failed: %s", exc)
+            return {"error": f"research failed: {exc}"}
+
+        if not isinstance(result, dict):
+            return {"error": "research returned non-dict result"}
+
+        # Compact the payload so the LLM context doesn't drown in metadata
+        return {
+            "success": result.get("success", True),
+            "query": query,
+            "depth": depth,
+            "summary": result.get("summary") or result.get("synthesis") or "",
+            "synthesis": result.get("synthesis", ""),
+            "citations": result.get("citations", [])[:20],
+            "sources": [
+                {"title": s.get("title", ""), "url": s.get("url", "")}
+                for s in (result.get("sources") or [])[:20]
+                if isinstance(s, dict)
+            ],
+            "knowledge_gaps": result.get("knowledge_gaps", [])[:10],
+            "contradictions": result.get("contradictions", [])[:10],
+            "pages_read": result.get("pages_read", 0),
+            "queries_run": result.get("queries_run", 0),
+            "time_seconds": result.get("time_seconds", 0),
+            "phases_completed": result.get("phases_completed", 0),
+        }
 
     def _fetch_url(self, args: dict) -> dict:
         url = args.get("url", "")
