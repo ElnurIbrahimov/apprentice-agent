@@ -108,7 +108,9 @@ def configure_http_middleware(app: "FastAPI", logger: "logging.Logger") -> None:
 def mount_static_frontend(app: "FastAPI") -> None:
     """Serve the built frontend in production mode."""
 
-    static_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "dist")
+    from pathlib import Path as _Path
+    # api/bootstrap/http.py → repo root → web/dist
+    static_path = str(_Path(__file__).resolve().parents[2] / "web" / "dist")
     is_dev = os.environ.get("AURA_ENV") != "production"
     if not os.path.exists(static_path) or is_dev:
         return
