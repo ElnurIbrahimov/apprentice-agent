@@ -41,6 +41,11 @@ from .skill_learner import SkillLearner
 from .skill_executor import SkillExecutor
 from .mcp_tools import SkillLibraryTools
 from .titans_integration import TitansSkillBridge
+from .skill_md_importer import (
+    import_skill_md_dir,
+    import_skill_md_file,
+    import_many,
+)
 
 # Lazy-check: don't import sentence_transformers at module load time
 EMBEDDINGS_AVAILABLE = True  # assume available; SkillStore will handle gracefully
@@ -366,6 +371,11 @@ __all__ = [
     # Integration
     "SkillLibraryTools",
     "TitansSkillBridge",
+
+    # SKILL.md importer
+    "import_skill_md_dir",
+    "import_skill_md_file",
+    "import_many",
 
     # Constants
     "EMBEDDINGS_AVAILABLE",
