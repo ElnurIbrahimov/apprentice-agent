@@ -50,9 +50,9 @@ Example: [TOOL: web_search] latest developments in AI safety 2024"""
     ]
 
     triggers = [
-        "search", "find", "look up", "research", "google",
-        "web", "online", "arxiv", "paper", "article",
-        "news", "latest", "current", "discover"
+        "search for", "search the web", "look up", "research",
+        "google", "arxiv", "scholarly", "academic paper",
+        "latest news", "web search",
     ]
 
     max_tool_calls = 3

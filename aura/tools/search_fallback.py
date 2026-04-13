@@ -19,6 +19,7 @@ Perplexity use.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -26,11 +27,63 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Maximum query length that any provider will accept cleanly.
+# Brave/Tavily return 400/422 on very long queries. Keep a hard cap.
+_MAX_QUERY_LEN = 300
+
 # ---------------------------------------------------------------------------
 # Session-level query cache (5-minute TTL)
 # ---------------------------------------------------------------------------
 _search_cache: Dict[Tuple[str, int], Tuple[float, dict]] = {}
 _CACHE_TTL = 300
+
+
+def _clean_query(raw: str) -> str:
+    """Sanitize garbage query wrappers that upstream callers sometimes pass.
+
+    Handles three real-world failure modes that caused provider 400/422 errors:
+      1. Literal "search " / "find " / "look up " / "google " prefix from
+         tool-wrapper code that prepends a verb to the query.
+      2. The Telegram bot's contextual prompt wrapper, which embeds the
+         entire recent conversation before the actual search term —
+         e.g. "[Recent conversation for context …]\\nUser: …\\nAura: …\\n
+         [Current message]\\n<real query>". We extract the last segment
+         after "[Current message]" or the final "User:" line.
+      3. Multi-line prompts: collapse to single line, trim whitespace.
+
+    Finally hard-caps length so no provider sees a giant blob.
+    """
+    if not raw:
+        return ""
+    text = str(raw).strip()
+
+    # Extract the actual user message from Telegram's contextual prompt wrapper.
+    marker = text.rfind("[Current message]")
+    if marker >= 0:
+        text = text[marker + len("[Current message]"):].strip()
+    else:
+        # No explicit marker — if the wrapper header exists, grab the last
+        # "User:" line as a best-effort extraction.
+        if "[Recent conversation for context" in text:
+            user_lines = re.findall(r"User:\s*(.+?)(?:\n|$)", text)
+            if user_lines:
+                text = user_lines[-1].strip()
+
+    # Strip common verb prefixes added by tool wrappers.
+    for prefix in ("search ", "find ", "look up ", "lookup ", "google ", "query "):
+        if text.lower().startswith(prefix):
+            text = text[len(prefix):].lstrip()
+            break
+
+    # Collapse whitespace, hard-cap length.
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > _MAX_QUERY_LEN:
+        logger.warning(
+            "[SearchFallback] query truncated from %d to %d chars",
+            len(text), _MAX_QUERY_LEN,
+        )
+        text = text[:_MAX_QUERY_LEN].rstrip()
+    return text
 
 
 def _cache_get(query: str, max_results: int):
@@ -343,9 +396,18 @@ def web_search_with_fallback(
         total_raw, results, source. Each result has title, url,
         snippet, content, source, score, scraped.
     """
-    if not query or not query.strip():
+    if not query or not str(query).strip():
         return {"success": False, "error": "Empty query", "results": [], "query": ""}
-    query = query.strip()
+
+    original_query = str(query).strip()
+    query = _clean_query(original_query)
+    if not query:
+        return {
+            "success": False,
+            "error": "Query empty after sanitization",
+            "results": [],
+            "query": original_query[:200],
+        }
 
     cached = _cache_get(query, max_results)
     if cached is not None:

@@ -222,13 +222,13 @@ AGENTIC_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search the web for current information. Returns titles, URLs, and descriptions.",
+            "description": "Search the web for FACTUAL information you don't already know — current events, technical docs, recent news, real-world facts. Uses Tavily+Brave+Firecrawl in parallel, returns ranked results with full page content. DO NOT use this for casual conversation, greetings, questions directed at Aura personally (\"how are you\", \"what's your name\"), chit-chat, or anything answerable from general knowledge. The `query` field must be a focused search phrase (3-15 words), NEVER the user's raw message or conversation history. Example good queries: \"Next.js 16 release date\", \"Python 3.14 free-threading PEP\". Example bad queries: \"hey what's up\", \"tell me about yourself\".",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query",
+                        "description": "A focused search phrase (3-15 words). Must NOT contain conversation history or prompt wrappers.",
                     },
                     "max_results": {
                         "type": "integer",
