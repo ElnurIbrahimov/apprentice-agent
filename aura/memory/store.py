@@ -29,12 +29,10 @@ try:
 except ImportError:
     np = None  # type: ignore[assignment]
 
-try:
-    import faiss
-    _FAISS_AVAILABLE = True
-except ImportError:
-    faiss = None  # type: ignore[assignment]
-    _FAISS_AVAILABLE = False
+# faiss import is skipped — faiss-gpu hangs on CUDA init at import time.
+# The numpy brute-force fallback is used instead.
+faiss = None  # type: ignore[assignment]
+_FAISS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 

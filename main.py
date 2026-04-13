@@ -2,6 +2,15 @@
 """Main entry point for the Apprentice Agent."""
 from __future__ import annotations
 
+# Stub _wmi BEFORE any other import — Python 3.12's platform.py imports _wmi
+# at module level, and WMI can hang on Windows. This stub lets platform.machine()
+# fall back to the PROCESSOR_ARCHITECTURE env var instead.
+import sys as _sys, types as _types
+if '_wmi' not in _sys.modules:
+    _wmi_stub = _types.ModuleType('_wmi')
+    _wmi_stub.exec_query = lambda *a, **k: (_ for _ in ()).throw(OSError("_wmi stubbed"))
+    _sys.modules['_wmi'] = _wmi_stub
+
 import argparse
 import os
 import sys
@@ -15,6 +24,7 @@ def _suppress_warnings() -> None:
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     os.environ["SENTENCE_TRANSFORMERS_NO_PROGRESS_BAR"] = "1"
     os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+    os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 
     try:
         from tqdm import tqdm as _orig_tqdm
@@ -35,8 +45,21 @@ def _suppress_warnings() -> None:
     warnings.filterwarnings("ignore", module="torchao")
     os.environ["TORCHAO_DISABLE_TRITON"] = "1"
 
-    # Suppress HuggingFace HTTP retry warnings
+    # Suppress noisy aura internal log messages
     logging.getLogger("huggingface_hub.utils._http").setLevel(logging.ERROR)
+    logging.getLogger("aura.auth").setLevel(logging.ERROR)
+    logging.getLogger("aura.tools.web_search").setLevel(logging.ERROR)
+    logging.getLogger("aura.tools.custom_loader").setLevel(logging.ERROR)
+    logging.getLogger("aura.memory.store").setLevel(logging.ERROR)
+    logging.getLogger("aura.memory.retrieval").setLevel(logging.ERROR)
+    logging.getLogger("torchao").setLevel(logging.ERROR)
+    logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+    logging.getLogger("transformers").setLevel(logging.ERROR)
+
+    # Suppress sentence_transformers stdout load report
+    os.environ["SENTENCE_TRANSFORMERS_HOME"] = os.environ.get("SENTENCE_TRANSFORMERS_HOME", "")
+    warnings.filterwarnings("ignore", module="sentence_transformers")
+    warnings.filterwarnings("ignore", module="transformers")
 
 
 def main() -> None:
