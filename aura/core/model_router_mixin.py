@@ -79,9 +79,13 @@ class ModelRouterMixin:
 
         # For local models / "auto": check if local Ollama is actually reachable.
         # Refresh status every 120s to recover from transient startup failures.
+        # Use a daemon thread so the periodic refresh never blocks the request thread.
         import time as _time
+        import threading as _threading
         if _time.time() - getattr(self, '_local_ollama_last_check', 0) > 120:
-            self._refresh_local_ollama_status()
+            _threading.Thread(
+                target=self._refresh_local_ollama_status, daemon=True, name="ollama-status-refresh"
+            ).start()
         if self._cloud_client and not self._local_ollama_ok:
             logger.info(f"[BRAIN] Local Ollama not available, routing '{model}' to cloud")
             cloud_model = model if model.endswith(":cloud") else Config.MODEL_FAST

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import sys
 import threading
 import time
 from typing import Any, Callable
@@ -254,25 +255,33 @@ def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any =
             logger.exception("Unexpected LLM error: %s: %s", type(exc).__name__, exc)
             return default
     except RuntimeError as exc:
-        # If pool is shutting down, skip the fallback entirely to avoid
-        # "cannot schedule new futures after interpreter shutdown" noise.
+        # Pool may be shut down either by our _shutdown_all() or by Python's own
+        # ThreadPoolExecutor._python_exit() atexit handler, which fires in LIFO order
+        # before our agent.shutdown() atexit. Check both flags.
         try:
             from aura.pools import is_shutting_down
             if is_shutting_down():
                 return default
         except Exception:
             pass
+        # Also detect interpreter-level shutdown (sys.is_finalizing() is Python 3.9+)
+        if getattr(sys, 'is_finalizing', lambda: False)():
+            return default
         logger.warning("Shared executor unavailable (%s), using fallback", exc)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(func)
-            try:
-                return future.result(timeout=timeout)
-            except concurrent.futures.TimeoutError:
-                logger.warning("Fallback LLM call timed out")
-                return default
-            except (ConnectionError, OSError, ValueError) as fallback_exc:
-                logger.error("Fallback LLM error: %s", fallback_exc)
-                return default
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(func)
+                try:
+                    return future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError:
+                    logger.warning("Fallback LLM call timed out")
+                    return default
+                except (ConnectionError, OSError, ValueError) as fallback_exc:
+                    logger.error("Fallback LLM error: %s", fallback_exc)
+                    return default
+        except RuntimeError:
+            # Interpreter is shutting down — ThreadPoolExecutor cannot be created
+            return default
 
 
 def is_rate_limit_error(exc: Exception) -> bool:

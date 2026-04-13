@@ -127,13 +127,14 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         # Local Ollama client (for local models)
         # Explicit timeout prevents infinite hangs on unresponsive models
         import httpx
-        _ollama_timeout = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+        _ollama_timeout = httpx.Timeout(connect=3.0, read=60.0, write=10.0, pool=10.0)
         self.client = ollama.Client(host=Config.OLLAMA_HOST, timeout=_ollama_timeout)
 
         # Check if local Ollama has useful models (not just embedding/OCR models)
         self._local_ollama_ok = False
         self._local_ollama_last_check = 0.0
-        self._refresh_local_ollama_status()
+        # Run non-blocking — don't hang startup if Ollama is slow/unreachable
+        threading.Thread(target=self._refresh_local_ollama_status, daemon=True).start()
 
         self._cloud_client = None  # Default to None — prevents AttributeError in routing
         api_key = os.getenv("OLLAMA_API_KEY")
@@ -990,9 +991,12 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         except Exception:
             pass
 
-        # Yield to user inference — wait briefly in case it finishes soon
+        # Yield to user inference — poll briefly in case it finishes soon.
+        # Event.wait(timeout) returns immediately when already set, so we poll manually.
         if self._user_inference_active.is_set():
-            self._user_inference_active.wait(timeout=5.0)
+            deadline = time.monotonic() + 5.0
+            while self._user_inference_active.is_set() and time.monotonic() < deadline:
+                time.sleep(0.2)
             if self._user_inference_active.is_set():
                 logger.debug("[BRAIN] _quick_generate skipped — user inference still active after 5s")
                 return ""
@@ -1110,6 +1114,14 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         Returns None if all attempts fail or time out.
         """
         for attempt in range(max_retries + 1):
+            # Bail immediately if the interpreter is shutting down to avoid
+            # repeated RuntimeError noise from a dead pool.
+            try:
+                from aura.pools import is_shutting_down
+                if is_shutting_down():
+                    return None
+            except Exception:
+                pass
             try:
                 future = _llm_pool_fn().submit(func)
                 return future.result(timeout=timeout)
@@ -1118,6 +1130,9 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 future.cancel()
                 return None
             except concurrent.futures.CancelledError:
+                return None
+            except RuntimeError:
+                # Pool shut down during interpreter teardown
                 return None
             except Exception as e:
                 if attempt < max_retries and _is_rate_limit_error(e):

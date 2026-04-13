@@ -13,8 +13,6 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-_ERROR_SENTINELS = ["I'm having trouble processing", "[LLM Error]"]
-
 from .chat_session_execution import SessionExecutionController
 from .chat_session_runtime import SessionRuntimeController
 from .chat_session_signals import SessionSignalController
@@ -136,8 +134,6 @@ class ChatSession:
         if self.checkpoint_mgr:
             self.agentic._checkpoint_mgr = self.checkpoint_mgr
             self.agentic.executor._checkpoint_mgr = self.checkpoint_mgr
-
-        self._show_perm_banner(self.perm_mode)
 
         # ── Optional subsystems ──
         try:
@@ -262,6 +258,7 @@ class ChatSession:
 
         self._last_ctrl_c_time = 0.0
         self._last_ipc_heartbeat = 0.0
+        self._injected_input: Optional[str] = None
 
         import threading
         self._channel_lock = threading.Lock()
@@ -283,6 +280,8 @@ class ChatSession:
         self._signal_controller = SessionSignalController(self)
         self._execution_controller = SessionExecutionController(self)
         self._runtime_controller = SessionRuntimeController(self)
+
+        self._show_perm_banner(self.perm_mode)
 
         # ── Initial status bar ──
         self._show_bar(

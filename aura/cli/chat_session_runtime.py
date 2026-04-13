@@ -48,7 +48,13 @@ class SessionRuntimeController:
 
         import threading
 
-        threading.Thread(target=_process, daemon=True, name="channel-drain").start()
+        t = threading.Thread(target=_process, daemon=True, name="channel-drain")
+        try:
+            t.start()
+        except RuntimeError:
+            # Thread creation failed (OS resource exhaustion) — release lock manually
+            # so subsequent drain_channels calls are not permanently blocked.
+            self._session._channel_lock.release()
 
     def submit_background(self, user_input: str) -> None:
         """Handle the '&' prefix for background task submission."""

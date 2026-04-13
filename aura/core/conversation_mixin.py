@@ -454,10 +454,6 @@ class ConversationMixin:
                 title = entry["title"]
                 break
 
-        # Build a summary of the conversation
-        [m["content"] for m in messages if m.get("role") == "user"]
-        [m["content"] for m in messages if m.get("role") == "assistant"]
-
         # Create a condensed version for memory
         conversation_text = ""
         for msg in messages:

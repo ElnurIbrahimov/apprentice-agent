@@ -509,7 +509,10 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
                     except (AttributeError, TypeError) as e:
                         logger.debug(f"[KG Brain] UnifiedMemory bridge wiring failed: {e}")
             except (ImportError, AttributeError, TypeError, ValueError, OSError, RuntimeError) as e:
-                logger.warning(f"[WARNING] Knowledge Graph Brain initialization failed: {e}")
+                # Kuzu allows only one process to hold the DB lock. If another
+                # process already has it (daemon, API server, previous session that
+                # didn't exit cleanly), this is expected — agent runs without KG.
+                logger.debug(f"[KG Brain] Initialization skipped (lock held by another process): {e}")
                 self.kg_brain = None
                 self.kg_bridge = None
                 self.kg_query_engine = None
@@ -1341,6 +1344,16 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             "errors": []
         }
 
+        # Signal pool subsystem that we are shutting down so call_with_timeout
+        # callers bail immediately instead of trying to submit to a potentially
+        # dead pool (Python's ThreadPoolExecutor registers its own _python_exit
+        # atexit handler which may fire before this shutdown() in LIFO order).
+        try:
+            import aura.pools as _pools
+            _pools._shutting_down = True
+        except Exception:
+            pass
+
         # 1. Shutdown NeuroDream if sleeping
         try:
             if hasattr(self, '_neurodream_stop_event'):
@@ -1445,16 +1458,20 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             results["errors"].append(f"ALMA state save: {e}")
 
         # 13. Stop GatewayDaemon (proactive intelligence)
+        # Guard: only stop if it was actually started — CLI never calls start(),
+        # so the daemon stays in STOPPED state and stop() would log a spurious warning.
         try:
             if self.gateway_daemon is not None:
-                import asyncio
-                try:
-                    asyncio.get_running_loop()  # raises RuntimeError if no loop
-                    from aura.pools import fire_and_forget
-                    fire_and_forget(self.gateway_daemon.stop())
-                except RuntimeError:
-                    asyncio.run(self.gateway_daemon.stop())
-                results["freed_resources"].append("gateway_daemon")
+                from aura.proactive.gateway_daemon import DaemonState
+                if self.gateway_daemon.state in (DaemonState.RUNNING, DaemonState.PAUSED):
+                    import asyncio
+                    try:
+                        asyncio.get_running_loop()  # raises RuntimeError if no loop
+                        from aura.pools import fire_and_forget
+                        fire_and_forget(self.gateway_daemon.stop())
+                    except RuntimeError:
+                        asyncio.run(self.gateway_daemon.stop())
+                    results["freed_resources"].append("gateway_daemon")
         except Exception as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"GatewayDaemon stop: {e}")
 
