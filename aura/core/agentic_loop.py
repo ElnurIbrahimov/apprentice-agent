@@ -346,8 +346,32 @@ class AgenticLoop:
         except Exception:
             return {"estimated_cost": 0, "estimated_iterations": 0, "category": "unknown"}
 
+    # Keywords that suggest a code-task prompt (as opposed to conversation)
+    _CODE_TASK_KEYWORDS = frozenset({
+        "fix", "edit", "write", "implement", "refactor", "debug", "test",
+        "add", "create", "delete", "remove", "update", "change", "modify",
+        "function", "class", "method", "file", "import", "error", "bug",
+        "code", "script", "module", "variable", "loop", "api", "endpoint",
+    })
+
     def _inject_smart_context(self, prompt: str, system_prompt: str) -> str:
-        """Embed prompt and find most relevant project files to inject."""
+        """Embed prompt and find the most relevant project files to inject.
+
+        Skipped for short conversational prompts to avoid 30+ blocking embed
+        calls that add 5-20s of latency per message with no benefit.
+        """
+        # Skip for conversational prompts — embedding 30 files for "hey aura"
+        # wastes 4-20 seconds and adds irrelevant code to context.
+        words = prompt.lower().split()
+        is_code_task = len(words) >= 5 and any(w in self._CODE_TASK_KEYWORDS for w in words)
+        if not is_code_task:
+            return system_prompt
+
+        # Also skip if system prompt is already very large (> 30KB) to avoid
+        # bloating context beyond what the model can handle effectively.
+        if len(system_prompt) > 30000:
+            return system_prompt
+
         try:
             import numpy as np
             import ollama
@@ -357,16 +381,16 @@ class AgenticLoop:
                 return system_prompt
             prompt_vec = np.array(resp["embeddings"][0])
 
-            # Score candidate files
+            # Score candidate files — cap at 10 (not 30) to keep latency bounded.
             import glob as _glob
             candidates = []
             for ext in ("*.py", "*.js", "*.ts", "*.go", "*.rs", "*.java"):
                 candidates.extend(_glob.glob(os.path.join(self.project_root, "**", ext), recursive=True))
-            candidates = [f for f in candidates[:50] if os.path.getsize(f) < 50000]
+            candidates = [f for f in candidates[:30] if os.path.getsize(f) < 50000]
 
             # Remove files already in hot_files
             hot = set(getattr(self, '_hot_files', []))
-            candidates = [f for f in candidates if f not in hot][:30]
+            candidates = [f for f in candidates if f not in hot][:10]
 
             if not candidates:
                 return system_prompt
@@ -399,7 +423,7 @@ class AgenticLoop:
                 except Exception:
                     continue
 
-            if parts and len(system_prompt) < 25000:
+            if parts and len(system_prompt) < 30000:
                 system_prompt += "\n\n## Auto-detected relevant files\n" + "\n".join(parts)
 
             return system_prompt
