@@ -83,10 +83,16 @@ def _analyze_impl(zip_path: str, tmp_dir: str) -> str:
     zip_name = Path(zip_path).name
     root = Path(tmp_dir)
 
-    # ── 1. Extract with zip-slip protection ───────────────────────────────────
+    # ── 1. Extract with zip-slip + symlink protection ─────────────────────────
     resolved_root = root.resolve()
     with zipfile.ZipFile(zip_path, "r") as zf:
         for member in zf.infolist():
+            # Skip symlinks — on Unix zipfile.extract() creates real symlinks
+            # which can escape the sandbox on later reads via path traversal.
+            mode = (member.external_attr >> 16) & 0o170000
+            if mode == 0o120000:
+                logger.warning(f"[ZipAnalyzer] Skipping symlink member: {member.filename}")
+                continue
             target = (root / member.filename).resolve()
             try:
                 target.relative_to(resolved_root)

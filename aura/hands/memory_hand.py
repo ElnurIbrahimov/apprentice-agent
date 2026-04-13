@@ -139,7 +139,7 @@ class MemoryHand(Hand):
                             f"and a one-sentence reason."
                         )
                         response = await asyncio.to_thread(
-                            lambda: brain.think(resolution_prompt, system_prompt=self.get_system_prompt())
+                            lambda rp=resolution_prompt: brain.think(rp, system_prompt=self.get_system_prompt())
                         )
                         if response:
                             actions_taken.append(f"Resolved contradiction: {str(c.get('fact_a', ''))[:50]}")

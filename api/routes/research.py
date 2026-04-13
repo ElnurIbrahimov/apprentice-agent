@@ -55,7 +55,8 @@ class ResearchRequest(BaseModel):
 
 def _domain(url: str) -> str:
     try:
-        return urlparse(url).netloc.lstrip("www.")
+        netloc = urlparse(url).netloc
+        return netloc[4:] if netloc.startswith("www.") else netloc
     except Exception:
         return url
 

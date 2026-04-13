@@ -153,7 +153,7 @@ class CollectorHand(Hand):
                     )
                     try:
                         response = await asyncio.to_thread(
-                            lambda: brain.think(diff_prompt, system_prompt=self.get_system_prompt())
+                            lambda dp=diff_prompt: brain.think(dp, system_prompt=self.get_system_prompt())
                         )
                         diff_summary = str(response)[:500] if response else "Content changed (no summary available)"
                         iterations += 1
