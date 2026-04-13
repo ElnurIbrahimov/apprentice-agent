@@ -19,6 +19,14 @@ from pathlib import Path
 from aura.core.conversation_manager import get_conversation_manager
 
 try:
+    from api.services.websocket_hub import push_message, push_typing
+except Exception:  # api package not importable in some bot-only startups
+    def push_message(*args, **kwargs):
+        return None
+    def push_typing(*args, **kwargs):
+        return None
+
+try:
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
     from telegram.ext import ContextTypes
     TELEGRAM_AVAILABLE = True
@@ -256,6 +264,17 @@ class AgentCoreMixin:
             except Exception as e:
                 logger.debug(f"[Telegram] ConversationManager user message tracking skipped: {e}")
 
+        # Mirror the user message to the Mini App via the push channel so any
+        # connected Mini App client sees it the moment it's typed in Telegram.
+        push_message(
+            role="user",
+            content=original_goal,
+            surface="telegram",
+            user_id=user_id,
+            conversation_id=conv_id,
+        )
+        push_typing(active=True, surface="telegram", user_id=user_id)
+
         # Send contextual placeholder based on the goal
         placeholder_text = self._get_progress_text(original_goal)
         placeholder = await update.message.reply_text(placeholder_text)
@@ -353,6 +372,17 @@ class AgentCoreMixin:
                 cm.on_message_added(conv_id, "assistant", response_text, "telegram", user_id)
             except Exception as e:
                 logger.debug(f"[Telegram] ConversationManager assistant message tracking skipped: {e}")
+
+        # Mirror the assistant reply to the Mini App via the push channel.
+        push_typing(active=False, surface="telegram", user_id=user_id)
+        if response_text:
+            push_message(
+                role="assistant",
+                content=response_text,
+                surface="telegram",
+                user_id=user_id,
+                conversation_id=conv_id,
+            )
 
         # Store last exchange for /learn command (persisted to SQLite)
         if user_id:

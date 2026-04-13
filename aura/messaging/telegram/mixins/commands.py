@@ -174,6 +174,37 @@ class CommandsMixin:
                 reply_markup=reply_markup,
             )
 
+    @staticmethod
+    def _miniapp_command_to_goal(command: str) -> str:
+        """Convert a Mini App slash-command into a natural-language goal the agent can dispatch.
+
+        The Mini App's Tools tab builds strings like "/research quantum computing" and
+        passes them via tg.sendData(). We can't re-inject them through CommandHandler
+        (update.message.text is immutable after webapp_data), so we translate to the
+        intent the agent's LLM will route to the right tool via tool-calling.
+        """
+        cmd = command.strip()
+        if not cmd.startswith("/"):
+            return cmd
+        parts = cmd[1:].split(maxsplit=1)
+        if not parts:
+            return cmd
+        verb = parts[0].lower()
+        args = parts[1].strip() if len(parts) > 1 else ""
+        intents = {
+            "research": f"Research thoroughly: {args}" if args else "Use the research tool on the topic I'm about to ask about.",
+            "search":   f"Search the web for: {args}" if args else "Ask me what to search for.",
+            "code":     f"Execute this code and show the output:\n{args}" if args else "Ask me what code to run.",
+            "image":    f"Generate an image of: {args}" if args else "Ask me what image to create.",
+            "compare":  f"Compare multiple models on this prompt: {args}" if args else "Ask me what to compare.",
+            "summarize": f"Summarize: {args}" if args else "Summarize the last message I sent.",
+            "math":     f"Solve this math problem: {args}" if args else "Ask me what math problem to solve.",
+            "youtube":  f"Analyze this YouTube video: {args}" if args else "Ask me for a YouTube URL.",
+            "translate": f"Translate: {args}" if args else "Ask me what to translate.",
+            "explain":  f"Explain: {args}" if args else "Ask me what to explain.",
+        }
+        return intents.get(verb, args or cmd)
+
     async def _handle_webapp_data(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle data sent from the Telegram Mini App via tg.sendData()."""
         import json
@@ -200,16 +231,11 @@ class CommandsMixin:
             command = data.get("command", "").strip()
             if command:
                 await self.send_typing_indicator(chat_id)
-                # Route through agent if it's not a slash command
-                if command.startswith("/"):
-                    await update.effective_message.reply_text(
-                        f"Running: {command}\n\nType the command directly in chat to execute it."
-                    )
-                else:
-                    await self._run_agent_and_reply(
-                        update, command,
-                        user_id=str(user.id),
-                    )
+                goal = self._miniapp_command_to_goal(command)
+                await self._run_agent_and_reply(
+                    update, goal,
+                    user_id=str(user.id),
+                )
         elif action == "settings":
             # Mini App sent settings update
             settings = data.get("settings", {})
@@ -340,26 +366,65 @@ Status: Online and ready!"""
         await update.message.reply_text(response)
 
     async def _handle_memory(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /memory command"""
+        """Handle /memory command — show rich memory stats + recent entries."""
 
         if not self._is_user_allowed(update.effective_user.id):
             return
 
-        # Get memory summary from agent's MemorySystem
-        try:
-            if hasattr(self.aura, 'memory') and self.aura.memory:
-                mem = self.aura.memory
-                # MemorySystem stores conversations in ChromaDB
-                stats = mem.get_stats() if hasattr(mem, 'get_stats') else {}
-                count = stats.get('total_entries', 0) if stats else 0
-                memory_text = f"Memory system active!\n\nStored entries: {count}\n\nKeep chatting and I'll remember important things."
-            else:
-                memory_text = "Memory system active. I remember our conversations!"
-        except Exception as e:
-            logger.error(f"Error getting memory: {e}")
-            memory_text = "Memory system active!"
+        lines: list[str] = ["🧠 *Memory Report*", ""]
 
-        await update.message.reply_text(memory_text)
+        try:
+            from aura.memory.unified_memory import get_unified_memory
+            um = get_unified_memory()
+            stats = um.get_stats() or {}
+
+            total = stats.get("total_memories", 0)
+            profiles = stats.get("user_profiles", 0)
+            embedded = stats.get("embedded_count", 0)
+            by_source = stats.get("by_source", {}) or {}
+            by_life = stats.get("by_lifecycle", {}) or {}
+            sources = stats.get("available_sources", []) or []
+
+            lines.append(f"• Total memories: *{total}*")
+            lines.append(f"• Embedded (semantic): *{embedded}*")
+            lines.append(f"• User profiles: *{profiles}*")
+            lines.append(f"• Backends: {', '.join(sources) if sources else 'sqlite'}")
+
+            if by_source:
+                src_line = ", ".join(f"{k}={v}" for k, v in sorted(by_source.items(), key=lambda x: -x[1])[:5])
+                lines.append(f"• By source: {src_line}")
+            if by_life:
+                life_line = ", ".join(f"{k}={v}" for k, v in sorted(by_life.items(), key=lambda x: -x[1])[:5])
+                lines.append(f"• By lifecycle: {life_line}")
+        except Exception as e:
+            logger.debug(f"[/memory] unified stats error: {e}")
+            lines.append("• Unified memory: not available")
+
+        # Knowledge graph stats
+        try:
+            kg = getattr(self.aura, "kg", None) or getattr(self.aura, "knowledge_graph", None)
+            if kg and hasattr(kg, "_nodes"):
+                lines.append("")
+                lines.append(f"🕸 *Knowledge Graph*")
+                lines.append(f"• Nodes: *{len(kg._nodes)}*")
+                lines.append(f"• Edges: *{len(kg._edges)}*")
+        except Exception as e:
+            logger.debug(f"[/memory] kg stats error: {e}")
+
+        # Conversation context window for this user
+        try:
+            uid = str(update.effective_user.id)
+            hist = self._chat_history.get(uid, [])
+            if hist:
+                lines.append("")
+                lines.append(f"💬 *Current Session*")
+                lines.append(f"• Messages in context: *{len(hist)}*")
+        except Exception:
+            pass
+
+        lines.append("")
+        lines.append("_Tip: /forget clears everything I remember about you._")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     async def _handle_forget(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /forget command"""

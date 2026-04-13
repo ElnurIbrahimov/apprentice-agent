@@ -62,6 +62,7 @@ ROUTE_MODULE_SPECS: tuple[RouteModuleSpec, ...] = (
     RouteModuleSpec("routing"),
     RouteModuleSpec("reliability"),
     RouteModuleSpec("auth"),
+    RouteModuleSpec("bandit"),
 )
 
 CRITICAL_ROUTE_MODULES = frozenset({"chat", "status", "auth"})

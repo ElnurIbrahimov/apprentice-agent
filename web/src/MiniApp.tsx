@@ -60,16 +60,53 @@ declare global {
         viewportHeight: number;
         viewportStableHeight: number;
         platform: string;
+        CloudStorage?: {
+          setItem: (key: string, value: string, cb?: (err: Error | null, ok?: boolean) => void) => void;
+          getItem: (key: string, cb: (err: Error | null, value?: string) => void) => void;
+          getItems: (keys: string[], cb: (err: Error | null, values?: Record<string, string>) => void) => void;
+          removeItem: (key: string, cb?: (err: Error | null, ok?: boolean) => void) => void;
+          removeItems: (keys: string[], cb?: (err: Error | null, ok?: boolean) => void) => void;
+          getKeys: (cb: (err: Error | null, keys?: string[]) => void) => void;
+        };
       };
     };
   }
 }
 
+// ─── CloudStorage helpers: Promise wrappers around the callback-style SDK ───
+function cloudStorageSet(key: string, value: string): Promise<void> {
+  return new Promise((resolve) => {
+    const cs = window.Telegram?.WebApp.CloudStorage;
+    if (!cs) return resolve();
+    try {
+      cs.setItem(key, value, () => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}
+
+function cloudStorageGet(key: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const cs = window.Telegram?.WebApp.CloudStorage;
+    if (!cs) return resolve(null);
+    try {
+      cs.getItem(key, (_err, value) => resolve(value ?? null));
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+const CLOUD_KEY_MESSAGES = 'aura:chat:last';
+const CLOUD_KEY_ACTIVE_TAB = 'aura:ui:active_tab';
+const CLOUD_MAX_MESSAGES = 20;  // TMA CloudStorage has ~100KB quota; keep it tight
+
 // ─── Constants ───
 const API_BASE = `${window.location.protocol}//${window.location.host}/api`;
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/chat/stream`;
 
-type TabId = 'chat' | 'dashboard' | 'tools' | 'emotion' | 'settings';
+type TabId = 'chat' | 'dashboard' | 'tools' | 'emotion' | 'strategies' | 'settings';
 
 // ─── Interfaces ───
 interface ChatMessage {
@@ -78,6 +115,7 @@ interface ChatMessage {
   content: string;
   timestamp: number;
   isStreaming?: boolean;
+  mirroredFrom?: string;
 }
 
 interface AuraStatus {
@@ -127,6 +165,21 @@ export default function MiniApp() {
   const [validated, setValidated] = useState(false);
   // Ref to allow tool tab to send messages into the chat WebSocket
   const sendToChatRef = useRef<((text: string) => void) | null>(null);
+
+  // Restore the previously-active tab from CloudStorage on mount
+  useEffect(() => {
+    (async () => {
+      const saved = await cloudStorageGet(CLOUD_KEY_ACTIVE_TAB);
+      if (saved && ['chat', 'dashboard', 'tools', 'emotion', 'strategies', 'settings'].includes(saved)) {
+        setActiveTab(saved as TabId);
+      }
+    })();
+  }, []);
+
+  // Persist active tab on change
+  useEffect(() => {
+    void cloudStorageSet(CLOUD_KEY_ACTIVE_TAB, activeTab);
+  }, [activeTab]);
 
   // ─── Telegram WebApp init ───
   useEffect(() => {
@@ -212,6 +265,7 @@ export default function MiniApp() {
           tg?.HapticFeedback?.impactOccurred('medium');
         }} />}
         {activeTab === 'emotion' && <EmotionTab />}
+        {activeTab === 'strategies' && <StrategiesTab />}
         {activeTab === 'settings' && <SettingsTab tg={tg} />}
       </main>
 
@@ -222,6 +276,7 @@ export default function MiniApp() {
           { id: 'dashboard' as TabId, label: 'Dashboard', icon: DashIcon },
           { id: 'tools' as TabId, label: 'Tools', icon: ToolsIcon },
           { id: 'emotion' as TabId, label: 'Emotion', icon: EmotionIcon },
+          { id: 'strategies' as TabId, label: 'Strategies', icon: StrategiesIcon },
           { id: 'settings' as TabId, label: 'Settings', icon: SettingsIcon },
         ]).map((tab) => (
           <button
@@ -263,6 +318,7 @@ function ChatTab({ tg, sendToChatRef }: { tg?: NonNullable<Window['Telegram']>['
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const currentMsgIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -271,6 +327,42 @@ function ChatTab({ tg, sendToChatRef }: { tg?: NonNullable<Window['Telegram']>['
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
+
+  // Hydrate chat history from Telegram CloudStorage on first mount so the
+  // Mini App reopens instantly instead of showing an empty shell.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = await cloudStorageGet(CLOUD_KEY_MESSAGES);
+        if (!cancelled && raw) {
+          const parsed = JSON.parse(raw) as ChatMessage[];
+          if (Array.isArray(parsed) && parsed.length) {
+            setMessages(parsed);
+          }
+        }
+      } catch {
+        // ignore — corrupt payload, start fresh
+      }
+      if (!cancelled) setHydrated(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Persist the last N messages to CloudStorage whenever the list changes
+  // (after hydration finishes, so we don't wipe on the initial render).
+  useEffect(() => {
+    if (!hydrated) return;
+    const tail = messages.slice(-CLOUD_MAX_MESSAGES);
+    const payload = JSON.stringify(tail);
+    // CloudStorage has a ~100KB quota — truncate long content before persisting.
+    if (payload.length < 90_000) {
+      void cloudStorageSet(CLOUD_KEY_MESSAGES, payload);
+    } else {
+      const trimmed = tail.map((m) => ({ ...m, content: m.content.slice(0, 2000) }));
+      void cloudStorageSet(CLOUD_KEY_MESSAGES, JSON.stringify(trimmed));
+    }
+  }, [messages, hydrated]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -349,7 +441,71 @@ function ChatTab({ tg, sendToChatRef }: { tg?: NonNullable<Window['Telegram']>['
           break;
 
         case 'pong':
+        case 'ping':
           break;
+
+        case 'message_append': {
+          // Mirror messages that originated on another surface (Telegram chat)
+          // so both surfaces show the same conversation in real time.
+          const role = (data.role as string) || 'assistant';
+          const content = (data.content as string) || '';
+          const surface = (data.surface as string) || 'telegram';
+          if (!content || surface === 'miniapp') break; // ignore our own echoes
+          const id = `mirror_${data.timestamp || Date.now()}_${role}`;
+          setMessages(prev => {
+            // Dedupe: if the last message has identical role+content within 5s, skip
+            const last = prev[prev.length - 1];
+            if (last && last.role === role && last.content === content &&
+                Math.abs(Date.now() - last.timestamp) < 5000) {
+              return prev;
+            }
+            return [...prev, {
+              id,
+              role: role === 'user' ? 'user' : 'assistant',
+              content,
+              timestamp: Date.now(),
+              isStreaming: false,
+              mirroredFrom: surface,
+            }];
+          });
+          break;
+        }
+
+        case 'typing': {
+          const active = Boolean(data.active);
+          setIsLoading(active);
+          break;
+        }
+
+        case 'alma_state': {
+          // Live-update the dashboard's ALMA state without polling
+          const state = data.state as Record<string, unknown> | undefined;
+          if (state && typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('aura:alma_state', { detail: state }));
+          }
+          break;
+        }
+
+        case 'bandit_pull': {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('aura:bandit_pull', { detail: data }));
+          }
+          break;
+        }
+
+        case 'hand_state': {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('aura:hand_state', { detail: data }));
+          }
+          break;
+        }
+
+        case 'inner_thought': {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('aura:inner_thought', { detail: data }));
+          }
+          break;
+        }
       }
     };
 
@@ -1089,5 +1245,163 @@ function SendIcon() {
       <line x1="22" y1="2" x2="11" y2="13" />
       <polygon points="22 2 15 22 11 13 2 9 22 2" />
     </svg>
+  );
+}
+
+function StrategiesIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={active ? '#a78bfa' : '#a1a1aa'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="4" y1="20" x2="4" y2="10" />
+      <line x1="10" y1="20" x2="10" y2="4" />
+      <line x1="16" y1="20" x2="16" y2="14" />
+      <line x1="22" y1="20" x2="22" y2="8" />
+    </svg>
+  );
+}
+
+// ═══════════════════════════════════════════
+// STRATEGIES TAB — live Strategy Bandit chart
+// Shows each category's arm posteriors (Beta mean reward + pull count)
+// Updates live via window 'aura:bandit_pull' CustomEvents fired from the
+// main MiniApp WebSocket handler. Initial state fetched from /api/bandit/state.
+// ═══════════════════════════════════════════
+interface BanditArm {
+  strategy: string;
+  alpha: number;
+  beta: number;
+  mean_reward: number;
+  total_pulls: number;
+  total_reward: number;
+  last_updated: string;
+}
+
+interface BanditState {
+  categories: Record<string, BanditArm[]>;
+  summary?: {
+    total_arms?: number;
+    total_outcomes?: number;
+  };
+}
+
+function StrategiesTab() {
+  const [state, setState] = useState<BanditState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [flashArm, setFlashArm] = useState<string | null>(null);
+
+  const refetch = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/bandit/state');
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      setState(data);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message || 'Failed to load bandit state');
+    }
+  }, []);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { arm?: string } | undefined;
+      if (detail?.arm) {
+        setFlashArm(detail.arm);
+        setTimeout(() => setFlashArm(null), 800);
+      }
+      // Re-fetch on pull events so posteriors stay fresh
+      refetch();
+    };
+    window.addEventListener('aura:bandit_pull', handler);
+    return () => window.removeEventListener('aura:bandit_pull', handler);
+  }, [refetch]);
+
+  if (error) {
+    return (
+      <div className="miniapp-tab-content">
+        <div style={{ padding: 20, color: '#ef4444' }}>
+          Bandit state unavailable: {error}
+        </div>
+      </div>
+    );
+  }
+
+  if (!state) {
+    return (
+      <div className="miniapp-tab-content">
+        <div style={{ padding: 20, color: '#a1a1aa' }}>Loading strategy bandit…</div>
+      </div>
+    );
+  }
+
+  const categories = Object.entries(state.categories || {});
+  const totalArms = state.summary?.total_arms || categories.reduce((sum, [, arms]) => sum + arms.length, 0);
+  const totalOutcomes = state.summary?.total_outcomes || 0;
+
+  return (
+    <div className="miniapp-tab-content" style={{ padding: 16, color: '#e4e4e7' }}>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 4 }}>Strategy Bandit</div>
+        <div style={{ fontSize: 12, color: '#a1a1aa' }}>
+          {totalArms} arms · {totalOutcomes} outcomes recorded · live
+        </div>
+      </div>
+
+      {categories.length === 0 && (
+        <div style={{ color: '#a1a1aa', fontSize: 14, padding: 20, textAlign: 'center' }}>
+          No bandit arms yet. Keep chatting — the bandit learns as Aura picks strategies.
+        </div>
+      )}
+
+      {categories.map(([category, arms]) => {
+        const sortedArms = [...arms].sort((a, b) => b.mean_reward - a.mean_reward);
+        const maxReward = Math.max(...sortedArms.map((a) => a.mean_reward), 0.01);
+        return (
+          <div key={category} style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: '#d4d4d8', textTransform: 'capitalize' }}>
+              {category.replace(/_/g, ' ')}
+            </div>
+            {sortedArms.map((arm) => {
+              const armKey = `${category}:${arm.strategy}`;
+              const pct = Math.max(2, (arm.mean_reward / maxReward) * 100);
+              const isFlashing = flashArm === armKey;
+              return (
+                <div key={arm.strategy} style={{ marginBottom: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 2 }}>
+                    <span style={{ color: '#d4d4d8' }}>{arm.strategy.replace(/_/g, ' ')}</span>
+                    <span style={{ color: '#a1a1aa' }}>
+                      {(arm.mean_reward * 100).toFixed(0)}% · {arm.total_pulls} pulls
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      height: 6,
+                      background: '#27272a',
+                      borderRadius: 3,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${pct}%`,
+                        background: isFlashing
+                          ? 'linear-gradient(90deg, #fbbf24, #a78bfa)'
+                          : 'linear-gradient(90deg, #7c3aed, #a78bfa)',
+                        transition: 'width 400ms ease, background 200ms ease',
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
   );
 }

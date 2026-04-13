@@ -687,6 +687,21 @@ class StrategyBandit:
             f"(request={request_id})"
         )
 
+        # Fire-and-forget push so the Mini App Strategies tab updates live.
+        try:
+            from api.services.websocket_hub import push_bandit_pull
+            push_bandit_pull(
+                arm=f"{category.value}:{strategy.value}",
+                reward=composite_reward,
+                totals={
+                    "category": category.value,
+                    "strategy": strategy.value,
+                    "latency_ms": latency_ms,
+                },
+            )
+        except Exception as _push_exc:
+            logger.debug("[StrategyBandit] push_bandit_pull skipped: %s", _push_exc)
+
         return composite_reward
 
     def record_user_feedback(
