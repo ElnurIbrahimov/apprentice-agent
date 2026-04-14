@@ -50,10 +50,6 @@
       "matches": ["*://www.netflix.com/*"]
     },
     {
-      "resources": ["pyodide-worker.js"],
-      "matches": ["<all_urls>"]
-    },
-    {
       "resources": ["ai-worker.js"],
       "matches": ["<all_urls>"]
     }
