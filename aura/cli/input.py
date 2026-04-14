@@ -410,6 +410,23 @@ def create_session():
         def _submit(event):
             event.current_buffer.validate_and_handle()
 
+        @kb.add('c-v')  # Ctrl+V — paste image or text from clipboard
+        def _paste(event):
+            try:
+                from .clipboard import read_clipboard_image, read_clipboard_text
+            except Exception:
+                return
+            img_path = read_clipboard_image()
+            if img_path:
+                event.current_buffer.insert_text(f"[image: {img_path}]")
+                return
+            text = read_clipboard_text()
+            if text:
+                # prompt_toolkit's default c-v binding is "paste from system
+                # clipboard" on most platforms anyway; we override it so that
+                # multi-line text or images get handled consistently across OSes.
+                event.current_buffer.insert_text(text)
+
         session = PromptSession(
             history=FileHistory(str(HISTORY_FILE)),
             auto_suggest=AutoSuggestFromHistory(),
