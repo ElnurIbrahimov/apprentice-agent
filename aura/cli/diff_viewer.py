@@ -82,6 +82,61 @@ def diff_summary(old: str, new: str, filename: str = "file") -> str:
     return f"{filename} ([green]+{added}[/green]/[red]-{removed}[/red])"
 
 
+def render_diff_from_text(diff_text: str, filename: str = "file", language: str = "") -> Optional[Panel]:
+    """Render a pre-generated unified diff string as a Rich Panel.
+
+    Used for tools (like edit_file) that return a diff in their result dict
+    instead of old/new content. Applies the same syntax highlighting as
+    render_diff(), just skipping the difflib step.
+    """
+    if not diff_text:
+        return None
+    lang = language or _detect_language(filename)
+    text = Text()
+    for line in diff_text.split("\n"):
+        if line.startswith("+++") or line.startswith("---"):
+            text.append(line + "\n", style="bold")
+        elif line.startswith("@@"):
+            text.append(line + "\n", style="cyan")
+        elif line.startswith("+"):
+            if lang:
+                try:
+                    hl = _highlight_line(line[1:], lang, "on dark_green")
+                    text.append("+", style="on dark_green")
+                    text.append_text(hl)
+                    text.append("\n")
+                    continue
+                except Exception:
+                    _logger.debug("diff_highlight_add_failed", exc_info=True)
+            text.append(line + "\n", style="green")
+        elif line.startswith("-"):
+            if lang:
+                try:
+                    hl = _highlight_line(line[1:], lang, "on dark_red")
+                    text.append("-", style="on dark_red")
+                    text.append_text(hl)
+                    text.append("\n")
+                    continue
+                except Exception:
+                    _logger.debug("diff_highlight_remove_failed", exc_info=True)
+            text.append(line + "\n", style="red")
+        else:
+            if lang:
+                try:
+                    hl = _highlight_line(line, lang, "dim")
+                    text.append_text(hl)
+                    text.append("\n")
+                    continue
+                except Exception:
+                    _logger.debug("diff_highlight_context_failed", exc_info=True)
+            text.append(line + "\n", style="dim")
+
+    adds = sum(1 for ln in diff_text.split("\n") if ln.startswith("+") and not ln.startswith("+++"))
+    dels = sum(1 for ln in diff_text.split("\n") if ln.startswith("-") and not ln.startswith("---"))
+    title = f"edit {filename} (+{adds}/-{dels})"
+    return Panel(text, title=f"[bold]{title}[/bold]", border_style="cyan", padding=(0, 1))
+
+
 def render_diff(old: str, new: str, filename: str = "file", context_lines: int = 3, language: str = "") -> Optional[Panel]:
     """Render a syntax-highlighted diff as a Rich Panel.
 

@@ -119,6 +119,25 @@ class ToolOutputRenderer:
         elif not isinstance(output, str):
             output = str(output) if output else ""
 
+        # Auto-render the full colorized diff panel whenever an edit/write
+        # tool returns a pre-generated unified diff. The renderer already
+        # exists in diff_viewer.py but wasn't wired — tool output was just
+        # dumping the raw diff into the shell formatter, which is illegible.
+        if tool_name in ("edit_file", "edit", "write_file", "multi_edit") and result.get("success"):
+            diff_text = result.get("diff") or ""
+            if diff_text and not result.get("preview"):
+                try:
+                    from .diff_viewer import render_diff_from_text
+                    path = result.get("path", result.get("file", "file"))
+                    filename = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                    panel = render_diff_from_text(diff_text, filename=filename)
+                    if panel is not None:
+                        from .display import console as _console
+                        _console.print(panel)
+                        return
+                except Exception:
+                    pass
+
         if tool_name in ("shell", "shell_executor", "bash", "run"):
             self.render_shell_output(
                 output=output,
