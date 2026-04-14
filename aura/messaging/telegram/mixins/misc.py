@@ -737,7 +737,6 @@ class MiscMixin:
                 return
 
             placeholder = await update.message.reply_text(f"\ud83e\udd16 Running hand '{subarg}'...")
-            chat_id = update.effective_chat.id
 
             async def _run_and_report():
                 try:
@@ -752,9 +751,15 @@ class MiscMixin:
                     )
                     if result.error:
                         text += f"\nError: {result.error}"
-                    await self._edit_or_send_response(placeholder, text, chat_id, parse_mode="HTML")
+                    try:
+                        await placeholder.edit_text(text, parse_mode="HTML")
+                    except Exception:
+                        await placeholder.edit_text(text)
                 except Exception as e:
-                    await self._edit_or_send_response(placeholder, f"Hand execution failed: {e}", chat_id)
+                    try:
+                        await placeholder.edit_text(f"Hand execution failed: {e}")
+                    except Exception:
+                        logger.warning(f"[/hand] could not report failure: {e}")
 
             from aura.pools import fire_and_forget
             fire_and_forget(_run_and_report())
@@ -804,6 +809,97 @@ class MiscMixin:
                 "/hand status &lt;name&gt; — Detailed status",
                 parse_mode="HTML",
             )
+
+    async def _handle_proactive_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle prc_<action>_<args> callbacks from proactive cards.
+
+        Actions:
+          - ack                : edit the card to a compact acknowledged state
+          - more_<hand>        : run the hand again for a deeper follow-up
+          - snooze_<sec>_<hand>: snooze the hand for N seconds
+        """
+        query = update.callback_query
+        if not self._is_user_allowed(query.from_user.id):
+            await query.answer("Unauthorized", show_alert=True)
+            return
+        await query.answer()
+        data = query.data or ""
+        parts = data.split("_")
+        if len(parts) < 2 or parts[0] != "prc":
+            return
+        action = parts[1]
+
+        try:
+            from aura.hands.manager import get_hand_manager
+            manager = get_hand_manager()
+        except Exception:
+            manager = None
+
+        if action == "ack":
+            try:
+                await query.edit_message_text("\u2713 Acknowledged.")
+            except Exception:
+                pass
+            return
+
+        if action == "more":
+            hand_name = "_".join(parts[2:]) if len(parts) > 2 else ""
+            if not manager or not hand_name:
+                await query.message.reply_text("Hand manager unavailable.")
+                return
+            brain = self._get_brain()
+            tools = getattr(self.aura, 'tools', {}) or {}
+            if not brain:
+                await query.message.reply_text("Agent brain not ready.")
+                return
+            placeholder = await query.message.reply_text(f"\U0001f916 Re-running '{hand_name}'\u2026")
+            try:
+                result = await manager.run_hand(hand_name, brain, tools)
+                status_icon = "\u2705" if result.success else "\u274c"
+                text = (
+                    f"{status_icon} <b>{hand_name}</b> follow-up\n\n"
+                    f"{(result.summary or '')[:800]}"
+                )
+                if result.error:
+                    text += f"\n\n<i>{str(result.error)[:200]}</i>"
+                try:
+                    await placeholder.edit_text(text, parse_mode="HTML")
+                except Exception:
+                    await placeholder.edit_text(text)
+            except Exception as e:
+                logger.error(f"[/prc more] failed: {e}", exc_info=True)
+                try:
+                    await placeholder.edit_text(f"Follow-up failed: {e}")
+                except Exception:
+                    pass
+            return
+
+        if action == "snooze" and len(parts) >= 4:
+            try:
+                seconds = int(parts[2])
+            except ValueError:
+                return
+            hand_name = "_".join(parts[3:])
+            if not manager or not hand_name:
+                return
+            ok = manager.snooze(hand_name, seconds)
+            if ok:
+                # Human-readable label
+                if seconds >= 3600:
+                    label = f"{seconds // 3600}h"
+                elif seconds >= 60:
+                    label = f"{seconds // 60}m"
+                else:
+                    label = f"{seconds}s"
+                try:
+                    await query.edit_message_text(f"\u23f0 Snoozed '{hand_name}' for {label}.")
+                except Exception:
+                    pass
+            else:
+                try:
+                    await query.edit_message_text(f"Could not snooze '{hand_name}' (unknown hand).")
+                except Exception:
+                    pass
 
     async def _handle_hand_approval_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle hand approval inline keyboard callbacks."""
@@ -855,8 +951,8 @@ class MiscMixin:
         while self.is_running:
             try:
                 daemon = getattr(self.aura, 'gateway_daemon', None)
-                if daemon and hasattr(daemon, 'get_pending_notifications'):
-                    pending = daemon.get_pending_notifications()
+                if daemon and hasattr(daemon, 'get_pending_messages'):
+                    pending = daemon.get_pending_messages()
 
                     for notification in pending:
                         message = getattr(notification, 'content', str(notification))
@@ -946,12 +1042,27 @@ class MiscMixin:
         else:
             specialist = subcmd
             task = " ".join(args[1:]) if len(args) > 1 else "Help me"
+            orch = getattr(self.aura, "orchestrator", None)
+            if not orch or specialist not in getattr(orch, "specialists", {}):
+                available = ", ".join(getattr(orch, "specialists", {}).keys()) if orch else "none"
+                await update.message.reply_text(
+                    f"Unknown specialist '{specialist}'. Available: {available}"
+                )
+                return
+            chat_id = str(update.effective_chat.id)
             placeholder = await update.message.reply_text(f"Running {specialist} agent...")
             try:
-                response = await asyncio.to_thread(self._run_agent_sync, task)
-                await self._edit_or_send_response(placeholder, str(update.effective_chat.id), response or "No response from agent.", update)
+                result = await asyncio.to_thread(orch.run_single, specialist, task)
+                response_text = (
+                    result.response if getattr(result, "response", None)
+                    else "No response from agent."
+                )
+                await self._edit_or_send_response(placeholder, chat_id, response_text, update)
             except Exception as e:
-                await self._edit_or_send_response(placeholder, str(update.effective_chat.id), f"Agent error: {e}", update)
+                logger.error(f"[/agent] {specialist} failed: {e}", exc_info=True)
+                await self._edit_or_send_response(
+                    placeholder, chat_id, f"Agent error: {e}", update
+                )
 
     # ---- TTS Toggle ----
 

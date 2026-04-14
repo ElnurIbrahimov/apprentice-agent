@@ -67,6 +67,12 @@ class HandManager:
         self._pending_commands: dict[str, dict] = {}
         self._commands_lock = threading.Lock()
 
+        # Snooze state: hand_name -> unix timestamp until which scheduler
+        # and trigger_hand_async should skip this hand. Set via user action
+        # on a proactive card (e.g. "⏰ Snooze 1h").
+        self._snoozed_until: dict[str, float] = {}
+        self._snooze_lock = threading.Lock()
+
     def register(self, hand: Hand):
         """Register a Hand with the manager."""
         with self._lock:
@@ -115,6 +121,75 @@ class HandManager:
             hand.state = HandState.PAUSED
             return True
 
+    def snooze(self, name: str, seconds: int) -> bool:
+        """Snooze a Hand for N seconds. check_and_run and trigger_hand_async
+        will skip it until time.time() exceeds the snooze deadline.
+
+        Returns True if the hand exists, False otherwise."""
+        if seconds <= 0:
+            return False
+        with self._lock:
+            if name not in self._hands:
+                return False
+        with self._snooze_lock:
+            self._snoozed_until[name] = time.time() + seconds
+        logger.info(f"[HandManager] Snoozed '{name}' for {seconds}s")
+        return True
+
+    def unsnooze(self, name: str) -> None:
+        """Clear any active snooze on a Hand."""
+        with self._snooze_lock:
+            self._snoozed_until.pop(name, None)
+
+    def is_snoozed(self, name: str) -> bool:
+        """True if the Hand is currently snoozed (deadline not yet reached)."""
+        with self._snooze_lock:
+            deadline = self._snoozed_until.get(name)
+            if deadline is None:
+                return False
+            if time.time() >= deadline:
+                # Expired — clean up lazily
+                self._snoozed_until.pop(name, None)
+                return False
+            return True
+
+    def snooze_remaining(self, name: str) -> float:
+        """Seconds remaining on a Hand's snooze, or 0 if not snoozed."""
+        with self._snooze_lock:
+            deadline = self._snoozed_until.get(name)
+            if deadline is None:
+                return 0.0
+            remaining = deadline - time.time()
+            return max(0.0, remaining)
+
+    async def trigger_hand_async(
+        self,
+        name: str,
+        context: Optional[dict] = None,
+    ) -> Optional[str]:
+        """Queue a Hand for immediate execution, bypassing schedule/idle/drive gates.
+
+        Used by webhook receivers and other push-driven triggers. Honors the
+        snooze state — returns None if the Hand is currently snoozed.
+
+        Returns the Hand name if queued, ``None`` if the Hand is unknown or snoozed.
+        """
+        with self._lock:
+            if name not in self._hands:
+                logger.warning(f"[HandManager] trigger_hand_async: unknown hand '{name}'")
+                return None
+        if self.is_snoozed(name):
+            logger.info(f"[HandManager] trigger_hand_async: '{name}' is snoozed — skipping")
+            return None
+        with self._triggers_lock:
+            self._pending_triggers[name] = {
+                "triggered_by": (context or {}).get("source", "external"),
+                "context": context or {},
+                "timestamp": time.time(),
+            }
+        logger.info(f"[HandManager] Queued push-trigger for '{name}'")
+        return name
+
     def list_hands(self) -> list[dict]:
         """List all registered Hands with their stats."""
         with self._lock:
@@ -146,6 +221,15 @@ class HandManager:
 
         if hand.state == HandState.RUNNING:
             return HandResult(hand_name=name, success=False, summary="", error="Hand is already running")
+
+        if self.is_snoozed(name):
+            remaining = int(self.snooze_remaining(name))
+            return HandResult(
+                hand_name=name,
+                success=False,
+                summary="",
+                error=f"Hand is snoozed for {remaining}s",
+            )
 
         # Filter tools by guardrails (base blocked + per-Hand extras)
         manifest = hand.manifest
@@ -327,6 +411,8 @@ class HandManager:
             pending_trigger_names = set(self._pending_triggers.keys())
         with self._lock:
             for hand in self._hands.values():
+                if self.is_snoozed(hand.name):
+                    continue  # Skip snoozed hands entirely
                 # Hand-to-hand triggers have highest priority (200)
                 if hand.name in pending_trigger_names and hand.state in (
                     HandState.ACTIVE, HandState.COOLDOWN

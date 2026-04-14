@@ -196,44 +196,114 @@ def _run_telegram_scheduled_task(chat_id: str, task_prompt: str, is_agent_task: 
 
 
 def notify_hand_result(result) -> None:
-    """Push a Hand execution result to all authorized Telegram chats.
+    """Push a Hand execution result to all authorized Telegram chats as a
+    rich proactive card with inline action buttons (acknowledge / tell me more /
+    snooze 1h / snooze 6h). The same card is broadcast to the Mini App via
+    the WebSocket hub so both surfaces render it live.
 
-    Called from HandManager's notify callback. Skips routine "all clear" results.
-    Only notifies on: failures, Guardian issues, or completed research with findings.
+    Called from HandManager's ``_notify`` callback. Skips routine "all clear"
+    outputs from recurring maintenance Hands.
     """
     bot_inst = _active_bot_instance
     loop = _active_event_loop
     if not bot_inst or not bot_inst.bot or not loop or loop.is_closed():
         return
 
-    # Skip routine "all clear" Guardian reports and empty Memory maintenance
+    # Unwrap dataclass or dict
     hand_name = result.hand_name if hasattr(result, 'hand_name') else str(result.get("hand", ""))
     success = result.success if hasattr(result, 'success') else result.get("success", True)
     summary = result.summary if hasattr(result, 'summary') else result.get("summary", "")
+    iterations = getattr(result, 'iterations', 0) if hasattr(result, 'iterations') else result.get("iterations", 0)
+    duration = getattr(result, 'duration_seconds', 0.0) if hasattr(result, 'duration_seconds') else result.get("duration_seconds", 0.0)
+    cost = getattr(result, 'cost_usd', 0.0) if hasattr(result, 'cost_usd') else result.get("cost_usd", 0.0)
+    error = getattr(result, 'error', None) if hasattr(result, 'error') else result.get("error")
 
-    if success and hand_name == "guardian" and "ALL CLEAR" in summary.upper():
+    # Skip routine "all clear" Guardian reports and empty Memory maintenance
+    if success and hand_name == "guardian" and "ALL CLEAR" in (summary or "").upper():
         return
-    if success and hand_name == "memory" and "no action needed" in summary.lower():
+    if success and hand_name == "memory" and "no action needed" in (summary or "").lower():
         return
 
-    icon = "\u2705" if success else "\u274c"
-    text = f"{icon} <b>Hand '{hand_name}' completed</b>\n\n{summary[:800]}"
+    # Build rich inline keyboard: ack / more / snooze 1h / snooze 6h
+    try:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("\u2713 Ack", callback_data=f"prc_ack_{hand_name}"),
+                InlineKeyboardButton("\U0001f4ac More", callback_data=f"prc_more_{hand_name}"),
+            ],
+            [
+                InlineKeyboardButton("\u23f0 1h", callback_data=f"prc_snooze_3600_{hand_name}"),
+                InlineKeyboardButton("\U0001f515 6h", callback_data=f"prc_snooze_21600_{hand_name}"),
+            ],
+        ])
+    except Exception:
+        keyboard = None
 
-    async def _send():
+    header_icon = "\U0001f916" if success else "\u274c"
+    title = (
+        f"{header_icon} Hand '{hand_name}' {'completed' if success else 'failed'}"
+    )
+    body = (summary or "").strip()[:800]
+    if error:
+        body += f"\n\n<i>{str(error)[:200]}</i>"
+    meta_parts = []
+    if iterations:
+        meta_parts.append(f"{iterations} iter")
+    if duration:
+        meta_parts.append(f"{duration:.1f}s")
+    if cost:
+        meta_parts.append(f"${cost:.4f}")
+    meta_line = " \u00b7 ".join(meta_parts)
+
+    telegram_text = f"<b>{title}</b>\n\n{body}"
+    if meta_line:
+        telegram_text += f"\n\n<i>{meta_line}</i>"
+
+    async def _send_telegram():
         try:
-            # Send to all known authorized chats
             chat_ids = list(getattr(bot_inst, '_authorized_chats', set()))
             if not chat_ids and hasattr(bot_inst, '_admin_chat_id'):
                 chat_ids = [bot_inst._admin_chat_id]
+            if not chat_ids:
+                chat_ids = list(getattr(bot_inst, 'active_chats', {}).keys())
             for cid in chat_ids:
                 try:
-                    await bot_inst.bot.send_message(chat_id=cid, text=text, parse_mode="HTML")
+                    await bot_inst.bot.send_message(
+                        chat_id=cid,
+                        text=telegram_text,
+                        parse_mode="HTML",
+                        reply_markup=keyboard,
+                    )
                 except Exception:
                     pass
         except Exception as e:
             logging.getLogger(__name__).debug(f"[Hands] Telegram notify failed: {e}")
 
-    asyncio.run_coroutine_threadsafe(_send(), loop)
+    asyncio.run_coroutine_threadsafe(_send_telegram(), loop)
+
+    # Broadcast the same card to the Mini App via WebSocket
+    try:
+        from api.services.websocket_hub import push_proactive_card
+        push_proactive_card({
+            "hand_name": hand_name,
+            "title": title,
+            "summary": body,
+            "severity": "success" if success else "error",
+            "metadata": {
+                "iterations": iterations,
+                "duration_seconds": float(duration) if duration else 0.0,
+                "cost_usd": float(cost) if cost else 0.0,
+            },
+            "actions": [
+                {"id": "ack", "label": "\u2713 Acknowledge", "style": "primary"},
+                {"id": "more", "label": "\U0001f4ac Tell me more", "style": "secondary"},
+                {"id": "snooze_3600", "label": "\u23f0 Snooze 1h", "style": "secondary"},
+                {"id": "snooze_21600", "label": "\U0001f515 Snooze 6h", "style": "secondary"},
+            ],
+        })
+    except Exception as e:
+        logging.getLogger(__name__).debug(f"[Hands] Mini App proactive card push failed: {e}")
 
 
 def notify_hand_approval_request(request: dict) -> None:
@@ -511,6 +581,9 @@ class TelegramBot(
 
         # Hand approval callbacks
         self.app.add_handler(CallbackQueryHandler(self._handle_hand_approval_callback, pattern="^hand_"))
+
+        # Proactive card callbacks (ack / more / snooze)
+        self.app.add_handler(CallbackQueryHandler(self._handle_proactive_callback, pattern="^prc_"))
 
         # Payment handlers
         self.app.add_handler(CallbackQueryHandler(self._handle_callback, pattern="^buy_"))

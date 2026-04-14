@@ -84,6 +84,40 @@ class WebSocketHub:
 
         await self.broadcast_json({"type": "hand_event", **result_dict})
 
+    async def broadcast_agent_event(
+        self,
+        *,
+        kind: str,
+        run_id: str,
+        iteration: int,
+        payload: dict[str, Any],
+        timestamp: float | None = None,
+        user_id: str | None = None,
+        conversation_id: str | None = None,
+    ) -> None:
+        """Push a typed agent event (tool_start, tool_result, chunk, response, ...)
+        to all connected clients. Emitted by LoopEventEmitter via Telegram's
+        agent_core mixin and consumed by both the Mini App and web SPA for live
+        tool-progress rendering."""
+
+        await self.broadcast_json({
+            "type": "agent_event",
+            "kind": kind,
+            "run_id": run_id,
+            "iteration": iteration,
+            "payload": payload,
+            "timestamp": timestamp if timestamp is not None else time.time(),
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+        })
+
+    async def broadcast_proactive_card(self, card: dict[str, Any]) -> None:
+        """Push a rich proactive card (from a Hand or webhook trigger)
+        to all connected clients. Rendered by Mini App's ProactiveCard
+        component with action buttons (ack/more/snooze)."""
+
+        await self.broadcast_json({"type": "proactive_card", **card})
+
     async def broadcast_action_trace(
         self,
         hand_name: str,
@@ -274,6 +308,37 @@ def push_inner_thought(thought: str, level: str = "summary", source: str = "inne
     )
 
 
+def push_agent_event(
+    kind: str,
+    run_id: str,
+    iteration: int,
+    payload: dict[str, Any],
+    *,
+    user_id: str | None = None,
+    conversation_id: str | None = None,
+) -> None:
+    """Fire-and-forget typed agent event broadcast from sync code.
+
+    Called from Telegram's agent thread on every LoopEvent so the Mini App
+    and web SPA see live tool_start / tool_result / chunk / response events
+    keyed by run_id."""
+    _schedule_broadcast(
+        websocket_hub.broadcast_agent_event(
+            kind=kind,
+            run_id=run_id,
+            iteration=iteration,
+            payload=payload,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+    )
+
+
+def push_proactive_card(card: dict[str, Any]) -> None:
+    """Fire-and-forget proactive-card broadcast from sync code."""
+    _schedule_broadcast(websocket_hub.broadcast_proactive_card(card))
+
+
 __all__ = [
     "WebSocketHub",
     "websocket_hub",
@@ -282,4 +347,6 @@ __all__ = [
     "push_bandit_pull",
     "push_hand_state",
     "push_inner_thought",
+    "push_agent_event",
+    "push_proactive_card",
 ]

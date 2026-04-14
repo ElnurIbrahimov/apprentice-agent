@@ -5,6 +5,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { EMOTION_COLORS, NEURO_INFO, PERSONALITY_INFO } from './utils/emotionConstants';
+import { ToolCardRenderer } from './components/ToolCards/ToolCardRenderer';
+import type { ToolResult, ToolStatus, ProactiveCard, ProactiveCardAction } from './types';
 
 // ─── Telegram WebApp type declarations ───
 declare global {
@@ -116,6 +118,135 @@ interface ChatMessage {
   timestamp: number;
   isStreaming?: boolean;
   mirroredFrom?: string;
+  runId?: string;                 // agent run_id that produced this assistant message
+  toolResults?: ToolResult[];     // rich tool cards to render above the markdown bubble
+  proactive?: ProactiveCard;      // Hand-driven proactive card (renders as a special message)
+}
+
+// ─── Tool name → card kind mapping ───
+// Mirrors _TOOL_ICONS in aura/messaging/telegram/mixins/agent_core.py so the
+// two surfaces agree on which tool class each card represents.
+const TOOL_KIND_MAP: Record<string, ToolResult['kind']> = {
+  search_web: 'search', web_search: 'search', brave_search: 'search', searx_search: 'search',
+  research: 'research', deep_research: 'research',
+  code_exec: 'code', python_exec: 'code', execute_code: 'code', run_code: 'code',
+  image_gen: 'image', generate_image: 'image',
+  summarize: 'summary',
+};
+
+function toolKindFor(toolName: string): ToolResult['kind'] {
+  const key = (toolName || '').toLowerCase();
+  return TOOL_KIND_MAP[key] || 'generic';
+}
+
+function safeJSONParse(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  try { return JSON.parse(raw); } catch { return raw; }
+}
+
+function toStr(v: unknown): string {
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  try { return JSON.stringify(v); } catch { return String(v); }
+}
+
+// Build a ToolResult placeholder or enriched final value from an agent event payload.
+// toolResult is the raw server value on 'tool_result' events; undefined on 'tool_start'.
+function buildToolResult(
+  id: string,
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+  toolResult: unknown | undefined,
+  status: ToolStatus,
+): ToolResult {
+  const kind = toolKindFor(toolName);
+  const parsed = toolResult !== undefined ? safeJSONParse(toolResult) : undefined;
+  switch (kind) {
+    case 'code': {
+      const source = toStr(toolArgs.code ?? toolArgs.source ?? toolArgs.python ?? '');
+      const language = toStr(toolArgs.language || 'python');
+      let output: string | undefined;
+      if (parsed && typeof parsed === 'object') {
+        const pObj = parsed as Record<string, unknown>;
+        output = toStr(pObj.output ?? pObj.stdout ?? pObj.result ?? '');
+      } else if (typeof parsed === 'string') {
+        output = parsed;
+      }
+      return { id, tool: toolName, kind: 'code', language, source, output, status };
+    }
+    case 'image': {
+      const prompt = toStr(toolArgs.prompt ?? toolArgs.description ?? '');
+      let imageUrl: string | undefined;
+      let imageB64: string | undefined;
+      if (parsed && typeof parsed === 'object') {
+        const pObj = parsed as Record<string, unknown>;
+        imageUrl = typeof pObj.image_url === 'string' ? pObj.image_url : undefined;
+        imageB64 = typeof pObj.image_b64 === 'string' ? pObj.image_b64
+          : typeof pObj.image_base64 === 'string' ? pObj.image_base64 : undefined;
+      }
+      return { id, tool: toolName, kind: 'image', prompt, imageUrl, imageB64, status };
+    }
+    case 'search': {
+      const query = toStr(toolArgs.query ?? toolArgs.q ?? '');
+      let results: { url: string; title: string; snippet?: string }[] | undefined;
+      if (parsed && typeof parsed === 'object') {
+        const pObj = parsed as Record<string, unknown>;
+        const rawResults = pObj.results;
+        if (Array.isArray(rawResults)) {
+          results = rawResults.slice(0, 16).map((r) => {
+            const ro = (r || {}) as Record<string, unknown>;
+            return {
+              url: toStr(ro.url || ro.link || ''),
+              title: toStr(ro.title || ro.name || ro.url || ''),
+              snippet: ro.snippet != null ? toStr(ro.snippet) : undefined,
+            };
+          });
+        }
+      }
+      return { id, tool: toolName, kind: 'search', query, results, status };
+    }
+    case 'research': {
+      const query = toStr(toolArgs.query ?? toolArgs.topic ?? '');
+      let report: string | undefined;
+      let sources: { id: number; title: string; url: string; snippet?: string }[] | undefined;
+      if (parsed && typeof parsed === 'object') {
+        const pObj = parsed as Record<string, unknown>;
+        report = typeof pObj.report === 'string' ? pObj.report
+          : typeof pObj.summary === 'string' ? pObj.summary : undefined;
+        const rawSources = pObj.sources ?? pObj.citations;
+        if (Array.isArray(rawSources)) {
+          sources = rawSources.slice(0, 16).map((s, i) => {
+            const so = (s || {}) as Record<string, unknown>;
+            return {
+              id: typeof so.id === 'number' ? so.id : i + 1,
+              title: toStr(so.title || so.name || so.url || ''),
+              url: toStr(so.url || ''),
+              snippet: so.snippet != null ? toStr(so.snippet) : undefined,
+            };
+          });
+        }
+      } else if (typeof parsed === 'string') {
+        report = parsed;
+      }
+      return { id, tool: toolName, kind: 'research', query, report, sources, status };
+    }
+    case 'summary': {
+      let summary: string | undefined;
+      if (typeof parsed === 'string') {
+        summary = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        const pObj = parsed as Record<string, unknown>;
+        summary = toStr(pObj.summary || pObj.result || '');
+      }
+      return { id, tool: toolName, kind: 'summary', summary, status };
+    }
+    default: {
+      const resultStr = toolResult !== undefined
+        ? (typeof parsed === 'string' ? parsed : toStr(parsed))
+        : undefined;
+      return { id, tool: toolName, kind: 'generic', args: toolArgs, result: resultStr, status };
+    }
+  }
 }
 
 interface AuraStatus {
@@ -351,15 +482,40 @@ function ChatTab({ tg, sendToChatRef }: { tg?: NonNullable<Window['Telegram']>['
 
   // Persist the last N messages to CloudStorage whenever the list changes
   // (after hydration finishes, so we don't wipe on the initial render).
+  // CloudStorage quota is ~100KB — truncate content + drop heavy tool payloads
+  // (imageB64, long code output, full research reports) before serializing.
   useEffect(() => {
     if (!hydrated) return;
-    const tail = messages.slice(-CLOUD_MAX_MESSAGES);
+    const stripToolResults = (results?: ToolResult[]): ToolResult[] | undefined => {
+      if (!results || results.length === 0) return results;
+      return results.map((t) => {
+        switch (t.kind) {
+          case 'image':
+            return { ...t, imageB64: undefined };
+          case 'code':
+            return { ...t, output: t.output ? t.output.slice(0, 500) : undefined };
+          case 'research':
+            return { ...t, report: t.report ? t.report.slice(0, 1000) : undefined };
+          case 'generic':
+            return { ...t, result: t.result ? t.result.slice(0, 500) : undefined };
+          default:
+            return t;
+        }
+      });
+    };
+    const tail = messages.slice(-CLOUD_MAX_MESSAGES).map((m) => ({
+      ...m,
+      toolResults: stripToolResults(m.toolResults),
+    }));
     const payload = JSON.stringify(tail);
-    // CloudStorage has a ~100KB quota — truncate long content before persisting.
     if (payload.length < 90_000) {
       void cloudStorageSet(CLOUD_KEY_MESSAGES, payload);
     } else {
-      const trimmed = tail.map((m) => ({ ...m, content: m.content.slice(0, 2000) }));
+      const trimmed = tail.map((m) => ({
+        ...m,
+        content: m.content.slice(0, 2000),
+        toolResults: undefined,
+      }));
       void cloudStorageSet(CLOUD_KEY_MESSAGES, JSON.stringify(trimmed));
     }
   }, [messages, hydrated]);
@@ -403,6 +559,114 @@ function ChatTab({ tg, sendToChatRef }: { tg?: NonNullable<Window['Telegram']>['
 
     const handleWSMessage = (data: Record<string, unknown>) => {
       switch (data.type) {
+        case 'agent_event': {
+          const kind = data.kind as string;
+          const payload = (data.payload || {}) as Record<string, unknown>;
+          const runId = (data.run_id as string) || '';
+          if (kind === 'tool_start') {
+            const toolName = (payload.tool_name as string) || 'tool';
+            const toolArgs = (payload.tool_args || {}) as Record<string, unknown>;
+            const iteration = (data.iteration as number) || 0;
+            const toolId = `${runId || 'run'}:${iteration}:${toolName}:${Date.now()}`;
+            const placeholder = buildToolResult(toolId, toolName, toolArgs, undefined, 'running');
+            setMessages(prev => {
+              // Find or create the streaming message for this runId
+              const existing = currentMsgIdRef.current
+                ? prev.find(m => m.id === currentMsgIdRef.current)
+                : prev.slice().reverse().find(m => m.role === 'assistant' && m.runId === runId);
+              if (existing) {
+                return prev.map(m =>
+                  m.id === existing.id
+                    ? { ...m, toolResults: [...(m.toolResults || []), placeholder] }
+                    : m
+                );
+              }
+              const id = `msg_${Date.now()}`;
+              currentMsgIdRef.current = id;
+              return [...prev, {
+                id, role: 'assistant', content: '',
+                timestamp: Date.now(), isStreaming: true,
+                runId, toolResults: [placeholder],
+              }];
+            });
+          } else if (kind === 'tool_result') {
+            const toolName = (payload.tool_name as string) || 'tool';
+            const toolArgs = (payload.tool_args || {}) as Record<string, unknown>;
+            const toolResult = payload.tool_result;
+            setMessages(prev => prev.map(m => {
+              if (m.role !== 'assistant' || !m.toolResults) return m;
+              // Update the most recent running card for this tool
+              const idx = [...m.toolResults].reverse().findIndex(
+                t => t.tool === toolName && t.status === 'running'
+              );
+              if (idx === -1) return m;
+              const realIdx = m.toolResults.length - 1 - idx;
+              const prevCard = m.toolResults[realIdx];
+              const enriched = buildToolResult(prevCard.id, toolName, toolArgs, toolResult, 'done');
+              const newResults = [...m.toolResults];
+              newResults[realIdx] = enriched;
+              return { ...m, toolResults: newResults };
+            }));
+          } else if (kind === 'chunk') {
+            const text = (payload.text as string) || '';
+            if (!text) break;
+            if (!currentMsgIdRef.current) {
+              const id = `msg_${Date.now()}`;
+              currentMsgIdRef.current = id;
+              setMessages(prev => [...prev, {
+                id, role: 'assistant', content: text,
+                timestamp: Date.now(), isStreaming: true, runId,
+              }]);
+            } else {
+              const msgId = currentMsgIdRef.current;
+              setMessages(prev => prev.map(m =>
+                m.id === msgId ? { ...m, content: m.content + text } : m
+              ));
+            }
+          } else if (kind === 'response' || kind === 'done') {
+            const finalText = (payload.text as string) || '';
+            if (currentMsgIdRef.current) {
+              const msgId = currentMsgIdRef.current;
+              setMessages(prev => prev.map(m => {
+                if (m.id !== msgId) return m;
+                return {
+                  ...m,
+                  content: m.content || finalText,
+                  isStreaming: false,
+                };
+              }));
+            }
+            currentMsgIdRef.current = null;
+            setIsLoading(false);
+          } else if (kind === 'error') {
+            if (currentMsgIdRef.current) {
+              const msgId = currentMsgIdRef.current;
+              setMessages(prev => prev.map(m => {
+                if (m.id !== msgId) return m;
+                const errored = (m.toolResults || []).map(t =>
+                  t.status === 'running' ? { ...t, status: 'error' as ToolStatus } : t
+                );
+                return { ...m, isStreaming: false, toolResults: errored };
+              }));
+            }
+            currentMsgIdRef.current = null;
+            setIsLoading(false);
+          }
+          break;
+        }
+        case 'proactive_card': {
+          const card = data as unknown as ProactiveCard;
+          const id = `proactive_${card.hand_name}_${Date.now()}`;
+          setMessages(prev => [...prev, {
+            id,
+            role: 'assistant',
+            content: '',
+            timestamp: Date.now(),
+            isStreaming: false,
+            proactive: card,
+          }]);
+          break;
+        }
         case 'chunk':
           if (data.content) {
             if (!currentMsgIdRef.current) {
@@ -617,27 +881,57 @@ function ChatTab({ tg, sendToChatRef }: { tg?: NonNullable<Window['Telegram']>['
           </div>
         )}
 
-        {messages.map((msg) => (
-          <div key={msg.id} className={`chat-msg ${msg.role}`}>
-            {msg.role === 'assistant' && (
-              <div className="chat-msg-avatar">
-                <div className="avatar-dot" />
-              </div>
-            )}
-            <div className={`chat-msg-bubble ${msg.role}`}>
-              {msg.role === 'assistant' ? (
-                <div className="chat-msg-text markdown-body">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {msg.content}
-                  </ReactMarkdown>
-                  {msg.isStreaming && <span className="streaming-cursor" />}
+        {messages.map((msg) => {
+          if (msg.proactive) {
+            return (
+              <ProactiveCardView
+                key={msg.id}
+                card={msg.proactive}
+                onAction={(actionId) => {
+                  tg?.HapticFeedback?.impactOccurred('medium');
+                  const initData = (tg as unknown as { initData?: string } | undefined)?.initData || '';
+                  fetch(`${API_BASE}/telegram/proactive/action`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      init_data: initData,
+                      action_id: actionId,
+                      hand_name: msg.proactive!.hand_name,
+                    }),
+                  }).catch(() => {});
+                }}
+              />
+            );
+          }
+          return (
+            <div key={msg.id} className={`chat-msg ${msg.role}`}>
+              {msg.role === 'assistant' && (
+                <div className="chat-msg-avatar">
+                  <div className="avatar-dot" />
                 </div>
-              ) : (
-                <div className="chat-msg-text">{msg.content}</div>
               )}
+              <div className={`chat-msg-bubble ${msg.role}`}>
+                {msg.role === 'assistant' ? (
+                  <>
+                    {msg.toolResults && msg.toolResults.length > 0 && (
+                      <ToolCardRenderer results={msg.toolResults} />
+                    )}
+                    {msg.content && (
+                      <div className="chat-msg-text markdown-body">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
+                    )}
+                    {msg.isStreaming && <span className="streaming-cursor" />}
+                  </>
+                ) : (
+                  <div className="chat-msg-text">{msg.content}</div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {isLoading && !currentMsgIdRef.current && (
           <div className="chat-msg assistant">
@@ -809,7 +1103,7 @@ function ToolsTab({ tg, onRunCommand }: { tg?: NonNullable<Window['Telegram']>['
   const quickTools = [
     { id: 'research', label: 'Research', icon: '\u{1F50D}', color: '#8b5cf6', command: '/research ' },
     { id: 'code', label: 'Code', icon: '\u{1F4BB}', color: '#3b82f6', command: '/code ' },
-    { id: 'image', label: 'Image', icon: '\u{1F3A8}', color: '#f59e0b', command: '/imagine ' },
+    { id: 'image', label: 'Image', icon: '\u{1F3A8}', color: '#f59e0b', command: '/image ' },
     { id: 'search', label: 'Search', icon: '\u{1F310}', color: '#10b981', command: '/search ' },
     { id: 'compare', label: 'Compare', icon: '\u{2696}\u{FE0F}', color: '#ec4899', command: '/compare ' },
     { id: 'summarize', label: 'Summarize', icon: '\u{1F4DD}', color: '#14b8a6', command: '/summarize ' },
@@ -1074,6 +1368,54 @@ function EmotionTab() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ─── Proactive card view (Hand-driven action cards) ───
+function ProactiveCardView({ card, onAction }: { card: ProactiveCard; onAction: (id: string) => void }) {
+  const severity = card.severity || 'info';
+  const defaultActions: ProactiveCardAction[] = [
+    { id: 'ack', label: '\u2713 Acknowledge', style: 'primary' },
+    { id: 'more', label: '\u{1F4AC} Tell me more', style: 'secondary' },
+    { id: 'snooze_3600', label: '\u23F0 1h', style: 'secondary' },
+    { id: 'snooze_21600', label: '\u{1F515} 6h', style: 'secondary' },
+  ];
+  const actions = card.actions && card.actions.length > 0 ? card.actions : defaultActions;
+  const meta = card.metadata || {};
+  const metaLine: string[] = [];
+  if (meta.iterations) metaLine.push(`${meta.iterations} iter`);
+  if (typeof meta.duration_seconds === 'number') metaLine.push(`${meta.duration_seconds.toFixed(1)}s`);
+  if (typeof meta.cost_usd === 'number') metaLine.push(`$${meta.cost_usd.toFixed(4)}`);
+  if (meta.source) metaLine.push(String(meta.source));
+
+  return (
+    <div className={`proactive-card proactive-card--${severity}`}>
+      <div className="proactive-card-header">
+        <span className="proactive-card-icon">{'\u{1F916}'}</span>
+        <div className="proactive-card-titles">
+          <span className="proactive-card-title">{card.title || `Hand "${card.hand_name}"`}</span>
+          <span className="proactive-card-hand">{card.hand_name}</span>
+        </div>
+      </div>
+      {card.summary && (
+        <div className="proactive-card-body">{card.summary}</div>
+      )}
+      {metaLine.length > 0 && (
+        <div className="proactive-card-meta">{metaLine.join(' \u00B7 ')}</div>
+      )}
+      <div className="proactive-card-actions">
+        {actions.map((a) => (
+          <button
+            key={a.id}
+            className={`proactive-card-btn proactive-card-btn--${a.style || 'secondary'}`}
+            onClick={() => onAction(a.id)}
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

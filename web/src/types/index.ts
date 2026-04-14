@@ -78,6 +78,104 @@ export interface ProactiveMessage {
   metadata: Record<string, unknown>;
 }
 
+// ─── Typed agent events (mirror of Python LoopEvent) ─────────────────────
+// Emitted by Telegram/API agent threads via websocket_hub.broadcast_agent_event
+// and consumed by the Mini App chat tab + web SPA for live tool-progress UI.
+
+export type AgentEventKind =
+  | 'tool_start'
+  | 'tool_result'
+  | 'chunk'
+  | 'response'
+  | 'done'
+  | 'error'
+  | 'run_finished';
+
+export interface AgentEvent {
+  type: 'agent_event';
+  kind: AgentEventKind;
+  run_id: string;
+  iteration: number;
+  payload: Record<string, unknown>;
+  timestamp: number;
+  user_id?: string | null;
+  conversation_id?: string | null;
+}
+
+// ─── Rich tool-output cards for the Mini App chat ────────────────────────
+// Each assistant ChatMessage can carry a list of ToolResults that render
+// above the markdown bubble as interactive cards (CodeCard, ImageCard,
+// ResearchCard, SearchCard, SummaryCard, GenericToolCard).
+
+export type ToolStatus = 'running' | 'done' | 'error';
+
+export interface ToolResultBase {
+  id: string;           // unique — typically `${run_id}:${iteration}:${tool_name}`
+  tool: string;         // raw tool name from the agent
+  status: ToolStatus;
+  iconOverride?: string;
+}
+
+export type ToolResult =
+  | (ToolResultBase & {
+      kind: 'code';
+      language: string;
+      source: string;
+      output?: string;
+    })
+  | (ToolResultBase & {
+      kind: 'image';
+      imageUrl?: string;
+      imageB64?: string;
+      prompt: string;
+    })
+  | (ToolResultBase & {
+      kind: 'research';
+      query: string;
+      report?: string;
+      sources?: Citation[];
+    })
+  | (ToolResultBase & {
+      kind: 'search';
+      query: string;
+      results?: { url: string; title: string; snippet?: string }[];
+    })
+  | (ToolResultBase & {
+      kind: 'summary';
+      title?: string;
+      summary?: string;
+      highlights?: string[];
+    })
+  | (ToolResultBase & {
+      kind: 'generic';
+      args?: Record<string, unknown>;
+      result?: string;
+    });
+
+// ─── Proactive action card (from Hands + webhooks) ───────────────────────
+
+export interface ProactiveCardAction {
+  id: string;           // e.g. "ack", "more", "snooze_3600"
+  label: string;        // e.g. "✓ Acknowledge", "💬 Tell me more", "⏰ Snooze 1h"
+  style?: 'primary' | 'secondary' | 'danger';
+}
+
+export interface ProactiveCard {
+  type: 'proactive_card';
+  hand_name: string;
+  title: string;
+  summary: string;
+  severity?: 'info' | 'success' | 'warning' | 'error';
+  metadata?: {
+    iterations?: number;
+    duration_seconds?: number;
+    cost_usd?: number;
+    source?: string;  // e.g. "github:ci_failure"
+  };
+  actions?: ProactiveCardAction[];
+  timestamp?: number;
+}
+
 export interface ChatResponse {
   response: string;
   fast_path: boolean;

@@ -15,15 +15,18 @@ import re
 import time as _time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from aura.core.conversation_manager import get_conversation_manager
 
 try:
-    from api.services.websocket_hub import push_message, push_typing
+    from api.services.websocket_hub import push_agent_event, push_message, push_typing
 except Exception:  # api package not importable in some bot-only startups
     def push_message(*args, **kwargs):
         return None
     def push_typing(*args, **kwargs):
+        return None
+    def push_agent_event(*args, **kwargs):
         return None
 
 try:
@@ -35,6 +38,96 @@ except ImportError:
     Update = None
 
 logger = logging.getLogger(__name__)
+
+
+# ─── Typed agent event rendering helpers (module-level, reusable, testable) ───
+
+_TOOL_ICONS: dict[str, str] = {
+    "search_web": "\U0001f50d", "web_search": "\U0001f50d",
+    "brave_search": "\U0001f50d", "searx_search": "\U0001f50d",
+    "research": "\U0001f9ea", "deep_research": "\U0001f9ea",
+    "code_exec": "\U0001f4bb", "python_exec": "\U0001f4bb",
+    "execute_code": "\U0001f4bb", "run_code": "\U0001f4bb",
+    "image_gen": "\U0001f3a8", "generate_image": "\U0001f3a8",
+    "read_file": "\U0001f4c4", "write_file": "\u270f\ufe0f",
+    "edit_file": "\u270f\ufe0f",
+    "grep": "\U0001f50e", "glob": "\U0001f4c2",
+    "list_dir": "\U0001f4c2", "project_structure": "\U0001f4c2",
+    "shell": "\u2699\ufe0f", "bash": "\u2699\ufe0f",
+    "summarize": "\U0001f4dd", "translate": "\U0001f310",
+    "fetch_url": "\U0001f310", "url_fetch": "\U0001f310",
+    "youtube": "\U0001f3ac", "math": "\U0001f522",
+    "memory_search": "\U0001f9e0", "memory_add": "\U0001f4be",
+}
+
+
+def _tool_icon(name: str) -> str:
+    return _TOOL_ICONS.get((name or "").lower(), "\U0001f527")
+
+
+def _tool_result_hint(tool_name: str, result: Any) -> str:  # noqa: ANN401
+    """Short, human-readable hint shown next to a completed tool line.
+
+    E.g. ``(12 results)``, ``(2.3k chars)``, ``(error)``. Safe on any type.
+    """
+    if result is None:
+        return ""
+    try:
+        if isinstance(result, dict):
+            if result.get("error") or result.get("errors"):
+                return "(error)"
+            if isinstance(result.get("results"), list):
+                return f"({len(result['results'])} results)"
+            if "output" in result and isinstance(result["output"], str):
+                n = len(result["output"])
+                if n > 1000:
+                    return f"({n // 1000}k chars)"
+                if n > 0:
+                    return f"({n} chars)"
+            return ""
+        if isinstance(result, list):
+            return f"({len(result)} items)"
+        if isinstance(result, str):
+            head = result[:100].lower()
+            if "error" in head or "failed" in head or "traceback" in head:
+                return "(error)"
+            n = len(result)
+            if n > 1000:
+                return f"({n // 1000}k chars)"
+            if n > 0:
+                return f"({n} chars)"
+    except Exception:
+        pass
+    return ""
+
+
+def _serialize_event_payload(payload: Any) -> dict[str, Any]:  # noqa: ANN401
+    """Make a LoopEvent payload JSON-safe for WebSocket broadcast.
+
+    Trims oversized strings to keep the Mini App responsive; falls back to
+    ``str()`` on any non-serializable value."""
+    if not isinstance(payload, dict):
+        return {"value": str(payload)[:2000]}
+    out: dict[str, Any] = {}
+    for k, v in payload.items():
+        try:
+            if isinstance(v, str):
+                out[k] = v[:4000]
+            elif isinstance(v, (int, float, bool)) or v is None:
+                out[k] = v
+            elif isinstance(v, dict):
+                # Shallow trim — values become repr'd strings
+                out[k] = {
+                    kk: (vv[:1000] if isinstance(vv, str) else str(vv)[:1000])
+                    for kk, vv in list(v.items())[:32]
+                }
+            elif isinstance(v, (list, tuple)):
+                out[k] = [str(x)[:500] for x in v[:32]]
+            else:
+                out[k] = str(v)[:2000]
+        except Exception:
+            out[k] = "<unserializable>"
+    return out
 
 
 class AgentCoreMixin:
@@ -279,40 +372,93 @@ class AgentCoreMixin:
         placeholder_text = self._get_progress_text(original_goal)
         placeholder = await update.message.reply_text(placeholder_text)
 
-        # Streaming: use a queue to pass chunks from the agent thread
-        chunk_q = queue.Queue(maxsize=500)
+        # Typed event bus: one queue carries every LoopEvent from the agent
+        # thread. The stream editor renders tool progress + streaming text
+        # into the Telegram placeholder; the same events are mirrored to the
+        # Mini App via push_agent_event (inside _run_agent_sync).
+        events_q: queue.Queue = queue.Queue(maxsize=1000)
+        progress_items: list[dict[str, Any]] = []  # [{name, icon, done, hint}]
         streamed_text = ""
-        _STREAM_EDIT_INTERVAL = 1.5  # seconds between Telegram message edits
-        _last_edit_time = _time.time()
+        _STREAM_EDIT_INTERVAL = 1.5
         _stream_done = asyncio.Event()
 
+        def _render_progress() -> str:
+            lines: list[str] = []
+            for item in progress_items:
+                icon = item["icon"]
+                name = item["name"]
+                if item["done"]:
+                    hint = f" {item['hint']}" if item.get("hint") else ""
+                    lines.append(f"{icon} {name} \u2713{hint}")
+                else:
+                    lines.append(f"{icon} {name}\u2026")
+            body = "\n".join(lines)
+            if streamed_text.strip():
+                if body:
+                    body += "\n\n"
+                display = streamed_text[:3500]
+                if len(streamed_text) > 3500:
+                    display += " \u2026"
+                else:
+                    display += " \u2588"
+                body += display
+            return body or placeholder_text
+
         async def _stream_editor():
-            """Periodically edit the placeholder with accumulated streamed text."""
-            nonlocal streamed_text, _last_edit_time
+            """Drain typed agent events and update the Telegram placeholder."""
+            nonlocal streamed_text
+            _last_edit = _time.time()
+            _last_rendered = ""
             while not _stream_done.is_set():
-                # Drain all available chunks
-                new_chunks = []
+                drained: list[dict[str, Any]] = []
                 while True:
                     try:
-                        chunk = chunk_q.get_nowait()
-                        if chunk is None:  # Sentinel — agent done
+                        item = events_q.get_nowait()
+                        if item is None:
                             _stream_done.set()
                             break
-                        new_chunks.append(chunk)
+                        drained.append(item)
                     except queue.Empty:
                         break
 
-                if new_chunks:
-                    streamed_text += "".join(new_chunks)
-                    now = _time.time()
-                    # Edit message at most every INTERVAL seconds (Telegram rate limit)
-                    if now - _last_edit_time >= _STREAM_EDIT_INTERVAL and streamed_text.strip():
+                for ev in drained:
+                    kind = ev.get("kind") or ""
+                    payload = ev.get("payload") or {}
+                    if kind == "tool_start":
+                        tool_name = str(payload.get("tool_name") or "tool")
+                        progress_items.append({
+                            "name": tool_name,
+                            "icon": _tool_icon(tool_name),
+                            "done": False,
+                            "hint": "",
+                        })
+                    elif kind == "tool_result":
+                        tool_name = str(payload.get("tool_name") or "")
+                        hint = _tool_result_hint(tool_name, payload.get("tool_result"))
+                        for pi in reversed(progress_items):
+                            if pi["name"] == tool_name and not pi["done"]:
+                                pi["done"] = True
+                                pi["hint"] = hint
+                                break
+                    elif kind == "chunk":
+                        text = str(payload.get("text") or "")
+                        if text:
+                            streamed_text += text
+                    elif kind == "response":
+                        text = str(payload.get("text") or "")
+                        if text and not streamed_text:
+                            streamed_text = text
+
+                now = _time.time()
+                if drained and now - _last_edit >= _STREAM_EDIT_INTERVAL:
+                    rendered = _render_progress()
+                    if rendered and rendered != _last_rendered:
                         try:
-                            display = streamed_text[:4000] + (" ..." if len(streamed_text) > 4000 else " \u2588")
-                            await placeholder.edit_text(display)
-                            _last_edit_time = now
+                            await placeholder.edit_text(rendered[:4096])
+                            _last_rendered = rendered
+                            _last_edit = now
                         except Exception:
-                            pass  # Message unchanged or rate limited
+                            pass  # rate limited or unchanged
 
                 if not _stream_done.is_set():
                     await asyncio.sleep(0.3)
@@ -324,7 +470,13 @@ class AgentCoreMixin:
         is_error = False
         try:
             response_text, artifacts = await asyncio.wait_for(
-                asyncio.to_thread(self._run_agent_sync, goal, chunk_q),
+                asyncio.to_thread(
+                    self._run_agent_sync,
+                    goal,
+                    events_q,
+                    user_id,
+                    conv_id,
+                ),
                 timeout=self._AGENT_TIMEOUT,
             )
         except asyncio.TimeoutError:
@@ -438,31 +590,69 @@ class AgentCoreMixin:
         except Exception:
             pass  # Reactions are optional — never break the main flow
 
-    def _run_agent_sync(self, goal: str, chunk_queue: queue.Queue | None = None):
+    def _run_agent_sync(
+        self,
+        goal: str,
+        events_queue: "queue.Queue | None" = None,
+        user_id: str | None = None,
+        conv_id: str | None = None,
+    ):
         """Synchronous agent execution — called via asyncio.to_thread.
 
-        Returns (response_text, list_of_artifact_paths).
+        Wires a typed ``on_event`` callback into ``agent.run()`` that:
+          (a) feeds ``events_queue`` for Telegram's stream editor, and
+          (b) mirrors every ``LoopEvent`` to the Mini App via ``push_agent_event``.
+
+        Returns ``(response_text, list_of_artifact_paths)``.
         """
         wrapper = self.aura  # TelegramAgentWrapper
         agent = getattr(wrapper, 'agent', wrapper)  # Unwrap to ApprenticeAgent
 
         response_text = ""
-        artifacts = []
+        artifacts: list = []
 
-        # Build on_chunk callback for streaming
-        on_chunk = None
-        if chunk_queue is not None:
-            def on_chunk(text):
+        def _dispatch_event(kind: str, payload_dict: dict, run_id: str = "", iteration: int = 0) -> None:
+            """Push a typed event to the local queue + the Mini App WebSocket."""
+            if events_queue is not None:
                 try:
-                    chunk_queue.put_nowait(text)
+                    events_queue.put_nowait({
+                        "kind": kind,
+                        "run_id": run_id,
+                        "iteration": iteration,
+                        "payload": payload_dict,
+                    })
                 except queue.Full:
                     pass
+            try:
+                push_agent_event(
+                    kind=kind,
+                    run_id=run_id,
+                    iteration=iteration,
+                    payload=_serialize_event_payload(payload_dict),
+                    user_id=user_id,
+                    conversation_id=conv_id,
+                )
+            except Exception as e:
+                logger.debug(f"[Telegram] push_agent_event failed: {e}")
 
-        # === Primary: Full ReAct agent loop ===
+        def on_event(event) -> None:  # LoopEvent (dataclass)
+            try:
+                kind = getattr(event, "type", "") or ""
+                run_id = str(getattr(event, "run_id", "") or "")
+                iteration = int(getattr(event, "iteration", 0) or 0)
+                payload_dict = dict(getattr(event, "payload", {}) or {})
+                _dispatch_event(kind, payload_dict, run_id, iteration)
+            except Exception as e:
+                logger.debug(f"[Telegram] on_event adapter error: {e}")
+
+        # === Primary: Full ReAct agent loop with typed events ===
         try:
             logger.info(f"[Telegram] agent.run() starting: {goal[:80]}")
-            result = agent.run(goal, timeout_seconds=self._AGENT_TIMEOUT - 5,
-                               on_chunk=on_chunk)
+            result = agent.run(
+                goal,
+                timeout_seconds=self._AGENT_TIMEOUT - 5,
+                on_event=on_event,
+            )
 
             if isinstance(result, dict):
                 response_text = result.get("response", "")
@@ -492,20 +682,26 @@ class AgentCoreMixin:
 
             if response_text:
                 logger.info(f"[Telegram] agent.run() succeeded ({len(response_text)} chars)")
+                # Final synthetic 'done' event so the Mini App knows to finalize
+                _dispatch_event("done", {"text": response_text[:4000]})
                 return (response_text, artifacts)
 
         except Exception as e:
             logger.warning(f"[Telegram] agent.run() failed: {e}, falling back to chat()")
 
-        # Signal streaming done for fallback paths
-        if chunk_queue is not None:
-            chunk_queue.put(None)  # Sentinel
+        # Signal streaming done so _stream_editor unblocks after fallbacks
+        if events_queue is not None:
+            try:
+                events_queue.put(None)
+            except Exception:
+                pass
 
         # === Fallback 1: agent.chat() ===
         try:
             logger.info(f"[Telegram] Fallback to agent.chat(): {goal[:80]}")
             response_text = agent.chat(goal)
             if response_text:
+                _dispatch_event("done", {"text": response_text[:4000]})
                 return (response_text, [])
         except Exception as e:
             logger.warning(f"[Telegram] agent.chat() failed: {e}, falling back to brain.think()")
@@ -517,10 +713,12 @@ class AgentCoreMixin:
                 logger.info(f"[Telegram] Fallback to brain.think(): {goal[:80]}")
                 response_text = brain.think(goal)
                 if response_text:
+                    _dispatch_event("done", {"text": response_text[:4000]})
                     return (response_text, [])
         except Exception as e:
             logger.error(f"[Telegram] brain.think() also failed: {e}")
 
+        _dispatch_event("error", {"message": "Could not process request"})
         return (response_text or "Sorry, I couldn't process that right now.", [])
 
     def _collect_artifacts(self, agent) -> list:

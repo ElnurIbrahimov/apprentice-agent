@@ -52,6 +52,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         "/api/status",
         "/api/auth/chatgpt/status",
         "/api/auth/chatgpt/login",
+        "/api/telegram/validate-init",
+        "/api/telegram/proactive/action",
         "/docs",
         "/openapi.json",
         "/redoc",

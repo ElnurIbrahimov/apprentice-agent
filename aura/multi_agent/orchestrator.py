@@ -155,6 +155,26 @@ class MultiAgentOrchestrator:
 
         return final_response
 
+    def run_single(self, agent_name: str, query: str,
+                   context: Optional[Dict[str, Any]] = None) -> AgentResult:
+        """Force-run one specialist by name, bypassing the router.
+
+        Used by surfaces (Telegram `/agent <name> <task>`, CLI, web) that want to
+        target a specific specialist instead of letting the IntentRouter decide.
+        """
+        if agent_name not in self.specialists:
+            return AgentResult(
+                success=False,
+                response=f"Agent '{agent_name}' not found. Available: {', '.join(self.specialists.keys())}",
+                agent=agent_name,
+            )
+        message = AgentMessage(
+            content=query,
+            sender="user",
+            context=context or {},
+        )
+        return self._execute_single(agent_name, message)
+
     def _execute_single(self, agent_name: str, message: AgentMessage) -> AgentResult:
         """Execute a single agent."""
         if agent_name not in self.specialists:

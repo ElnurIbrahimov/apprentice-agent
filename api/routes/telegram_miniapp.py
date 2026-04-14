@@ -14,17 +14,20 @@ import os
 import time
 from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-
-from api.auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
+# This router is intentionally NOT gated by require_api_key: the Mini App runs
+# in a Telegram WebView that has no way to carry a pre-shared X-API-Key without
+# leaking it to the client. Authentication for these endpoints is the HMAC-SHA256
+# signature Telegram puts in initData — verified below via _validate_init_data.
+# Must also be listed in api/middleware.py PUBLIC_PATHS for the middleware to
+# skip it.
 router = APIRouter(
     prefix="/api/telegram",
     tags=["telegram-miniapp"],
-    dependencies=[Depends(require_api_key)],
 )
 
 
@@ -38,6 +41,12 @@ class InitDataResponse(BaseModel):
     first_name: str | None = None
     username: str | None = None
     auth_date: int | None = None
+
+
+class ProactiveActionRequest(BaseModel):
+    init_data: str                     # Telegram Mini App initData for HMAC auth
+    action_id: str                     # "ack" | "more" | "snooze_3600" | ...
+    hand_name: str
 
 
 def _validate_init_data(init_data: str, bot_token: str) -> dict | None:
@@ -121,3 +130,60 @@ async def validate_init_data(request: InitDataRequest):
         username=result.get("username"),
         auth_date=result.get("auth_date"),
     )
+
+
+@router.post("/proactive/action")
+async def proactive_action(request: ProactiveActionRequest):
+    """Apply a proactive-card action from the Mini App (ack / more / snooze).
+
+    Authenticated via Telegram Mini App initData HMAC — no API key required
+    because the Telegram WebView can't carry one. The HMAC proves the request
+    originated from a legitimate Mini App session.
+    """
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not bot_token:
+        raise HTTPException(status_code=500, detail="Bot token not configured")
+
+    if _validate_init_data(request.init_data, bot_token) is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired initData")
+
+    action = request.action_id
+    hand_name = request.hand_name
+    if not hand_name:
+        raise HTTPException(status_code=400, detail="hand_name is required")
+
+    try:
+        from aura.hands.manager import get_hand_manager
+        manager = get_hand_manager()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Hand manager unavailable: {exc}") from exc
+
+    if action == "ack":
+        return {"status": "acknowledged", "hand": hand_name}
+
+    if action == "more":
+        # Queue a follow-up run via push-trigger; results flow back through
+        # the normal notify_hand_result path (Telegram + Mini App card).
+        triggered = await manager.trigger_hand_async(
+            hand_name,
+            context={"source": "miniapp:more"},
+        )
+        if not triggered:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Could not trigger '{hand_name}' (unknown or snoozed)",
+            )
+        return {"status": "queued", "hand": hand_name}
+
+    if action.startswith("snooze_"):
+        try:
+            seconds = int(action.split("_", 1)[1])
+        except (IndexError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid snooze action") from exc
+        if seconds <= 0 or seconds > 7 * 24 * 3600:
+            raise HTTPException(status_code=400, detail="Snooze out of range")
+        if not manager.snooze(hand_name, seconds):
+            raise HTTPException(status_code=404, detail=f"Unknown hand: {hand_name}")
+        return {"status": "snoozed", "hand": hand_name, "seconds": seconds}
+
+    raise HTTPException(status_code=400, detail=f"Unknown action: {action}")

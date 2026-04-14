@@ -145,6 +145,29 @@ async def _notify_surfaces(text: str, channel: str = "all"):
             logger.debug(f"[Webhooks] WebSocket broadcast failed: {e}")
 
 
+async def _trigger_hand(hand_name: str, context: Dict[str, Any]) -> bool:
+    """Push-trigger a Hand via HandManager, falling back to direct agent routing.
+
+    Used by the GitHub/alert webhooks so a CI failure runs through the Guardian
+    Hand (with audit logging, cost caps, approval gates) instead of dumping a
+    raw ``agent.run()`` call into the event loop.
+
+    Returns True if the trigger was accepted, False otherwise.
+    """
+    try:
+        from aura.hands.manager import get_hand_manager
+        manager = get_hand_manager()
+        if not manager or not manager.get_hand(hand_name):
+            return False
+        triggered = await manager.trigger_hand_async(hand_name, context=context)
+        if triggered:
+            logger.info(f"[Webhooks] Hand-trigger queued: {hand_name} ({context.get('source', '?')})")
+            return True
+    except Exception as e:
+        logger.warning(f"[Webhooks] Hand-trigger failed for {hand_name}: {e}")
+    return False
+
+
 async def _route_to_agent(task_description: str, context: Dict[str, Any] | None = None):
     """Queue a task for the AURA agent to investigate."""
     try:
@@ -254,17 +277,28 @@ async def github_webhook(
 
             async def _investigate_ci():
                 await _notify_surfaces(
-                    f"CI Failure on {repo}\n"
+                    f"\u26a0\ufe0f CI Failure on {repo}\n"
                     f"Check: {name}\n"
                     f"Commit: {head_sha}\n"
-                    f"URL: {url}\n\n"
-                    f"Investigating..."
+                    f"URL: {url}"
                 )
-                await _route_to_agent(
-                    f"CI check '{name}' failed on {repo} (commit {head_sha}). "
-                    f"Investigate the failure and suggest a fix.",
-                    {"repo": repo, "check_name": name, "url": url, "sha": head_sha},
-                )
+                hand_context = {
+                    "source": "github:ci_failure",
+                    "event": "check_run",
+                    "repo": repo,
+                    "check_name": name,
+                    "url": url,
+                    "sha": head_sha,
+                }
+                # Prefer push-triggering the Guardian Hand (audited, cost-capped,
+                # approval-gated). Fall back to direct agent routing if Hands are
+                # not available (e.g. API-only mode).
+                if not await _trigger_hand("guardian", hand_context):
+                    await _route_to_agent(
+                        f"CI check '{name}' failed on {repo} (commit {head_sha}). "
+                        f"Investigate the failure and suggest a fix.",
+                        hand_context,
+                    )
 
             _fire_and_forget(_investigate_ci())
 
@@ -278,17 +312,25 @@ async def github_webhook(
 
             async def _investigate_workflow():
                 await _notify_surfaces(
-                    f"Workflow Failed on {repo}\n"
+                    f"\u26a0\ufe0f Workflow Failed on {repo}\n"
                     f"Workflow: {name}\n"
                     f"Branch: {branch}\n"
-                    f"URL: {url}\n\n"
-                    f"Investigating..."
+                    f"URL: {url}"
                 )
-                await _route_to_agent(
-                    f"GitHub Actions workflow '{name}' failed on {repo} (branch {branch}). "
-                    f"Investigate the failure.",
-                    {"repo": repo, "workflow": name, "url": url, "branch": branch},
-                )
+                hand_context = {
+                    "source": "github:workflow_failure",
+                    "event": "workflow_run",
+                    "repo": repo,
+                    "workflow": name,
+                    "url": url,
+                    "branch": branch,
+                }
+                if not await _trigger_hand("guardian", hand_context):
+                    await _route_to_agent(
+                        f"GitHub Actions workflow '{name}' failed on {repo} (branch {branch}). "
+                        f"Investigate the failure.",
+                        hand_context,
+                    )
 
             _fire_and_forget(_investigate_workflow())
 
