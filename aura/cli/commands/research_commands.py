@@ -68,24 +68,22 @@ def handle_recall(agent, arg, context) -> Optional[str]:
     if not arg:
         console.print("Usage: /recall <query>  (alias: /memory)")
         return None
-    # Query the unified memory directly so we get score + source, not just
-    # content. agent.recall_memories() drops the score on the floor.
     try:
-        from aura.memory.unified_memory import get_unified_memory
-        mem = get_unified_memory()
-        results = mem.query(arg, k=10, min_score=0.0)
+        memories = agent.recall_memories(arg, n=10)
     except Exception as exc:
         console.print(f"[red]Memory query failed: {exc}[/red]")
         return None
-    if not results:
+    if not memories:
         console.print(f"[dim]No memories found for '{arg}'.[/dim]")
         return None
-    console.print(f"\n[bold]Recalled {len(results)} memories for '{arg}':[/bold]")
-    for i, r in enumerate(results, 1):
-        source = getattr(r, "source", "?")
-        score = getattr(r, "score", 0.0)
-        content = r.content[:140] if hasattr(r, "content") else str(r)[:140]
-        console.print(f"  [cyan]{i:>2}.[/cyan] [dim][{source}, {score:.3f}][/dim] {content}")
+    console.print(f"\n[bold]Recalled {len(memories)} memories for '{arg}':[/bold]")
+    for i, m in enumerate(memories, 1):
+        score = m.get("score", 0.0) if isinstance(m, dict) else getattr(m, "score", 0.0)
+        content = m.get("content", "") if isinstance(m, dict) else getattr(m, "content", str(m))
+        meta = m.get("metadata", {}) if isinstance(m, dict) else {}
+        source = meta.get("source", "memory") if isinstance(meta, dict) else "memory"
+        snippet = str(content)[:140]
+        console.print(f"  [cyan]{i:>2}.[/cyan] [dim][{source}, {score:.3f}][/dim] {snippet}")
     return None
 
 
