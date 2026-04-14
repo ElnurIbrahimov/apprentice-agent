@@ -405,7 +405,7 @@ Status: Online and ready!"""
             kg = getattr(self.aura, "kg", None) or getattr(self.aura, "knowledge_graph", None)
             if kg and hasattr(kg, "_nodes"):
                 lines.append("")
-                lines.append(f"🕸 *Knowledge Graph*")
+                lines.append("🕸 *Knowledge Graph*")
                 lines.append(f"• Nodes: *{len(kg._nodes)}*")
                 lines.append(f"• Edges: *{len(kg._edges)}*")
         except Exception as e:
@@ -417,7 +417,7 @@ Status: Online and ready!"""
             hist = self._chat_history.get(uid, [])
             if hist:
                 lines.append("")
-                lines.append(f"💬 *Current Session*")
+                lines.append("💬 *Current Session*")
                 lines.append(f"• Messages in context: *{len(hist)}*")
         except Exception:
             pass

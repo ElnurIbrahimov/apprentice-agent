@@ -343,6 +343,56 @@ def handle_compact(agent, arg, context) -> Optional[str]:
         console.print("Nothing to compact (history too short).")
 
 
+def handle_retry(agent, arg, context) -> Optional[str]:
+    """Re-run the last prompt, with optional tier escalation if the last run errored."""
+    from ..display import show_error, show_info, show_response
+
+    ctx = get_ctx()
+    if not ctx or not ctx.agentic_loop:
+        show_error("Retry not available outside chat mode.")
+        return
+
+    loop = ctx.agentic_loop
+    last_prompt = None
+    for msg in reversed(getattr(loop, "_conversation_history", []) or []):
+        if msg.get("role") == "user":
+            last_prompt = msg.get("content", "")
+            break
+
+    if not last_prompt:
+        show_error("Nothing to retry — no previous prompt.")
+        return
+
+    if getattr(loop, "_loop_error", False):
+        escalation_map = {"fast": "balanced", "balanced": "max"}
+        current_tier = getattr(loop, "_current_tier", None) or getattr(loop, "tier", "balanced")
+        if current_tier in escalation_map:
+            next_tier = escalation_map[current_tier]
+            approved = confirm_action(
+                agent,
+                "retry_tier_escalation",
+                {"from_tier": current_tier, "to_tier": next_tier, "prompt": last_prompt},
+                fallback_prompt=f"  Retry with '{next_tier}' tier? (y/n): ",
+            )
+            if approved:
+                router = getattr(loop, "router", None)
+                if router is not None:
+                    router.tier = next_tier
+                show_info(f"Escalated to '{next_tier}' tier.")
+
+    show_info(f"Retrying: {last_prompt[:60]}...")
+    try:
+        result = loop.run(last_prompt)
+    except Exception as exc:
+        show_error(f"Retry failed: {exc}")
+        return
+
+    if result:
+        response = result.get("response", "")
+        if response:
+            show_response(response, model=result.get("model", ""), stream=False)
+
+
 def handle_context(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if ctx and ctx.agentic_loop:
