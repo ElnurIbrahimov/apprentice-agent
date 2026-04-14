@@ -104,6 +104,12 @@ class AgenticLoop:
 
         # Cancellation event for mid-loop abort (Ctrl+C)
         self._cancel_event = threading.Event()
+
+        # Reflexion state: count consecutive iterations that contained any
+        # failed tool call so we can trigger a reflection pass when the
+        # agent is repeatedly stuck. Reset to 0 on any clean iteration.
+        self._tool_failure_streak = 0
+        self._reflexion_fired_this_run = False
         self._tool_call_coordinator = ToolCallCoordinator(self)
         self._model_step_controller = ModelStepController(self)
 
@@ -511,6 +517,10 @@ class AgenticLoop:
         # Reset cancellation for this run
         self._cancel_event.clear()
 
+        # Reset Reflexion state so the one-shot per-run fire counter is fresh
+        self._tool_failure_streak = 0
+        self._reflexion_fired_this_run = False
+
         # Wire in loop guard to prevent infinite tool cycles
         from aura.reliability.loop_guard import get_guard
         _session_id = self.session.session_id if self.session else "default"
@@ -798,6 +808,12 @@ class AgenticLoop:
                 event_emitter=event_emitter,
             )
 
+            # Reflexion hook: if this iteration's tool calls had errors, bump
+            # the failure streak. Two consecutive failing iterations trigger
+            # a one-shot diagnosis that gets injected as a system nudge so
+            # the next iteration sees concrete next-action advice.
+            self._maybe_reflect_on_failures(approved, messages, event_emitter=event_emitter)
+
             if batch_result.should_break:
                 outcome = batch_result.outcome
                 break
@@ -877,6 +893,103 @@ class AgenticLoop:
             tool_calls=self.tool_calls_total,
         )
         return result
+
+    def _maybe_reflect_on_failures(
+        self,
+        approved: list,
+        messages: list[dict],
+        event_emitter=None,
+    ) -> None:
+        """Trigger a Reflexion-style diagnosis after repeated tool failures.
+
+        Counts errors in the just-finished iteration's `approved` tool list.
+        If the streak hits 2 and Reflexion is enabled in Config, ask the
+        brain to diagnose why and prepend the diagnosis as a system message
+        so the next iteration sees it. Fires at most once per run to avoid
+        cost spirals when the agent is stuck on a genuinely impossible task.
+        """
+        try:
+            from aura.config import Config
+            if not getattr(Config, "REFLEXION_ENABLED", False):
+                return
+        except Exception:
+            return
+
+        if self._reflexion_fired_this_run:
+            return
+
+        # Count failures in this iteration's approved list
+        had_failure = False
+        for tool_name, args, tool_result in approved:
+            if self._tool_result_has_error(tool_result):
+                had_failure = True
+                break
+
+        if had_failure:
+            self._tool_failure_streak += 1
+        else:
+            self._tool_failure_streak = 0
+            return
+
+        if self._tool_failure_streak < 2:
+            return
+
+        # Build a compact reflection prompt — just the last 2-3 iterations
+        # of tool calls + results, asking the brain to diagnose.
+        recent = []
+        for m in messages[-8:]:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    c.get("text", "") if isinstance(c, dict) else str(c)
+                    for c in content
+                )
+            if not content:
+                continue
+            recent.append(f"{role}: {str(content)[:300]}")
+        recent_str = "\n".join(recent[-6:])
+
+        prompt = (
+            "You are diagnosing why the agent's last two tool calls failed.\n\n"
+            "Recent history:\n"
+            f"{recent_str}\n\n"
+            "Give a 2-3 sentence diagnosis of the root cause and a concrete "
+            "next action the agent should try. Be specific about paths, "
+            "commands, or arguments that should change."
+        )
+
+        try:
+            reflection = self.brain.think(
+                prompt,
+                system_prompt="You are a concise debugging coach.",
+                use_history=False,
+            )
+            if isinstance(reflection, dict):
+                reflection = reflection.get("response") or reflection.get("content") or ""
+            reflection = (reflection or "").strip()
+            if not reflection:
+                return
+        except Exception as exc:
+            logger.debug(f"[Reflexion] Diagnosis call failed: {exc}")
+            return
+
+        self._reflexion_fired_this_run = True
+
+        # Inject as a system nudge the next iteration will see
+        messages.append({
+            "role": "system",
+            "content": f"[Reflexion] {reflection[:500]}",
+        })
+
+        # Emit an event so the UI can surface it
+        if event_emitter is not None and hasattr(event_emitter, "emit"):
+            try:
+                event_emitter.emit("reflexion", text=reflection[:500])
+            except Exception:
+                pass
+
+        logger.info(f"[Reflexion] fired after {self._tool_failure_streak} failures")
 
     @staticmethod
     def _tool_result_has_error(tool_result: str) -> bool:
