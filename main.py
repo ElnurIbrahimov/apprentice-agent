@@ -442,6 +442,11 @@ def main() -> None:
         if piped:
             args.prompt = piped
 
+    # If stdout is piped and the user didn't pick an output format, assume
+    # the caller is a script that wants structured JSONL output.
+    if not sys.stdout.isatty() and args.format == "text":
+        args.format = "json"
+
     # Initialize channel bridge if --channels specified (available to every path)
     bridge = None
     if args.channels:

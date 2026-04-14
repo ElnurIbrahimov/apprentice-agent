@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 
 class PipeOutput:
@@ -40,6 +40,40 @@ class PipeOutput:
             content = data.get("response", data.get("content", ""))
             sys.stdout.write(content + "\n")
         sys.stdout.flush()
+
+
+class StreamingJSONEmitter:
+    """Emits one JSON object per line (JSONL) to stdout.
+
+    Intended for scripted consumers of `aura -p "..."` that want to stream
+    agentic events (token chunks, tool starts, tool results, final summary)
+    as they arrive instead of waiting for a single final payload.
+    """
+
+    def emit(self, event: dict) -> None:
+        sys.stdout.write(json.dumps(event, default=str) + "\n")
+        sys.stdout.flush()
+
+    def emit_chunk(self, text: str) -> None:
+        self.emit({"type": "chunk", "text": text})
+
+    def emit_tool_start(self, tool: str, args: dict) -> None:
+        self.emit({"type": "tool_start", "tool": tool, "args": args})
+
+    def emit_tool_result(self, tool: str, args: dict, result: Any) -> None:
+        self.emit({"type": "tool_result", "tool": tool, "args": args, "result": result})
+
+    def emit_final(self, response: str, model: str = "", cost: float = 0.0,
+                   iterations: int = 0, tool_calls: int = 0, success: bool = True) -> None:
+        self.emit({
+            "type": "final",
+            "response": response,
+            "model": model,
+            "cost": cost,
+            "iterations": iterations,
+            "tool_calls": tool_calls,
+            "success": success,
+        })
 
 
 def is_pipe_mode() -> bool:

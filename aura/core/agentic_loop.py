@@ -1093,8 +1093,19 @@ def run_agentic(
     trust_mode: bool = False,
     aura_config: dict | None = None,
     router=None,
+    on_response=None,
+    on_chunk=None,
+    on_tool_start=None,
+    on_tool_call=None,
+    on_event=None,
 ) -> dict:
-    """Convenience function to run a single agentic task."""
+    """Convenience function to run a single agentic task.
+
+    Callers can pass any of the event callbacks (on_chunk, on_tool_start,
+    on_tool_call, on_event, on_response) to subscribe to the loop's event
+    stream. If on_response is None, the default prints the response to the
+    shared console.
+    """
     if permissions is None:
         permissions = PermissionManager()
     if trust_mode:
@@ -1112,7 +1123,15 @@ def run_agentic(
         router=router,
     )
 
-    def on_response(text, iteration):
-        _loop_support.console.print(f"\n{text}\n")
+    if on_response is None:
+        def on_response(text, iteration):
+            _loop_support.console.print(f"\n{text}\n")
 
-    return loop.run(prompt, on_response=on_response)
+    return loop.run(
+        prompt,
+        on_response=on_response,
+        on_chunk=on_chunk,
+        on_tool_start=on_tool_start,
+        on_tool_call=on_tool_call,
+        on_event=on_event,
+    )
