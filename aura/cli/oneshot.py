@@ -17,6 +17,49 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
     # so stdout stays valid JSONL for scripted consumers.
     json_mode = getattr(args, "format", "text") == "json"
 
+    mode = getattr(args, "mode", "chat")
+    if mode == "debate":
+        if not json_mode:
+            show_banner()
+        from .debate_mode import run_debate
+        try:
+            run_debate(agent.brain, prompt)
+        except KeyboardInterrupt:
+            sys.exit(130)
+        except Exception as e:
+            console.print(f"\n  [red]Debate failed: {e}[/red]")
+            sys.exit(1)
+        finally:
+            if bridge:
+                bridge.stop()
+        sys.exit(0)
+
+    if mode == "chain":
+        if not json_mode:
+            show_banner()
+        from .chain_mode import parse_chain, run_chain
+        steps = parse_chain(prompt)
+        if not steps:
+            console.print("[red]Chain mode requires 'step1 -> step2 -> step3' syntax.[/red]")
+            sys.exit(1)
+        try:
+            result = run_chain(agent.brain, steps)
+        except KeyboardInterrupt:
+            sys.exit(130)
+        except Exception as e:
+            console.print(f"\n  [red]Chain failed: {e}[/red]")
+            sys.exit(1)
+        finally:
+            if bridge:
+                bridge.stop()
+        # Print each step output for scriptability.
+        total = len(result.step_results)
+        for step_result in result.step_results:
+            console.print(f"\n[bold cyan]── Step {step_result['step']}/{total} ──[/bold cyan]")
+            console.print(f"[dim]prompt: {step_result['prompt']} (model: {step_result['model']})[/dim]")
+            console.print(step_result.get("response", ""))
+        sys.exit(0 if result.success else 1)
+
     if not json_mode:
         show_banner()
 

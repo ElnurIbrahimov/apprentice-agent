@@ -258,6 +258,14 @@ def main() -> None:
         default=[],
         help="Enable channel bridges (telegram, extension)"
     )
+    parser.add_argument(
+        "--mode",
+        choices=["chat", "debate", "chain"],
+        default="chat",
+        help="Reasoning mode for non-interactive runs. Default 'chat' is normal "
+             "agentic. 'debate' runs three-model cross-examination on the prompt. "
+             "'chain' executes a step chain parsed as 'step1 -> step2 -> step3'."
+    )
 
     args = parser.parse_args()
     if not use_subparsers:
