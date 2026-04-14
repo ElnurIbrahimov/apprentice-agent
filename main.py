@@ -62,6 +62,42 @@ def _suppress_warnings() -> None:
     warnings.filterwarnings("ignore", module="transformers")
 
 
+_SUBCOMMANDS = {
+    "init", "setup", "doctor", "config", "models", "commit", "cost",
+    "mcp-serve", "exec", "ide", "log",
+}
+_OPTS_WITH_VALUES = {
+    "--max-iterations", "--dream-date", "-p", "--prompt", "--login", "--logout",
+    "--tier", "--budget", "--preference", "--model", "--format",
+    "--channels", "-ch",
+}
+
+
+def _argv_has_subcommand(argv: list[str]) -> bool:
+    """Return True if the first positional token in argv is a known subcommand.
+
+    Needed because argparse subparsers are greedy: if we always register them,
+    `aura "fix the login bug"` fails with 'invalid choice: fix'. We pre-scan
+    to decide whether to register subparsers at all.
+    """
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--":
+            return False
+        if tok.startswith("-"):
+            if "=" in tok:
+                i += 1
+                continue
+            if tok in _OPTS_WITH_VALUES:
+                i += 2
+                continue
+            i += 1
+            continue
+        return tok in _SUBCOMMANDS
+    return False
+
+
 def main() -> None:
     _suppress_warnings()
     from aura._version import __version__
@@ -71,27 +107,33 @@ def main() -> None:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
-    # Subcommands
-    subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("init", help="Create AURA.md in current project")
-    subparsers.add_parser("setup", help="Interactive setup wizard for new projects")
-    subparsers.add_parser("doctor", help="Check Ollama, models, dependencies")
-    subparsers.add_parser("config", help="Show current configuration")
-    subparsers.add_parser("models", help="List available models with routing roles")
-    sub_commit = subparsers.add_parser("commit", help="Smart commit with AI-generated message")
-    sub_commit.add_argument("--all", "-a", action="store_true", help="Stage all changes")
-    subparsers.add_parser("cost", help="Show session cost breakdown")
-    subparsers.add_parser("mcp-serve", help="Run as MCP server (JSON-RPC over stdio)")
-    sub_exec = subparsers.add_parser("exec", help="Non-interactive agent execution")
-    sub_exec.add_argument("exec_prompt", nargs="?", default=None, help="Prompt to execute")
-    sub_ide = subparsers.add_parser("ide", help="IDE integration setup")
-    sub_ide.add_argument("action", nargs="?", default="setup", choices=["setup"], help="Action (default: setup)")
-    sub_log = subparsers.add_parser("log", help="Query interaction history")
-    sub_log.add_argument("action", choices=["search", "export", "stats", "recent"], nargs="?", default="recent")
-    sub_log.add_argument("query", nargs="*", default=[])
-    sub_log.add_argument("--session", default="")
-    sub_log.add_argument("--format", dest="log_format", choices=["markdown", "json"], default="markdown")
-    sub_log.add_argument("--limit", type=int, default=20)
+    # Only register subparsers if a known subcommand is present in argv.
+    # Otherwise argparse would greedily consume the first positional of a
+    # goal-mode invocation (e.g. `aura "fix the login bug"`) and crash.
+    # Also register when -h/--help is requested so the help text is complete.
+    _wants_help = any(a in ("-h", "--help") for a in sys.argv[1:])
+    use_subparsers = _argv_has_subcommand(sys.argv[1:]) or _wants_help
+    if use_subparsers:
+        subparsers = parser.add_subparsers(dest="command")
+        subparsers.add_parser("init", help="Create AURA.md in current project")
+        subparsers.add_parser("setup", help="Interactive setup wizard for new projects")
+        subparsers.add_parser("doctor", help="Check Ollama, models, dependencies")
+        subparsers.add_parser("config", help="Show current configuration")
+        subparsers.add_parser("models", help="List available models with routing roles")
+        sub_commit = subparsers.add_parser("commit", help="Smart commit with AI-generated message")
+        sub_commit.add_argument("--all", "-a", action="store_true", help="Stage all changes")
+        subparsers.add_parser("cost", help="Show session cost breakdown")
+        subparsers.add_parser("mcp-serve", help="Run as MCP server (JSON-RPC over stdio)")
+        sub_exec = subparsers.add_parser("exec", help="Non-interactive agent execution")
+        sub_exec.add_argument("exec_prompt", nargs="?", default=None, help="Prompt to execute")
+        sub_ide = subparsers.add_parser("ide", help="IDE integration setup")
+        sub_ide.add_argument("action", nargs="?", default="setup", choices=["setup"], help="Action (default: setup)")
+        sub_log = subparsers.add_parser("log", help="Query interaction history")
+        sub_log.add_argument("action", choices=["search", "export", "stats", "recent"], nargs="?", default="recent")
+        sub_log.add_argument("query", nargs="*", default=[])
+        sub_log.add_argument("--session", default="")
+        sub_log.add_argument("--format", dest="log_format", choices=["markdown", "json"], default="markdown")
+        sub_log.add_argument("--limit", type=int, default=20)
 
     # Positional prompt for one-shot agentic mode
     parser.add_argument(
@@ -211,6 +253,8 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    if not use_subparsers:
+        args.command = None
 
     # Validate conflicting flags
     if args.voice and args.prompt:
@@ -286,8 +330,29 @@ def main() -> None:
 
     # Handle dream mode first (doesn't need agent)
     if args.dream:
+        date_label = args.dream_date or "today"
+        print(f"[Dream] Analyzing metacognition logs for {date_label}...")
         result = run_dream_mode(args.dream_date)
-        sys.exit(0 if result.get("success") else 1)
+        if result.get("success"):
+            insights = result.get("insights", [])
+            print(
+                f"[Dream] Analyzed {result.get('logs_analyzed', 0)} log entries, "
+                f"generated {len(insights)} insights, "
+                f"stored {len(result.get('stored_ids', []))} in memory."
+            )
+            for i, ins in enumerate(insights, 1):
+                print(f"  {i}. {ins}")
+            cons = result.get("consolidation") or {}
+            if cons:
+                print(
+                    f"[Dream] Consolidation: merged={cons.get('merged', 0)}, "
+                    f"pruned={cons.get('pruned', 0)}"
+                )
+            sys.exit(0)
+        err = result.get("error", "Unknown error")
+        print(f"[Dream] {err}")
+        # "No logs found" is informational, not a failure.
+        sys.exit(0 if err == "No logs found" else 1)
 
     try:
         agent = ApprenticeAgent()

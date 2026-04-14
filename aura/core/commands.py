@@ -439,37 +439,45 @@ def cmd_cost(args) -> int:
 
 def cmd_ide_setup(args) -> int:
     """Generate VS Code tasks.json and print MCP config snippet."""
+    import sys as _sys
+
     cwd = os.getcwd()
     vscode_dir = os.path.join(cwd, ".vscode")
     tasks_path = os.path.join(vscode_dir, "tasks.json")
+
+    # Resolve the current Python interpreter and absolute path to Aura's main.py.
+    # `python -m main` would only work when cwd contains a top-level main module,
+    # which is not the case for arbitrary user projects.
+    main_py = str(Path(__file__).resolve().parents[2] / "main.py")
+    aura_cmd = f'"{_sys.executable}" "{main_py}"'
 
     # Aura tasks for VS Code
     aura_tasks = [
         {
             "label": "Aura: Chat",
             "type": "shell",
-            "command": "python -m main --chat",
+            "command": aura_cmd,
             "presentation": {"reveal": "always", "panel": "dedicated"},
             "problemMatcher": [],
         },
         {
             "label": "Aura: Run Prompt",
             "type": "shell",
-            "command": "python -m main -p \"${input:auraPrompt}\"",
+            "command": f'{aura_cmd} -p "${{input:auraPrompt}}"',
             "presentation": {"reveal": "always"},
             "problemMatcher": [],
         },
         {
             "label": "Aura: Init Project",
             "type": "shell",
-            "command": "python -m main init",
+            "command": f"{aura_cmd} init",
             "presentation": {"reveal": "always"},
             "problemMatcher": [],
         },
         {
             "label": "Aura: Smart Commit",
             "type": "shell",
-            "command": "python -m main commit --all",
+            "command": f"{aura_cmd} commit --all",
             "presentation": {"reveal": "always"},
             "problemMatcher": [],
         },
@@ -527,13 +535,16 @@ def cmd_ide_setup(args) -> int:
     print("    - Aura: Smart Commit")
 
     # Print MCP config snippet
+    # Point cwd at Aura's install dir so `python -m aura.core.mcp_server` can
+    # resolve the package without requiring a site-packages install.
+    aura_root = str(Path(__file__).resolve().parents[2])
     print("\n  MCP Server config for VS Code settings.json:\n")
     mcp_config = {
         "mcp.servers": {
             "aura": {
-                "command": "python",
+                "command": _sys.executable,
                 "args": ["-m", "aura.core.mcp_server"],
-                "cwd": cwd,
+                "cwd": aura_root,
             }
         }
     }
