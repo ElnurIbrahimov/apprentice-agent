@@ -5,7 +5,7 @@
 import type { PanelId } from './types';
 
 // Panel order for Ctrl+1..9
-const PANEL_SLOTS: PanelId[] = ['chat', 'search', 'write', 'artifacts', 'webcreator', 'code', 'research', 'summary', 'settings'];
+const PANEL_SLOTS: PanelId[] = ['chat', 'search', 'research', 'summary', 'artifacts', 'agent', 'wisebase', 'tools', 'settings'];
 
 type Store = {
   getState: () => {

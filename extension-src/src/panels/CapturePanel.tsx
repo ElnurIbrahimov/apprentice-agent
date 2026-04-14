@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Crosshair, Copy, Eye, Code2, Wand2, Sparkles, X,
   Image as ImageIcon, Layers, SplitSquareHorizontal,
-  Globe, Send, Palette, Type, Check, RefreshCw, Trash2, FileText, ExternalLink,
+  Globe, Send, Palette, Type, Check, RefreshCw, Trash2, FileText,
 } from 'lucide-react';
 import { useStore } from '../store';
 import CodeEditor from '../components/CodeEditor';
@@ -1328,16 +1328,6 @@ ${generatedCode}
                 icon={<Copy size={13} />}
                 label="HTML"
                 onClick={() => copyText(pageCaptured.html.slice(0, 100000), 'HTML')}
-              />
-              <ActionBtn
-                id="edit-webcreator"
-                icon={<ExternalLink size={13} />}
-                label="Web Creator"
-                onClick={() => {
-                  const { handoffToPanel } = useStore.getState();
-                  const code = generatedCode || pageCaptured.html.slice(0, 200000);
-                  handoffToPanel('webcreator', { code, from: 'Capture' });
-                }}
               />
             </>
           )}

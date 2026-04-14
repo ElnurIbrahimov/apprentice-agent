@@ -66,7 +66,7 @@ export default function VoicePanel() {
     const prompt = `Turn this voice transcript into structured, well-organized notes with headings and bullet points:\n\n${transcript}`;
 
     setActiveStream({
-      type: 'write',
+      type: 'chat',
       rawText: '',
       onFirstChunk: () => setNotesHtml(''),
       onDone: (rawText) => {

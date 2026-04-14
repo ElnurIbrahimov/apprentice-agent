@@ -281,7 +281,7 @@ export default function RecordPanel() {
       : `Summarize this recording transcript concisely, highlighting the key points:\n\n${transcript}`;
 
     setActiveStream({
-      type: 'write',
+      type: 'chat',
       rawText: '',
       onFirstChunk: () => setNotesHtml(''),
       onDone: (rawText) => {

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Copy, Check, Volume2, VolumeX, ChevronDown, Download } from 'lucide-react';
+import { Copy, Check, Volume2, VolumeX, ChevronDown, Download, Bot } from 'lucide-react';
 import type { Message } from '../types';
 import { md } from '../markdown';
 import { speak, stopSpeaking, isSpeaking } from '../tts';
 import { useStore } from '../store';
 import { messageAsMarkdown, messageAsText, downloadFile } from '../exportChat';
+import AgentStepRow from './AgentStepRow';
 
 interface Props {
   message: Message;
@@ -25,6 +26,13 @@ export default function MessageBubble({ message, isLatest, isStreaming: isStream
 
   const isStreaming = isStreamingProp || (isLatest && !!activeStream);
   const hasThinking = !!message.thinkingContent;
+  const hasAgent = !!message.agentSteps;
+  const agentActive = hasAgent && !message.agentDone;
+  const [agentExpanded, setAgentExpanded] = useState(true);
+
+  useEffect(() => {
+    if (hasAgent && message.agentDone) setAgentExpanded(false);
+  }, [hasAgent, message.agentDone]);
 
   // Get active model name for the badge
   const modelDisplay = featureModels['chat']
@@ -225,20 +233,66 @@ export default function MessageBubble({ message, isLatest, isStreaming: isStream
           </div>
         )}
 
+        {/* Agent run — task header + step list */}
+        {hasAgent && (
+          <div style={{ marginBottom: message.text ? 8 : 0 }}>
+            <button
+              onClick={() => setAgentExpanded(v => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                background: 'transparent',
+                border: 'none',
+                padding: '2px 0 6px',
+                cursor: 'pointer',
+                color: 'var(--pl)',
+                fontSize: 12,
+                fontWeight: 500,
+                fontFamily: 'inherit',
+              }}
+            >
+              <Bot size={13} />
+              <span>Agent: {message.agentTask || 'running'}</span>
+              {agentActive && (
+                <span style={{ color: 'var(--mu)', fontSize: 10.5, marginLeft: 4 }}>
+                  · step {message.agentSteps!.length}
+                </span>
+              )}
+              <ChevronDown
+                size={11}
+                style={{ marginLeft: 'auto', transition: 'transform 0.2s', transform: agentExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+              />
+            </button>
+            {agentExpanded && message.agentSteps!.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {message.agentSteps!.map((s, i) => <AgentStepRow key={i} step={s} />)}
+              </div>
+            )}
+            {agentActive && (
+              <div className="aura-thinking" style={{ marginTop: 6 }}>
+                <span /><span /><span />
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Message body */}
-        <div
-          className="md-body"
-          style={{ fontSize: '12.5px', lineHeight: 1.65, color: 'var(--tx)' }}
-          dangerouslySetInnerHTML={{ __html: md(message.text) }}
-        />
+        {message.text && (
+          <div
+            className="md-body"
+            style={{ fontSize: '12.5px', lineHeight: 1.65, color: 'var(--tx)' }}
+            dangerouslySetInnerHTML={{ __html: md(message.text) }}
+          />
+        )}
 
         {/* Streaming cursor — blinking purple block */}
-        {isStreaming && message.text && (
+        {isStreaming && !hasAgent && message.text && (
           <span className="streaming-cursor" />
         )}
 
         {/* Branded thinking indicator — three staggered gradient circles */}
-        {isStreaming && !message.text && (
+        {isStreaming && !hasAgent && !message.text && (
           <div className="aura-thinking">
             <span /><span /><span />
           </div>

@@ -25,12 +25,346 @@ let BACKEND_API_KEY = '';
   } catch {}
 })();
 
+// ── Lifelog event batching ──────────────────────────────────────────────────
+const lifelogBuffer: any[] = [];
+let lifelogFlushTimer: ReturnType<typeof setTimeout> | null = null;
+const LIFELOG_FLUSH_MS = 30_000;
+const LIFELOG_MAX_BATCH = 10;
+
+function scheduleLifelogFlush(): void {
+  if (lifelogBuffer.length >= LIFELOG_MAX_BATCH) {
+    flushLifelog();
+    return;
+  }
+  if (lifelogFlushTimer) return;
+  lifelogFlushTimer = setTimeout(flushLifelog, LIFELOG_FLUSH_MS);
+}
+
+async function flushLifelog(): Promise<void> {
+  if (lifelogFlushTimer) { clearTimeout(lifelogFlushTimer); lifelogFlushTimer = null; }
+  if (!lifelogBuffer.length) return;
+  const batch = lifelogBuffer.splice(0, lifelogBuffer.length);
+  try {
+    await fetch(`${BACKEND}/api/lifelog/events`, {
+      method: 'POST',
+      headers: backendHeaders(),
+      body: JSON.stringify({ events: batch }),
+    });
+  } catch { /* non-fatal — observational data */ }
+}
+
+// ── CDP cleanup on tab close ────────────────────────────────────────────────
+// Mirror of extension-src/src/utils/cdp.ts::installCdpTabCleanup, but running
+// in the service worker so it survives sidebar close.
+ext.tabs?.onRemoved?.addListener((tabId: number) => {
+  try { chrome.debugger?.detach?.({ tabId }); } catch { /* noop */ }
+});
+chrome.debugger?.onDetach?.addListener((_src) => { /* noop — CDP wrapper tracks state */ });
+
 // ── Service worker keepalive alarm ──────────────────────────────────────────
 ext.alarms?.create('aura-health-check', { periodInMinutes: 4 });
 ext.alarms?.onAlarm?.addListener((alarm: chrome.alarms.Alarm) => {
   if (alarm.name !== 'aura-health-check') return;
   // Wake-up ping — sidebar will handle WS reconnect if needed
   ext.runtime.sendMessage({ type: 'HEALTH_CHECK' }).catch(() => {});
+});
+
+// ── Global hotkeys (chrome.commands) ────────────────────────────────────────
+
+async function openActivePanelAndMessage(message: Record<string, unknown>): Promise<void> {
+  try {
+    const [tab] = await new Promise<chrome.tabs.Tab[]>((resolve) =>
+      ext.tabs.query({ active: true, currentWindow: true }, resolve),
+    );
+    if (tab?.windowId != null && chrome.sidePanel) {
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+    }
+  } catch { /* noop */ }
+  // Small delay so the sidebar's message listener is attached before dispatch.
+  setTimeout(() => {
+    ext.runtime.sendMessage(message).catch(() => {});
+  }, 120);
+}
+
+ext.commands?.onCommand?.addListener(async (command: string) => {
+  if (command === 'focus-chat') {
+    await openActivePanelAndMessage({ type: 'FOCUS_INPUT' });
+  } else if (command === 'dictate') {
+    await openActivePanelAndMessage({ type: 'DICTATE_START' });
+  }
+});
+
+// ── Omnibox — type "aura <query>" in the address bar ───────────────────────
+if (chrome.omnibox) {
+  chrome.omnibox.setDefaultSuggestion?.({
+    description: 'Ask AURA — <match>%s</match>',
+  });
+
+  chrome.omnibox.onInputChanged?.addListener((text, suggest) => {
+    const q = (text || '').trim();
+    const suggestions: chrome.omnibox.SuggestResult[] = [];
+    if (q) {
+      suggestions.push({
+        content: `ask ${q}`,
+        description: `Ask AURA: <match>${escapeOmnibox(q)}</match>`,
+      });
+      suggestions.push({
+        content: `search ${q}`,
+        description: `Search the web via AURA: <match>${escapeOmnibox(q)}</match>`,
+      });
+      suggestions.push({
+        content: `agent ${q}`,
+        description: `Run browser agent task: <match>${escapeOmnibox(q)}</match>`,
+      });
+    }
+    suggest(suggestions);
+  });
+
+  chrome.omnibox.onInputEntered?.addListener(async (text, _disposition) => {
+    const raw = (text || '').trim();
+    if (!raw) return;
+    let prefix = '';
+    let query = raw;
+    const m = raw.match(/^(ask|search|agent)\s+(.+)$/i);
+    if (m) {
+      prefix = m[1].toLowerCase();
+      query = m[2];
+    }
+    const panel = prefix === 'search' ? 'search' : 'chat';
+    const text_to_send = prefix === 'agent' ? `/agent ${query}` : query;
+    await openActivePanelAndMessage({
+      type: 'OMNIBOX_QUERY',
+      panel,
+      text: text_to_send,
+    });
+  });
+}
+
+function escapeOmnibox(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] || c));
+}
+
+// ── Offscreen document bootstrap ────────────────────────────────────────────
+// The offscreen doc owns the persistent WebSocket. It stays alive
+// regardless of sidebar lifecycle so Hetzner pushes reach the user.
+const OFFSCREEN_URL = 'offscreen.html';
+
+async function ensureOffscreen(): Promise<void> {
+  try {
+    // @ts-ignore hasDocument exists in chrome.offscreen since 116
+    const has: boolean = await chrome.offscreen.hasDocument?.();
+    if (has) return;
+    await chrome.offscreen.createDocument({
+      url: OFFSCREEN_URL,
+      // @ts-ignore — 'WORKERS' is valid since Chrome 121
+      reasons: ['WORKERS'],
+      justification: 'Hosts the persistent Aura WebSocket so proactive pushes reach the user when the side panel is closed.',
+    });
+  } catch (err) {
+    // Fallback reason for older Chrome versions
+    try {
+      await chrome.offscreen.createDocument({
+        url: OFFSCREEN_URL,
+        reasons: ['BLOBS' as chrome.offscreen.Reason],
+        justification: 'Hosts the persistent Aura WebSocket.',
+      });
+    } catch (err2) {
+      console.warn('[Aura] Failed to create offscreen document:', err2);
+    }
+  }
+}
+
+ext.runtime.onStartup?.addListener(() => { ensureOffscreen(); });
+ext.runtime.onInstalled.addListener(() => { ensureOffscreen(); });
+// Also create on first message from sidebar if service worker just woke up.
+ensureOffscreen();
+
+// ── Sidebar presence tracking (for notification suppression) ────────────────
+let sidebarOpen = false;
+
+// ── WS event routing + notifications ────────────────────────────────────────
+// Types we surface as chrome.notifications when the sidebar is not visible.
+const NOTIFY_TYPES = new Set(['proactive', 'hand_approval_request', 'hand_event']);
+
+function notificationIdFor(type: string, key: string): string {
+  return `aura:${type}:${key}`;
+}
+
+function fireProactiveNotification(data: any): void {
+  const id = notificationIdFor('proactive', String(data.id || Date.now()));
+  chrome.notifications?.create(id, {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: 'Aura',
+    message: String(data.text || '').slice(0, 200),
+    priority: 1,
+  }, () => { if (chrome.runtime.lastError) { /* swallow */ } });
+}
+
+function fireApprovalNotification(data: any): void {
+  const id = notificationIdFor('approval', String(data.request_id || Date.now()));
+  chrome.notifications?.create(id, {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: `Aura · approval needed: ${data.hand_name || 'hand'}`,
+    message: `${data.tool_name || 'action'} — click to review`,
+    priority: 2,
+    requireInteraction: true,
+    buttons: [
+      { title: 'Approve' },
+      { title: 'Deny' },
+    ],
+  }, () => { if (chrome.runtime.lastError) { /* swallow */ } });
+}
+
+function fireHandEventNotification(data: any): void {
+  if (data.success !== false) return; // only notify on failures
+  const id = notificationIdFor('hand', `${data.hand || 'hand'}:${Date.now()}`);
+  chrome.notifications?.create(id, {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: `Aura · hand failed`,
+    message: `${data.hand || 'hand'}: ${(data.summary || data.error || 'error').slice(0, 160)}`,
+    priority: 1,
+  }, () => { if (chrome.runtime.lastError) { /* swallow */ } });
+}
+
+async function openPanelForActiveWindow(): Promise<void> {
+  try {
+    const [tab] = await new Promise<chrome.tabs.Tab[]>((resolve) =>
+      ext.tabs.query({ active: true, currentWindow: true }, resolve),
+    );
+    if (tab?.windowId != null && chrome.sidePanel) {
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+    }
+  } catch { /* noop */ }
+}
+
+chrome.notifications?.onClicked?.addListener((notificationId: string) => {
+  chrome.notifications.clear(notificationId);
+  openPanelForActiveWindow().then(() => {
+    if (notificationId.startsWith('aura:approval:')) {
+      ext.runtime.sendMessage({ type: 'SWITCH_PANEL', panel: 'hands' }).catch(() => {});
+    }
+  });
+});
+
+// Approval notification buttons resolve the approval directly from the SW,
+// so the user can approve/deny without ever opening the side panel.
+const pendingApprovalsByNotification = new Map<string, { hand_name: string }>();
+
+chrome.notifications?.onButtonClicked?.addListener(async (notificationId: string, buttonIndex: number) => {
+  if (!notificationId.startsWith('aura:approval:')) return;
+  const ctx = pendingApprovalsByNotification.get(notificationId);
+  if (!ctx) return;
+  const approved = buttonIndex === 0;
+  try {
+    await fetch(`${BACKEND}/api/hands/${encodeURIComponent(ctx.hand_name)}/approve`, {
+      method: 'POST',
+      headers: backendHeaders(),
+      body: JSON.stringify({ approved }),
+    });
+  } catch { /* noop */ }
+  chrome.notifications.clear(notificationId);
+  pendingApprovalsByNotification.delete(notificationId);
+});
+
+// Listen for incoming WS frames broadcast by offscreen and decide whether
+// to fire a notification. The sidebar handles its own rendering; this path
+// is only for when the sidebar is closed.
+ext.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!msg || typeof msg !== 'object') return false;
+
+  if (msg.type === 'AURA_ENSURE_OFFSCREEN') {
+    ensureOffscreen();
+    return false;
+  }
+
+  if (msg.type === 'SIDEBAR_READY') {
+    sidebarOpen = true;
+    // Clear any lingering notifications — user is now watching
+    chrome.notifications?.getAll?.((items) => {
+      for (const id of Object.keys(items || {})) {
+        if (id.startsWith('aura:')) chrome.notifications.clear(id);
+      }
+    });
+    return false;
+  }
+
+  if (msg.type === 'SIDEBAR_CLOSED') {
+    sidebarOpen = false;
+    return false;
+  }
+
+  if (msg.type === 'LIFELOG_EVENT' && msg.event) {
+    lifelogBuffer.push(msg.event);
+    scheduleLifelogFlush();
+    return false;
+  }
+
+  if (msg.type === 'GHOST_COMPLETE' && typeof msg.text === 'string') {
+    (async () => {
+      try {
+        const r = await fetch(`${BACKEND}/api/ghost/complete`, {
+          method: 'POST',
+          headers: backendHeaders(),
+          body: JSON.stringify({ text: msg.text, url: msg.url, title: msg.title }),
+        });
+        if (!r.ok) { sendResponse({ continuation: '' }); return; }
+        const data = await r.json();
+        sendResponse({ continuation: String(data?.continuation || '') });
+      } catch {
+        sendResponse({ continuation: '' });
+      }
+    })();
+    return true; // async response
+  }
+
+  if (msg.type === 'STUCK_SIGNAL' && typeof msg.kind === 'string') {
+    // Forward to backend — it decides whether to produce a proactive message.
+    fetch(`${BACKEND}/api/proactive/stuck`, {
+      method: 'POST',
+      headers: backendHeaders(),
+      body: JSON.stringify({
+        kind: msg.kind,
+        url: String(msg.url || ''),
+        title: String(msg.title || ''),
+        count: typeof msg.count === 'number' ? msg.count : undefined,
+        snippet: typeof msg.snippet === 'string' ? msg.snippet : undefined,
+        field: typeof msg.field === 'string' ? msg.field : undefined,
+      }),
+    }).catch(() => {});
+    return false;
+  }
+
+  if (msg.type === 'PROACTIVE_COUNT_CHANGED') {
+    const n = Number(msg.count || 0);
+    try {
+      chrome.action?.setBadgeText?.({ text: n > 0 ? String(n).slice(0, 2) : '' });
+      chrome.action?.setBadgeBackgroundColor?.({ color: '#7c3aed' });
+    } catch { /* noop */ }
+    return false;
+  }
+
+  if (msg.type === 'AURA_WS_IN' && typeof msg.payload === 'string') {
+    if (sidebarOpen) return false; // sidebar handles it itself
+    let d: any;
+    try { d = JSON.parse(msg.payload); } catch { return false; }
+    if (!d || !NOTIFY_TYPES.has(d.type)) return false;
+
+    if (d.type === 'proactive' && d.text) {
+      fireProactiveNotification(d);
+    } else if (d.type === 'hand_approval_request' && d.request_id) {
+      fireApprovalNotification(d);
+      const nId = notificationIdFor('approval', String(d.request_id));
+      pendingApprovalsByNotification.set(nId, { hand_name: String(d.hand_name || '') });
+    } else if (d.type === 'hand_event') {
+      fireHandEventNotification(d);
+    }
+    return false;
+  }
+
+  return false;
 });
 
 // Listen for settings changes

@@ -110,6 +110,10 @@ const inputStyle: React.CSSProperties = {
 
 export default function SettingsPanel() {
   const { customInstructions, userName, setCustomInstructions, setUserName } = useStore();
+  const powerModeEnabled = useStore(s => s.powerModeEnabled);
+  const lifelogEnabled = useStore(s => s.lifelogEnabled);
+  const setPowerModeEnabled = useStore(s => s.setPowerModeEnabled);
+  const setLifelogEnabled = useStore(s => s.setLifelogEnabled);
 
   const [localName, setLocalName] = useState(userName);
   const [localInstructions, setLocalInstructions] = useState(customInstructions);
@@ -884,6 +888,68 @@ export default function SettingsPanel() {
               </div>
             </div>
           </div>
+        </section>
+
+        {/* Section: Browser Agent (Power Mode) */}
+        <section>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--fg)', letterSpacing: '0.03em' }}>
+              BROWSER AGENT
+            </h3>
+          </div>
+          <label style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '12px 14px',
+            borderRadius: 10,
+            border: '1px solid var(--b2)',
+            background: 'var(--glass)',
+            cursor: 'pointer',
+            marginBottom: 10,
+          }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', marginBottom: 3 }}>
+                Power Mode (uses chrome.debugger)
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--fg3)', lineHeight: 1.45 }}>
+                Enables real mouse / keyboard events via CDP + frame-per-step screenshots for the LLM planner. Works on Stripe Elements, canvas, shadow DOM, cross-origin iframes. Chrome will show a yellow "AURA started debugging this browser" banner while the agent is active — this cannot be suppressed.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={powerModeEnabled}
+              onChange={(e) => setPowerModeEnabled(e.target.checked)}
+              style={{ marginTop: 2, accentColor: 'var(--pl)' }}
+            />
+          </label>
+          <label style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '12px 14px',
+            borderRadius: 10,
+            border: '1px solid var(--b2)',
+            background: 'var(--glass)',
+            cursor: 'pointer',
+          }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', marginBottom: 3 }}>
+                Browsing lifelog
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--fg3)', lineHeight: 1.45 }}>
+                Passively log page visits (URL, title, dwell, selection) to Aura's memory on Hetzner. Recurring topics get promoted into your user profile via the nightly Dream consolidation. Banks, password managers, and incognito are always skipped.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={lifelogEnabled}
+              onChange={(e) => setLifelogEnabled(e.target.checked)}
+              style={{ marginTop: 2, accentColor: 'var(--pl)' }}
+            />
+          </label>
         </section>
 
         {/* Section 1: Your Profile */}

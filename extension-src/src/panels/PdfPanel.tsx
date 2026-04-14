@@ -222,7 +222,7 @@ export default function PdfPanel() {
     setResultRaw('');
 
     setActiveStream({
-      type: 'write',
+      type: 'chat',
       rawText: '',
       onFirstChunk: () => setResultHtml(''),
       onDone: (rawText) => {

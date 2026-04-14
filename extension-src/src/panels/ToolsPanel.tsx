@@ -22,7 +22,7 @@ const TOOLS: Tool[] = [
 ];
 
 export default function ToolsPanel() {
-  const { setPanel, setPendingCtx, addMessage } = useStore();
+  const { setPanel, setPendingCtx } = useStore();
 
   const handle = async (action: string) => {
     switch (action) {
@@ -45,16 +45,24 @@ export default function ToolsPanel() {
         break;
       }
       case 'deep-research':
-        setPanel('search');
-        break;
       case 'fact-check':
         setPanel('search');
         break;
       case 'write-essay':
-        setPanel('write');
+        setPanel('chat');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('aura-send', {
+            detail: { text: 'Help me start writing an essay. Ask me for the topic and tone, then draft an opening paragraph.' },
+          }));
+        }, 80);
         break;
       case 'improve-writing':
-        setPanel('write');
+        setPanel('chat');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('aura-send', {
+            detail: { text: 'I want to improve some writing. Paste the text in your next message and tell me the style or tone you want.' },
+          }));
+        }, 80);
         break;
     }
   };

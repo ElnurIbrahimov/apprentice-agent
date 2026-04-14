@@ -3,7 +3,7 @@ import {
   Copy, Download, Maximize2, Minimize2, Code2, Eye, SplitSquareHorizontal,
   Sparkles, Wand2, Wrench, RotateCcw, Globe, BarChart3, GitBranch,
   Gamepad2, Presentation, FileCode, ChevronRight, Radio, X, Terminal, Undo2, Redo2,
-  Save, FolderOpen, Search, Pencil, Trash2, GitFork, ExternalLink, Package,
+  Save, FolderOpen, Search, Pencil, Trash2, GitFork, Package,
 } from 'lucide-react';
 import { useStore } from '../store';
 import CodeEditor, { type CodeEditorDiagnostic, type CodeEditorLanguage } from '../components/CodeEditor';
@@ -2264,17 +2264,6 @@ export default function ArtifactsPanel() {
         }}>
           <ActionBtn id="copy" icon={<Copy size={13} />} label="Copy Code" onClick={copyCode} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
           <ActionBtn id="download" icon={<Download size={13} />} label="Download" onClick={downloadFile} hoveredBtn={hoveredBtn} setHoveredBtn={setHoveredBtn} />
-          <ActionBtn
-            id="webcreator"
-            icon={<ExternalLink size={13} />}
-            label="Edit in Web Creator"
-            onClick={() => {
-              const { handoffToPanel } = useStore.getState();
-              handoffToPanel('webcreator', { code: activeCode, from: 'Artifacts' });
-            }}
-            hoveredBtn={hoveredBtn}
-            setHoveredBtn={setHoveredBtn}
-          />
           <ActionBtn
             id="savecomp"
             icon={<Package size={13} />}

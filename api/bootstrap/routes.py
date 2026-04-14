@@ -63,6 +63,11 @@ ROUTE_MODULE_SPECS: tuple[RouteModuleSpec, ...] = (
     RouteModuleSpec("reliability"),
     RouteModuleSpec("auth"),
     RouteModuleSpec("bandit"),
+    # SOTA Round 2 additions — deploy with `git pull` + restart aura-api
+    RouteModuleSpec("ghost"),
+    RouteModuleSpec("lifelog"),
+    RouteModuleSpec("mcp_server_http"),
+    RouteModuleSpec("mcp_manage"),
 )
 
 CRITICAL_ROUTE_MODULES = frozenset({"chat", "status", "auth"})

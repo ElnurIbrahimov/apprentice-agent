@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Plus, Sun, Moon, RefreshCw, Download, Clock, Server, Image as ImageIcon } from 'lucide-react';
+import { Plus, Sun, Moon, RefreshCw, Download, Clock, Server } from 'lucide-react';
 import { useStore } from '../store';
 import { fetchStatus } from '../ws';
 import { exportChat } from '../exportChat';
-import { exportConversationAsImage } from '../utils/exportUtils';
 import { getServerLabel } from '../api';
 import ConversationHistory from './ConversationHistory';
 import ext from '../ext';
@@ -221,17 +220,6 @@ export default function Header() {
                       {item.label}
                     </button>
                   ))}
-                  <button
-                    onClick={() => {
-                      const msgs = useStore.getState().messages;
-                      if (msgs?.length) exportConversationAsImage(msgs);
-                      setExportOpen(false);
-                    }}
-                    className="dropdown-item"
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, borderTop: '1px solid var(--b1)' }}
-                  >
-                    <ImageIcon size={11} /> Export as Image
-                  </button>
                 </div>
               )}
             </div>

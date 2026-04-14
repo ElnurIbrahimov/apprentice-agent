@@ -3,12 +3,36 @@
   "name": "AURA",
   "version": "4.3.0",
   "description": "Your private AI assistant — always present, never clouds.",
-  "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "tabs", "scripting", "unlimitedStorage", "topSites"],
+  "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "tabs", "scripting", "unlimitedStorage", "topSites", "offscreen", "notifications", "debugger"],
   "optional_permissions": ["tabCapture"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "side_panel": { "default_path": "sidebar.html" },
   "action": { "default_title": "Open AURA" },
+  "omnibox": { "keyword": "aura" },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Space",
+        "mac": "Command+Shift+Space"
+      },
+      "description": "Open AURA sidebar"
+    },
+    "focus-chat": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+K",
+        "mac": "Command+Shift+K"
+      },
+      "description": "Open AURA and focus chat input"
+    },
+    "dictate": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Open AURA and start voice dictation"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

@@ -560,3 +560,55 @@ async def get_proactive_suggestion(session_id: str = Query(default="default")):
         }
     except Exception as e:
         return {"suggestion": None, "error": safe_error_detail(e)}
+
+
+# ============================================================================
+# Stuck detector endpoint (extension push)
+# ============================================================================
+
+class StuckSignal(BaseModel):
+    """Browser stuck signal forwarded from the Chrome extension."""
+    kind: str = Field(..., pattern=r"^[a-z_]{3,40}$")
+    url: str = Field(..., max_length=2048)
+    title: str = Field(default="", max_length=512)
+    count: Optional[int] = None
+    snippet: Optional[str] = Field(default=None, max_length=400)
+    field: Optional[str] = Field(default=None, max_length=120)
+    session_id: str = Field(default="default", max_length=64)
+
+
+@router.post("/stuck")
+async def stuck_signal(signal: StuckSignal):
+    """Receive a stuck-state hint from the browser extension.
+
+    The extension's content script watches for tab revisits, re-reads,
+    form flip-flops, and workflow boundaries. When any trigger fires, the
+    signal is forwarded here so the Gateway Daemon can decide whether to
+    surface a proactive suggestion. This replaces the 60s poll-based loop
+    with evidence-based triggers.
+    """
+    try:
+        daemon = _get_daemon_for_session(signal.session_id)
+        # Update user context with the stuck hint
+        try:
+            ctx = daemon.user_context
+            ctx.keywords = list(set((ctx.keywords or []) + [signal.kind]))[:20]
+            if signal.title:
+                ctx.current_task = signal.title[:200]
+        except Exception:
+            pass
+        # Nudge the inference engine — the daemon's own tick will decide
+        # whether to produce a message on its next pass.
+        try:
+            daemon.inference_engine.beliefs.uncertainty = min(
+                1.0, daemon.inference_engine.beliefs.uncertainty + 0.15
+            )
+        except Exception:
+            pass
+        logger.info("[Proactive] stuck signal %s from %s", signal.kind, signal.url[:80])
+        return {"ok": True, "acknowledged": signal.kind}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.debug("[Proactive] stuck signal handling failed: %s", e)
+        return {"ok": False, "error": safe_error_detail(e)}

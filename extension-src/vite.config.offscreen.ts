@@ -3,19 +3,19 @@ import { resolve } from 'path'
 
 export default defineConfig({
   build: {
-    outDir: resolve(__dirname, '../extension'),
+    outDir: '../extension',
     emptyOutDir: false,
+    sourcemap: 'hidden',
     lib: {
-      entry: resolve(__dirname, 'src/workers/pyodide-worker.ts'),
-      name: 'PyodideWorker',
+      entry: resolve(__dirname, 'offscreen.ts'),
+      name: 'offscreen',
+      fileName: () => 'offscreen.js',
       formats: ['iife'],
-      fileName: () => 'pyodide-worker.js',
     },
     rollupOptions: {
       output: {
         inlineDynamicImports: true,
       },
     },
-    minify: 'esbuild',
   },
 })

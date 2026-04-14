@@ -1,8 +1,27 @@
 import { create } from 'zustand';
-import type { Message, StreamState, Context, PanelId, ThinkingLevel, ConversationMeta, ProactiveMessage } from './types';
-import { HTTP, API_KEY } from './api';
+import type {
+  Message,
+  StreamState,
+  Context,
+  PanelId,
+  ThinkingLevel,
+  ConversationMeta,
+  ProactiveMessage,
+  AgentStep,
+  HandStats,
+  HandTemplate,
+  HandHistoryEntry,
+  HandApprovalRequest,
+  HandLiveTrace,
+  McpServerInfo,
+  McpServerCreate,
+} from './types';
+import { HTTP, API_KEY, apiFetch } from './api';
 import ext from './ext';
 import * as db from './utils/db';
+import { runAgentLoop } from './utils/agentLoop';
+
+const HAND_LIVE_TRACE_MAX = 20;
 
 // --- Conversation history constants ---
 const MAX_CONVERSATIONS = 500;
@@ -99,6 +118,50 @@ interface AuraStore {
   dismissProactive: (id: string) => void;
   acceptProactive: (id: string, sendFn: (text: string) => void) => void;
 
+  // Browser agent (inline in chat)
+  agentRunning: boolean;
+  powerModeEnabled: boolean;
+  setPowerModeEnabled: (on: boolean) => void;
+  lifelogEnabled: boolean;
+  setLifelogEnabled: (on: boolean) => void;
+  runAgentTask: (task: string) => Promise<void>;
+  stopAgentTask: () => void;
+  appendAgentStep: (messageId: string, step: AgentStep) => void;
+
+  // Hands (autonomous background agents on Hetzner)
+  hands: HandStats[];
+  handApprovals: HandApprovalRequest[];
+  handHistory: HandHistoryEntry[];
+  handTemplates: HandTemplate[];
+  handLiveTrace: HandLiveTrace[];
+  handsLoaded: boolean;
+  handsError: string | null;
+  loadHands: () => Promise<void>;
+  loadHandApprovals: () => Promise<void>;
+  loadHandHistory: (limit?: number) => Promise<void>;
+  loadHandTemplates: () => Promise<void>;
+  runHand: (name: string) => Promise<void>;
+  pauseHand: (name: string) => Promise<void>;
+  activateHand: (name: string) => Promise<void>;
+  deactivateHand: (name: string) => Promise<void>;
+  deleteHand: (name: string) => Promise<void>;
+  approveHand: (name: string, requestId: string, approved: boolean) => Promise<void>;
+  createHand: (description: string) => Promise<void>;
+  createHandFromTemplate: (templateName: string, variables?: Record<string, string>) => Promise<void>;
+  applyHandEvent: (ev: any) => void;
+  applyHandApprovalRequest: (req: any) => void;
+  applyHandActionTrace: (trace: any) => void;
+
+  // MCP hub
+  mcpServers: McpServerInfo[];
+  mcpLoaded: boolean;
+  mcpError: string | null;
+  loadMcpServers: () => Promise<void>;
+  addMcpServer: (server: McpServerCreate) => Promise<void>;
+  removeMcpServer: (name: string) => Promise<void>;
+  setMcpServerEnabled: (name: string, enabled: boolean) => Promise<void>;
+  testMcpServer: (name: string) => Promise<{ ok: boolean; tool_count: number; error?: string }>;
+
   // Actions
   setWs: (ws: WebSocket | null) => void;
   setWsReady: (ready: boolean) => void;
@@ -181,13 +244,15 @@ export const useStore = create<AuraStore>((set, get) => {
     }
   });
 
-  // Load saved autoSpeak + thinking/research prefs
-  ext?.storage?.local?.get(['autoSpeak', 'thinkingMode', 'thinkingLevel', 'deepResearch'], (d: any) => {
+  // Load saved autoSpeak + thinking/research + power-mode prefs
+  ext?.storage?.local?.get(['autoSpeak', 'thinkingMode', 'thinkingLevel', 'deepResearch', 'powerModeEnabled', 'lifelogEnabled'], (d: any) => {
     set({
       autoSpeak: !!d?.autoSpeak,
       thinkingMode: !!d?.thinkingMode,
       thinkingLevel: d?.thinkingLevel || 'medium',
       deepResearch: !!d?.deepResearch,
+      powerModeEnabled: !!d?.powerModeEnabled,
+      lifelogEnabled: !!d?.lifelogEnabled,
     });
   });
 
@@ -252,6 +317,19 @@ export const useStore = create<AuraStore>((set, get) => {
     routingPreference: 'balanced' as 'prefer-fast' | 'balanced' | 'prefer-quality',
     lastRoutingResult: null,
     proactiveMessages: [],
+    agentRunning: false,
+    powerModeEnabled: false,
+    lifelogEnabled: false,
+    hands: [] as HandStats[],
+    handApprovals: [] as HandApprovalRequest[],
+    handHistory: [] as HandHistoryEntry[],
+    handTemplates: [] as HandTemplate[],
+    handLiveTrace: [] as HandLiveTrace[],
+    handsLoaded: false,
+    handsError: null as string | null,
+    mcpServers: [] as McpServerInfo[],
+    mcpLoaded: false,
+    mcpError: null as string | null,
 
     setWs: (ws) => set({ ws }),
     setWsReady: (wsReady) => set({ wsReady }),
@@ -437,12 +515,17 @@ export const useStore = create<AuraStore>((set, get) => {
         const existing = s.proactiveMessages.find(m => m.id === msg.id);
         if (existing) return s;
         const msgs = [...s.proactiveMessages, msg].slice(-2);
+        ext?.runtime?.sendMessage?.({ type: 'PROACTIVE_COUNT_CHANGED', count: msgs.length }).catch(() => {});
         return { proactiveMessages: msgs };
       });
     },
 
     dismissProactive: (id) => {
-      set(s => ({ proactiveMessages: s.proactiveMessages.filter(m => m.id !== id) }));
+      set(s => {
+        const next = s.proactiveMessages.filter(m => m.id !== id);
+        ext?.runtime?.sendMessage?.({ type: 'PROACTIVE_COUNT_CHANGED', count: next.length }).catch(() => {});
+        return { proactiveMessages: next };
+      });
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (API_KEY) headers['X-API-Key'] = API_KEY;
       fetch(`${HTTP}/api/proactive/dismiss`, {
@@ -455,8 +538,280 @@ export const useStore = create<AuraStore>((set, get) => {
     acceptProactive: (id, sendFn) => {
       const msg = get().proactiveMessages.find(m => m.id === id);
       if (!msg) return;
-      set(s => ({ proactiveMessages: s.proactiveMessages.filter(m => m.id !== id) }));
+      set(s => {
+        const next = s.proactiveMessages.filter(m => m.id !== id);
+        ext?.runtime?.sendMessage?.({ type: 'PROACTIVE_COUNT_CHANGED', count: next.length }).catch(() => {});
+        return { proactiveMessages: next };
+      });
       sendFn(msg.text);
+    },
+
+    appendAgentStep: (messageId, step) => {
+      set(s => ({
+        messages: s.messages.map(m =>
+          m.id === messageId
+            ? { ...m, agentSteps: [...(m.agentSteps || []), step] }
+            : m,
+        ),
+      }));
+    },
+
+    runAgentTask: async (task) => {
+      if (get().agentRunning) return;
+
+      const userMsg: Message = {
+        id: 'user-' + Date.now(),
+        role: 'user',
+        text: `/agent ${task}`,
+        timestamp: Date.now(),
+      };
+      const agentMsgId = 'agent-' + Date.now();
+      const agentMsg: Message = {
+        id: agentMsgId,
+        role: 'ai',
+        text: '',
+        timestamp: Date.now(),
+        agentTask: task,
+        agentSteps: [],
+        agentDone: false,
+      };
+
+      const abort = new AbortController();
+      set(s => ({
+        messages: [...s.messages, userMsg, agentMsg],
+        agentRunning: true,
+        activeStream: {
+          type: 'agent',
+          rawText: '',
+          agentMessageId: agentMsgId,
+          agentAbortController: abort,
+        },
+      }));
+
+      await runAgentLoop({
+        task,
+        model: get().getModel('agent'),
+        signal: abort.signal,
+        powerMode: get().powerModeEnabled,
+        onStep: (step) => get().appendAgentStep(agentMsgId, step),
+        onComplete: (reason, errorMessage) => {
+          const summary =
+            reason === 'done' ? 'Task complete.'
+            : reason === 'max-steps' ? 'Stopped after 15 steps.'
+            : reason === 'stopped' ? 'Stopped by user.'
+            : `Error: ${errorMessage || 'unknown'}`;
+          set(s => ({
+            agentRunning: false,
+            activeStream: null,
+            messages: s.messages.map(m =>
+              m.id === agentMsgId ? { ...m, agentDone: true, text: summary } : m,
+            ),
+          }));
+        },
+      });
+    },
+
+    stopAgentTask: () => {
+      const stream = get().activeStream;
+      if (stream && stream !== true && stream.agentAbortController) {
+        stream.agentAbortController.abort();
+      }
+    },
+
+    setPowerModeEnabled: (on: boolean) => {
+      set({ powerModeEnabled: on });
+      ext?.storage?.local?.set({ powerModeEnabled: on });
+    },
+
+    setLifelogEnabled: (on: boolean) => {
+      set({ lifelogEnabled: on });
+      ext?.storage?.local?.set({ lifelogEnabled: on });
+    },
+
+    // ─── Hands actions ─────────────────────────────────────────────────────
+
+    loadHands: async () => {
+      try {
+        const data = await apiFetch(`${HTTP}/api/hands`);
+        set({ hands: (data?.hands || []) as HandStats[], handsLoaded: true, handsError: null });
+      } catch (err: any) {
+        set({ handsError: err?.message || 'Failed to load hands', handsLoaded: true });
+      }
+    },
+
+    loadHandApprovals: async () => {
+      try {
+        const data = await apiFetch(`${HTTP}/api/hands/approvals`);
+        set({ handApprovals: (data?.approvals || []) as HandApprovalRequest[] });
+      } catch { /* non-fatal */ }
+    },
+
+    loadHandHistory: async (limit = 30) => {
+      try {
+        const data = await apiFetch(`${HTTP}/api/hands/history?limit=${limit}`);
+        set({ handHistory: (data?.history || []) as HandHistoryEntry[] });
+      } catch { /* non-fatal */ }
+    },
+
+    loadHandTemplates: async () => {
+      try {
+        const data = await apiFetch(`${HTTP}/api/hands/templates`);
+        set({ handTemplates: (data?.templates || []) as HandTemplate[] });
+      } catch { /* non-fatal */ }
+    },
+
+    runHand: async (name: string) => {
+      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/run`, { method: 'POST' });
+      get().loadHands();
+    },
+
+    pauseHand: async (name: string) => {
+      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/pause`, { method: 'POST' });
+      get().loadHands();
+    },
+
+    activateHand: async (name: string) => {
+      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/activate`, { method: 'POST' });
+      get().loadHands();
+    },
+
+    deactivateHand: async (name: string) => {
+      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/deactivate`, { method: 'POST' });
+      get().loadHands();
+    },
+
+    deleteHand: async (name: string) => {
+      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      set(s => ({ hands: s.hands.filter(h => h.name !== name) }));
+    },
+
+    approveHand: async (name: string, _requestId: string, approved: boolean) => {
+      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved }),
+      });
+      set(s => ({ handApprovals: s.handApprovals.filter(a => a.hand_name !== name) }));
+    },
+
+    createHand: async (description: string) => {
+      await apiFetch(`${HTTP}/api/hands/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description }),
+      });
+      get().loadHands();
+    },
+
+    createHandFromTemplate: async (templateName: string, variables?: Record<string, string>) => {
+      await apiFetch(`${HTTP}/api/hands/from-template`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template_name: templateName, variables: variables || {} }),
+      });
+      get().loadHands();
+    },
+
+    applyHandEvent: (ev: any) => {
+      // Update the hand's stats optimistically + add to history
+      set(s => {
+        const handName = ev.hand || ev.hand_name;
+        const next = s.hands.map(h =>
+          h.name === handName
+            ? { ...h, total_runs: h.total_runs + 1, last_run_ts: Date.now() / 1000, state: ev.success === false ? 'error' : 'cooldown' }
+            : h,
+        );
+        const historyEntry: HandHistoryEntry = {
+          timestamp: new Date().toISOString(),
+          action_type: 'hand_complete',
+          action_data: {
+            success: ev.success !== false,
+            hand: handName,
+            summary: ev.summary || '',
+            duration_ms: Math.round((ev.duration_seconds || 0) * 1000),
+          },
+          agent_id: `hand:${handName}`,
+        };
+        return { hands: next, handHistory: [historyEntry, ...s.handHistory].slice(0, 50) };
+      });
+    },
+
+    applyHandApprovalRequest: (req: any) => {
+      const entry: HandApprovalRequest = {
+        request_id: String(req.request_id),
+        hand_name: String(req.hand_name),
+        tool_name: String(req.tool_name),
+        args: (req.args && typeof req.args === 'object') ? req.args : {},
+        timestamp: req.timestamp || Date.now(),
+        age_seconds: Number(req.age_seconds || 0),
+      };
+      set(s => {
+        if (s.handApprovals.some(a => a.request_id === entry.request_id)) return s;
+        return { handApprovals: [...s.handApprovals, entry] };
+      });
+    },
+
+    applyHandActionTrace: (trace: any) => {
+      const entry: HandLiveTrace = {
+        hand: String(trace.hand || ''),
+        step: Number(trace.step || 0),
+        description: String(trace.description || ''),
+        timestamp: Number(trace.timestamp || Date.now()),
+      };
+      set(s => ({
+        handLiveTrace: [...s.handLiveTrace, entry].slice(-HAND_LIVE_TRACE_MAX),
+      }));
+    },
+
+    // ─── MCP hub actions ───────────────────────────────────────────────────
+
+    loadMcpServers: async () => {
+      try {
+        const data = await apiFetch(`${HTTP}/api/mcp/servers`);
+        set({ mcpServers: (data?.servers || []) as McpServerInfo[], mcpLoaded: true, mcpError: null });
+      } catch (err: any) {
+        set({ mcpError: err?.message || 'Failed to load MCP servers', mcpLoaded: true });
+      }
+    },
+
+    addMcpServer: async (server) => {
+      await apiFetch(`${HTTP}/api/mcp/servers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(server),
+      });
+      await get().loadMcpServers();
+    },
+
+    removeMcpServer: async (name) => {
+      await apiFetch(`${HTTP}/api/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      set(s => ({ mcpServers: s.mcpServers.filter(srv => srv.name !== name) }));
+    },
+
+    setMcpServerEnabled: async (name, enabled) => {
+      const action = enabled ? 'enable' : 'disable';
+      await apiFetch(`${HTTP}/api/mcp/servers/${encodeURIComponent(name)}/${action}`, { method: 'POST' });
+      set(s => ({
+        mcpServers: s.mcpServers.map(srv =>
+          srv.name === name ? { ...srv, enabled } : srv,
+        ),
+      }));
+    },
+
+    testMcpServer: async (name) => {
+      try {
+        const data = await apiFetch(`${HTTP}/api/mcp/servers/${encodeURIComponent(name)}/test`, { method: 'POST' });
+        set(s => ({
+          mcpServers: s.mcpServers.map(srv =>
+            srv.name === name
+              ? { ...srv, connected: !!data?.ok, tool_count: Number(data?.tool_count || 0), tools: (data?.tools || []).map((t: any) => t.name || String(t)), error: data?.error }
+              : srv,
+          ),
+        }));
+        return { ok: !!data?.ok, tool_count: Number(data?.tool_count || 0), error: data?.error };
+      } catch (err: any) {
+        return { ok: false, tool_count: 0, error: err?.message || 'Test failed' };
+      }
     },
 
     // --- Conversation History (IndexedDB with chrome.storage fallback) ---

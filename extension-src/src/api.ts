@@ -10,11 +10,10 @@ import ext from './ext';
 
 // Default to the Aura server. Override in Settings panel if running locally.
 const DEFAULT_HTTP = 'https://aura-elnur.duckdns.org';
-const DEFAULT_API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
 
 export let HTTP = DEFAULT_HTTP;
 export let WS_URL = deriveWsUrl(DEFAULT_HTTP);
-export let API_KEY = DEFAULT_API_KEY;
+export let API_KEY = '';
 
 /** Derive the WebSocket URL from an HTTP base URL. */
 export function deriveWsUrl(httpUrl: string): string {
@@ -49,10 +48,9 @@ export function getServerLabel(): string {
 export function initBackendUrl(): Promise<void> {
   return new Promise((resolve) => {
     if (!ext?.storage?.local) {
-      // No storage API (dev mode / non-extension context) — use defaults
       HTTP = DEFAULT_HTTP;
       WS_URL = deriveWsUrl(HTTP);
-      API_KEY = DEFAULT_API_KEY;
+      API_KEY = '';
       resolve();
       return;
     }
@@ -60,18 +58,9 @@ export function initBackendUrl(): Promise<void> {
       const savedUrl = d?.backendUrl?.trim?.();
       const savedKey = d?.apiKey?.trim?.();
 
-      if (savedUrl) {
-        HTTP = savedUrl.replace(/\/+$/, '');
-      } else {
-        HTTP = DEFAULT_HTTP;
-      }
+      HTTP = savedUrl ? savedUrl.replace(/\/+$/, '') : DEFAULT_HTTP;
       WS_URL = deriveWsUrl(HTTP);
-
-      if (savedKey) {
-        API_KEY = savedKey;
-      } else {
-        API_KEY = DEFAULT_API_KEY;
-      }
+      API_KEY = savedKey || '';
       resolve();
     });
   });

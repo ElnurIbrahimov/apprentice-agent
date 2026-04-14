@@ -2,11 +2,11 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
-  MessageSquare, Search, Languages, PenLine, CheckSquare,
+  MessageSquare, Search, Languages, CheckSquare,
   Database, Zap, FileText, Wrench, File, Mic, Radio,
-  Camera, Youtube, FlaskConical, Calculator, Terminal, Code2,
+  Camera, Youtube, FlaskConical, Calculator, Code2,
   Image, BarChart2, Bot, Cpu, Settings, Crosshair,
-  Presentation, Globe, Brain,
+  Brain, MousePointerClick, Headphones, Settings2, Hand, Plug,
 } from 'lucide-react';
 import { useStore } from '../store';
 import type { PanelId } from '../types';
@@ -35,23 +35,9 @@ const CATEGORIES: CategoryTab[] = [
     Icon: MessageSquare,
     panels: [
       { id: 'chat', label: 'Chat', Icon: MessageSquare },
+      { id: 'ask', label: 'Ask', Icon: Zap },
       { id: 'search', label: 'Search', Icon: Search },
       { id: 'translate', label: 'Translate', Icon: Languages },
-      { id: 'ask', label: 'Ask', Icon: Zap },
-    ],
-  },
-  {
-    key: 'create',
-    label: 'Create',
-    Icon: PenLine,
-    panels: [
-      { id: 'write', label: 'Write', Icon: PenLine },
-      { id: 'grammar', label: 'Grammar', Icon: CheckSquare },
-      { id: 'artifacts', label: 'Artifacts', Icon: Code2 },
-      { id: 'webcreator', label: 'Web Creator', Icon: Globe },
-      { id: 'image', label: 'Image', Icon: Image },
-      { id: 'code', label: 'Code', Icon: Terminal },
-      { id: 'slides', label: 'Slides', Icon: Presentation },
     ],
   },
   {
@@ -59,12 +45,32 @@ const CATEGORIES: CategoryTab[] = [
     label: 'Research',
     Icon: FlaskConical,
     panels: [
-      { id: 'summary', label: 'Summary', Icon: FileText },
       { id: 'research', label: 'Research', Icon: FlaskConical },
+      { id: 'summary', label: 'Summary', Icon: FileText },
       { id: 'youtube', label: 'YouTube', Icon: Youtube },
       { id: 'pdf', label: 'PDF', Icon: File },
-      { id: 'math', label: 'Math', Icon: Calculator },
       { id: 'wisebase', label: 'Wisebase', Icon: Database },
+      { id: 'math', label: 'Math', Icon: Calculator },
+    ],
+  },
+  {
+    key: 'page',
+    label: 'Page',
+    Icon: MousePointerClick,
+    panels: [
+      { id: 'capture', label: 'Capture', Icon: Crosshair },
+      { id: 'ocr', label: 'OCR', Icon: Camera },
+      { id: 'grammar', label: 'Grammar', Icon: CheckSquare },
+      { id: 'image', label: 'Image', Icon: Image },
+    ],
+  },
+  {
+    key: 'media',
+    label: 'Media',
+    Icon: Headphones,
+    panels: [
+      { id: 'voice', label: 'Voice', Icon: Mic },
+      { id: 'record', label: 'Record', Icon: Radio },
     ],
   },
   {
@@ -74,11 +80,7 @@ const CATEGORIES: CategoryTab[] = [
     panels: [
       { id: 'tools', label: 'Tools', Icon: Wrench },
       { id: 'compare', label: 'Compare', Icon: BarChart2 },
-      { id: 'capture', label: 'Capture', Icon: Crosshair },
-      { id: 'ocr', label: 'OCR', Icon: Camera },
-      { id: 'voice', label: 'Voice', Icon: Mic },
-      { id: 'record', label: 'Record', Icon: Radio },
-      { id: 'agent', label: 'Agent', Icon: Bot },
+      { id: 'artifacts', label: 'Artifacts', Icon: Code2 },
     ],
   },
   {
@@ -87,14 +89,17 @@ const CATEGORIES: CategoryTab[] = [
     Icon: Brain,
     panels: [
       { id: 'aura-status', label: 'Mind', Icon: Brain },
+      { id: 'hands', label: 'Hands', Icon: Hand },
+      { id: 'agent', label: 'Agent', Icon: Bot },
     ],
   },
   {
     key: 'settings',
     label: 'Settings',
-    Icon: Settings,
+    Icon: Settings2,
     panels: [
       { id: 'models', label: 'Models', Icon: Cpu },
+      { id: 'mcp', label: 'Connections', Icon: Plug },
       { id: 'settings', label: 'Settings', Icon: Settings },
     ],
   },

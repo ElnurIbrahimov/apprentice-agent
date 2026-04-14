@@ -2036,7 +2036,7 @@ ${url}`;
     };
     let store_ = null;
     let actionCallback = null;
-    const onKeyDown = (e) => {
+    const onKeyDown2 = (e) => {
       if (e.key === "Escape" && internals.isOpen) {
         close();
       }
@@ -2102,14 +2102,14 @@ ${url}`;
         });
       }
       overlay.addEventListener("click", () => close());
-      document.addEventListener("keydown", onKeyDown);
+      document.addEventListener("keydown", onKeyDown2);
       internals.opening = false;
     }
     async function close() {
       if (!internals.isOpen || internals.closing) return;
       internals.closing = true;
       const { modal, overlay, originRect } = internals;
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown2);
       const animations = [];
       if (modal && originRect) {
         const currentRect = centeredRect();
@@ -4534,7 +4534,7 @@ ${description}
   const BATCH_SIZE = 10;
   const MAX_CONCURRENT = 10;
   function initTranslation(ext2) {
-    const state = {
+    const state2 = {
       mode: "bilingual",
       targetLang: "English",
       active: false,
@@ -4617,15 +4617,15 @@ ${description}
       });
     }
     function updateBadgeText() {
-      if (!state.badge) return;
-      const modeBtn = state.badge.querySelector("[data-badge-mode]");
+      if (!state2.badge) return;
+      const modeBtn = state2.badge.querySelector("[data-badge-mode]");
       if (modeBtn) {
-        modeBtn.textContent = state.mode === "bilingual" ? "Bilingual" : "Translated";
+        modeBtn.textContent = state2.mode === "bilingual" ? "Bilingual" : "Translated";
       }
     }
     function setMode(mode) {
-      state.mode = mode;
-      for (const pair of state.elements) {
+      state2.mode = mode;
+      for (const pair of state2.elements) {
         if (mode === "translated") {
           pair.original.style.display = "none";
           pair.translation.style.marginTop = "0";
@@ -4637,26 +4637,26 @@ ${description}
       updateBadgeText();
     }
     function remove() {
-      state.active = false;
-      for (const pair of state.elements) {
+      state2.active = false;
+      for (const pair of state2.elements) {
         pair.translation.remove();
         pair.original.removeAttribute(AURA_TRANSLATE_ATTR);
         pair.original.style.display = "";
       }
-      state.elements = [];
-      if (state.badge) {
-        state.badge.remove();
-        state.badge = null;
+      state2.elements = [];
+      if (state2.badge) {
+        state2.badge.remove();
+        state2.badge = null;
       }
     }
     function showTranslateBadge() {
-      if (state.badge) {
-        state.badge.remove();
-        state.badge = null;
+      if (state2.badge) {
+        state2.badge.remove();
+        state2.badge = null;
       }
-      state.badge = document.createElement("div");
-      state.badge.className = "aura-translate-badge";
-      Object.assign(state.badge.style, {
+      state2.badge = document.createElement("div");
+      state2.badge.className = "aura-translate-badge";
+      Object.assign(state2.badge.style, {
         position: "fixed",
         bottom: "20px",
         right: "20px",
@@ -4683,20 +4683,20 @@ ${description}
         background: "#7c3aed",
         flexShrink: "0"
       });
-      state.badge.appendChild(dot);
+      state2.badge.appendChild(dot);
       const label = document.createElement("span");
       label.style.color = "rgba(160, 148, 210, 0.8)";
       label.textContent = "Translation active";
-      state.badge.appendChild(label);
+      state2.badge.appendChild(label);
       const sep1 = document.createElement("span");
       Object.assign(sep1.style, { width: "1px", height: "14px", background: "rgba(255,255,255,0.1)", flexShrink: "0" });
-      state.badge.appendChild(sep1);
+      state2.badge.appendChild(sep1);
       const langSpan = document.createElement("span");
       langSpan.setAttribute("data-badge-lang", "");
-      langSpan.textContent = state.targetLang;
+      langSpan.textContent = state2.targetLang;
       langSpan.style.color = "rgba(124, 58, 237, 0.9)";
       langSpan.style.fontWeight = "600";
-      state.badge.appendChild(langSpan);
+      state2.badge.appendChild(langSpan);
       const badgeBtnBase = {
         background: "rgba(124, 58, 237, 0.15)",
         border: "1px solid rgba(124, 58, 237, 0.3)",
@@ -4719,9 +4719,9 @@ ${description}
         modeBtn.style.background = "rgba(124, 58, 237, 0.15)";
       });
       modeBtn.addEventListener("click", () => {
-        setMode(state.mode === "bilingual" ? "translated" : "bilingual");
+        setMode(state2.mode === "bilingual" ? "translated" : "bilingual");
       });
-      state.badge.appendChild(modeBtn);
+      state2.badge.appendChild(modeBtn);
       const removeBtn = document.createElement("button");
       removeBtn.textContent = "✕";
       Object.assign(removeBtn.style, { ...badgeBtnBase, padding: "3px 6px", color: "rgba(226, 232, 240, 0.6)" });
@@ -4739,15 +4739,15 @@ ${description}
       removeBtn.addEventListener("click", () => {
         remove();
       });
-      state.badge.appendChild(removeBtn);
-      document.body.appendChild(state.badge);
+      state2.badge.appendChild(removeBtn);
+      document.body.appendChild(state2.badge);
     }
     async function start(targetLang) {
-      state.targetLang = targetLang;
-      state.active = true;
-      state.mode = "bilingual";
-      state.elements = [];
-      state.activeCount = 0;
+      state2.targetLang = targetLang;
+      state2.active = true;
+      state2.mode = "bilingual";
+      state2.elements = [];
+      state2.activeCount = 0;
       showTranslateBadge();
       const elements = getTranslatableElements();
       if (elements.length === 0) return;
@@ -4756,7 +4756,7 @@ ${description}
         const text = (el.textContent || "").trim();
         if (!text) continue;
         const translationDiv = createTranslationElement(el);
-        state.elements.push({ original: el, translation: translationDiv });
+        state2.elements.push({ original: el, translation: translationDiv });
         pairs.push({ original: el, translation: translationDiv, text });
       }
       const batches = [];
@@ -4764,24 +4764,24 @@ ${description}
         batches.push(pairs.slice(i, i + BATCH_SIZE));
       }
       const processBatch = async (batch) => {
-        while (state.activeCount >= MAX_CONCURRENT) {
+        while (state2.activeCount >= MAX_CONCURRENT) {
           await new Promise((r) => setTimeout(r, 100));
         }
-        if (!state.active) return;
-        state.activeCount++;
+        if (!state2.active) return;
+        state2.activeCount++;
         try {
           const texts = batch.map((p) => p.text);
-          const translations = await translateBatchRequest(texts, state.targetLang);
-          if (!state.active) return;
+          const translations = await translateBatchRequest(texts, state2.targetLang);
+          if (!state2.active) return;
           batch.forEach((pair, idx) => {
-            if (!state.active) return;
+            if (!state2.active) return;
             fadeInTranslation(pair.translation, translations[idx] || "[No translation]");
-            if (state.mode === "translated") {
+            if (state2.mode === "translated") {
               pair.original.style.display = "none";
             }
           });
         } finally {
-          state.activeCount--;
+          state2.activeCount--;
         }
       };
       const promises = batches.map((batch) => processBatch(batch));
@@ -5784,6 +5784,455 @@ I have a follow-up question: `,
       }
     );
   }
+  const ext$3 = typeof browser !== "undefined" ? browser : chrome;
+  const MIN_INTERVAL_MS = 5 * 60 * 1e3;
+  const REVISIT_WINDOW_MS = 48 * 60 * 60 * 1e3;
+  const REVISIT_DEDUPE_MS = 10 * 60 * 1e3;
+  const REVISIT_THRESHOLD = 3;
+  const REREAD_THRESHOLD = 3;
+  const FLIPFLOP_THRESHOLD = 2;
+  const FLIPFLOP_WINDOW_MS = 1e4;
+  const MAX_TRACKED_URLS = 2e3;
+  function normalizeUrl(url) {
+    try {
+      const u = new URL(url);
+      return `${u.protocol}//${u.host}${u.pathname}`;
+    } catch {
+      return url;
+    }
+  }
+  let lastSignalAt = 0;
+  function isHttpPage() {
+    return location.protocol === "http:" || location.protocol === "https:";
+  }
+  function sendStuckSignal(kind, extra = {}) {
+    const now = Date.now();
+    if (now - lastSignalAt < MIN_INTERVAL_MS) return;
+    lastSignalAt = now;
+    try {
+      ext$3.runtime.sendMessage({
+        type: "STUCK_SIGNAL",
+        kind,
+        url: location.href,
+        title: document.title,
+        ...extra
+      }).catch(() => {
+      });
+    } catch {
+    }
+  }
+  async function recordVisitAndCheck(rawUrl) {
+    const url = normalizeUrl(rawUrl);
+    try {
+      const data = await ext$3.storage.local.get(["aura_visit_log"]);
+      const log = data.aura_visit_log || {};
+      const now = Date.now();
+      const entry = log[url] || { ts: [] };
+      entry.ts = entry.ts.filter((t) => now - t < REVISIT_WINDOW_MS);
+      const lastTs = entry.ts[entry.ts.length - 1] || 0;
+      const isDuplicate = now - lastTs < REVISIT_DEDUPE_MS;
+      if (!isDuplicate) {
+        entry.ts.push(now);
+        log[url] = entry;
+        for (const k of Object.keys(log)) {
+          if (!log[k].ts.length) delete log[k];
+        }
+        const keys = Object.keys(log);
+        if (keys.length > MAX_TRACKED_URLS) {
+          const sorted = keys.sort((a, b) => (log[a].ts[0] || 0) - (log[b].ts[0] || 0));
+          for (const k of sorted.slice(0, keys.length - MAX_TRACKED_URLS)) delete log[k];
+        }
+        await ext$3.storage.local.set({ aura_visit_log: log });
+      }
+      if (entry.ts.length >= REVISIT_THRESHOLD) {
+        sendStuckSignal("tab_revisit", { count: entry.ts.length });
+      }
+    } catch {
+    }
+  }
+  const rereadCounts = /* @__PURE__ */ new WeakMap();
+  let rereadObserver = null;
+  function initReread() {
+    if (typeof IntersectionObserver === "undefined") return;
+    try {
+      rereadObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          const n = (rereadCounts.get(entry.target) || 0) + 1;
+          rereadCounts.set(entry.target, n);
+          if (n >= REREAD_THRESHOLD) {
+            const text = (entry.target.textContent || "").slice(0, 140);
+            sendStuckSignal("reread", { snippet: text });
+            rereadObserver == null ? void 0 : rereadObserver.unobserve(entry.target);
+          }
+        }
+      }, { threshold: 0.6, rootMargin: "0px" });
+      const candidates = document.querySelectorAll("p, article, section, blockquote");
+      let observed = 0;
+      for (const el of Array.from(candidates)) {
+        if ((el.textContent || "").trim().length >= 120) {
+          rereadObserver.observe(el);
+          observed++;
+          if (observed >= 200) break;
+        }
+      }
+    } catch {
+    }
+  }
+  const flipFlopMap = /* @__PURE__ */ new WeakMap();
+  function initFlipFlop() {
+    const handler = (e) => {
+      const el = e.target;
+      if (!el || !("value" in el)) return;
+      if (el.type === "password" || el.type === "hidden") return;
+      const rec = flipFlopMap.get(el) || { lastEdit: 0, emptyAt: [] };
+      const now = Date.now();
+      if (el.value === "") {
+        rec.emptyAt = rec.emptyAt.filter((t) => now - t < FLIPFLOP_WINDOW_MS);
+        rec.emptyAt.push(now);
+        if (rec.emptyAt.length >= FLIPFLOP_THRESHOLD) {
+          const name = el.getAttribute("name") || el.getAttribute("id") || "field";
+          sendStuckSignal("form_flipflop", { field: name });
+          rec.emptyAt = [];
+        }
+      } else {
+        rec.lastEdit = now;
+      }
+      flipFlopMap.set(el, rec);
+    };
+    document.addEventListener("input", handler, { capture: true, passive: true });
+  }
+  function initWorkflowBoundary() {
+    window.addEventListener("beforeunload", () => {
+      const hasUnsaved = document.querySelector('textarea:focus, [contenteditable="true"]:focus');
+      if (hasUnsaved) {
+        try {
+          ext$3.runtime.sendMessage({
+            type: "STUCK_SIGNAL",
+            kind: "workflow_boundary_unsaved",
+            url: location.href,
+            title: document.title
+          });
+        } catch {
+        }
+      }
+    });
+  }
+  function initStuckDetector() {
+    if (!isHttpPage()) return;
+    recordVisitAndCheck(location.href);
+    const setup = () => {
+      initReread();
+      initFlipFlop();
+      initWorkflowBoundary();
+    };
+    if (document.readyState === "complete") {
+      setTimeout(setup, 500);
+    } else {
+      window.addEventListener("load", () => setTimeout(setup, 500), { once: true });
+    }
+  }
+  const ext$2 = typeof browser !== "undefined" ? browser : chrome;
+  const DEBOUNCE_MS = 800;
+  const MIN_TEXT_LEN = 3;
+  const MAX_TEXT_LEN = 2e3;
+  const MAX_SUGGESTION_LEN = 200;
+  const CHIP_ID = "aura-ghost-chip";
+  let state = null;
+  let chipNode = null;
+  let enabled$1 = true;
+  const SENSITIVE_HOSTS = [
+    "accounts.google.com",
+    "login.microsoftonline.com",
+    "okta.com",
+    "1password.com",
+    "lastpass.com",
+    "bitwarden.com",
+    "dashlane.com"
+  ];
+  function isDenylisted$1() {
+    const host = location.hostname;
+    if (SENSITIVE_HOSTS.some((d) => host === d || host.endsWith("." + d))) return true;
+    if (/\bbank\b|\bpayment\b|\bcheckout\b/i.test(host)) return true;
+    return false;
+  }
+  function ensureChipNode() {
+    if (chipNode && document.body.contains(chipNode)) return chipNode;
+    const node = document.createElement("div");
+    node.id = CHIP_ID;
+    node.setAttribute("role", "tooltip");
+    node.setAttribute("aria-live", "polite");
+    node.style.cssText = [
+      "position:fixed",
+      "z-index:2147483646",
+      "pointer-events:none",
+      "max-width:480px",
+      "padding:6px 10px",
+      "border-radius:8px",
+      "background:rgba(20,20,28,0.92)",
+      "color:rgba(220,220,235,0.92)",
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+      "font-size:12px",
+      "line-height:1.4",
+      "box-shadow:0 6px 24px rgba(0,0,0,0.35), 0 0 0 1px rgba(124,58,237,0.35)",
+      "opacity:0",
+      "transform:translateY(-4px)",
+      "transition:opacity 0.12s ease, transform 0.12s ease",
+      "display:none"
+    ].join(";");
+    document.body.appendChild(node);
+    chipNode = node;
+    return node;
+  }
+  function clearChip() {
+    if (chipNode) {
+      chipNode.style.opacity = "0";
+      chipNode.style.transform = "translateY(-4px)";
+      chipNode.style.display = "none";
+      chipNode.textContent = "";
+    }
+    if (state) state.suggestion = "";
+  }
+  function showChipFor(el, suggestion) {
+    const node = ensureChipNode();
+    node.textContent = "";
+    const label = document.createElement("span");
+    label.textContent = "Aura · Tab to accept";
+    label.style.cssText = "color:rgba(167,139,250,0.85);margin-right:8px;font-size:10.5px;text-transform:uppercase;letter-spacing:0.05em";
+    node.appendChild(label);
+    const text = document.createElement("span");
+    text.textContent = suggestion;
+    node.appendChild(text);
+    const rect = el.getBoundingClientRect();
+    const maxLeft = Math.max(8, window.innerWidth - 500);
+    const left = Math.min(Math.max(8, rect.left), maxLeft);
+    const top = Math.min(rect.bottom + 6, window.innerHeight - 40);
+    node.style.left = `${left}px`;
+    node.style.top = `${top}px`;
+    node.style.display = "block";
+    void node.offsetHeight;
+    node.style.opacity = "1";
+    node.style.transform = "translateY(0)";
+  }
+  function getInputText(el) {
+    if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+      return el.value || "";
+    }
+    return el.textContent || "";
+  }
+  function applySuggestion(el, suggestion) {
+    if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+      const start = el.selectionStart ?? el.value.length;
+      el.value = el.value.slice(0, start) + suggestion + el.value.slice(start);
+      const newPos = start + suggestion.length;
+      try {
+        el.setSelectionRange(newPos, newPos);
+      } catch {
+      }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    } else if (el.isContentEditable) {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        const node = document.createTextNode(suggestion);
+        range.insertNode(node);
+        range.setStartAfter(node);
+        range.setEndAfter(node);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+    clearChip();
+    state = null;
+  }
+  async function requestCompletion(el, text) {
+    if (!state) return;
+    if (state.abortCtrl) state.abortCtrl.abort();
+    const ctrl = new AbortController();
+    state.abortCtrl = ctrl;
+    try {
+      const resp = await ext$2.runtime.sendMessage({
+        type: "GHOST_COMPLETE",
+        text: text.slice(-MAX_TEXT_LEN),
+        url: location.href,
+        title: document.title
+      });
+      if (!resp || typeof resp.continuation !== "string") return;
+      const s = String(resp.continuation || "").trim();
+      if (!s || s.length > MAX_SUGGESTION_LEN) return;
+      if (state && state.el === el && state.text === text) {
+        state.suggestion = s;
+        showChipFor(el, s);
+      }
+    } catch {
+    }
+  }
+  function scheduleCompletion(el) {
+    if (!state || state.el !== el) return;
+    if (state.debounceTimer) window.clearTimeout(state.debounceTimer);
+    state.debounceTimer = window.setTimeout(() => {
+      if (!state || state.el !== el) return;
+      const text = getInputText(el);
+      state.text = text;
+      if (text.length < MIN_TEXT_LEN) return;
+      requestCompletion(el, text);
+    }, DEBOUNCE_MS);
+  }
+  function isEligibleTarget(el) {
+    if (!el || !(el instanceof HTMLElement)) return false;
+    if (el instanceof HTMLInputElement) {
+      if (["password", "email", "tel", "number", "date", "url"].includes(el.type)) return false;
+      if (el.getAttribute("autocomplete") === "off") return false;
+      return true;
+    }
+    if (el instanceof HTMLTextAreaElement) {
+      if (el.getAttribute("autocomplete") === "off") return false;
+      return true;
+    }
+    return el.isContentEditable;
+  }
+  function onInput(e) {
+    if (!enabled$1 || isDenylisted$1()) return;
+    if (!isEligibleTarget(e.target)) return;
+    const target = e.target;
+    state = {
+      el: target,
+      text: getInputText(target),
+      suggestion: "",
+      debounceTimer: null,
+      abortCtrl: null
+    };
+    clearChip();
+    scheduleCompletion(target);
+  }
+  function onKeyDown(e) {
+    if (!state) return;
+    if (e.key === "Tab" && !e.shiftKey && state.suggestion) {
+      e.preventDefault();
+      applySuggestion(state.el, state.suggestion);
+      return;
+    }
+    if (state.suggestion) clearChip();
+  }
+  function onScrollOrResize() {
+    clearChip();
+  }
+  function initGhostText() {
+    if (location.protocol !== "http:" && location.protocol !== "https:") return;
+    document.addEventListener("input", onInput, { capture: true, passive: true });
+    document.addEventListener("keydown", onKeyDown, { capture: true });
+    window.addEventListener("scroll", onScrollOrResize, { capture: true, passive: true });
+    window.addEventListener("resize", onScrollOrResize, { passive: true });
+    window.addEventListener("blur", clearChip);
+  }
+  window.addEventListener("aura-ghost-disable", () => {
+    enabled$1 = false;
+    clearChip();
+  });
+  window.addEventListener("aura-ghost-enable", () => {
+    enabled$1 = true;
+  });
+  const ext$1 = typeof browser !== "undefined" ? browser : chrome;
+  let enabled = false;
+  let startTs = 0;
+  let maxScrollPct = 0;
+  let lastSelection = "";
+  let sent = false;
+  const DENYLIST_HOSTS = [
+    "accounts.google.com",
+    "login.microsoftonline.com",
+    "okta.com",
+    "1password.com",
+    "lastpass.com",
+    "bitwarden.com",
+    "dashlane.com"
+  ];
+  function isDenylisted() {
+    const host = location.hostname;
+    if (DENYLIST_HOSTS.some((d) => host.endsWith(d))) return true;
+    if (/\bbank|\bpayment|\bcheckout\b/i.test(host)) return true;
+    return false;
+  }
+  function isLoggablePage() {
+    if (location.protocol !== "http:" && location.protocol !== "https:") return false;
+    if (isDenylisted()) return false;
+    return true;
+  }
+  function trackScroll() {
+    const doc = document.documentElement;
+    const viewport = window.innerHeight;
+    const total = Math.max(1, (doc.scrollHeight || viewport) - viewport);
+    const cur = window.scrollY;
+    const pct = Math.round(cur / total * 100);
+    if (pct > maxScrollPct) maxScrollPct = pct;
+  }
+  function trackSelection() {
+    var _a;
+    try {
+      const s = ((_a = window.getSelection()) == null ? void 0 : _a.toString()) || "";
+      if (s.length >= 20 && s.length <= 500 && s.length > lastSelection.length) {
+        lastSelection = s;
+      }
+    } catch {
+    }
+  }
+  function buildEvent() {
+    if (!enabled || !isLoggablePage()) return null;
+    if (!startTs) return null;
+    const dwell = Date.now() - startTs;
+    if (dwell < 3e3) return null;
+    const ev = {
+      url: location.href,
+      title: document.title,
+      dwell_ms: dwell,
+      scroll_max_pct: maxScrollPct,
+      timestamp: Date.now()
+    };
+    if (lastSelection) ev.selection = lastSelection;
+    return ev;
+  }
+  function flush() {
+    if (sent) return;
+    const ev = buildEvent();
+    if (!ev) return;
+    sent = true;
+    try {
+      ext$1.runtime.sendMessage({ type: "LIFELOG_EVENT", event: ev }).catch(() => {
+      });
+    } catch {
+    }
+  }
+  async function loadEnabled() {
+    try {
+      const data = await ext$1.storage.local.get(["lifelogEnabled"]);
+      enabled = !!(data == null ? void 0 : data.lifelogEnabled);
+    } catch {
+    }
+  }
+  function initLifelog() {
+    var _a, _b;
+    if (!isLoggablePage()) return;
+    loadEnabled().then(() => {
+      if (!enabled) return;
+      startTs = Date.now();
+      maxScrollPct = 0;
+      lastSelection = "";
+      sent = false;
+      window.addEventListener("scroll", trackScroll, { passive: true });
+      document.addEventListener("selectionchange", trackSelection, { passive: true });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") flush();
+      });
+      window.addEventListener("pagehide", flush);
+      window.addEventListener("beforeunload", flush);
+    });
+    (_b = (_a = ext$1.storage) == null ? void 0 : _a.onChanged) == null ? void 0 : _b.addListener((changes, area) => {
+      if (area !== "local" || !changes.lifelogEnabled) return;
+      enabled = !!changes.lifelogEnabled.newValue;
+      if (enabled && !startTs) startTs = Date.now();
+    });
+  }
   const ext = typeof browser !== "undefined" ? browser : chrome;
   const STALE_IDS = [
     "aura-shadow-host",
@@ -5920,6 +6369,9 @@ I have a follow-up question: `,
     initYoutubeRelay(safeSend);
     initNetflixRelay(safeSend);
     initGoogleSerp(ext, safeSend);
+    initStuckDetector();
+    initGhostText();
+    initLifelog();
     setupMessageListener(ext, {
       extractMainContent,
       serializeDOM,

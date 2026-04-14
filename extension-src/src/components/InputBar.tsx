@@ -86,10 +86,38 @@ const MAX_TEXTAREA_HEIGHT = Math.ceil(MAX_VISIBLE_LINES * LINE_HEIGHT_PX) + 20; 
 const MAX_POPUP_ITEMS = 6;
 
 export default function InputBar({ onSend, featureKey = 'chat', placeholder, disabled, fileAttachments = [], onRemoveAttachment, onFilesAdded }: Props) {
-  const { thinkingMode, setThinkingMode, thinkingLevel, setThinkingLevel, deepResearch, setDeepResearch, activeStream, setPendingCtx, pendingCtx, pageContextEnabled, setPageContextEnabled, pageContext, setPageContext } = useStore();
+  const { thinkingMode, setThinkingMode, thinkingLevel, setThinkingLevel, deepResearch, setDeepResearch, activeStream, setPendingCtx, pendingCtx, pageContextEnabled, setPageContextEnabled, pageContext, setPageContext, agentRunning, stopAgentTask } = useStore();
   const [showThinkTooltip, setShowThinkTooltip] = useState(false);
   const thinkLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Global hotkey focus event (fired by background.ts focus-chat command)
+  useEffect(() => {
+    const handler = () => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }
+    };
+    window.addEventListener('aura-focus-input', handler);
+    return () => window.removeEventListener('aura-focus-input', handler);
+  }, []);
+
+  // Voice dictate hotkey event (fired by background.ts dictate command)
+  useEffect(() => {
+    const handler = () => {
+      const el = textareaRef.current;
+      if (el) el.focus();
+      // Ref-stable: toggleRecording is defined below; use a slight delay so the
+      // effect re-reads the current function via a window event.
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('aura-inputbar-toggle-mic'));
+      }, 50);
+    };
+    window.addEventListener('aura-dictate-start', handler);
+    return () => window.removeEventListener('aura-dictate-start', handler);
+  }, []);
   const [pageLoading, setPageLoading] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [hasText, setHasText] = useState(false);
@@ -358,6 +386,15 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
     recognition.start();
     setIsRecording(true);
   }, [isRecording, handleInput]);
+
+  // Bridge the two useEffects above — toggleRecording is defined here, and
+  // the dictate hotkey useEffect fires `aura-inputbar-toggle-mic` instead of
+  // calling it directly to avoid stale-closure issues.
+  useEffect(() => {
+    const h = () => toggleRecording();
+    window.addEventListener('aura-inputbar-toggle-mic', h);
+    return () => window.removeEventListener('aura-inputbar-toggle-mic', h);
+  }, [toggleRecording]);
 
   // Stop recording on Escape key
   useEffect(() => {
@@ -861,22 +898,36 @@ export default function InputBar({ onSend, featureKey = 'chat', placeholder, dis
                 <div className="mic-tooltip">Voice not available in this browser</div>
               )}
             </div>
-            <button
-              onClick={handleSend}
-              disabled={!canSend}
-              className={`input-send-btn ${canSend ? 'input-send-ready' : ''}`}
-              aria-label="Send message"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path
-                  d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
+            {agentRunning ? (
+              <button
+                onClick={stopAgentTask}
+                className="input-send-btn input-send-ready"
+                aria-label="Stop agent"
+                title="Stop running agent"
+                style={{ background: 'rgba(239,68,68,0.18)', color: 'var(--rd)', border: '1px solid var(--rd)' }}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="2" y="2" width="8" height="8" rx="1" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!canSend}
+                className={`input-send-btn ${canSend ? 'input-send-ready' : ''}`}
+                aria-label="Send message"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path
+                    d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
       </div>

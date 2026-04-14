@@ -1,48 +1,42 @@
-import { WS_URL, HTTP, API_KEY } from './api';
+import { HTTP, API_KEY } from './api';
 import { useStore, registerReconnectHandler } from './store';
 
-let _wsRetryDelay = 1000;
-let _wsConsecutiveFailures = 0;
+/**
+ * WebSocket transport lives in the offscreen document (see offscreen.ts).
+ * This module is a thin client: it exposes a WebSocket-shaped proxy so
+ * panels can keep calling `socket.send(...)` unchanged, listens for
+ * `AURA_WS_IN` runtime messages from offscreen, and applies the same
+ * message switch that the single-process version used.
+ */
+
+const WS_STALE_TIMEOUT = 300_000; // 5 min during active streams
 let _chunkBuf = '';
 let _thinkBuf = '';
 let _rafId: number | null = null;
-let _connTimer: ReturnType<typeof setTimeout> | null = null;
 let _staleTimer: ReturnType<typeof setTimeout> | null = null;
-const WS_CONNECT_TIMEOUT = 5_000;
-const WS_STALE_TIMEOUT = 300_000; // 5 min — complex ops (deep research, web creator) can be slow
-const PING_INTERVAL = 25_000; // 25s — keeps service worker alive (Chrome kills after 30s idle)
-const PING_GRACE = 5_000; // Don't ping if message received <5s ago
-let _pingTimer: ReturnType<typeof setInterval> | null = null;
-let _lastMessageTime = 0;
 
-function clearWsTimers() {
-  if (_connTimer) { clearTimeout(_connTimer); _connTimer = null; }
-  if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
-}
+// --- WsProxy: WebSocket-shaped handle for the store ------------------------
+// Keeps the store's `ws` field contract ({ readyState, send, close }) so
+// every panel's `socket?.readyState === WebSocket.OPEN && socket.send(...)`
+// pattern keeps working without modification. The real WebSocket lives in
+// the offscreen document (see offscreen.ts).
+//
+// `close()` here means "tear down and reconnect" — this matches the only
+// caller's intent (SettingsPanel after a URL change). True close-without-
+// reconnect isn't a useful semantic for an offscreen-hosted socket.
 
-function startPingLoop(socket: WebSocket) {
-  if (_pingTimer) return;
-  _pingTimer = setInterval(() => {
-    if (socket.readyState === WebSocket.OPEN && (Date.now() - _lastMessageTime) > PING_GRACE) {
-      socket.send(JSON.stringify({ type: 'ping' }));
-    }
-  }, PING_INTERVAL);
-}
-
-function stopPingLoop() {
-  if (_pingTimer) { clearInterval(_pingTimer); _pingTimer = null; }
-}
-
-function resetStaleTimer(socket: WebSocket) {
-  if (_staleTimer) clearTimeout(_staleTimer);
-  const { activeStream } = useStore.getState();
-  if (activeStream && activeStream !== true) {
-    _staleTimer = setTimeout(() => {
-      console.warn('[Aura] WebSocket stale (no message for 5min during stream), reconnecting');
-      socket.close();
-    }, WS_STALE_TIMEOUT);
+class WsProxy {
+  readyState: number = WebSocket.CLOSED;
+  send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+    const payload = typeof data === 'string' ? data : String(data);
+    chrome.runtime.sendMessage({ type: 'AURA_WS_OUT', payload }).catch(() => {});
+  }
+  close(): void {
+    chrome.runtime.sendMessage({ type: 'AURA_WS_RECONNECT' }).catch(() => {});
   }
 }
+
+const wsProxy = new WsProxy();
 
 function flushChunks(): void {
   _rafId = null;
@@ -59,10 +53,18 @@ function flushChunks(): void {
   useStore.setState({ activeStream: update });
 }
 
-/**
- * Quick HTTP health check. Returns true if the backend responds to /api/status.
- * Used to distinguish "WS failed but server is up" from "server is down".
- */
+function resetStaleTimer(): void {
+  if (_staleTimer) clearTimeout(_staleTimer);
+  const { activeStream } = useStore.getState();
+  if (activeStream && activeStream !== true) {
+    _staleTimer = setTimeout(() => {
+      console.warn('[Aura] WebSocket stale during stream, requesting reconnect');
+      chrome.runtime.sendMessage({ type: 'AURA_WS_RECONNECT' }).catch(() => {});
+    }, WS_STALE_TIMEOUT);
+  }
+}
+
+/** Quick HTTP health check for "WS failed but server is up" detection. */
 async function httpHealthCheck(): Promise<boolean> {
   try {
     const headers: Record<string, string> = {};
@@ -77,231 +79,217 @@ async function httpHealthCheck(): Promise<boolean> {
   }
 }
 
-export function connectWS() {
-  const { ws } = useStore.getState();
-  if (ws && ws.readyState <= 1) return;
+// --- Incoming message dispatcher -------------------------------------------
 
-  // Read fresh WS_URL and API_KEY (live bindings from api.ts)
-  // API key sent as first message after connect (not in query string — avoids log exposure)
-  console.log('[Aura] Connecting WebSocket to:', WS_URL);
-  const socket = new WebSocket(WS_URL);
+function handleWsFrame(raw: string): void {
+  let d: any;
+  try { d = JSON.parse(raw); } catch { return; }
 
-  // 5s connection timeout -- if not open by then, close and let onclose retry
-  _connTimer = setTimeout(() => {
-    _connTimer = null;
-    if (socket.readyState !== WebSocket.OPEN) {
-      console.warn('[Aura] WebSocket connection timeout (5s), retrying');
-      socket.close();
+  resetStaleTimer();
+
+  if (d.type === 'auth_ok' || d.type === 'pong') return;
+  if (d.type === 'ready_status') {
+    useStore.getState().setAgentReady(d.ready);
+    return;
+  }
+
+  if (d.type === 'proactive' && d.id && d.text) {
+    useStore.getState().addProactiveMessage({
+      id: d.id,
+      text: d.text,
+      timestamp: d.timestamp || Date.now(),
+    });
+    return;
+  }
+
+  if (d.type === 'routing') {
+    useStore.getState().setLastRoutingResult(d);
+    return;
+  }
+
+  // Hands events — route to the store's hand-event handlers.
+  const store = useStore.getState();
+  if (d.type === 'hand_event') {
+    store.applyHandEvent(d);
+    return;
+  }
+  if (d.type === 'hand_approval_request') {
+    store.applyHandApprovalRequest(d);
+    return;
+  }
+  if (d.type === 'action_trace') {
+    store.applyHandActionTrace(d);
+    return;
+  }
+
+  const { activeStream } = useStore.getState();
+  if (!activeStream || activeStream === true) return;
+
+  if (d.type === 'thinking_chunk') {
+    const content = d.content || '';
+    if (!activeStream.isThinkingPhase) {
+      useStore.setState({
+        activeStream: {
+          ...activeStream,
+          isThinkingPhase: true,
+          thinkingStartTime: activeStream.thinkingStartTime || Date.now(),
+          thinkingText: activeStream.thinkingText || '',
+        },
+      });
     }
-  }, WS_CONNECT_TIMEOUT);
-
-  socket.onopen = () => {
-    if (_connTimer) { clearTimeout(_connTimer); _connTimer = null; }
-    // Authenticate via first message (keeps key out of URL/logs)
-    if (API_KEY) {
-      socket.send(JSON.stringify({ type: 'auth', api_key: API_KEY }));
+    if (activeStream.onFirstChunk) {
+      activeStream.onFirstChunk();
+      const current = useStore.getState().activeStream;
+      if (current && current !== true) {
+        useStore.setState({ activeStream: { ...current, onFirstChunk: null } });
+      }
     }
-    // Ask if the agent is ready
-    socket.send(JSON.stringify({ type: 'ready_check' }));
-    startPingLoop(socket);
-    console.log('[Aura] WebSocket connected');
-    useStore.getState().setWsReady(true);
-    useStore.getState().setWs(socket);
-    useStore.getState().setBackendStatus('online');
-    useStore.getState().setConnectionAbandoned(false);
-    _wsRetryDelay = 1000;
-    _wsConsecutiveFailures = 0;
-  };
+    _thinkBuf += content;
+    if (!_rafId) _rafId = requestAnimationFrame(flushChunks);
 
-  socket.onclose = () => {
-    stopPingLoop();
-    clearWsTimers();
-    useStore.getState().setWsReady(false);
-    useStore.getState().setWs(null);
-    _wsConsecutiveFailures++;
-    console.warn(`[Aura] WebSocket closed (failure #${_wsConsecutiveFailures})`);
+  } else if (d.type === 'chunk') {
+    const content = d.content || '';
+    if (activeStream.isThinkingPhase) {
+      useStore.setState({
+        activeStream: { ...activeStream, isThinkingPhase: false },
+      });
+    }
+    if (activeStream.onFirstChunk) {
+      activeStream.onFirstChunk();
+      const current = useStore.getState().activeStream;
+      if (current && current !== true) {
+        useStore.setState({ activeStream: { ...current, onFirstChunk: null } });
+      }
+    }
+    _chunkBuf += content;
+    if (!_rafId) _rafId = requestAnimationFrame(flushChunks);
 
-    // Flush any pending chunk buffer before finalization
+  } else if (d.type === 'done') {
+    if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
     if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
     if (_chunkBuf || _thinkBuf) { flushChunks(); }
-    const { activeStream } = useStore.getState();
-    if (activeStream && activeStream !== true) {
-      // Finalize with error so panels update correctly
-      if (activeStream.onFirstChunk) activeStream.onFirstChunk();
-      if (activeStream.onDone) activeStream.onDone(activeStream.rawText ? activeStream.rawText + '\n\n[Connection lost]' : '[Connection lost]');
+    const finalStream = useStore.getState().activeStream;
+    if (finalStream && finalStream !== true && finalStream.onDone) {
+      finalStream.onDone(finalStream.rawText, finalStream.thinkingText);
     }
     useStore.getState().setActiveStream(null);
 
-    // Don't immediately declare offline -- check HTTP first.
-    // WS can fail (401, firewall, nginx miscfg) while HTTP works fine.
+  } else if (d.type === 'error') {
+    if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
+    if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+    _chunkBuf = '';
+    _thinkBuf = '';
+    const errStream = useStore.getState().activeStream;
+    if (errStream && errStream !== true) {
+      if (errStream.onFirstChunk) errStream.onFirstChunk();
+      const errMsg = `[Error] ${d.content || d.error || 'Error'}`;
+      useStore.setState({ activeStream: { ...errStream, rawText: errMsg, onFirstChunk: null } });
+      if (errStream.onDone) errStream.onDone(errMsg);
+    }
+    useStore.getState().setActiveStream(null);
+
+  } else if (d.type === 'conversation_id') {
+    useStore.getState().setConversationId(d.id);
+  }
+}
+
+// --- Runtime message listener (from offscreen via SW broadcast) ------------
+
+chrome.runtime?.onMessage?.addListener((msg) => {
+  if (!msg || typeof msg !== 'object') return false;
+
+  if (msg.type === 'AURA_WS_IN' && typeof msg.payload === 'string') {
+    handleWsFrame(msg.payload);
+    return false;
+  }
+
+  if (msg.type === 'AURA_WS_STATUS') {
+    const rs = Number(msg.readyState ?? 3);
+    wsProxy.readyState = rs;
+    const store = useStore.getState();
+    store.setWsReady(rs === WebSocket.OPEN);
+    if (rs === WebSocket.OPEN) {
+      store.setBackendStatus('online');
+      store.setConnectionAbandoned(false);
+    }
+    // Set the proxy handle once — skip if already in place.
+    if (store.ws !== (wsProxy as unknown as WebSocket)) {
+      store.setWs(wsProxy as unknown as WebSocket);
+    }
+    return false;
+  }
+
+  if (msg.type === 'AURA_WS_CLOSED') {
+    wsProxy.readyState = WebSocket.CLOSED;
+    const store = useStore.getState();
+    store.setWsReady(false);
+
+    // Flush pending chunks + finalize any live stream with a "Connection lost" error.
+    if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+    if (_chunkBuf || _thinkBuf) { flushChunks(); }
+    const { activeStream } = store;
+    if (activeStream && activeStream !== true) {
+      if (activeStream.onFirstChunk) activeStream.onFirstChunk();
+      if (activeStream.onDone) {
+        const lostMsg = activeStream.rawText ? activeStream.rawText + '\n\n[Connection lost]' : '[Connection lost]';
+        activeStream.onDone(lostMsg);
+      }
+    }
+    store.setActiveStream(null);
+
+    // Probe HTTP to distinguish "server down" from "WS glitch".
     httpHealthCheck().then((httpOk) => {
+      const s = useStore.getState();
       if (httpOk) {
-        // Server is up, just WS is broken. Keep status as 'online' so
-        // the user can still chat via HTTP fallback.
-        useStore.getState().setBackendStatus('online');
-        console.log('[Aura] WebSocket down but HTTP is working -- staying online (HTTP fallback)');
+        s.setBackendStatus('online');
+      } else if ((msg.consecutiveFailures ?? 0) >= 3) {
+        s.setBackendStatus('offline');
       } else {
-        // Both WS and HTTP are down
-        if (_wsConsecutiveFailures >= 3) {
-          useStore.getState().setBackendStatus('offline');
-        } else {
-          useStore.getState().setBackendStatus('connecting');
-        }
+        s.setBackendStatus('connecting');
       }
     });
-
-    // Reconnect with exponential backoff + jitter -- stop after 8 failures
-    if (_wsConsecutiveFailures <= 8) {
-      const jitter = Math.random() * _wsRetryDelay * 0.3;
-      setTimeout(() => {
-        _wsRetryDelay = Math.min(_wsRetryDelay * 2, 30000);
-        connectWS();
-      }, _wsRetryDelay + jitter);
-    } else {
-      // All retries exhausted — flag so panels can show reconnect UI
-      useStore.getState().setConnectionAbandoned(true);
-      console.warn('[Aura] WebSocket reconnection abandoned after 8 failures');
-    }
-  };
-
-  socket.onerror = (ev) => {
-    console.warn('[Aura] WebSocket error:', ev);
-    useStore.getState().setWsReady(false);
-  };
-
-  socket.onmessage = (ev) => {
-    _lastMessageTime = Date.now();
-    resetStaleTimer(socket);
-
-    let d: any;
-    try { d = JSON.parse(ev.data); } catch { return; }
-
-    // Handle control messages that don't require an active stream
-    if (d.type === 'auth_ok' || d.type === 'pong') return;
-    if (d.type === 'ready_status') {
-      useStore.getState().setAgentReady(d.ready);
-      return;
-    }
-
-    // Proactive suggestion pushed from backend daemon
-    if (d.type === 'proactive' && d.id && d.text) {
-      useStore.getState().addProactiveMessage({
-        id: d.id,
-        text: d.text,
-        timestamp: d.timestamp || Date.now(),
-      });
-      return;
-    }
-
-    // Routing decision from neural router
-    if (d.type === 'routing') {
-      useStore.getState().setLastRoutingResult(d);
-      return;
-    }
-
-    const { activeStream } = useStore.getState();
-    if (!activeStream || activeStream === true) return;
-
-    if (d.type === 'thinking_chunk') {
-      const content = d.content || '';
-      // Mark as thinking phase if not already
-      if (!activeStream.isThinkingPhase) {
-        useStore.setState({
-          activeStream: {
-            ...activeStream,
-            isThinkingPhase: true,
-            thinkingStartTime: activeStream.thinkingStartTime || Date.now(),
-            thinkingText: activeStream.thinkingText || '',
-          },
-        });
-      }
-      if (activeStream.onFirstChunk) {
-        activeStream.onFirstChunk();
-        useStore.setState({
-          activeStream: { ...useStore.getState().activeStream as any, onFirstChunk: null },
-        });
-      }
-      _thinkBuf += content;
-      if (!_rafId) _rafId = requestAnimationFrame(flushChunks);
-
-    } else if (d.type === 'chunk') {
-      const content = d.content || '';
-      // Transition from thinking phase to responding phase
-      if (activeStream.isThinkingPhase) {
-        useStore.setState({
-          activeStream: { ...activeStream, isThinkingPhase: false },
-        });
-      }
-      if (activeStream.onFirstChunk) {
-        activeStream.onFirstChunk();
-        useStore.setState({
-          activeStream: { ...useStore.getState().activeStream as any, onFirstChunk: null },
-        });
-      }
-      // Batch chunk updates via rAF to avoid O(n^2) string concat per frame
-      _chunkBuf += content;
-      if (!_rafId) _rafId = requestAnimationFrame(flushChunks);
-
-    } else if (d.type === 'done') {
-      // Stream complete -- clear stale timer
-      if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
-      // Flush any pending chunks before finalizing
-      if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
-      if (_chunkBuf || _thinkBuf) { flushChunks(); }
-      const finalStream = useStore.getState().activeStream;
-      if (finalStream && finalStream !== true && finalStream.onDone) {
-        finalStream.onDone(finalStream.rawText, finalStream.thinkingText);
-      }
-      useStore.getState().setActiveStream(null);
-
-    } else if (d.type === 'error') {
-      // Stream error -- clear stale timer
-      if (_staleTimer) { clearTimeout(_staleTimer); _staleTimer = null; }
-      // Flush pending chunks before error handling
-      if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
-      _chunkBuf = '';
-      _thinkBuf = '';
-      const errStream = useStore.getState().activeStream;
-      if (errStream && errStream !== true) {
-        if (errStream.onFirstChunk) errStream.onFirstChunk();
-        const errMsg = `[Error] ${d.content || d.error || 'Error'}`;
-        useStore.setState({ activeStream: { ...errStream, rawText: errMsg, onFirstChunk: null } });
-        if (errStream.onDone) errStream.onDone(errMsg);
-      }
-      useStore.getState().setActiveStream(null);
-
-    } else if (d.type === 'conversation_id') {
-      useStore.getState().setConversationId(d.id);
-    }
-  };
-
-  useStore.getState().setWs(socket);
-}
-
-/** Reset WS retry state -- call when user manually changes server URL. */
-export function resetWsRetry() {
-  _wsRetryDelay = 1000;
-  _wsConsecutiveFailures = 0;
-}
-
-/** Manual reconnect -- resets retry counter, clears abandoned flag, and connects. */
-export function reconnectWS() {
-  _wsRetryDelay = 1000;
-  _wsConsecutiveFailures = 0;
-  useStore.getState().setConnectionAbandoned(false);
-  // Close existing dead socket if any
-  const { ws } = useStore.getState();
-  if (ws) {
-    try { ws.close(); } catch { /* ignore */ }
-    useStore.getState().setWs(null);
+    return false;
   }
-  connectWS();
+
+  if (msg.type === 'AURA_WS_ABANDONED') {
+    useStore.getState().setConnectionAbandoned(true);
+    return false;
+  }
+
+  return false;
+});
+
+// --- Public API (unchanged signatures so main.tsx works as-is) -------------
+
+export function connectWS(): void {
+  // Ensure the store has the proxy handle early so UI code calling
+  // store.ws?.send() before the first AURA_WS_STATUS arrives is a no-op
+  // rather than a crash.
+  const store = useStore.getState();
+  if (store.ws !== (wsProxy as unknown as WebSocket)) {
+    store.setWs(wsProxy as unknown as WebSocket);
+  }
+  // Request a status broadcast from the offscreen doc; service worker
+  // will create the offscreen doc if it doesn't exist yet.
+  chrome.runtime.sendMessage({ type: 'AURA_ENSURE_OFFSCREEN' }).catch(() => {});
+  chrome.runtime.sendMessage({ type: 'AURA_WS_STATUS_REQUEST' }).catch(() => {});
 }
 
-// Register with the store so panels can call store.reconnect() without circular imports
+/**
+ * Deprecated: the offscreen document now owns the retry counter, and
+ * `AURA_WS_RECONNECT` (fired by `reconnectWS()` or `WsProxy.close()`) resets
+ * it as a side effect. Kept as a no-op so `SettingsPanel.tsx` doesn't break.
+ */
+export function resetWsRetry(): void { /* no-op */ }
+
+export function reconnectWS(): void {
+  useStore.getState().setConnectionAbandoned(false);
+  chrome.runtime.sendMessage({ type: 'AURA_WS_RECONNECT' }).catch(() => {});
+}
+
 registerReconnectHandler(reconnectWS);
 
-export async function fetchStatus() {
+export async function fetchStatus(): Promise<void> {
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15_000);
@@ -310,18 +298,13 @@ export async function fetchStatus() {
       if (API_KEY) headers['X-API-Key'] = API_KEY;
       const r = await fetch(`${HTTP}/api/status`, { signal: ctrl.signal, headers });
       if (!r.ok) {
-        // HTTP failed -- but don't wipe wsReady if WS is actually open
         const store = useStore.getState();
-        if (!store.wsReady) {
-          store.setBackendStatus('offline');
-        }
+        if (!store.wsReady) store.setBackendStatus('offline');
         return;
       }
       const d = await r.json();
       const store = useStore.getState();
-      // HTTP works -- server is online regardless of WS state
       store.setBackendStatus('online');
-      // Agent is ready if model is reported (not "initializing...")
       const modelStr = d.last_model_used || d.model || '';
       store.setAgentReady(modelStr !== '' && modelStr !== 'initializing...');
       if (!store.wsReady) connectWS();
@@ -332,20 +315,16 @@ export async function fetchStatus() {
       clearTimeout(timer);
     }
   } catch {
-    // Network error -- only declare offline if WS is also down
     const store = useStore.getState();
-    if (!store.wsReady) {
-      store.setBackendStatus('offline');
-    }
+    if (!store.wsReady) store.setBackendStatus('offline');
   }
 }
 
-// --- Proactive message polling ---
-// Polls /api/proactive/messages every 60s when backend is online.
-// WebSocket push (above) is preferred; polling is the fallback.
+// --- Proactive polling fallback (same as before) ---------------------------
+
 let _proactivePollTimer: ReturnType<typeof setInterval> | null = null;
 
-async function pollProactiveMessages() {
+async function pollProactiveMessages(): Promise<void> {
   const store = useStore.getState();
   if (store.backendStatus !== 'online') return;
   try {
@@ -370,17 +349,22 @@ async function pollProactiveMessages() {
   } catch { /* non-fatal */ }
 }
 
-export function startProactivePoll() {
+export function startProactivePoll(): void {
   if (_proactivePollTimer) return;
-  // Initial fetch after 5s to let connection settle
-  setTimeout(pollProactiveMessages, 5000);
-  _proactivePollTimer = setInterval(pollProactiveMessages, 60_000);
+  // Only poll when the WebSocket is not alive. When WS is connected, the
+  // backend pushes proactive messages directly and the stuck-signal path
+  // handles contextual triggers — the old 60s unconditional poll is gone.
+  setTimeout(() => {
+    if (!useStore.getState().wsReady) pollProactiveMessages();
+  }, 5000);
+  _proactivePollTimer = setInterval(() => {
+    if (!useStore.getState().wsReady) pollProactiveMessages();
+  }, 60_000);
 }
 
-export function stopProactivePoll() {
+export function stopProactivePoll(): void {
   if (_proactivePollTimer) { clearInterval(_proactivePollTimer); _proactivePollTimer = null; }
 }
 
-// Page-context keywords -- auto-inject page content when matched
 export const PAGE_KEYWORDS =
   /\b(this page|this site|this article|this post|this video|current page|what('s| is) (this|the) (page|site|article)|summarize this|explain this|what does this (say|mean)|translate this|tldr|tl;dr)\b/i;

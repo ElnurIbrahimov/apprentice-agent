@@ -106,6 +106,18 @@ export default function ChatPanel() {
   const sendMessage = useCallback(async (text: string, overrideModel?: string) => {
     if (!text.trim()) return;
     const st = useStore.getState();
+
+    // /agent <task> — route to the inline browser agent instead of chat
+    const agentMatch = text.match(/^\s*\/agent\s+(.+)$/is);
+    if (agentMatch) {
+      if (st.agentRunning) {
+        sysmsg('Agent is already running. Stop it first.');
+        return;
+      }
+      useStore.getState().runAgentTask(agentMatch[1].trim());
+      return;
+    }
+
     // Don't hard-block here -- the WS/HTTP check below does a health probe
     if (st.activeStream) return;
 

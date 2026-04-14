@@ -12,7 +12,6 @@ import type { PanelId } from './types';
 // Lazy-load every non-chat panel so the initial sidebar boot stays lean.
 const SearchPanel = React.lazy(() => import('./panels/SearchPanel'));
 const TranslatePanel = React.lazy(() => import('./panels/TranslatePanel'));
-const WritePanel = React.lazy(() => import('./panels/WritePanel'));
 const GrammarPanel = React.lazy(() => import('./panels/GrammarPanel'));
 const WisebasePanel = React.lazy(() => import('./panels/WisebasePanel'));
 const AskPanel = React.lazy(() => import('./panels/AskPanel'));
@@ -25,16 +24,15 @@ const OcrPanel = React.lazy(() => import('./panels/OcrPanel'));
 const YoutubePanel = React.lazy(() => import('./panels/YoutubePanel'));
 const ResearchPanel = React.lazy(() => import('./panels/ResearchPanel'));
 const MathPanel = React.lazy(() => import('./panels/MathPanel'));
-const CodePanel = React.lazy(() => import('./panels/CodePanel'));
 const ArtifactsPanel = React.lazy(() => import('./panels/ArtifactsPanel'));
-const WebCreatorPanel = React.lazy(() => import('./panels/WebCreatorPanel'));
 const ImagePanel = React.lazy(() => import('./panels/ImagePanel'));
 const ComparePanel = React.lazy(() => import('./panels/ComparePanel'));
 const CapturePanel = React.lazy(() => import('./panels/CapturePanel'));
 const AgentPanel = React.lazy(() => import('./panels/AgentPanel'));
-const SlidesPanel = React.lazy(() => import('./panels/SlidesPanel'));
+const HandsPanel = React.lazy(() => import('./panels/HandsPanel'));
 const AuraStatusPanel = React.lazy(() => import('./panels/AuraStatusPanel'));
 const ModelsPanel = React.lazy(() => import('./panels/ModelsPanel'));
+const McpPanel = React.lazy(() => import('./panels/McpPanel'));
 const SettingsPanel = React.lazy(() => import('./panels/SettingsPanel'));
 
 function LazyFallback() {
@@ -49,7 +47,6 @@ const PANEL_ENTRIES: { id: PanelId; Component: React.ComponentType }[] = [
   { id: 'chat', Component: ChatPanel },
   { id: 'search', Component: SearchPanel },
   { id: 'translate', Component: TranslatePanel },
-  { id: 'write', Component: WritePanel },
   { id: 'grammar', Component: GrammarPanel },
   { id: 'wisebase', Component: WisebasePanel },
   { id: 'ask', Component: AskPanel },
@@ -62,16 +59,15 @@ const PANEL_ENTRIES: { id: PanelId; Component: React.ComponentType }[] = [
   { id: 'youtube', Component: YoutubePanel },
   { id: 'research', Component: ResearchPanel },
   { id: 'math', Component: MathPanel },
-  { id: 'code', Component: CodePanel },
   { id: 'artifacts', Component: ArtifactsPanel },
-  { id: 'webcreator', Component: WebCreatorPanel },
   { id: 'image', Component: ImagePanel },
   { id: 'compare', Component: ComparePanel },
   { id: 'capture', Component: CapturePanel },
   { id: 'agent', Component: AgentPanel },
-  { id: 'slides', Component: SlidesPanel },
+  { id: 'hands', Component: HandsPanel },
   { id: 'aura-status', Component: AuraStatusPanel },
   { id: 'models', Component: ModelsPanel },
+  { id: 'mcp', Component: McpPanel },
   { id: 'settings', Component: SettingsPanel },
 ];
 
@@ -168,6 +164,24 @@ export default function App() {
         setPanel('image');
         // Dispatch to ImagePanel's EditTab via custom event
         window.dispatchEvent(new CustomEvent('image-edit-load', { detail: { dataUrl: msg.dataUrl } }));
+      }
+      if (msg.type === 'FOCUS_INPUT') {
+        setPanel('chat');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('aura-focus-input'));
+        }, 100);
+      }
+      if (msg.type === 'DICTATE_START') {
+        setPanel('chat');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('aura-dictate-start'));
+        }, 120);
+      }
+      if (msg.type === 'OMNIBOX_QUERY' && msg.text) {
+        setPanel(msg.panel === 'search' ? 'search' : 'chat');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('aura-send', { detail: { text: msg.text } }));
+        }, 120);
       }
     };
 

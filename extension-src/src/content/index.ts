@@ -26,6 +26,9 @@ import {
   showOcrOverlay,
   extractFullPageData,
 } from './page-services';
+import { initStuckDetector } from './stuck-detector';
+import { initGhostText } from './ghost-text';
+import { initLifelog } from './lifelog';
 
 // ── Firefox compat shim ────────────────────────────────────────────────────────
 
@@ -218,6 +221,9 @@ export function init(): void {
   initYoutubeRelay(safeSend);
   initNetflixRelay(safeSend);
   initGoogleSerp(ext as typeof chrome, safeSend);
+  initStuckDetector();
+  initGhostText();
+  initLifelog();
 
   // ── Setup message listener ─────────────────────────────────────────────────
 

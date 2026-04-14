@@ -2,11 +2,11 @@ import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useStore } from '../store';
 import type { PanelId } from '../types';
 import {
-  MessageSquare, Search, Languages, PenLine, CheckSquare,
+  MessageSquare, Search, Languages, CheckSquare,
   Database, Zap, FileText, Wrench, File, Mic,
   Radio, Camera, Youtube, FlaskConical, Calculator,
-  Terminal, Code2, Image, BarChart2, Crosshair,
-  Presentation, Globe, Bot, Cpu, Settings,
+  Code2, Image, BarChart2, Crosshair,
+  Bot, Cpu, Settings, Hand, Plug,
   Command,
 } from 'lucide-react';
 
@@ -22,7 +22,6 @@ const PANELS: PanelEntry[] = [
   { id: 'chat', label: 'Chat', icon: <MessageSquare size={ICON_SIZE} /> },
   { id: 'search', label: 'Search', icon: <Search size={ICON_SIZE} /> },
   { id: 'translate', label: 'Translate', icon: <Languages size={ICON_SIZE} /> },
-  { id: 'write', label: 'Write', icon: <PenLine size={ICON_SIZE} /> },
   { id: 'grammar', label: 'Grammar', icon: <CheckSquare size={ICON_SIZE} /> },
   { id: 'wisebase', label: 'Wisebase', icon: <Database size={ICON_SIZE} /> },
   { id: 'ask', label: 'Ask', icon: <Zap size={ICON_SIZE} /> },
@@ -35,15 +34,14 @@ const PANELS: PanelEntry[] = [
   { id: 'youtube', label: 'YouTube', icon: <Youtube size={ICON_SIZE} /> },
   { id: 'research', label: 'Research', icon: <FlaskConical size={ICON_SIZE} /> },
   { id: 'math', label: 'Math', icon: <Calculator size={ICON_SIZE} /> },
-  { id: 'code', label: 'Code', icon: <Terminal size={ICON_SIZE} /> },
   { id: 'artifacts', label: 'Artifacts', icon: <Code2 size={ICON_SIZE} /> },
   { id: 'image', label: 'Image', icon: <Image size={ICON_SIZE} /> },
   { id: 'compare', label: 'Compare', icon: <BarChart2 size={ICON_SIZE} /> },
   { id: 'capture', label: 'Capture', icon: <Crosshair size={ICON_SIZE} /> },
-  { id: 'slides', label: 'Slides', icon: <Presentation size={ICON_SIZE} /> },
-  { id: 'webcreator', label: 'Web Creator', icon: <Globe size={ICON_SIZE} /> },
   { id: 'agent', label: 'Agent', icon: <Bot size={ICON_SIZE} /> },
+  { id: 'hands', label: 'Hands', icon: <Hand size={ICON_SIZE} /> },
   { id: 'models', label: 'Models', icon: <Cpu size={ICON_SIZE} /> },
+  { id: 'mcp', label: 'Connections', icon: <Plug size={ICON_SIZE} /> },
   { id: 'settings', label: 'Settings', icon: <Settings size={ICON_SIZE} /> },
 ];
 

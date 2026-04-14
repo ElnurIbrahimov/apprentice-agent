@@ -59,9 +59,29 @@ async def agent_action(body: dict):
     session_id = body.get("session_id", "")
     if session_id and not _SESSION_ID_RE.match(session_id):
         raise HTTPException(400, "Invalid session_id: must be alphanumeric/hyphens, max 64 chars")
-    model = body.get("model") or os.getenv("AURA_AGENT_MODEL", "nemotron-3-super:cloud")
+
+    # Power Mode: extension may attach a base64 screenshot for vision-capable models.
+    screenshot_b64 = body.get("screenshot")
+    if screenshot_b64 and not isinstance(screenshot_b64, str):
+        raise HTTPException(400, "screenshot must be a base64-encoded string")
+    if screenshot_b64 and len(screenshot_b64) > 4_500_000:
+        raise HTTPException(400, "screenshot exceeds maximum size (~3 MB decoded)")
+
+    default_model = os.getenv("AURA_AGENT_MODEL", "nemotron-3-super:cloud")
+    if screenshot_b64:
+        default_model = os.getenv("AURA_AGENT_VISION_MODEL", "qwen3.5:cloud")
+    model = body.get("model") or default_model
     from api.utils import validate_model_name
     validate_model_name(model)
+
+    # If a screenshot was sent but the chosen model doesn't look vision-capable,
+    # silently drop the screenshot and fall back to the text path. Non-vision
+    # models fed an image via Ollama's /api/chat will error, and we'd rather
+    # degrade gracefully than crash the agent step.
+    _VISION_HINTS = ("vision", "vl", "gemma4", "qwen3.5", "qwen3.6", "minimax", "pixtral", "llava")
+    if screenshot_b64 and not any(h in model.lower() for h in _VISION_HINTS):
+        logger.debug("[AgentAction] Dropping screenshot — %s is not vision-capable", model)
+        screenshot_b64 = None
 
     t0 = time.monotonic()
 
@@ -91,12 +111,28 @@ async def agent_action(body: dict):
 
     try:
         async with httpx.AsyncClient(timeout=30) as c:
-            r = await c.post(
-                f"{OLLAMA_BASE}/api/generate",
-                json={"model": model, "prompt": prompt, "stream": False},
-            )
-        r.raise_for_status()
-        response_text = r.json().get("response", "")
+            if screenshot_b64:
+                # Vision path: /api/chat with a user message that includes the image.
+                # Ollama's chat endpoint accepts `images: [base64_no_prefix, ...]`.
+                messages = [{
+                    "role": "user",
+                    "content": prompt,
+                    "images": [screenshot_b64],
+                }]
+                r = await c.post(
+                    f"{OLLAMA_BASE}/api/chat",
+                    json={"model": model, "messages": messages, "stream": False},
+                )
+                r.raise_for_status()
+                data = r.json()
+                response_text = (data.get("message") or {}).get("content", "") or data.get("response", "")
+            else:
+                r = await c.post(
+                    f"{OLLAMA_BASE}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False},
+                )
+                r.raise_for_status()
+                response_text = r.json().get("response", "")
     except Exception as e:
         logger.error("[AgentAction] LLM call failed: %s", e)
         raise HTTPException(500, detail=safe_error_detail(e))

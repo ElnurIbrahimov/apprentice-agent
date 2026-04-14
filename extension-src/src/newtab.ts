@@ -5,7 +5,6 @@
 
 const CONV_LIST_KEY = 'aura_conversations';
 const BACKEND_URL = 'https://aura-elnur.duckdns.org';
-const DEFAULT_API_KEY = 'i-L5ShpMkY2B7loNb8VS4EAAT-Ronh-K8cIgRILGjnQ';
 const MOOD_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 const QUOTES = [
@@ -93,7 +92,7 @@ async function fetchAndApplyMood(): Promise<void> {
     return;
   }
   const stored = await storageGet(['apiKey']);
-  const apiKey = stored?.apiKey?.trim?.() || DEFAULT_API_KEY;
+  const apiKey = stored?.apiKey?.trim?.() || '';
   if (!apiKey) return;
   try {
     const headers: Record<string, string> = { 'X-API-Key': apiKey };
