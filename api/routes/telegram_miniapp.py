@@ -187,3 +187,197 @@ async def proactive_action(request: ProactiveActionRequest):
         return {"status": "snoozed", "hand": hand_name, "seconds": seconds}
 
     raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
+
+
+# ============================================================================
+# Memory Browser — Mini App public proxy
+# ============================================================================
+#
+# These endpoints sit on the public router (no X-API-Key required) because the
+# Telegram WebView can't carry a pre-shared header. Each handler validates the
+# request's initData HMAC before delegating to UnifiedMemory.
+#
+# They mirror the authenticated endpoints in api/routes/memory.py but as POSTs
+# carrying init_data in the body, so no query params leak to access logs.
+
+
+class MemoryBrowseBody(BaseModel):
+    init_data: str
+    offset: int = 0
+    limit: int = 50
+    source: str | None = None
+
+
+class MemoryItemRefBody(BaseModel):
+    init_data: str
+    memory_id: str
+
+
+class MemoryPatchItemBody(BaseModel):
+    init_data: str
+    memory_id: str
+    content: str | None = None
+    tags: list[str] | None = None
+    importance: float | None = None
+
+
+class MemoryPinBody(BaseModel):
+    init_data: str
+    memory_id: str
+    pinned: bool
+
+
+class InitDataOnlyBody(BaseModel):
+    init_data: str
+
+
+class MemoryKgTopBody(BaseModel):
+    init_data: str
+    limit: int = 20
+
+
+def _require_init_data(init_data: str) -> None:
+    """Validate Telegram initData HMAC or raise 401."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not bot_token:
+        raise HTTPException(status_code=500, detail="Bot token not configured")
+    if _validate_init_data(init_data, bot_token) is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired initData")
+
+
+def _get_um():
+    from aura.memory.unified_memory import get_unified_memory
+    return get_unified_memory()
+
+
+@router.post("/memory/browse")
+async def miniapp_memory_browse(body: MemoryBrowseBody):
+    """Paginated memory timeline for the Brain tab."""
+    _require_init_data(body.init_data)
+    if body.limit <= 0 or body.limit > 200:
+        raise HTTPException(status_code=400, detail="limit out of range")
+    if body.offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be >= 0")
+    um = _get_um()
+    items = um.list_recent(
+        offset=body.offset,
+        limit=body.limit,
+        source_filter=body.source,
+    )
+    total = um.count_memories(source_filter=body.source)
+    return {
+        "items": items,
+        "total": total,
+        "offset": body.offset,
+        "limit": body.limit,
+        "source": body.source,
+    }
+
+
+@router.post("/memory/item/get")
+async def miniapp_memory_get(body: MemoryItemRefBody):
+    """Fetch a single memory by id."""
+    _require_init_data(body.init_data)
+    row = _get_um().get_memory(body.memory_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return row
+
+
+@router.post("/memory/item/patch")
+async def miniapp_memory_patch(body: MemoryPatchItemBody):
+    """Update content / tags / importance on a memory."""
+    _require_init_data(body.init_data)
+    fields: dict = {}
+    if body.content is not None:
+        fields["content"] = body.content[:50000]
+    if body.tags is not None:
+        fields["tags"] = [str(t)[:100] for t in body.tags[:50]]
+    if body.importance is not None:
+        fields["importance"] = max(0.0, min(1.0, float(body.importance)))
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    ok = _get_um().update_memory(body.memory_id, **fields)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"id": body.memory_id, "status": "updated"}
+
+
+@router.post("/memory/item/delete")
+async def miniapp_memory_delete(body: MemoryItemRefBody):
+    """Hard-delete a memory by id."""
+    _require_init_data(body.init_data)
+    ok = _get_um().delete_memory(body.memory_id)
+    return {"deleted": bool(ok), "id": body.memory_id}
+
+
+@router.post("/memory/item/pin")
+async def miniapp_memory_pin(body: MemoryPinBody):
+    """Pin or unpin a memory (stored as a tag for v1)."""
+    _require_init_data(body.init_data)
+    ok = _get_um().set_pinned(body.memory_id, bool(body.pinned))
+    if not ok:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"id": body.memory_id, "pinned": bool(body.pinned)}
+
+
+@router.post("/memory/stats")
+async def miniapp_memory_stats(body: InitDataOnlyBody):
+    """Memory tab header stats."""
+    _require_init_data(body.init_data)
+    um = _get_um()
+    stats = um.get_stats() or {}
+    stats["sources"] = um.list_sources()
+    stats["total_count"] = um.count_memories()
+    return stats
+
+
+@router.post("/memory/kg/top")
+async def miniapp_memory_kg_top(body: MemoryKgTopBody):
+    """Top knowledge-graph entities for the Brain tab."""
+    _require_init_data(body.init_data)
+    limit = max(1, min(100, int(body.limit)))
+    try:
+        from api.services.agent_service import agent_service
+        agent = getattr(agent_service, "agent", None)
+        if not agent:
+            return {"nodes": [], "total_entities": 0, "total_relationships": 0}
+        kg = getattr(agent, "kg_brain", None)
+        stats = {}
+        if kg is not None and hasattr(kg, "get_statistics"):
+            try:
+                stats = kg.get_statistics() or {}
+            except Exception:
+                stats = {}
+        nodes: list[dict] = []
+        kg_tool = (getattr(agent, "tools", None) or {}).get("knowledge_graph")
+        if kg_tool is not None:
+            graph = getattr(kg_tool, "_graph", None) or getattr(kg_tool, "graph", None)
+            raw_nodes = getattr(graph, "nodes", None) if graph else None
+            if raw_nodes:
+                items = list(raw_nodes.items() if hasattr(raw_nodes, "items") else raw_nodes)
+                for entry in items[: limit * 3]:
+                    if isinstance(entry, tuple) and len(entry) == 2:
+                        nid, ndata = entry
+                    else:
+                        nid, ndata = entry, {}
+                    if not isinstance(ndata, dict):
+                        ndata = {"label": str(ndata)}
+                    nodes.append({
+                        "id": str(nid),
+                        "label": str(ndata.get("label") or nid),
+                        "type": str(ndata.get("type") or "entity"),
+                        "confidence": float(ndata.get("confidence", 0.0) or 0.0),
+                        "access_count": int(ndata.get("access_count", 0) or 0),
+                    })
+                nodes.sort(key=lambda n: (n["access_count"], n["confidence"]), reverse=True)
+                nodes = nodes[:limit]
+        return {
+            "nodes": nodes,
+            "total_entities": int(stats.get("total_entities", 0) or 0),
+            "total_relationships": int(stats.get("total_relationships", 0) or 0),
+            "type_distribution": stats.get("entity_type_distribution", {}) or {},
+        }
+    except Exception as exc:
+        logger.debug(f"[MiniApp] kg/top error: {exc}")
+        return {"nodes": [], "total_entities": 0, "total_relationships": 0}

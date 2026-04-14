@@ -160,18 +160,18 @@ class MediaMixin:
             # --- PDF ---
             if ext == ".pdf" or mime == "application/pdf":
                 text, char_count = await self._extract_pdf(doc)
-                self._store_doc_context(user.id, text, filename)
+                await self._ingest_document(user.id, filename, text, update)
                 await update.message.reply_text(
-                    f"\U0001f4c4 Extracted {char_count:,} characters from {filename}.\n"
+                    f"\U0001f4c4 Indexed {char_count:,} characters from {filename}.\n"
                     f"Ask me anything about this document!"
                 )
 
             # --- Text / code files ---
             elif ext in self._TEXT_EXTENSIONS or mime.startswith("text/"):
                 text, char_count = await self._extract_text_file(doc)
-                self._store_doc_context(user.id, text, filename)
+                await self._ingest_document(user.id, filename, text, update)
                 await update.message.reply_text(
-                    f"\U0001f4c4 Read {char_count:,} characters from {filename}.\n"
+                    f"\U0001f4c4 Indexed {char_count:,} characters from {filename}.\n"
                     f"Ask me anything about this file!"
                 )
 
@@ -200,9 +200,9 @@ class MediaMixin:
             # --- DOCX ---
             elif ext == ".docx" or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
                 text, char_count = await self._extract_docx(doc)
-                self._store_doc_context(user.id, text, filename)
+                await self._ingest_document(user.id, filename, text, update)
                 await update.message.reply_text(
-                    f"\U0001f4c4 Extracted {char_count:,} characters from {filename}.\n"
+                    f"\U0001f4c4 Indexed {char_count:,} characters from {filename}.\n"
                     f"Ask me anything about this document!"
                 )
 
@@ -212,9 +212,9 @@ class MediaMixin:
                 "application/vnd.ms-excel", "text/csv",
             ):
                 text, char_count = await self._extract_spreadsheet(doc, ext)
-                self._store_doc_context(user.id, text, filename)
+                await self._ingest_document(user.id, filename, text, update)
                 await update.message.reply_text(
-                    f"\U0001f4ca Extracted {char_count:,} characters from {filename}.\n"
+                    f"\U0001f4ca Indexed {char_count:,} characters from {filename}.\n"
                     f"Ask me anything about this data!"
                 )
 
@@ -359,11 +359,140 @@ class MediaMixin:
         return text, len(text)
 
     def _store_doc_context(self, user_id: int, text: str, filename: str):
-        """Store extracted document text for subsequent Q&A."""
+        """Store extracted document text for subsequent Q&A (legacy 30-min fallback)."""
         self.store.set_doc_context(str(user_id), text, filename)
         logger.info(
             f"Stored doc context for user {user_id}: {filename} ({len(text)} chars)"
         )
+
+    def _get_doc_index(self):
+        """Lazy-load the per-bot DocumentIndex instance."""
+        if not hasattr(self, "_doc_index_instance") or self._doc_index_instance is None:
+            try:
+                from aura.messaging.telegram.doc_rag import DocumentIndex
+                self._doc_index_instance = DocumentIndex(self.store)
+            except Exception as exc:
+                logger.debug(f"[Media] DocumentIndex init failed: {exc}")
+                self._doc_index_instance = None
+        return self._doc_index_instance
+
+    async def _ingest_document(
+        self,
+        user_id: int,
+        filename: str,
+        text: str,
+        update: "Update",
+    ) -> None:
+        """Chunk + embed a document for RAG, push a live DocumentCard to the
+        Mini App, and kick off async summarization.
+
+        Also stores the flat text in legacy doc_context for the 30-min fallback
+        path, so Telegram-only users (no Mini App) still get Q&A over the doc.
+        """
+        # Legacy path first — keep the existing inline Q&A flow working
+        self._store_doc_context(user_id, text, filename)
+
+        idx = self._get_doc_index()
+        if idx is None:
+            return
+
+        from aura.messaging.telegram.doc_rag import (
+            make_doc_id,
+            summarize_document_sync,
+        )
+
+        uid = str(user_id)
+        doc_id = make_doc_id(uid, filename, len(text))
+
+        # Run chunking + embedding in a worker thread (can take 5-15s)
+        try:
+            index_result = await asyncio.to_thread(
+                idx.index_document, uid, doc_id, filename, text
+            )
+        except Exception as exc:
+            logger.warning(f"[Media] index_document failed: {exc}")
+            return
+
+        # Push an immediate tool card to the Mini App with "summarizing..."
+        try:
+            from api.services.websocket_hub import push_agent_event
+            card_payload = {
+                "tool_name": "document_index",
+                "tool_args": {
+                    "filename": filename,
+                    "doc_id": doc_id,
+                    "size_chars": index_result.get("size_chars", 0),
+                    "chunks_count": index_result.get("chunks_count", 0),
+                    "summary": "",
+                    "facts": [],
+                    "questions": [],
+                },
+                "tool_result": None,
+            }
+            push_agent_event(
+                kind="tool_start",
+                run_id=f"doc:{doc_id}",
+                iteration=0,
+                payload=card_payload,
+                user_id=uid,
+            )
+        except Exception as exc:
+            logger.debug(f"[Media] push_agent_event (tool_start) failed: {exc}")
+
+        # Summarize in the background; update the Mini App card when done
+        async def _finalize_card():
+            brain = self._get_brain()
+            if brain is None:
+                return
+            try:
+                summary = await asyncio.to_thread(summarize_document_sync, brain, text)
+            except Exception as exc:
+                logger.debug(f"[Media] summarize failed: {exc}")
+                summary = {"summary": "", "facts": [], "questions": []}
+
+            # Persist so the user sees the same card on reload
+            try:
+                idx.set_summary(uid, doc_id, filename, {
+                    **summary,
+                    "chunks_count": index_result.get("chunks_count", 0),
+                    "size_chars": index_result.get("size_chars", 0),
+                })
+            except Exception:
+                pass
+
+            try:
+                from api.services.websocket_hub import push_agent_event
+                push_agent_event(
+                    kind="tool_result",
+                    run_id=f"doc:{doc_id}",
+                    iteration=0,
+                    payload={
+                        "tool_name": "document_index",
+                        "tool_args": {
+                            "filename": filename,
+                            "doc_id": doc_id,
+                            "size_chars": index_result.get("size_chars", 0),
+                            "chunks_count": index_result.get("chunks_count", 0),
+                        },
+                        "tool_result": {
+                            "filename": filename,
+                            "doc_id": doc_id,
+                            "chunks_count": index_result.get("chunks_count", 0),
+                            "size_chars": index_result.get("size_chars", 0),
+                            "summary": summary.get("summary", ""),
+                            "facts": summary.get("facts", []),
+                            "questions": summary.get("questions", []),
+                        },
+                    },
+                    user_id=uid,
+                )
+            except Exception as exc:
+                logger.debug(f"[Media] push_agent_event (tool_result) failed: {exc}")
+
+        try:
+            asyncio.create_task(_finalize_card())
+        except Exception as exc:
+            logger.debug(f"[Media] summary task spawn failed: {exc}")
 
     def _get_doc_context(self, user_id: int):
         """Get active document context, or None if expired/missing."""
@@ -373,7 +502,39 @@ class MediaMixin:
         return ctx
 
     def _build_doc_augmented_text(self, user_id: int, text: str) -> str:
-        """If the user has active document context, prepend it to their message."""
+        """Inject relevant document chunks into the user's message.
+
+        Prefers per-document RAG search: embeds the query, retrieves top-3
+        chunks from the user's most recently indexed doc. Falls back to the
+        legacy flat-text prepend if the RAG path returns nothing (e.g. Ollama
+        unavailable, or the doc wasn't indexed yet).
+        """
+        uid = str(user_id)
+
+        # Preferred path: RAG over the most recent indexed doc
+        try:
+            idx = self._get_doc_index()
+            if idx is not None:
+                docs = idx.list_user_docs(uid)
+                if docs:
+                    latest = docs[0]  # newest first
+                    hits = idx.search(uid, text, doc_id=latest["doc_id"], k=3)
+                    if hits:
+                        blocks = "\n\n".join(
+                            f"[chunk {h['chunk_idx']}] {h['chunk_text']}"
+                            for h in hits
+                        )
+                        return (
+                            f"[DOCUMENT CONTEXT -- file: {latest['filename']}, "
+                            f"top {len(hits)} relevant chunks]\n"
+                            f"{blocks}\n"
+                            f"[END DOCUMENT CONTEXT]\n\n"
+                            f"User question: {text}"
+                        )
+        except Exception as exc:
+            logger.debug(f"[Media] RAG augmentation failed: {exc}")
+
+        # Legacy fallback: 30-min TTL blob
         ctx = self._get_doc_context(user_id)
         if not ctx:
             return text

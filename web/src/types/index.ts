@@ -150,6 +150,16 @@ export type ToolResult =
       kind: 'generic';
       args?: Record<string, unknown>;
       result?: string;
+    })
+  | (ToolResultBase & {
+      kind: 'document';
+      doc_id: string;
+      filename: string;
+      chunks_count?: number;
+      size_chars?: number;
+      summary?: string;
+      facts?: string[];
+      questions?: string[];
     });
 
 // ─── Proactive action card (from Hands + webhooks) ───────────────────────
@@ -158,6 +168,33 @@ export interface ProactiveCardAction {
   id: string;           // e.g. "ack", "more", "snooze_3600"
   label: string;        // e.g. "✓ Acknowledge", "💬 Tell me more", "⏰ Snooze 1h"
   style?: 'primary' | 'secondary' | 'danger';
+}
+
+// ─── Memory browser (Mini App Brain tab) ─────────────────────────────────
+
+export interface MemoryItem {
+  id: string;
+  content: string;
+  title?: string;
+  source: string;
+  memory_type?: string;
+  importance?: number;
+  tags?: string[];
+  pinned?: boolean;
+  category?: string;
+  lifecycle_state?: string;
+  access_count?: number;
+  strength?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface MemoryKgNode {
+  id: string;
+  label: string;
+  type: string;
+  confidence: number;
+  access_count: number;
 }
 
 export interface ProactiveCard {

@@ -382,6 +382,76 @@ class MemoryStore:
                 conn.rollback()
                 raise
 
+    # Whitelist for safe list_paginated ordering — prevents SQL injection via order_by.
+    _ORDER_BY_WHITELIST = frozenset({
+        "created_at DESC", "created_at ASC",
+        "updated_at DESC", "updated_at ASC",
+        "importance DESC", "importance ASC",
+        "strength DESC", "strength ASC",
+        "access_count DESC", "access_count ASC",
+    })
+
+    def list_paginated(
+        self,
+        offset: int = 0,
+        limit: int = 50,
+        source_filter: Optional[str] = None,
+        order_by: str = "created_at DESC",
+    ) -> list[MemoryRecord]:
+        """Return a paginated slice of memories, newest first by default.
+
+        Used by the Memory Browser Mini App tab to render a timeline without
+        needing a search query. Whitelists ``order_by`` to block SQL injection.
+        """
+        if order_by not in self._ORDER_BY_WHITELIST:
+            order_by = "created_at DESC"
+        limit = max(1, min(500, int(limit)))
+        offset = max(0, int(offset))
+
+        col_list = ",".join(_COLUMNS)
+        if source_filter:
+            sql = (
+                f"SELECT {col_list} FROM memories WHERE source = ? "
+                f"ORDER BY {order_by} LIMIT ? OFFSET ?"
+            )
+            params: tuple = (source_filter, limit, offset)
+        else:
+            sql = (
+                f"SELECT {col_list} FROM memories "
+                f"ORDER BY {order_by} LIMIT ? OFFSET ?"
+            )
+            params = (limit, offset)
+
+        with self._lock:
+            rows = self._get_conn().execute(sql, params).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
+    def count_by_source(self, source_filter: Optional[str] = None) -> int:
+        """Return the total number of memories, optionally filtered by source.
+
+        Distinct from ``count(lifecycle_states, user_id)`` below, which filters
+        by lifecycle and user instead of source.
+        """
+        with self._lock:
+            if source_filter:
+                row = self._get_conn().execute(
+                    "SELECT COUNT(*) FROM memories WHERE source = ?",
+                    (source_filter,),
+                ).fetchone()
+            else:
+                row = self._get_conn().execute(
+                    "SELECT COUNT(*) FROM memories"
+                ).fetchone()
+        return int(row[0]) if row else 0
+
+    def list_sources(self) -> list[str]:
+        """Return distinct source values in the store."""
+        with self._lock:
+            rows = self._get_conn().execute(
+                "SELECT DISTINCT source FROM memories ORDER BY source"
+            ).fetchall()
+        return [r[0] for r in rows if r[0]]
+
     # ------------------------------------------------------------------
     # FAISS vector index
     # ------------------------------------------------------------------

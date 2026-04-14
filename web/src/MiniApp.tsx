@@ -1,12 +1,12 @@
 // Telegram Mini App — embedded UI inside Telegram
 // Uses Telegram's WebApp API: window.Telegram.WebApp
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { EMOTION_COLORS, NEURO_INFO, PERSONALITY_INFO } from './utils/emotionConstants';
 import { ToolCardRenderer } from './components/ToolCards/ToolCardRenderer';
-import type { ToolResult, ToolStatus, ProactiveCard, ProactiveCardAction } from './types';
+import type { ToolResult, ToolStatus, ProactiveCard, ProactiveCardAction, MemoryItem, MemoryKgNode } from './types';
 
 // ─── Telegram WebApp type declarations ───
 declare global {
@@ -108,7 +108,7 @@ const CLOUD_MAX_MESSAGES = 20;  // TMA CloudStorage has ~100KB quota; keep it ti
 const API_BASE = `${window.location.protocol}//${window.location.host}/api`;
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/chat/stream`;
 
-type TabId = 'chat' | 'dashboard' | 'tools' | 'emotion' | 'strategies' | 'settings';
+type TabId = 'chat' | 'dashboard' | 'tools' | 'emotion' | 'strategies' | 'brain' | 'settings';
 
 // ─── Interfaces ───
 interface ChatMessage {
@@ -132,6 +132,7 @@ const TOOL_KIND_MAP: Record<string, ToolResult['kind']> = {
   code_exec: 'code', python_exec: 'code', execute_code: 'code', run_code: 'code',
   image_gen: 'image', generate_image: 'image',
   summarize: 'summary',
+  document_index: 'document',
 };
 
 function toolKindFor(toolName: string): ToolResult['kind'] {
@@ -240,6 +241,42 @@ function buildToolResult(
       }
       return { id, tool: toolName, kind: 'summary', summary, status };
     }
+    case 'document': {
+      const docId = toStr(toolArgs.doc_id ?? '');
+      const filename = toStr(toolArgs.filename ?? '');
+      let chunksCount: number | undefined;
+      let sizeChars: number | undefined;
+      let summary: string | undefined;
+      let facts: string[] | undefined;
+      let questions: string[] | undefined;
+
+      const argChunks = toolArgs.chunks_count;
+      if (typeof argChunks === 'number') chunksCount = argChunks;
+      const argSize = toolArgs.size_chars;
+      if (typeof argSize === 'number') sizeChars = argSize;
+
+      if (parsed && typeof parsed === 'object') {
+        const pObj = parsed as Record<string, unknown>;
+        if (typeof pObj.chunks_count === 'number') chunksCount = pObj.chunks_count;
+        if (typeof pObj.size_chars === 'number') sizeChars = pObj.size_chars;
+        if (typeof pObj.summary === 'string') summary = pObj.summary;
+        if (Array.isArray(pObj.facts)) facts = pObj.facts.map((f) => toStr(f));
+        if (Array.isArray(pObj.questions)) questions = pObj.questions.map((q) => toStr(q));
+      }
+      return {
+        id,
+        tool: toolName,
+        kind: 'document',
+        doc_id: docId,
+        filename,
+        chunks_count: chunksCount,
+        size_chars: sizeChars,
+        summary,
+        facts,
+        questions,
+        status,
+      };
+    }
     default: {
       const resultStr = toolResult !== undefined
         ? (typeof parsed === 'string' ? parsed : toStr(parsed))
@@ -301,7 +338,7 @@ export default function MiniApp() {
   useEffect(() => {
     (async () => {
       const saved = await cloudStorageGet(CLOUD_KEY_ACTIVE_TAB);
-      if (saved && ['chat', 'dashboard', 'tools', 'emotion', 'strategies', 'settings'].includes(saved)) {
+      if (saved && ['chat', 'dashboard', 'tools', 'emotion', 'strategies', 'brain', 'settings'].includes(saved)) {
         setActiveTab(saved as TabId);
       }
     })();
@@ -397,6 +434,7 @@ export default function MiniApp() {
         }} />}
         {activeTab === 'emotion' && <EmotionTab />}
         {activeTab === 'strategies' && <StrategiesTab />}
+        {activeTab === 'brain' && <BrainTab tg={tg} />}
         {activeTab === 'settings' && <SettingsTab tg={tg} />}
       </main>
 
@@ -404,10 +442,11 @@ export default function MiniApp() {
       <nav className="miniapp-tabbar">
         {([
           { id: 'chat' as TabId, label: 'Chat', icon: ChatIcon },
-          { id: 'dashboard' as TabId, label: 'Dashboard', icon: DashIcon },
+          { id: 'dashboard' as TabId, label: 'Dash', icon: DashIcon },
           { id: 'tools' as TabId, label: 'Tools', icon: ToolsIcon },
-          { id: 'emotion' as TabId, label: 'Emotion', icon: EmotionIcon },
-          { id: 'strategies' as TabId, label: 'Strategies', icon: StrategiesIcon },
+          { id: 'emotion' as TabId, label: 'Emo', icon: EmotionIcon },
+          { id: 'strategies' as TabId, label: 'Str', icon: StrategiesIcon },
+          { id: 'brain' as TabId, label: 'Brain', icon: BrainIcon },
           { id: 'settings' as TabId, label: 'Settings', icon: SettingsIcon },
         ]).map((tab) => (
           <button
@@ -914,7 +953,10 @@ function ChatTab({ tg, sendToChatRef }: { tg?: NonNullable<Window['Telegram']>['
                 {msg.role === 'assistant' ? (
                   <>
                     {msg.toolResults && msg.toolResults.length > 0 && (
-                      <ToolCardRenderer results={msg.toolResults} />
+                      <ToolCardRenderer
+                        results={msg.toolResults}
+                        onQuestionClick={(q) => sendMessage(q)}
+                      />
                     )}
                     {msg.content && (
                       <div className="chat-msg-text markdown-body">
@@ -1601,6 +1643,14 @@ function StrategiesIcon({ active }: { active: boolean }) {
   );
 }
 
+function BrainIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={active ? '#a78bfa' : '#a1a1aa'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9.5 2a3 3 0 00-3 3v.5A3.5 3.5 0 003 9v1a3 3 0 001 2.24V14a3 3 0 003 3v1a3 3 0 003 3h.5V2zM14.5 2a3 3 0 013 3v.5A3.5 3.5 0 0121 9v1a3 3 0 01-1 2.24V14a3 3 0 01-3 3v1a3 3 0 01-3 3H13.5V2z" />
+    </svg>
+  );
+}
+
 // ═══════════════════════════════════════════
 // STRATEGIES TAB — live Strategy Bandit chart
 // Shows each category's arm posteriors (Beta mean reward + pull count)
@@ -1744,6 +1794,291 @@ function StrategiesTab() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════
+// BRAIN TAB — interactive memory browser
+// Paginated timeline, source filter, expand-to-edit/delete/pin, KG top entities.
+// Authenticates to the public /api/telegram/memory/* proxy via initData HMAC.
+// ═══════════════════════════════════════════
+
+interface BrainStats {
+  total_count?: number;
+  embedded_count?: number;
+  by_source?: Record<string, number>;
+  by_lifecycle?: Record<string, number>;
+  sources?: string[];
+  user_profiles?: number;
+}
+
+function BrainTab({ tg }: { tg?: NonNullable<Window['Telegram']>['WebApp'] }) {
+  const initData = (tg as unknown as { initData?: string } | undefined)?.initData || '';
+  const [stats, setStats] = useState<BrainStats | null>(null);
+  const [items, setItems] = useState<MemoryItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [limit] = useState(30);
+  const [source, setSource] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [kgNodes, setKgNodes] = useState<MemoryKgNode[]>([]);
+  const [showKg, setShowKg] = useState(false);
+
+  const miniFetch = useCallback(async (path: string, body: Record<string, unknown>) => {
+    const resp = await fetch(`${API_BASE}/telegram/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ init_data: initData, ...body }),
+    });
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      throw new Error(`${resp.status} ${detail.slice(0, 200)}`);
+    }
+    return resp.json();
+  }, [initData]);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const data = await miniFetch('memory/stats', {});
+      setStats(data);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [miniFetch]);
+
+  const loadPage = useCallback(async (nextOffset: number, nextSource: string | null) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await miniFetch('memory/browse', {
+        offset: nextOffset, limit, source: nextSource,
+      });
+      setItems(prev => nextOffset === 0 ? (data.items || []) : [...prev, ...(data.items || [])]);
+      setTotal(data.total || 0);
+      setOffset(nextOffset + (data.items?.length || 0));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [miniFetch, limit]);
+
+  const loadKg = useCallback(async () => {
+    try {
+      const data = await miniFetch('memory/kg/top', { limit: 20 });
+      setKgNodes(data.nodes || []);
+    } catch {
+      setKgNodes([]);
+    }
+  }, [miniFetch]);
+
+  useEffect(() => { loadStats(); }, [loadStats]);
+  useEffect(() => { loadPage(0, source); }, [source, loadPage]);
+  useEffect(() => { if (showKg && kgNodes.length === 0) loadKg(); }, [showKg, kgNodes.length, loadKg]);
+
+  const filteredItems = useMemo(() => {
+    if (!query.trim()) return items;
+    const q = query.trim().toLowerCase();
+    return items.filter(m =>
+      m.content.toLowerCase().includes(q) ||
+      (m.tags || []).some(t => t.toLowerCase().includes(q)) ||
+      (m.source || '').toLowerCase().includes(q)
+    );
+  }, [items, query]);
+
+  const handlePin = async (item: MemoryItem) => {
+    tg?.HapticFeedback?.impactOccurred('light');
+    const next = !item.pinned;
+    try {
+      await miniFetch('memory/item/pin', { memory_id: item.id, pinned: next });
+      setItems(prev => prev.map(m => m.id === item.id ? {
+        ...m, pinned: next,
+        tags: next
+          ? [...(m.tags || []), 'pinned']
+          : (m.tags || []).filter(t => t !== 'pinned'),
+      } : m));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const handleDelete = async (item: MemoryItem) => {
+    if (!confirm(`Delete this memory?\n\n"${item.content.slice(0, 100)}${item.content.length > 100 ? '…' : ''}"`)) return;
+    tg?.HapticFeedback?.notificationOccurred('warning');
+    try {
+      await miniFetch('memory/item/delete', { memory_id: item.id });
+      setItems(prev => prev.filter(m => m.id !== item.id));
+      setTotal(prev => Math.max(0, prev - 1));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const handleStartEdit = (item: MemoryItem) => {
+    setEditingId(item.id);
+    setEditText(item.content);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingId) return;
+    tg?.HapticFeedback?.impactOccurred('medium');
+    try {
+      await miniFetch('memory/item/patch', { memory_id: editingId, content: editText });
+      setItems(prev => prev.map(m => m.id === editingId ? { ...m, content: editText } : m));
+      setEditingId(null);
+      setEditText('');
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const sources = stats?.sources || [];
+  const loaded = items.length;
+  const canLoadMore = loaded < total && !loading;
+
+  return (
+    <div className="brain-tab">
+      {/* Stats header */}
+      <div className="brain-stats">
+        <div className="brain-stat">
+          <span className="brain-stat-value">{stats?.total_count ?? '—'}</span>
+          <span className="brain-stat-label">Memories</span>
+        </div>
+        <div className="brain-stat">
+          <span className="brain-stat-value">{stats?.embedded_count ?? '—'}</span>
+          <span className="brain-stat-label">Embedded</span>
+        </div>
+        <div className="brain-stat">
+          <span className="brain-stat-value">{sources.length}</span>
+          <span className="brain-stat-label">Sources</span>
+        </div>
+        <div className="brain-stat">
+          <span className="brain-stat-value">{stats?.user_profiles ?? 0}</span>
+          <span className="brain-stat-label">Profiles</span>
+        </div>
+      </div>
+
+      {/* Search + source filter */}
+      <div className="brain-search">
+        <input
+          type="text"
+          className="brain-search-input"
+          placeholder="Search memories…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <select
+          className="brain-source-select"
+          value={source || ''}
+          onChange={(e) => setSource(e.target.value || null)}
+        >
+          <option value="">All sources</option>
+          {sources.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+      </div>
+
+      {error && <div className="brain-error">{error}</div>}
+
+      {/* Memory list */}
+      <div className="brain-list">
+        {filteredItems.length === 0 && !loading && (
+          <div className="brain-empty">No memories yet.</div>
+        )}
+        {filteredItems.map((m) => {
+          const isExpanded = expandedId === m.id;
+          const isEditing = editingId === m.id;
+          const preview = m.content.length > 200 && !isExpanded
+            ? m.content.slice(0, 200) + '…'
+            : m.content;
+          return (
+            <div key={m.id} className={`brain-item ${isExpanded ? 'expanded' : ''}${m.pinned ? ' pinned' : ''}`}>
+              <div
+                className="brain-item-content"
+                onClick={() => {
+                  if (!isEditing) setExpandedId(isExpanded ? null : m.id);
+                }}
+              >
+                {isEditing ? (
+                  <textarea
+                    className="brain-edit-textarea"
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    rows={5}
+                    autoFocus
+                  />
+                ) : (
+                  <div className="brain-item-text">{preview}</div>
+                )}
+                <div className="brain-item-meta">
+                  {m.pinned && <span className="brain-badge brain-badge--pinned">{'\u{1F4CC}'}</span>}
+                  <span className="brain-badge brain-badge--source">{m.source}</span>
+                  {(m.tags || []).filter(t => t !== 'pinned').slice(0, 3).map((t) => (
+                    <span key={t} className="brain-badge brain-badge--tag">{t}</span>
+                  ))}
+                  <span className="brain-item-date">{(m.created_at || '').slice(0, 10)}</span>
+                </div>
+              </div>
+              {isExpanded && !isEditing && (
+                <div className="brain-item-actions">
+                  <button className="brain-btn" onClick={() => handleStartEdit(m)}>Edit</button>
+                  <button className="brain-btn" onClick={() => handlePin(m)}>
+                    {m.pinned ? 'Unpin' : 'Pin'}
+                  </button>
+                  <button className="brain-btn brain-btn--danger" onClick={() => handleDelete(m)}>Delete</button>
+                </div>
+              )}
+              {isEditing && (
+                <div className="brain-item-actions">
+                  <button className="brain-btn brain-btn--primary" onClick={handleSaveEdit}>Save</button>
+                  <button className="brain-btn" onClick={() => { setEditingId(null); setEditText(''); }}>Cancel</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {canLoadMore && (
+          <button
+            className="brain-load-more"
+            onClick={() => loadPage(offset, source)}
+            disabled={loading}
+          >
+            {loading ? 'Loading…' : `Load more (${loaded}/${total})`}
+          </button>
+        )}
+        {!canLoadMore && loaded > 0 && (
+          <div className="brain-end">{'\u2014 end \u2014'}</div>
+        )}
+      </div>
+
+      {/* Knowledge graph top entities */}
+      <div className="brain-kg-section">
+        <button className="brain-kg-toggle" onClick={() => setShowKg(v => !v)}>
+          {showKg ? '\u25BC' : '\u25B6'} Knowledge graph top entities
+        </button>
+        {showKg && (
+          <div className="brain-kg-list">
+            {kgNodes.length === 0 && <div className="brain-empty">No entities loaded.</div>}
+            {kgNodes.map((n) => (
+              <div key={n.id} className="brain-kg-node">
+                <span className="brain-kg-label">{n.label}</span>
+                <span className="brain-kg-type">{n.type}</span>
+                <span className="brain-kg-access">×{n.access_count}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

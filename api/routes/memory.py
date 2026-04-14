@@ -309,17 +309,28 @@ async def clear_recalls(session_id: str = Query(default="default")):
 @router.get("/recent")
 async def get_recent_memories(limit: int = Query(default=20, le=100)):
     """Return recent memories from unified memory store."""
+    loop = asyncio.get_running_loop()
+
+    def _fetch():
+        from aura.memory.unified_memory import get_unified_memory
+        return get_unified_memory().list_recent(offset=0, limit=limit)
+
     try:
-        import asyncio
-        loop = asyncio.get_running_loop()
-
-        def _fetch():
-            from aura.memory.unified_memory import get_unified_memory
-            um = get_unified_memory()
-            return um.retrieve("", limit=limit)
-
-        memories = await loop.run_in_executor(None, _fetch)
-        return {"memories": [{"content": m.get("content", ""), "timestamp": m.get("timestamp", ""), "category": m.get("category", "general"), "relevance": m.get("relevance", 0)} for m in (memories if memories else [])]}
+        rows = await loop.run_in_executor(None, _fetch)
+        return {
+            "memories": [
+                {
+                    "id": m.get("id", ""),
+                    "content": m.get("content", ""),
+                    "timestamp": m.get("created_at", ""),
+                    "source": m.get("source", ""),
+                    "category": m.get("category", ""),
+                    "importance": m.get("importance", 0.0),
+                    "tags": m.get("tags", []),
+                }
+                for m in (rows or [])
+            ]
+        }
     except Exception as e:
         logger.warning(f"[Memory] recent endpoint: {e}")
         raise HTTPException(status_code=503, detail="Memory store unavailable") from None
@@ -327,21 +338,257 @@ async def get_recent_memories(limit: int = Query(default=20, le=100)):
 
 @router.get("/search")
 async def search_memories(q: str = Query(..., min_length=1, max_length=500)):
-    """Search memories by query text."""
+    """Search memories via UnifiedMemory.query (BM25 + semantic)."""
+    loop = asyncio.get_running_loop()
+
+    def _search():
+        from aura.memory.unified_memory import get_unified_memory
+        return get_unified_memory().query(q, k=20)
+
     try:
-        import asyncio
-        loop = asyncio.get_running_loop()
-
-        def _search():
-            from aura.memory.unified_memory import get_unified_memory
-            um = get_unified_memory()
-            return um.retrieve(q, limit=20)
-
         results = await loop.run_in_executor(None, _search)
-        return {"results": [{"content": m.get("content", ""), "timestamp": m.get("timestamp", ""), "category": m.get("category", "general"), "relevance": m.get("relevance", 0)} for m in (results if results else [])]}
+        return {
+            "results": [
+                {
+                    "id": getattr(r, "source_id", "") or "",
+                    "content": getattr(r, "content", "") or "",
+                    "source": getattr(r, "source", "") or "",
+                    "score": float(getattr(r, "score", 0.0) or 0.0),
+                    "importance": float(getattr(r, "importance", 0.0) or 0.0),
+                    "relevance": float(getattr(r, "relevance", 0.0) or 0.0),
+                }
+                for r in (results or [])
+            ]
+        }
     except Exception as e:
         logger.warning(f"[Memory] search endpoint: {e}")
         raise HTTPException(status_code=503, detail="Memory store unavailable") from None
+
+
+# ============================================================================
+# Memory Browser CRUD (backing the Mini App "Brain" tab)
+# ============================================================================
+
+class MemoryItem(BaseModel):
+    id: str
+    content: str
+    title: str = ""
+    source: str = ""
+    memory_type: str = ""
+    importance: float = 0.0
+    tags: List[str] = Field(default_factory=list)
+    pinned: bool = False
+    category: str = ""
+    lifecycle_state: str = ""
+    access_count: int = 0
+    strength: float = 0.0
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class MemoryBrowseResponse(BaseModel):
+    items: List[MemoryItem]
+    total: int
+    offset: int
+    limit: int
+    source: Optional[str] = None
+
+
+class MemoryPatchBody(BaseModel):
+    content: Optional[str] = Field(default=None, max_length=50000)
+    tags: Optional[List[str]] = None
+    importance: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+def _get_um():
+    from aura.memory.unified_memory import get_unified_memory
+    return get_unified_memory()
+
+
+@router.get("/browse", response_model=MemoryBrowseResponse)
+async def browse_memories(
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    source: Optional[str] = Query(default=None, max_length=64),
+):
+    """Paginated timeline of memories. Backs the Mini App Brain tab."""
+    loop = asyncio.get_running_loop()
+
+    def _fetch():
+        um = _get_um()
+        items = um.list_recent(offset=offset, limit=limit, source_filter=source)
+        total = um.count_memories(source_filter=source)
+        return items, total
+
+    try:
+        items, total = await loop.run_in_executor(None, _fetch)
+        return MemoryBrowseResponse(
+            items=[MemoryItem(**it) for it in items],
+            total=total,
+            offset=offset,
+            limit=limit,
+            source=source,
+        )
+    except Exception as e:
+        logger.warning(f"[Memory] browse endpoint: {e}")
+        raise HTTPException(status_code=503, detail="Memory store unavailable") from None
+
+
+@router.get("/item/{memory_id}", response_model=MemoryItem)
+async def get_memory_item(memory_id: str):
+    """Fetch a single memory by ID."""
+    loop = asyncio.get_running_loop()
+
+    def _fetch():
+        return _get_um().get_memory(memory_id)
+
+    row = await loop.run_in_executor(None, _fetch)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+    return MemoryItem(**row)
+
+
+@router.patch("/item/{memory_id}")
+async def patch_memory_item(memory_id: str, body: MemoryPatchBody):
+    """Update content, tags, or importance on a memory."""
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    loop = asyncio.get_running_loop()
+
+    def _update():
+        return _get_um().update_memory(memory_id, **fields)
+
+    ok = await loop.run_in_executor(None, _update)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+    return {"id": memory_id, "status": "updated"}
+
+
+@router.delete("/item/{memory_id}")
+async def delete_memory_item(memory_id: str):
+    """Hard-delete a memory by ID."""
+    loop = asyncio.get_running_loop()
+
+    def _delete():
+        return _get_um().delete_memory(memory_id)
+
+    ok = await loop.run_in_executor(None, _delete)
+    return {"deleted": bool(ok), "id": memory_id}
+
+
+@router.post("/item/{memory_id}/pin")
+async def pin_memory_item(memory_id: str):
+    """Add the 'pinned' tag to a memory."""
+    loop = asyncio.get_running_loop()
+    ok = await loop.run_in_executor(None, lambda: _get_um().set_pinned(memory_id, True))
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+    return {"id": memory_id, "pinned": True}
+
+
+@router.delete("/item/{memory_id}/pin")
+async def unpin_memory_item(memory_id: str):
+    """Remove the 'pinned' tag from a memory."""
+    loop = asyncio.get_running_loop()
+    ok = await loop.run_in_executor(None, lambda: _get_um().set_pinned(memory_id, False))
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+    return {"id": memory_id, "pinned": False}
+
+
+@router.get("/stats")
+async def memory_stats():
+    """Lightweight stats for the Brain tab header."""
+    loop = asyncio.get_running_loop()
+
+    def _fetch():
+        um = _get_um()
+        stats = um.get_stats() or {}
+        stats["sources"] = um.list_sources()
+        stats["total_count"] = um.count_memories()
+        return stats
+
+    try:
+        return await loop.run_in_executor(None, _fetch)
+    except Exception as e:
+        logger.warning(f"[Memory] stats endpoint: {e}")
+        raise HTTPException(status_code=503, detail="Memory store unavailable") from None
+
+
+@router.get("/kg/top")
+async def memory_kg_top(limit: int = Query(default=20, ge=1, le=100)):
+    """Top knowledge graph entities ranked by access_count."""
+    loop = asyncio.get_running_loop()
+
+    def _fetch():
+        try:
+            from aura.services.agent_service import agent_service
+            agent = getattr(agent_service, "agent", None)
+            if agent is None:
+                return []
+            kg = getattr(agent, "kg_brain", None)
+            if kg is None:
+                return []
+            stats_fn = getattr(kg, "get_statistics", None)
+            if stats_fn is None:
+                return []
+            stats = stats_fn() or {}
+            dist = stats.get("entity_type_distribution", {}) or {}
+            total_entities = int(stats.get("total_entities", 0) or 0)
+            total_relationships = int(stats.get("total_relationships", 0) or 0)
+            return {
+                "total_entities": total_entities,
+                "total_relationships": total_relationships,
+                "type_distribution": dist,
+            }
+        except Exception as exc:
+            logger.debug(f"[Memory] kg/top error: {exc}")
+            return {"total_entities": 0, "total_relationships": 0, "type_distribution": {}}
+
+    result = await loop.run_in_executor(None, _fetch)
+    # Pull the top entries from the main knowledge_graph tool if available
+    def _top_nodes():
+        try:
+            from api.services.agent_service import agent_service
+            agent = getattr(agent_service, "agent", None)
+            if not agent:
+                return []
+            kg_tool = (getattr(agent, "tools", None) or {}).get("knowledge_graph")
+            if not kg_tool:
+                return []
+            nodes = []
+            graph = getattr(kg_tool, "_graph", None) or getattr(kg_tool, "graph", None)
+            raw_nodes = getattr(graph, "nodes", None) if graph else None
+            if raw_nodes:
+                items = list(raw_nodes.items() if hasattr(raw_nodes, "items") else raw_nodes)
+                for entry in items[:limit * 3]:
+                    if isinstance(entry, tuple) and len(entry) == 2:
+                        nid, ndata = entry
+                    else:
+                        nid, ndata = entry, {}
+                    if not isinstance(ndata, dict):
+                        ndata = {"label": str(ndata)}
+                    nodes.append({
+                        "id": str(nid),
+                        "label": str(ndata.get("label") or nid),
+                        "type": str(ndata.get("type") or "entity"),
+                        "confidence": float(ndata.get("confidence", 0.0) or 0.0),
+                        "access_count": int(ndata.get("access_count", 0) or 0),
+                    })
+            nodes.sort(key=lambda n: (n["access_count"], n["confidence"]), reverse=True)
+            return nodes[:limit]
+        except Exception as exc:
+            logger.debug(f"[Memory] kg top_nodes error: {exc}")
+            return []
+
+    nodes = await loop.run_in_executor(None, _top_nodes)
+    if isinstance(result, dict):
+        result["nodes"] = nodes
+    else:
+        result = {"nodes": nodes}
+    return result
 
 
 class AddMemoryBody(BaseModel):

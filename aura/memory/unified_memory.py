@@ -490,6 +490,140 @@ class UnifiedMemory:
                 logger.debug("[UnifiedMemory] Stats error: %s", e)
         return stats
 
+    # ------------------------------------------------------------------
+    # Memory browser API (Mini App "Brain" tab)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _record_to_dict(record) -> Dict[str, Any]:
+        """Serialize a MemoryRecord dataclass into a plain, JSON-safe dict.
+
+        Keeps only the fields the Mini App needs. Parses comma-separated ``tags``
+        back into a list and derives ``pinned`` from it.
+        """
+        if record is None:
+            return {}
+        tags_raw = getattr(record, "tags", "") or ""
+        tag_list = [t.strip() for t in tags_raw.split(",") if t.strip()]
+        return {
+            "id": getattr(record, "id", ""),
+            "content": getattr(record, "content", ""),
+            "title": getattr(record, "title", ""),
+            "source": getattr(record, "source", ""),
+            "memory_type": getattr(record, "memory_type", ""),
+            "importance": float(getattr(record, "importance", 0.0) or 0.0),
+            "tags": tag_list,
+            "pinned": "pinned" in tag_list,
+            "category": getattr(record, "category", ""),
+            "lifecycle_state": getattr(record, "lifecycle_state", ""),
+            "access_count": int(getattr(record, "access_count", 0) or 0),
+            "strength": float(getattr(record, "strength", 0.0) or 0.0),
+            "created_at": getattr(record, "created_at", ""),
+            "updated_at": getattr(record, "updated_at", ""),
+        }
+
+    def list_recent(
+        self,
+        offset: int = 0,
+        limit: int = 50,
+        source_filter: Optional[str] = None,
+        order_by: str = "created_at DESC",
+    ) -> list[Dict[str, Any]]:
+        """Return a paginated slice of memories as plain dicts."""
+        self._ensure_store()
+        if not self._store:
+            return []
+        try:
+            records = self._store.list_paginated(
+                offset=offset, limit=limit,
+                source_filter=source_filter, order_by=order_by,
+            )
+            return [self._record_to_dict(r) for r in records]
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] list_recent error: {e}")
+            return []
+
+    def count_memories(self, source_filter: Optional[str] = None) -> int:
+        """Total memory count, optionally filtered by source."""
+        self._ensure_store()
+        if not self._store:
+            return 0
+        try:
+            return int(self._store.count_by_source(source_filter=source_filter))
+        except Exception:
+            return 0
+
+    def list_sources(self) -> list[str]:
+        """Distinct source values in the store."""
+        self._ensure_store()
+        if not self._store:
+            return []
+        try:
+            return self._store.list_sources()
+        except Exception:
+            return []
+
+    def get_memory(self, memory_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single memory by ID."""
+        self._ensure_store()
+        if not self._store:
+            return None
+        try:
+            record = self._store.get(memory_id)
+            if record is None:
+                return None
+            return self._record_to_dict(record)
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] get_memory error: {e}")
+            return None
+
+    def update_memory(self, memory_id: str, **fields) -> bool:
+        """Update allowed fields on a memory record. Silently drops unknown
+        fields. Returns True on success."""
+        self._ensure_store()
+        if not self._store:
+            return False
+        # Normalize tags: list → "a,b,c"
+        if "tags" in fields and isinstance(fields["tags"], list):
+            fields["tags"] = ",".join(str(t).strip() for t in fields["tags"] if t)
+        # Drop any keys not in the store's whitelist to avoid ValueError
+        allowed = getattr(self._store, "_UPDATABLE_FIELDS", None)
+        if allowed:
+            fields = {k: v for k, v in fields.items() if k in allowed}
+        if not fields:
+            return False
+        try:
+            return bool(self._store.update(memory_id, **fields))
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] update_memory error: {e}")
+            return False
+
+    def delete_memory(self, memory_id: str) -> bool:
+        """Hard-delete a memory by ID."""
+        self._ensure_store()
+        if not self._store:
+            return False
+        try:
+            return bool(self._store.delete(memory_id))
+        except Exception as e:
+            logger.debug(f"[UnifiedMemory] delete_memory error: {e}")
+            return False
+
+    def set_pinned(self, memory_id: str, pinned: bool) -> bool:
+        """Toggle the 'pinned' tag on a memory. Pinning is stored as a tag
+        rather than a dedicated column to avoid a schema migration."""
+        record_dict = self.get_memory(memory_id)
+        if record_dict is None:
+            return False
+        tags = list(record_dict.get("tags") or [])
+        if pinned and "pinned" not in tags:
+            tags.append("pinned")
+        elif not pinned and "pinned" in tags:
+            tags = [t for t in tags if t != "pinned"]
+        else:
+            return True  # No change needed
+        return self.update_memory(memory_id, tags=tags)
+
     def close(self) -> None:
         """Release resources."""
         try:

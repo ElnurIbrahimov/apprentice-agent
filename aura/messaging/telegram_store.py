@@ -22,6 +22,7 @@ import logging
 import sqlite3
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -146,6 +147,30 @@ class TelegramStore:
 
                 CREATE INDEX IF NOT EXISTS idx_reaction_feedback_user
                     ON reaction_feedback(user_id, timestamp DESC);
+
+                CREATE TABLE IF NOT EXISTS doc_chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    doc_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    chunk_idx INTEGER NOT NULL,
+                    chunk_text TEXT NOT NULL,
+                    embedding BLOB,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_doc_chunks_user_doc
+                    ON doc_chunks(user_id, doc_id);
+                CREATE INDEX IF NOT EXISTS idx_doc_chunks_user_created
+                    ON doc_chunks(user_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS doc_summaries (
+                    user_id TEXT NOT NULL,
+                    doc_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    summary_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, doc_id)
+                );
             """)
             conn.commit()
 
@@ -543,3 +568,164 @@ class TelegramStore:
                     "GROUP BY sentiment"
                 ).fetchall()
             return {row["sentiment"]: row["cnt"] for row in rows}
+
+    # ------------------------------------------------------------------
+    # Document RAG (per-user mini-index for uploaded PDFs, DOCX, etc.)
+    # ------------------------------------------------------------------
+
+    def insert_doc_chunks(
+        self,
+        user_id: str,
+        doc_id: str,
+        filename: str,
+        chunks: list,
+    ) -> int:
+        """Insert a batch of chunks for a document.
+
+        ``chunks`` is a list of dicts with keys ``{chunk_idx, chunk_text, embedding}``.
+        ``embedding`` is an optional list[float]; serialized to bytes via numpy.
+        """
+        import struct
+        now = datetime.now().isoformat()
+
+        def _pack_embedding(emb) -> Optional[bytes]:
+            if emb is None:
+                return None
+            try:
+                return struct.pack(f"{len(emb)}f", *[float(x) for x in emb])
+            except Exception:
+                return None
+
+        rows = [
+            (
+                user_id,
+                doc_id,
+                filename,
+                int(c["chunk_idx"]),
+                str(c["chunk_text"]),
+                _pack_embedding(c.get("embedding")),
+                now,
+            )
+            for c in chunks
+        ]
+        with self._lock:
+            conn = self._get_conn()
+            conn.executemany(
+                "INSERT INTO doc_chunks "
+                "(user_id, doc_id, filename, chunk_idx, chunk_text, embedding, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+            conn.commit()
+        return len(rows)
+
+    def get_doc_chunks(
+        self,
+        user_id: str,
+        doc_id: Optional[str] = None,
+    ) -> list:
+        """Return all chunks for a user, optionally filtered to one document.
+
+        Each row is dict with ``chunk_idx, chunk_text, embedding`` (list[float] or None)
+        and metadata ``doc_id, filename``.
+        """
+        import struct
+        with self._lock:
+            conn = self._get_conn()
+            if doc_id:
+                rows = conn.execute(
+                    "SELECT doc_id, filename, chunk_idx, chunk_text, embedding "
+                    "FROM doc_chunks WHERE user_id = ? AND doc_id = ? "
+                    "ORDER BY chunk_idx ASC",
+                    (user_id, doc_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT doc_id, filename, chunk_idx, chunk_text, embedding "
+                    "FROM doc_chunks WHERE user_id = ? "
+                    "ORDER BY created_at DESC, chunk_idx ASC",
+                    (user_id,),
+                ).fetchall()
+
+        out = []
+        for r in rows:
+            blob = r["embedding"]
+            emb = None
+            if blob:
+                try:
+                    n = len(blob) // 4
+                    emb = list(struct.unpack(f"{n}f", blob))
+                except Exception:
+                    emb = None
+            out.append({
+                "doc_id": r["doc_id"],
+                "filename": r["filename"],
+                "chunk_idx": r["chunk_idx"],
+                "chunk_text": r["chunk_text"],
+                "embedding": emb,
+            })
+        return out
+
+    def list_user_docs(self, user_id: str) -> list:
+        """List documents the user has indexed, newest first."""
+        with self._lock:
+            rows = self._get_conn().execute(
+                "SELECT doc_id, filename, COUNT(*) as chunks_count, MAX(created_at) as created_at "
+                "FROM doc_chunks WHERE user_id = ? "
+                "GROUP BY doc_id, filename "
+                "ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        return [
+            {
+                "doc_id": r["doc_id"],
+                "filename": r["filename"],
+                "chunks_count": r["chunks_count"],
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
+
+    def delete_user_doc(self, user_id: str, doc_id: str) -> int:
+        """Hard-delete every chunk + summary for a document."""
+        with self._lock:
+            conn = self._get_conn()
+            cur = conn.execute(
+                "DELETE FROM doc_chunks WHERE user_id = ? AND doc_id = ?",
+                (user_id, doc_id),
+            )
+            conn.execute(
+                "DELETE FROM doc_summaries WHERE user_id = ? AND doc_id = ?",
+                (user_id, doc_id),
+            )
+            conn.commit()
+            return cur.rowcount
+
+    def set_doc_summary(
+        self,
+        user_id: str,
+        doc_id: str,
+        filename: str,
+        summary_json: str,
+    ) -> None:
+        """Store (or replace) the LLM-generated summary payload for a doc."""
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                "INSERT OR REPLACE INTO doc_summaries "
+                "(user_id, doc_id, filename, summary_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (user_id, doc_id, filename, summary_json, now),
+            )
+            conn.commit()
+
+    def get_doc_summary(self, user_id: str, doc_id: str) -> Optional[str]:
+        """Return the stored summary JSON for a doc, or None."""
+        with self._lock:
+            row = self._get_conn().execute(
+                "SELECT summary_json FROM doc_summaries "
+                "WHERE user_id = ? AND doc_id = ?",
+                (user_id, doc_id),
+            ).fetchone()
+        return row["summary_json"] if row else None
