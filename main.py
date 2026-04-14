@@ -504,6 +504,24 @@ def main() -> None:
         from aura.cli.voice_mode import run_voice_mode
         run_voice_mode(agent, enable_barge_in=not args.no_barge_in, bridge=bridge)
     else:
+        # Surface the latest dream report (< 48h old) on chat startup so
+        # users see what the nightly consolidation produced without running
+        # /memory or /dream manually.
+        try:
+            from aura.dream import load_latest_dream_report
+            _report = load_latest_dream_report()
+            if _report and _report.get("insights"):
+                from aura.cli.display import console as _console
+                _console.print(
+                    f"\n[dim cyan]\u25ce last dream ({_report.get('date', '?')}): "
+                    f"{_report.get('logs_analyzed', 0)} logs analyzed, "
+                    f"{len(_report['insights'])} insights[/dim cyan]"
+                )
+                for i, _ins in enumerate(_report["insights"][:3], 1):
+                    _console.print(f"[dim]    {i}. {str(_ins)[:100]}[/dim]")
+                _console.print()
+        except Exception:
+            pass
         from aura.cli.chat_loop import run_chat_mode
         run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model, verbose=args.verbose, tier=args.tier, bridge=bridge, preference=args.preference)
 

@@ -352,9 +352,64 @@ def run_dream_mode(date: Optional[str] = None) -> dict:
     """Entry point for running dream mode."""
     dreamer = DreamMode()
     try:
-        return dreamer.dream(date)
+        result = dreamer.dream(date)
+        if result.get("success"):
+            _persist_dream_report(date, result)
+        return result
     finally:
         dreamer.close()
+
+
+def _persist_dream_report(date: Optional[str], result: Dict[str, Any]) -> None:
+    """Write a dream report JSON next to Aura's data dir for CLI startup display.
+
+    The chat loop reads the latest file here and surfaces 'Last night's dream
+    insights' as a dim banner, so users see the consolidation output without
+    running `/memory` or `/dream` manually.
+    """
+    try:
+        report_dir = Path(__file__).parent.parent / "data" / "dream_reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        date_str = date or datetime.now().strftime("%Y-%m-%d")
+        report_path = report_dir / f"{date_str}.json"
+        report_path.write_text(
+            json.dumps(
+                {
+                    "date": date_str,
+                    "logs_analyzed": result.get("logs_analyzed", 0),
+                    "insights": result.get("insights", []),
+                    "consolidation": result.get("consolidation") or {},
+                    "generated_at": time.time(),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.debug(f"[Dream] Failed to persist report: {exc}")
+
+
+def load_latest_dream_report(max_age_seconds: float = 48 * 3600) -> Optional[dict]:
+    """Return the most recent dream report dict if it's younger than max_age.
+
+    Returns None if no reports exist, the newest is stale, or the file is
+    unreadable. Used by main.py to decorate chat-mode startup.
+    """
+    try:
+        report_dir = Path(__file__).parent.parent / "data" / "dream_reports"
+        if not report_dir.exists():
+            return None
+        reports = sorted(report_dir.glob("*.json"), reverse=True)
+        if not reports:
+            return None
+        data = json.loads(reports[0].read_text(encoding="utf-8"))
+        age = time.time() - float(data.get("generated_at", 0))
+        if age > max_age_seconds:
+            return None
+        return data
+    except Exception as exc:
+        logger.debug(f"[Dream] Failed to load latest report: {exc}")
+        return None
 
 
 # =============================================================================
