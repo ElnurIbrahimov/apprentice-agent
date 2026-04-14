@@ -83,6 +83,7 @@ COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {
     "/help": handle_help,
     "/goal": handle_goal,
     "/recall": handle_recall,
+    "/memory": handle_recall,
     "/clear": handle_clear,
     "/speak": handle_speak,
     "/say": handle_speak,

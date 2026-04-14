@@ -65,13 +65,28 @@ def handle_browse(agent, arg, context) -> Optional[str]:
 
 def handle_recall(agent, arg, context) -> Optional[str]:
     from ..display import console
-    if arg:
-        memories = agent.recall_memories(arg)
-        console.print(f"\nRecalled {len(memories)} memories:")
-        for m in memories:
-            console.print(f"  - {m.get('content', str(m))[:100]}...")
-    else:
-        console.print("Usage: /recall <query>")
+    if not arg:
+        console.print("Usage: /recall <query>  (alias: /memory)")
+        return None
+    # Query the unified memory directly so we get score + source, not just
+    # content. agent.recall_memories() drops the score on the floor.
+    try:
+        from aura.memory.unified_memory import get_unified_memory
+        mem = get_unified_memory()
+        results = mem.query(arg, k=10, min_score=0.0)
+    except Exception as exc:
+        console.print(f"[red]Memory query failed: {exc}[/red]")
+        return None
+    if not results:
+        console.print(f"[dim]No memories found for '{arg}'.[/dim]")
+        return None
+    console.print(f"\n[bold]Recalled {len(results)} memories for '{arg}':[/bold]")
+    for i, r in enumerate(results, 1):
+        source = getattr(r, "source", "?")
+        score = getattr(r, "score", 0.0)
+        content = r.content[:140] if hasattr(r, "content") else str(r)[:140]
+        console.print(f"  [cyan]{i:>2}.[/cyan] [dim][{source}, {score:.3f}][/dim] {content}")
+    return None
 
 
 def _handle_browse_command(agent, arg: str):

@@ -191,14 +191,27 @@ def _truncate(text: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:
     return text[:half] + f"\n\n... ({len(text) - max_chars} chars truncated) ...\n\n" + text[-half:]
 
 
-def _recall_memories(prompt: str, max_results: int = 5) -> str:
-    """Query UnifiedMemory for relevant context."""
+def _recall_memories(prompt: str, max_results: int = 8) -> str:
+    """Query UnifiedMemory for relevant context.
+
+    Returns a formatted "## Relevant Memories" block or empty string. The
+    last recall count is cached on this function object so the caller can
+    surface how many memories were injected without re-querying.
+    """
 
     try:
         from aura.memory.unified_memory import get_unified_memory
 
         unified_memory = get_unified_memory()
-        results = unified_memory.query(prompt, k=max_results, min_score=0.2)
+        # min_score=0.05 matches the typical blended-score distribution from
+        # the unified retrieval pipeline. The previous threshold of 0.2 was
+        # calibrated against raw BM25 scores and silently returned empty for
+        # most real queries since the fused rank+rerank scores live below it.
+        results = unified_memory.query(prompt, k=max_results, min_score=0.05)
+        _recall_memories.last_count = len(results)  # type: ignore[attr-defined]
+        _recall_memories.last_top = (
+            results[0].content[:80] if results else ""
+        )  # type: ignore[attr-defined]
         if not results:
             return ""
 
@@ -211,7 +224,15 @@ def _recall_memories(prompt: str, max_results: int = 5) -> str:
         return "\n".join(lines)
     except Exception as exc:
         logger.debug("[AgenticLoop] Memory recall failed (non-fatal): %s", exc)
+        _recall_memories.last_count = 0  # type: ignore[attr-defined]
+        _recall_memories.last_top = ""  # type: ignore[attr-defined]
         return ""
+
+
+# Initialize the cached attributes so callers don't AttributeError before the
+# first recall has run.
+_recall_memories.last_count = 0  # type: ignore[attr-defined]
+_recall_memories.last_top = ""  # type: ignore[attr-defined]
 
 
 def _store_interaction(prompt: str, response: str) -> None:

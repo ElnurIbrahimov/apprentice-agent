@@ -109,6 +109,19 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
 
     if not json_mode:
         console.print(f"  [dim]Model: {boot.display_model} | Tier: {boot.tier}[/dim]")
+        # Preview recalled memories for the current prompt (read-only, same
+        # query the agentic loop is about to run). Shows users that Aura has
+        # long-term recall for the context it's answering in.
+        try:
+            from aura.core.agentic_loop_support import _recall_memories
+            _recall_memories(prompt)
+            n = getattr(_recall_memories, "last_count", 0)
+            top = getattr(_recall_memories, "last_top", "")
+            if n:
+                snippet = (top[:60] + "...") if len(top) > 60 else top
+                console.print(f"  [dim cyan]\u25ce recalled {n} memories (top: {snippet!r})[/dim cyan]")
+        except Exception:
+            pass
         console.print()
 
     try:
