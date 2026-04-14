@@ -13,6 +13,20 @@ _SHELL_TAIL = 40
 MAX_OUTPUT_LINES = 500
 
 
+def _get_disclosure_manager():
+    """Return the process-wide DisclosureManager if one was installed.
+
+    chat_session.py sets display._disclosure = DisclosureManager(...) when
+    entering chat mode. If no manager is installed (non-interactive runs,
+    early startup), returns None and callers fall back to direct rendering.
+    """
+    try:
+        from . import display as _display_mod
+        return getattr(_display_mod, "_disclosure", None)
+    except Exception:
+        return None
+
+
 class ToolOutputRenderer:
     """Renders tool output — compact, no panels, dimmed."""
 
@@ -137,6 +151,41 @@ class ToolOutputRenderer:
                         return
                 except Exception:
                     pass
+
+        # Route non-diff tool output through the DisclosureManager when one
+        # is installed (chat mode always installs one). --verbose / -v flips
+        # default_expanded=True so full content shows; otherwise we render a
+        # one-line collapsed summary and keep the panel scroll clean.
+        disclosure = _get_disclosure_manager()
+        if disclosure is not None and tool_name not in ("edit_file", "edit", "write_file", "multi_edit"):
+            try:
+                from .disclosure import create_section_from_tool_call, render_section
+                from .display import console as _console
+                section = create_section_from_tool_call(
+                    tool_name=tool_name,
+                    args=result.get("_args", {}) or {},
+                    result=result,
+                    elapsed=elapsed,
+                )
+                # Honor the manager's default_expanded / _verbose setting
+                section.expanded = getattr(disclosure, "_default_expanded", False)
+                # Register so toggle / get_recent work later
+                try:
+                    disclosure.add_section(
+                        section_id=section.id,
+                        title=section.title,
+                        content=section.content,
+                        tool_name=section.tool_name,
+                        elapsed=section.elapsed,
+                    )
+                except Exception:
+                    pass
+                render_section(_console, section)
+                return
+            except Exception:
+                # Fall through to the legacy renderers on any failure so the
+                # user never loses tool output to a disclosure bug.
+                pass
 
         if tool_name in ("shell", "shell_executor", "bash", "run"):
             self.render_shell_output(

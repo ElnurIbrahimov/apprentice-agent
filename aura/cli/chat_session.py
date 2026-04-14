@@ -184,10 +184,15 @@ class ChatSession:
             self.hook_mgr.load_from_config(aura_config)
             self.hook_mgr.load_builtin_hooks(aura_config)
 
+        # Always install a DisclosureManager so tool output gets wrapped in
+        # collapsible sections. --verbose flips default_expanded=True so the
+        # full content shows inline; otherwise sections render as one-line
+        # summaries and the scroll stays clean.
+        from . import display as _display_mod
+        from .disclosure import DisclosureManager
+        _display_mod._disclosure = DisclosureManager(default_expanded=bool(verbose))
         if verbose:
-            from . import display as _display_mod
-            from .disclosure import DisclosureManager
-            _display_mod._disclosure = DisclosureManager(default_expanded=True)
+            _display_mod._disclosure.set_verbose(True)
 
         if self.hook_mgr:
             self.hook_mgr.fire(self._HookEvent.SESSION_START, {"project_root": project_root})
