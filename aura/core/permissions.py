@@ -88,6 +88,10 @@ class PermissionManager:
         self._trust_mode = False
         self._confirm_callback = confirm_callback
         self._always_approved: set[str] = set()
+        # Session-scope trust: tool keys approved for the current session only.
+        # Cleared when the process exits, unlike _always_approved (which is
+        # intended to represent persistent allow_always decisions).
+        self._session_approved: set[str] = set()
 
     def set_trust_mode(self, enabled: bool) -> None:
         self._trust_mode = enabled
@@ -150,6 +154,10 @@ class PermissionManager:
         if key in self._always_approved:
             return True
 
+        # Approved for the current session only
+        if key in self._session_approved:
+            return True
+
         tier = self._permissions.get(key, PROMPT)
 
         if tier == AUTO:
@@ -169,9 +177,18 @@ class PermissionManager:
         if self._confirm_callback:
             description = self._format_action_description(tool_name, args)
             result = self._confirm_callback(tool_name, description)
-            if result == "always":
+            # New vocabulary from permissions_dialog.request_permission():
+            if result == "allow_always" or result == "always":
                 self._always_approved.add(key)
                 return True
+            if result == "allow_session":
+                self._session_approved.add(key)
+                return True
+            if result == "allow_once":
+                return True
+            if result == "deny":
+                return False
+            # Back-compat: legacy callbacks returning bool
             return bool(result)
 
         # No callback = deny by default

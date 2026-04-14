@@ -75,17 +75,8 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
             # In JSON mode we can't prompt — deny by default. Callers that need
             # tool calls should pass --trust or set AURA.md permissions to auto.
             return False
-        console.print("\n  [yellow]Permission required:[/yellow]")
-        console.print(f"    [bold]{tool_name}[/bold]")
-        for line in description.split("\n"):
-            console.print(f"    {line}")
-        try:
-            resp = console.input("    [bold]Allow? [y/n/always]: [/bold]").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            return False
-        if resp == "always":
-            return "always"
-        return resp in ("y", "yes")
+        from .permissions_dialog import request_permission
+        return request_permission(console, tool_name, description)
 
     permissions.set_confirm_callback(_confirm)
     if args.trust:
