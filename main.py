@@ -164,6 +164,13 @@ def main() -> None:
         help="Disable fast-path for simple queries (always use full agent loop)"
     )
     parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Skip the agentic loop: call agent.run() directly. No tool calls, "
+             "no permissions, no session. Use for cheap scripted queries where "
+             "you only want a raw answer."
+    )
+    parser.add_argument(
         "--voice",
         action="store_true",
         help="Start in voice conversation mode (uses microphone and speaker)"
@@ -435,18 +442,7 @@ def main() -> None:
         if piped:
             args.prompt = piped
 
-    # Non-interactive mode: run prompt, print response, exit
-    if args.prompt:
-        pipe = PipeOutput(format=args.format)
-        prompt = args.prompt
-        result = agent.run(prompt)
-        response = result.get("response", "")
-        model_used = result.get("model", "")
-        if response:
-            pipe.result({"response": response, "model": model_used})
-        sys.exit(EXIT_SUCCESS if result.get("success", True) else EXIT_ERROR)
-
-    # Initialize channel bridge if --channels specified
+    # Initialize channel bridge if --channels specified (available to every path)
     bridge = None
     if args.channels:
         try:
@@ -469,13 +465,31 @@ def main() -> None:
             print(f"[AURA] Channel bridge failed to start: {e}")
             bridge = None
 
+    # Unified non-interactive dispatch: -p/--prompt, `exec` subcommand (which
+    # normalizes into args.prompt above), positional goal, and piped stdin all
+    # feed into the same dispatcher. Default is the rich agentic loop; --fast
+    # is the escape hatch for scripts that only want a raw one-shot answer.
+    noninteractive_prompt = args.prompt
+    if not noninteractive_prompt and args.goal:
+        noninteractive_prompt = " ".join(args.goal)
+
+    if noninteractive_prompt and not args.voice:
+        if args.fast:
+            pipe = PipeOutput(format=args.format)
+            result = agent.run(noninteractive_prompt)
+            response = result.get("response", "")
+            model_used = result.get("model", "")
+            if response:
+                pipe.result({"response": response, "model": model_used})
+            sys.exit(EXIT_SUCCESS if result.get("success", True) else EXIT_ERROR)
+        else:
+            from aura.cli.oneshot import run_agentic_oneshot
+            run_agentic_oneshot(agent, noninteractive_prompt, args, bridge=bridge)
+            # run_agentic_oneshot calls sys.exit(); unreachable below.
+
     if args.voice:
         from aura.cli.voice_mode import run_voice_mode
         run_voice_mode(agent, enable_barge_in=not args.no_barge_in, bridge=bridge)
-    elif args.goal:
-        from aura.cli.oneshot import run_agentic_oneshot
-        prompt = " ".join(args.goal)
-        run_agentic_oneshot(agent, prompt, args, bridge=bridge)
     else:
         from aura.cli.chat_loop import run_chat_mode
         run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model, verbose=args.verbose, tier=args.tier, bridge=bridge, preference=args.preference)
