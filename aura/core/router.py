@@ -12,11 +12,38 @@ stay warm and requests don't queue behind each other.
 """
 
 import logging
+import sys
 import threading
 from collections import defaultdict
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Global trace flag flipped by --routing-trace. When True, every select_agentic
+# call emits a one-line summary to stderr so scripts can audit routing.
+_TRACE_ENABLED = False
+
+
+def enable_routing_trace() -> None:
+    """Enable stderr tracing of router decisions for the rest of the process."""
+    global _TRACE_ENABLED
+    _TRACE_ENABLED = True
+
+
+def _emit_trace(decision: dict) -> None:
+    if not _TRACE_ENABLED:
+        return
+    msg = (
+        f"[router] category={decision.get('category', '?')} "
+        f"tier={decision.get('tier', '?')} "
+        f"model={decision.get('model', '?')} "
+        f"conf={decision.get('confidence', 0):.2f}\n"
+    )
+    try:
+        sys.stderr.write(msg)
+        sys.stderr.flush()
+    except Exception:
+        pass
 
 # The 3 concurrent model slots for Ollama cloud ($20/mo plan).
 # Each tier picks 3 models that cover all task categories.
@@ -334,6 +361,11 @@ class ModelRouter:
         self.tier = tier
         self.budget_usd = budget_usd
 
+        # Last routing decision, populated on every select_agentic() call so
+        # the /routing slash command and --routing-trace flag can introspect
+        # what the router just chose and why.
+        self._last_decision: dict | None = None
+
         # Outcome tracking: {(category, model): {"successes": int, "failures": int, "total_iters": int, "count": int}}
         self._outcome_stats: dict[tuple, dict] = defaultdict(
             lambda: {"successes": 0, "failures": 0, "total_iters": 0, "count": 0}
@@ -517,6 +549,14 @@ class ModelRouter:
                 model = fallback
 
         logger.debug(f"[Router] {task_category}/{effective_tier} -> slot:{slot} -> {model}")
+        self._last_decision = {
+            "category": task_category,
+            "confidence": 1.0,
+            "tier": effective_tier,
+            "model": model,
+            "prompt_snippet": "",
+        }
+        _emit_trace(self._last_decision)
         return model
 
     def select_agentic(self, prompt: str | None = None) -> str:
@@ -528,8 +568,30 @@ class ModelRouter:
         if prompt:
             category, confidence = classify_task(prompt)
             logger.debug(f"[Router] Task classified as '{category}' (conf={confidence:.2f}) for: {prompt[:60]}")
-            return self.select(category)
-        return self.select("orchestrator")
+            model = self.select(category)
+            self._last_decision = {
+                "category": category,
+                "confidence": round(float(confidence), 3),
+                "tier": self.tier,
+                "model": model,
+                "prompt_snippet": prompt[:80],
+            }
+            _emit_trace(self._last_decision)
+            return model
+        model = self.select("orchestrator")
+        self._last_decision = {
+            "category": "orchestrator",
+            "confidence": 1.0,
+            "tier": self.tier,
+            "model": model,
+            "prompt_snippet": "",
+        }
+        _emit_trace(self._last_decision)
+        return model
+
+    def last_decision(self) -> dict | None:
+        """Return the most recent routing decision as a dict, or None."""
+        return getattr(self, "_last_decision", None)
 
     def check_budget(self, brain) -> bool:
         """Return True if budget is OK, False if exhausted."""

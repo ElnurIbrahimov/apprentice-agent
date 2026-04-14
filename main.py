@@ -266,10 +266,21 @@ def main() -> None:
              "agentic. 'debate' runs three-model cross-examination on the prompt. "
              "'chain' executes a step chain parsed as 'step1 -> step2 -> step3'."
     )
+    parser.add_argument(
+        "--routing-trace",
+        action="store_true",
+        help="Log every ModelRouter decision (category, confidence, tier, model) "
+             "to stderr so scripts can audit which model handled a prompt."
+    )
 
     args = parser.parse_args()
     if not use_subparsers:
         args.command = None
+
+    # Routing trace: emit every router decision to stderr
+    if getattr(args, "routing_trace", False):
+        from aura.core.router import enable_routing_trace
+        enable_routing_trace()
 
     # Validate conflicting flags
     if args.voice and args.prompt:

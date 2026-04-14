@@ -166,13 +166,14 @@ def handle_quit(agent, arg, context) -> Optional[str]:
 
 
 def handle_routing(agent, arg, context) -> Optional[str]:
-    """Show current neural routing status and conversation profile."""
+    """Show current neural routing status and the last ModelRouter decision."""
     from ..display import console as _routing_console
+
+    # Section 1: conversation-aware neural routing preference
     try:
         from aura.routing.router import get_router
         router = get_router()
 
-        # Current conversation profile
         conv_id = "default"
         try:
             ctx = get_ctx()
@@ -191,10 +192,34 @@ def handle_routing(agent, arg, context) -> Optional[str]:
         _routing_console.print(f"  Complexity trend: {profile.complexity_trend:+.2f}")
         _routing_console.print(f"  Last model: {profile.last_model or 'none'}")
         _routing_console.print(f"  Regens: {profile.regen_count}, Switches: {profile.model_switches}")
-        _routing_console.print()
     except Exception as e:
         from ..display import console as _err_console
-        _err_console.print(f"  [red]Routing info unavailable: {e}[/red]")
+        _err_console.print(f"  [red]Neural routing info unavailable: {e}[/red]")
+
+    # Section 2: last ModelRouter tier/category decision (from agentic_loop)
+    try:
+        ctx = get_ctx()
+        model_router = None
+        if ctx and ctx.agentic_loop is not None:
+            model_router = getattr(ctx.agentic_loop, "_router", None)
+        if model_router is not None and hasattr(model_router, "last_decision"):
+            decision = model_router.last_decision()
+            if decision:
+                _routing_console.print()
+                _routing_console.print("[bold cyan]  Last ModelRouter Decision[/bold cyan]")
+                _routing_console.print(f"  Category:   {decision.get('category', '?')}")
+                _routing_console.print(f"  Confidence: {decision.get('confidence', 0):.3f}")
+                _routing_console.print(f"  Tier:       {decision.get('tier', '?')}")
+                _routing_console.print(f"  Model:      {decision.get('model', '?')}")
+                snippet = decision.get('prompt_snippet', '')
+                if snippet:
+                    _routing_console.print(f"  Prompt:     [dim]{snippet}[/dim]")
+            else:
+                _routing_console.print()
+                _routing_console.print("[dim]  ModelRouter: no decision recorded yet.[/dim]")
+    except Exception as e:
+        _routing_console.print(f"  [red]ModelRouter info unavailable: {e}[/red]")
+    _routing_console.print()
 
 
 def handle_tasks(agent, arg, context) -> Optional[str]:
