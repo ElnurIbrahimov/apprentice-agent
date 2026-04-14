@@ -69,11 +69,27 @@ function startPing(): void {
 }
 
 async function loadConfig(): Promise<void> {
-  const data = await chrome.storage.local.get(['backendUrl', 'apiKey']);
-  const httpUrl = (data.backendUrl as string | undefined)?.trim()?.replace(/\/+$/, '')
-    || 'https://aura-elnur.duckdns.org';
+  // `chrome.storage` is not guaranteed to be exposed to offscreen documents
+  // across Chrome versions — proxy through the service worker which always
+  // has access. Fall through to the default server if anything fails.
+  let httpUrl = 'https://aura-elnur.duckdns.org';
+  let key = '';
+  try {
+    // Prefer direct access if available (newer Chrome)…
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      const data = await chrome.storage.local.get(['backendUrl', 'apiKey']);
+      const u = (data.backendUrl as string | undefined)?.trim()?.replace(/\/+$/, '');
+      if (u) httpUrl = u;
+      key = ((data.apiKey as string | undefined) || '').trim();
+    } else {
+      // …otherwise ask the service worker.
+      const resp = await chrome.runtime.sendMessage({ type: 'AURA_OFFSCREEN_CONFIG_REQUEST' });
+      if (resp?.backendUrl) httpUrl = String(resp.backendUrl).trim().replace(/\/+$/, '');
+      if (resp?.apiKey) key = String(resp.apiKey).trim();
+    }
+  } catch { /* use defaults */ }
   wsUrl = deriveWsUrl(httpUrl);
-  apiKey = ((data.apiKey as string | undefined) || '').trim();
+  apiKey = key;
 }
 
 function connect(): void {
@@ -183,13 +199,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return false;
 });
 
-// Also watch storage directly so settings changes trigger reconnect even if the SW misses the ping.
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local') return;
-  if (changes.backendUrl || changes.apiKey) {
-    loadConfig().then(() => forceReconnect()).catch(() => {});
-  }
-});
+// Watch storage directly when available; silently skip if not exposed in
+// this offscreen context. The service worker also relays config changes
+// via `AURA_WS_CONFIG_CHANGED` runtime messages as a backup.
+if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.backendUrl || changes.apiKey) {
+      loadConfig().then(() => forceReconnect()).catch(() => {});
+    }
+  });
+}
 
 // Boot
 loadConfig().then(() => connect()).catch(() => connect());

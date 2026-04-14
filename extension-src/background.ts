@@ -280,6 +280,18 @@ ext.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return false;
   }
 
+  if (msg.type === 'AURA_OFFSCREEN_CONFIG_REQUEST') {
+    // Offscreen documents can't always reach chrome.storage directly.
+    // Serve config from the SW (which has access) via message response.
+    ext.storage.local.get(['backendUrl', 'apiKey'], (data) => {
+      sendResponse({
+        backendUrl: data?.backendUrl || 'https://aura-elnur.duckdns.org',
+        apiKey: data?.apiKey || '',
+      });
+    });
+    return true; // async response
+  }
+
   if (msg.type === 'SIDEBAR_READY') {
     sidebarOpen = true;
     // Clear any lingering notifications — user is now watching
@@ -372,6 +384,11 @@ ext.storage.onChanged.addListener((changes, area) => {
   if (area === 'local') {
     if (changes.backendUrl?.newValue) BACKEND = String(changes.backendUrl.newValue).replace(/\/+$/, '');
     if (changes.apiKey?.newValue) BACKEND_API_KEY = String(changes.apiKey.newValue);
+    // Relay to offscreen so it can reconnect with fresh config even when
+    // chrome.storage.onChanged isn't wired directly in the offscreen doc.
+    if (changes.backendUrl || changes.apiKey) {
+      ext.runtime.sendMessage({ type: 'AURA_WS_CONFIG_CHANGED' }).catch(() => {});
+    }
   }
 });
 
