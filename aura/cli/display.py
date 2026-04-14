@@ -949,14 +949,35 @@ class StreamingResponse:
         else:
             self._displayed = bool(self._accumulated.strip())
 
-        # Token speed stats
+        # Token speed + per-turn cost + context gauge (B3 live status hint).
+        # Rich's Live doesn't compose cleanly with a true bottom-sticky bar
+        # during streaming, so we condense the status info into the finish()
+        # summary line: tokens, tok/s, session cost delta, context usage %.
         if self._displayed and self._accumulated and self._first_chunk_time:
             elapsed = _t.monotonic() - self._first_chunk_time
             token_estimate = int(len(self._accumulated) / 3.5)
             if elapsed > 0.1 and token_estimate > 5:
                 tok_per_sec = token_estimate / elapsed
+                extras: list[str] = []
+                # Per-turn cost delta from the cached session stats
+                try:
+                    delta = float(getattr(self, "_last_turn_cost", 0.0) or 0.0)
+                    if delta > 0.0:
+                        extras.append(f"${delta:.4f}")
+                except (TypeError, ValueError):
+                    pass
+                # Context gauge (tokens used vs limit)
+                try:
+                    used = int(getattr(self, "_ctx_used", 0) or 0)
+                    limit = int(getattr(self, "_ctx_limit", 0) or 0)
+                    if used > 0 and limit > 0:
+                        pct = int(100 * used / max(limit, 1))
+                        extras.append(f"{pct}% ctx")
+                except (TypeError, ValueError):
+                    pass
+                suffix = (" \u00b7 " + " \u00b7 ".join(extras)) if extras else ""
                 console.print(
-                    f"  [dim]({token_estimate} tokens \u00b7 {tok_per_sec:.1f} tok/s)[/dim]"
+                    f"  [dim]({token_estimate} tokens \u00b7 {tok_per_sec:.1f} tok/s{suffix})[/dim]"
                 )
 
         # Model attribution below the response
@@ -964,6 +985,12 @@ class StreamingResponse:
             console.print(f"  [dim]{self._model}[/dim]")
 
         console.print()  # breathing room
+
+    def set_turn_stats(self, cost_delta: float = 0.0, ctx_used: int = 0, ctx_limit: int = 0) -> None:
+        """Attach per-turn stats so finish() can include them in the summary."""
+        self._last_turn_cost = cost_delta
+        self._ctx_used = ctx_used
+        self._ctx_limit = ctx_limit
 
     @property
     def displayed(self) -> bool:

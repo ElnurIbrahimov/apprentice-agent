@@ -69,6 +69,25 @@ class SessionExecutionController:
             if cancel_watch_stop is not None:
                 cancel_watch_stop()
 
+        # Feed per-turn stats into the streamer before finishing so the
+        # summary line shows $cost and ctx% in addition to token counts.
+        try:
+            from .context_bar import estimate_messages_tokens, get_context_limit
+            cost_delta = 0.0
+            try:
+                stats = self._session.agent.brain.get_session_stats()
+                cur_cost = float(stats.get("cost_usd", 0.0) or 0.0)
+                prev_cost = float(getattr(self._session, "_last_session_cost", 0.0) or 0.0)
+                cost_delta = max(0.0, cur_cost - prev_cost)
+                self._session._last_session_cost = cur_cost
+            except Exception:
+                pass
+            ctx_used = estimate_messages_tokens(self._session.agentic._conversation_history)
+            ctx_limit = get_context_limit(self._session.current_model)
+            streamer.set_turn_stats(cost_delta=cost_delta, ctx_used=ctx_used, ctx_limit=ctx_limit)
+        except Exception:
+            pass
+
         streamer.finish()
         self._session._streamer_displayed = True
 
