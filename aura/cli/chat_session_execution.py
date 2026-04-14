@@ -27,6 +27,12 @@ class SessionExecutionController:
         tool_call_count = 0
         exec_start = _exec_time.monotonic()
 
+        # Start a background Escape listener so users can cancel in-flight
+        # streaming with a single keystroke. Falls back silently on POSIX
+        # where the raw-mode approach isn't available without stealing
+        # prompt_toolkit's tty.
+        cancel_watch_stop = self._start_escape_watchdog()
+
         try:
             def _on_event(event: LoopEvent) -> None:
                 nonlocal tool_call_count
@@ -59,6 +65,9 @@ class SessionExecutionController:
             streamer.pause()
             show_error(str(exc))
             return None
+        finally:
+            if cancel_watch_stop is not None:
+                cancel_watch_stop()
 
         streamer.finish()
         self._session._streamer_displayed = True
@@ -80,6 +89,51 @@ class SessionExecutionController:
                 self._print_execution_summary(summary_parts)
 
         return result
+
+    def _start_escape_watchdog(self):
+        """Start a background keyboard watcher that cancels the agentic loop on Escape.
+
+        Windows only (msvcrt). On POSIX, returns None and the user falls back
+        to Ctrl+C. Returns a stop() callable that the caller must invoke in a
+        finally block, or None if no watcher was started.
+        """
+        import os
+        if os.name != "nt":
+            return None
+        try:
+            import msvcrt  # type: ignore[import]
+        except ImportError:
+            return None
+
+        import threading
+
+        stop_evt = threading.Event()
+        session = self._session
+
+        def _watch():
+            while not stop_evt.is_set():
+                try:
+                    if msvcrt.kbhit():  # type: ignore[attr-defined]
+                        ch = msvcrt.getwch()  # type: ignore[attr-defined]
+                        # ESC is '\x1b'. Ignore anything else so we don't
+                        # swallow keys that belong to prompt_toolkit's next
+                        # input cycle.
+                        if ch == "\x1b":
+                            try:
+                                session.agentic.cancel()
+                                session.console.print(
+                                    "\n  [red]Aborted (Esc).[/red]"
+                                )
+                            except Exception:
+                                pass
+                            return
+                except Exception:
+                    return
+                stop_evt.wait(0.1)
+
+        thread = threading.Thread(target=_watch, name="aura-esc-watchdog", daemon=True)
+        thread.start()
+        return stop_evt.set
 
     def process_normal_result(self, user_input: str, result: Optional[dict]) -> bool:
         """Render and track a normal execution result. Returns True when handled successfully."""
