@@ -35,7 +35,6 @@ class ChatSession:
         preference: Optional[str] = None,
     ) -> None:
         from aura.core.agentic_loop import AgenticLoop
-        from aura.core.context import gather_context, get_aura_md_config
         from aura.core.permissions import PermissionManager
         from aura.core.session import AgenticSession
 
@@ -50,6 +49,7 @@ class ChatSession:
         )
         from .input import create_session
         from .model_picker import update_model_roles_from_config
+        from .session_bootstrap import build_session_bootstrap
 
         # ── Store references to display helpers for use elsewhere ──
         self.agent = agent
@@ -80,14 +80,14 @@ class ChatSession:
         except (OSError, ValueError, KeyError, TypeError):
             logger.debug("project_type_detection_failed", exc_info=True)
 
-        project_root = os.getcwd()
-        project_context = ""
-        aura_config: dict[str, Any] = {}
-        try:
-            project_context = gather_context(project_root)
-            aura_config = get_aura_md_config(project_root)
-        except (OSError, ValueError, KeyError, TypeError):
-            logger.warning("gather_project_context_failed", exc_info=True)
+        from types import SimpleNamespace
+        boot = build_session_bootstrap(
+            SimpleNamespace(tier=tier, budget=None, model=model),
+            brain=agent.brain,
+        )
+        project_root = boot.project_root
+        project_context = boot.project_context
+        aura_config = boot.aura_config
 
         # ── Permissions ──
         self.permissions = PermissionManager()
@@ -103,22 +103,18 @@ class ChatSession:
 
         atexit.register(self._save_session_if_initialized)
 
-        # ── Router & AgenticLoop ──
-        from aura.core.router import ModelRouter
-        explicit_model = model or agent.brain._model_override or aura_config.get("model") or None
-        chat_tier = tier or aura_config.get("tier", "balanced")
-        chat_router = ModelRouter(tier=chat_tier, budget_usd=aura_config.get("budget"))
+        # ── AgenticLoop (uses router from bootstrap) ──
         self.agentic = AgenticLoop(
             brain=agent.brain,
             project_root=project_root,
             permissions=self.permissions,
-            model_override=explicit_model,
+            model_override=boot.model,
             max_iterations=aura_config.get("max_iterations", 25),
-            budget_usd=aura_config.get("budget"),
+            budget_usd=boot.budget,
             context=project_context,
             session=self.agentic_session,
             aura_config=aura_config,
-            router=chat_router,
+            router=boot.router,
         )
 
         # ── Neural routing preference ──
@@ -250,7 +246,7 @@ class ChatSession:
                 delattr(agent, '_resume_session_id')
 
         # ── State variables ──
-        self.current_model = explicit_model or "auto"
+        self.current_model = boot.model or "auto"
         self.session_title = ""
         self.msg_count = 0
         self.token_used = 0

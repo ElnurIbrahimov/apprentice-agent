@@ -7,29 +7,19 @@ from typing import Any, NoReturn
 
 def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) -> NoReturn:
     from aura.core.agentic_loop import run_agentic
-    from aura.core.context import gather_context, get_aura_md_config
     from aura.core.permissions import PermissionManager
-    from aura.core.router import ModelRouter
 
     from .display import console, show_banner
+    from .session_bootstrap import build_session_bootstrap
 
     show_banner()
 
-    project_root = os.getcwd()
-
-    context = gather_context(project_root)
-    aura_config = get_aura_md_config(project_root)
-
-    tier = args.tier or aura_config.get("tier", "balanced")
-    budget = args.budget or aura_config.get("budget")
-    router = ModelRouter(tier=tier, budget_usd=budget)
-    model = args.model or aura_config.get("model") or None
-    display_model = model or f"auto-route ({tier})"
+    boot = build_session_bootstrap(args, brain=getattr(agent, "brain", None))
 
     permissions = PermissionManager()
     permissions.set_mode("careful")
-    if aura_config:
-        permissions.apply_aura_md_overrides(aura_config)
+    if boot.aura_config:
+        permissions.apply_aura_md_overrides(boot.aura_config)
 
     def _confirm(tool_name: str, description: str) -> bool | str:
         console.print("\n  [yellow]Permission required:[/yellow]")
@@ -48,22 +38,22 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
     if args.trust:
         permissions.set_mode("full_auto")
 
-    console.print(f"  [dim]Model: {display_model} | Tier: {tier}[/dim]")
+    console.print(f"  [dim]Model: {boot.display_model} | Tier: {boot.tier}[/dim]")
     console.print()
 
     try:
         result = run_agentic(
             brain=agent.brain,
             prompt=prompt,
-            project_root=project_root,
+            project_root=boot.project_root,
             permissions=permissions,
-            model_override=model,
+            model_override=boot.model,
             max_iterations=args.max_iterations,
-            budget_usd=budget,
-            context=context,
+            budget_usd=boot.budget,
+            context=boot.project_context,
             trust_mode=args.trust,
-            aura_config=aura_config,
-            router=router,
+            aura_config=boot.aura_config,
+            router=boot.router,
         )
     except KeyboardInterrupt:
         console.print("\n  [red]Aborted.[/red]")
