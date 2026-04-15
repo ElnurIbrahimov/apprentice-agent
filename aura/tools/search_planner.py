@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
+from collections import OrderedDict
 from typing import Callable, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -26,9 +28,109 @@ Rules:
 - Do NOT add commentary or explanation.
 - Return ONLY a JSON array of strings, nothing else.
 
+Examples:
+
+User query: best practices for microservices
+JSON array: ["microservices architecture patterns", "microservices vs monolith tradeoffs", "microservices deployment kubernetes", "microservices testing strategies", "microservices observability tools"]
+
+User query: compare postgres vs mysql for high-write workloads
+JSON array: ["postgres high write performance benchmarks", "mysql write throughput tuning", "postgres vs mysql replication lag", "postgres mysql concurrent writes lock contention", "postgres mysql durability fsync settings"]
+
+User query: how does retrieval augmented generation work
+JSON array: ["RAG retrieval augmented generation overview", "RAG embedding models chunking strategies", "RAG vs fine-tuning comparison", "RAG hallucination reduction techniques", "RAG production deployment latency"]
+
 User query: {query}
 
 JSON array:"""
+
+
+# Query classification -------------------------------------------------
+
+_FACTUAL_STARTS = (
+    "what is ", "what are ", "what's ", "who is ", "who was ", "who are ",
+    "when did ", "when was ", "when is ", "where is ", "where was ",
+    "define ", "meaning of ", "capital of ",
+)
+
+_COMPARISON_MARKERS = (" vs ", " versus ", " compared to ", " difference between ",
+                      " or ", " better than ")
+_LIST_STARTS = ("list of ", "top ", "best ", "examples of ")
+_HOWTO_STARTS = ("how to ", "how do i ", "how can i ", "how does ")
+
+
+def _classify_query(query: str) -> str:
+    """Coarse query-type classifier — factual, comparison, list, howto, exploratory.
+
+    Factual queries are answered by the first hit and don't benefit from fan-out,
+    so the planner returns them unchanged without calling an LLM.
+    """
+    if not query:
+        return "exploratory"
+    q = query.strip().lower()
+    if any(q.startswith(p) for p in _FACTUAL_STARTS):
+        if len(q.split()) <= 12:
+            return "factual"
+    if any(m in q for m in _COMPARISON_MARKERS):
+        return "comparison"
+    if any(q.startswith(p) for p in _LIST_STARTS):
+        return "list"
+    if any(q.startswith(p) for p in _HOWTO_STARTS):
+        return "howto"
+    return "exploratory"
+
+
+# Decomposition cache --------------------------------------------------
+
+_CACHE_MAX_SIZE = 256
+_cache: "OrderedDict[str, List[str]]" = OrderedDict()
+_cache_lock = threading.Lock()
+_cache_stats = {"hits": 0, "misses": 0}
+
+
+def _cache_key(query: str) -> str:
+    return hashlib_md5(query.strip().lower())
+
+
+def hashlib_md5(s: str) -> str:
+    import hashlib
+    return hashlib.md5(s.encode("utf-8")).hexdigest()
+
+
+def _cache_get(query: str) -> Optional[List[str]]:
+    key = _cache_key(query)
+    with _cache_lock:
+        if key not in _cache:
+            _cache_stats["misses"] += 1
+            return None
+        # LRU touch
+        value = _cache.pop(key)
+        _cache[key] = value
+        _cache_stats["hits"] += 1
+        return list(value)
+
+
+def _cache_put(query: str, sub_queries: List[str]) -> None:
+    key = _cache_key(query)
+    with _cache_lock:
+        _cache[key] = list(sub_queries)
+        while len(_cache) > _CACHE_MAX_SIZE:
+            _cache.popitem(last=False)
+
+
+def get_planner_stats() -> dict:
+    """Hit/miss counters for the decomposition cache."""
+    total = _cache_stats["hits"] + _cache_stats["misses"]
+    rate = _cache_stats["hits"] / total if total else 0.0
+    return {**_cache_stats, "total": total, "hit_rate": round(rate, 3), "size": len(_cache)}
+
+
+def clear_planner_cache() -> None:
+    """Drop the LRU cache — exposed for tests and long-running processes."""
+    with _cache_lock:
+        _cache.clear()
+
+
+# Original helpers -----------------------------------------------------
 
 
 def _looks_specific(query: str) -> bool:
@@ -79,21 +181,33 @@ def decompose_query(
     """Return a list of sub-queries for parallel search fan-out.
 
     Returns ``[query]`` unchanged when:
-    - query is short/specific (no LLM call made)
+    - query is short/specific / classified as factual (no LLM call made)
     - no llm_func provided
     - LLM call or JSON parse fails (graceful fallback)
 
     The first element is always the original query so the fan-out
     covers the literal user intent even if the LLM rewrite is weird.
+    Results are cached in-process (LRU, size 256) so repeat queries
+    across sessions in a long-running agent skip the LLM entirely.
     """
     if not query or not query.strip():
         return []
     query = query.strip()
 
+    # Fast-path: short/specific or factual queries don't benefit from fan-out.
     if _looks_specific(query):
+        return [query]
+    if _classify_query(query) == "factual":
+        logger.debug("[SearchPlanner] factual query, skipping decomposition: %r", query)
         return [query]
     if llm_func is None:
         return [query]
+
+    # Cache: stable per (trim+lower) query hash.
+    cached = _cache_get(query)
+    if cached is not None:
+        logger.debug("[SearchPlanner] cache hit for %r", query)
+        return cached
 
     prompt = _DECOMPOSE_PROMPT.format(query=query)
     raw: Optional[str] = None
@@ -127,7 +241,9 @@ def decompose_query(
     if query not in cleaned:
         cleaned.insert(0, query)
 
-    return cleaned[: max(1, max_subqueries)]
+    result = cleaned[: max(1, max_subqueries)]
+    _cache_put(query, result)
+    return result
 
 
-__all__ = ["decompose_query"]
+__all__ = ["decompose_query", "get_planner_stats", "clear_planner_cache"]

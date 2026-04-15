@@ -886,10 +886,202 @@ class CodeEditTool:
                 # === Auto-lint (advisory) ===
                 self._attach_lint_warnings(result, resolved_str)
 
+                # === Compact structural diff (Python files only) ===
+                if file_path.suffix == ".py":
+                    result["ast_diff"] = self._ast_diff(original, updated)
+
             return result
 
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    # =====================================================================
+    #  AST-aware symbol rename (Python only, single-file)
+    # =====================================================================
+
+    def rename_symbol(self, path: str, old_name: str, new_name: str) -> dict:
+        """Rename a Python symbol (function, class, variable, parameter, attribute)
+        across all its AST-scoped occurrences in a single file.
+
+        Unlike string-based edit(), this is safe against substring collisions:
+        renaming ``helper`` will not touch ``helpers`` or the string
+        ``"call helper"`` inside a docstring (usually — see note below).
+
+        Flow:
+        1. Parse the source with ``ast``.
+        2. Walk the tree to find every Name/FunctionDef/ClassDef/Attribute/arg/
+           keyword node whose identifier equals ``old_name``.
+        3. Collect the set of line numbers that contain such a node.
+        4. In each of those lines, do a word-boundary regex replace
+           (``\\bold_name\\b`` -> ``new_name``).
+        5. Re-parse to verify the mutation is still valid Python.
+        6. Apply via the existing rollback/verify pipeline so lint + tests + git
+           auto-commit still run.
+
+        String-literal caveat: if a target line contains ``old_name`` both as
+        an identifier AND as a substring of a string literal, the literal is
+        also rewritten. Check the returned ``diff`` before accepting.
+
+        Out of scope this pass: cross-file rename, JS/TS support (needs
+        tree-sitter), extract function, inline variable.
+
+        Args:
+            path: Path to a Python file.
+            old_name: Identifier to rename.
+            new_name: Replacement identifier.
+
+        Returns:
+            ``{success, occurrences, old_name, new_name, diff, ast_diff, path,
+            backup_path, verification}`` on success, or ``{success: False, error}``.
+        """
+        import keyword as _kw
+
+        if not old_name or not new_name or old_name == new_name:
+            return {"success": False, "error": "old_name and new_name required and must differ"}
+        if not old_name.isidentifier() or not new_name.isidentifier():
+            return {"success": False, "error": "names must be valid Python identifiers"}
+        if _kw.iskeyword(new_name):
+            return {"success": False, "error": f"{new_name!r} is a Python keyword"}
+
+        try:
+            file_path = Path(path).resolve()
+            safe, reason = _is_safe_path(file_path)
+            if not safe:
+                return {"success": False, "error": reason}
+            if not file_path.exists():
+                return {"success": False, "error": f"File not found: {path}"}
+            if file_path.suffix != ".py":
+                return {"success": False, "error": "rename_symbol only supports Python (.py) files"}
+
+            original = file_path.read_text(encoding="utf-8")
+
+            try:
+                tree = ast.parse(original)
+            except SyntaxError as e:
+                return {"success": False, "error": f"source does not parse: {e}"}
+
+            target_lines: set = set()
+            for node in ast.walk(tree):
+                match = False
+                if isinstance(node, ast.Name) and node.id == old_name:
+                    match = True
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == old_name:
+                    match = True
+                elif isinstance(node, ast.ClassDef) and node.name == old_name:
+                    match = True
+                elif isinstance(node, ast.Attribute) and node.attr == old_name:
+                    match = True
+                elif isinstance(node, ast.arg) and node.arg == old_name:
+                    match = True
+                elif isinstance(node, ast.keyword) and node.arg == old_name:
+                    match = True
+
+                if match and getattr(node, "lineno", None):
+                    target_lines.add(node.lineno)
+                    end = getattr(node, "end_lineno", None)
+                    if end and end != node.lineno:
+                        for ln in range(node.lineno, end + 1):
+                            target_lines.add(ln)
+
+            if not target_lines:
+                return {"success": False, "error": f"symbol {old_name!r} not found in AST"}
+
+            lines = original.splitlines(keepends=True)
+            pattern = re.compile(r"\b" + re.escape(old_name) + r"\b")
+            total_replacements = 0
+            for lineno in sorted(target_lines):
+                if 1 <= lineno <= len(lines):
+                    new_line, count = pattern.subn(new_name, lines[lineno - 1])
+                    if count > 0:
+                        lines[lineno - 1] = new_line
+                        total_replacements += count
+
+            if total_replacements == 0:
+                return {"success": False, "error": "AST found matches but line replacement produced zero edits"}
+
+            updated = "".join(lines)
+
+            try:
+                ast.parse(updated)
+            except SyntaxError as e:
+                return {"success": False, "error": f"rename produced invalid Python: {e}"}
+
+            resolved_path = str(file_path)
+
+            def _do_rename():
+                backup_path = None
+                if self.backup_enabled:
+                    backup_path = resolved_path + ".bak"
+                    shutil.copy2(resolved_path, backup_path)
+                    self._last_backups[resolved_path] = backup_path
+
+                file_path.write_text(updated, encoding="utf-8")
+
+                diff = "".join(difflib.unified_diff(
+                    original.splitlines(keepends=True),
+                    updated.splitlines(keepends=True),
+                    fromfile=f"a/{file_path.name}",
+                    tofile=f"b/{file_path.name}",
+                ))
+
+                return {
+                    "success": True,
+                    "old_name": old_name,
+                    "new_name": new_name,
+                    "occurrences": total_replacements,
+                    "diff": diff,
+                    "path": resolved_path,
+                    "backup_path": backup_path,
+                }
+
+            result = self._apply_with_rollback(resolved_path, _do_rename)
+
+            if result.get("success"):
+                result["ast_diff"] = self._ast_diff(original, updated)
+                commit_hash = _git_auto_commit(
+                    resolved_path,
+                    f"aura: rename {old_name} -> {new_name} in {file_path.name} ({total_replacements} occurrences)",
+                )
+                if commit_hash:
+                    result["commit_hash"] = commit_hash
+                self._attach_lint_warnings(result, resolved_path)
+
+            return result
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _ast_diff(self, old_src: str, new_src: str) -> dict:
+        """Compact structural diff between two Python sources.
+
+        Returns ``{added, removed, modified}`` — lists of top-level function and
+        class qualifiers ("def foo", "class Bar") that were added, removed, or
+        whose body differs between the two versions. Silent on parse failures
+        (returns empty lists).
+        """
+        def _extract(src: str) -> Dict[str, str]:
+            try:
+                tree = ast.parse(src)
+            except SyntaxError:
+                return {}
+            out: Dict[str, str] = {}
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    key = f"def {node.name}"
+                    out[key] = ast.dump(node, annotate_fields=False)
+                elif isinstance(node, ast.ClassDef):
+                    key = f"class {node.name}"
+                    out[key] = ast.dump(node, annotate_fields=False)
+            return out
+
+        old_d = _extract(old_src)
+        new_d = _extract(new_src)
+
+        added = sorted(set(new_d) - set(old_d))
+        removed = sorted(set(old_d) - set(new_d))
+        modified = sorted(k for k in old_d if k in new_d and old_d[k] != new_d[k])
+
+        return {"added": added, "removed": removed, "modified": modified}
 
     # =====================================================================
     #  Rollback
@@ -951,6 +1143,12 @@ class CodeEditTool:
             return self.create_file(
                 path=kwargs.get("path", ""),
                 content=kwargs.get("content", ""),
+            )
+        elif "rename_symbol" in action_lower or "rename symbol" in action_lower or "rename" in action_lower:
+            return self.rename_symbol(
+                path=kwargs.get("path", ""),
+                old_name=kwargs.get("old_name", ""),
+                new_name=kwargs.get("new_name", ""),
             )
         elif "search_replace" in action_lower or "search/replace" in action_lower:
             # Apply Aider-style SEARCH/REPLACE blocks

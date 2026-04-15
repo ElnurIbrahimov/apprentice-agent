@@ -1,11 +1,19 @@
 """Safe Python code executor tool with sandboxing."""
 
 import ast
+import json
+import logging
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
-from typing import Optional, Set
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Dict, Optional, Set
+
+logger = logging.getLogger(__name__)
 
 
 class CodeExecutorTool:
@@ -46,9 +54,11 @@ class CodeExecutorTool:
     }
 
     def __init__(self, timeout: int = 30, max_output_length: int = 5000,
-                 allowed_modules: Optional[Set[str]] = None):
+                 allowed_modules: Optional[Set[str]] = None,
+                 persist_traces: bool = False):
         self.timeout = timeout
         self.max_output_length = max_output_length
+        self.persist_traces = persist_traces
         # When allowed_modules is provided, create a per-instance copy with those removed.
         # The default (None) keeps the class-level blocklist intact for the agent path.
         if allowed_modules:
@@ -165,12 +175,23 @@ class CodeExecutorTool:
                 "code": code,
             }
 
-    def execute(self, code: str) -> dict:
+    def execute(self, code: str, seed: Optional[int] = None) -> dict:
         """Execute Python code safely using a three-tier sandbox.
 
         Tier 1: Monty (pure computation, instant, no IO)
         Tier 2: E2B cloud VM (real Python + packages, requires E2B_API_KEY)
         Tier 3: Subprocess sandbox (AST-checked, offline fallback)
+
+        Args:
+            code: Python source to execute.
+            seed: Optional integer — if provided and execution lands on Tier 3
+                (the only tier where Aura controls the runtime), the wrapper
+                seeds ``random.seed(seed)`` before user code runs. Useful for
+                deterministic replay of flaky runs.
+
+        The Tier 3 path additionally captures an execution trace and returns
+        it under ``result["trace"]`` with per-line stdout/stderr timestamps,
+        a Python-line-event count, and a structured exception block on failure.
         """
         # Unescape literal \n, \t from LLM output to actual newlines/tabs
         code = self._unescape_code(code)
@@ -200,7 +221,7 @@ class CodeExecutorTool:
         # Tier 3: Subprocess sandbox (offline fallback)
         # AST safety check already passed at the top of execute().
         try:
-            result = self._run_sandboxed(code)
+            result = self._run_sandboxed(code, seed=seed)
             return result
         except Exception as e:
             return {
@@ -287,16 +308,23 @@ class CodeExecutorTool:
             return node.func.attr
         return ""
 
-    def _run_subprocess(self, script: str, code: str) -> dict:
+    def _run_subprocess(self, script: str, code: str,
+                        seed: Optional[int] = None) -> dict:
         """Run a complete Python script in a subprocess with timeout and env sanitization.
 
         Args:
             script: The full Python script to execute (written to a temp file).
             code:   The original user code (returned in the result dict for reference).
+            seed:   Optional deterministic seed, threaded to the wrapper via
+                    the ``AURA_EXEC_SEED`` env var.
         """
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
             f.write(script)
             temp_path = f.name
+
+        # Known trace path passed via env var so parent and child agree.
+        trace_uuid = uuid.uuid4().hex
+        trace_path = os.path.join(tempfile.gettempdir(), f"aura_exec_{trace_uuid}.json")
 
         proc = None
         try:
@@ -304,6 +332,10 @@ class CodeExecutorTool:
             safe_env = {k: v for k, v in os.environ.items()
                         if k in ("PATH", "HOME", "USERPROFILE", "TEMP", "TMP",
                                  "SYSTEMROOT", "WINDIR", "COMSPEC")}
+            safe_env["AURA_EXEC_TRACE_PATH"] = trace_path
+            if seed is not None:
+                safe_env["AURA_EXEC_SEED"] = str(seed)
+
             proc = subprocess.Popen(
                 [sys.executable, temp_path],
                 stdout=subprocess.PIPE,
@@ -317,28 +349,34 @@ class CodeExecutorTool:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.communicate()  # Drain pipes to avoid zombie
+                trace_data = self._read_trace(trace_path)
                 return {
                     "success": False,
                     "error": f"Code execution timed out after {self.timeout} seconds",
-                    "code": code
+                    "code": code,
+                    **({"trace": trace_data} if trace_data else {}),
                 }
 
             stdout = stdout_data[:self.max_output_length] if stdout_data else ""
             stderr = stderr_data[:self.max_output_length] if stderr_data else ""
+
+            trace_data = self._read_trace(trace_path)
 
             if proc.returncode == 0:
                 return {
                     "success": True,
                     "output": stdout.strip(),
                     "errors": stderr.strip() if stderr else None,
-                    "code": code
+                    "code": code,
+                    **({"trace": trace_data} if trace_data else {}),
                 }
             else:
                 return {
                     "success": False,
                     "output": stdout.strip() if stdout else None,
                     "error": stderr.strip() if stderr else "Unknown error",
-                    "code": code
+                    "code": code,
+                    **({"trace": trace_data} if trace_data else {}),
                 }
 
         finally:
@@ -347,32 +385,146 @@ class CodeExecutorTool:
             except (OSError, FileNotFoundError):
                 pass
 
-    def _run_sandboxed(self, code: str) -> dict:
-        """Run code in a separate process with restrictions."""
-        # Create a wrapper script that captures output
+    def _read_trace(self, trace_path: str) -> Optional[Dict[str, Any]]:
+        """Load an execution trace JSON from disk. Deletes it on read unless
+        ``self.persist_traces`` is True, in which case the trace is moved under
+        ``data/code_traces/`` and its final path is returned in the trace dict."""
+        if not os.path.exists(trace_path):
+            return None
+        try:
+            with open(trace_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            logger.debug(f"[CodeExecutor] trace read failed: {e}")
+            try:
+                os.unlink(trace_path)
+            except OSError:
+                pass
+            return None
+
+        if self.persist_traces:
+            try:
+                persist_dir = Path("data") / "code_traces"
+                persist_dir.mkdir(parents=True, exist_ok=True)
+                final_path = persist_dir / f"exec_{int(time.time() * 1000)}.json"
+                shutil.move(trace_path, final_path)
+                data["log_path"] = str(final_path)
+            except Exception as e:
+                logger.debug(f"[CodeExecutor] trace persist failed: {e}")
+                try:
+                    os.unlink(trace_path)
+                except OSError:
+                    pass
+        else:
+            try:
+                os.unlink(trace_path)
+            except OSError:
+                pass
+        return data
+
+    def _run_sandboxed(self, code: str, seed: Optional[int] = None) -> dict:
+        """Run code in a separate process with restrictions.
+
+        Injects a trace-capture preamble before user code so the subprocess
+        writes an execution-trace JSON (per-line timestamps on stdout/stderr,
+        Python line-event count, structured exception) to ``AURA_EXEC_TRACE_PATH``.
+        The parent reads it back in ``_run_subprocess``.
+        """
         # SECURITY: sys is NOT imported — user code must not access sys.modules.
         # We capture stdout/stderr refs before exec to print results without
         # exposing the sys module to user code.
         # SECURITY: Check that user code doesn't try to access wrapper internals
-        if '__aura_stdout_cap__' in code or '__aura_stderr_cap__' in code:
-            return {
-                "success": False,
-                "error": "Code blocked for safety: references to internal capture variables are not allowed",
-                "code": code,
-            }
+        banned_markers = (
+            "__aura_stdout_cap__", "__aura_stderr_cap__",
+            "_aura_trace", "_aura_sys", "_aura_tb",
+            "AURA_EXEC_TRACE_PATH", "AURA_EXEC_SEED",
+        )
+        for marker in banned_markers:
+            if marker in code:
+                return {
+                    "success": False,
+                    "error": f"Code blocked for safety: references to internal variable {marker!r} are not allowed",
+                    "code": code,
+                }
 
         wrapper_code = f'''
 import io as _io
+import json as _aura_json
+import os as _aura_os
+import sys as _aura_sys
+import time as _aura_time
+import atexit as _aura_atexit
+import tempfile as _aura_tempfile
 from contextlib import redirect_stdout as _redirect_stdout, redirect_stderr as _redirect_stderr
 
+# Trace file path: parent passes it via env var so both sides agree.
+_aura_trace_path = _aura_os.environ.get("AURA_EXEC_TRACE_PATH") or _aura_os.path.join(
+    _aura_tempfile.gettempdir(), f"aura_exec_{{_aura_os.getpid()}}.json"
+)
+_aura_trace = {{
+    "stdout_lines": [],
+    "stderr_lines": [],
+    "line_count": 0,
+    "exception": None,
+    "seed": None,
+    "start_time": _aura_time.time(),
+}}
+
+_aura_line_counter = [0]
+def _aura_trace_fn(frame, event, arg):
+    if event == "line":
+        _aura_line_counter[0] += 1
+    return _aura_trace_fn
+
+# Deterministic seed from env (set by parent when execute(..., seed=N) is called)
+_aura_seed_env = _aura_os.environ.get("AURA_EXEC_SEED")
+if _aura_seed_env:
+    try:
+        _aura_seed_int = int(_aura_seed_env)
+        import random as _aura_rnd
+        _aura_rnd.seed(_aura_seed_int)
+        _aura_trace["seed"] = _aura_seed_int
+    except ValueError:
+        pass
+
+def _aura_write_trace():
+    _aura_trace["line_count"] = _aura_line_counter[0]
+    _aura_trace["duration_s"] = round(_aura_time.time() - _aura_trace["start_time"], 4)
+    # Cap collected lines so pathological loops don't balloon the JSON.
+    if len(_aura_trace["stdout_lines"]) > 2000:
+        _aura_trace["stdout_lines"] = _aura_trace["stdout_lines"][:2000]
+    if len(_aura_trace["stderr_lines"]) > 2000:
+        _aura_trace["stderr_lines"] = _aura_trace["stderr_lines"][:2000]
+    try:
+        with open(_aura_trace_path, "w") as _f:
+            _aura_json.dump(_aura_trace, _f)
+    except Exception:
+        pass
+
+_aura_atexit.register(_aura_write_trace)
+
 # Capture references to real stdout/stderr before user code runs
-__aura_stderr_cap__ = __import__('sys').stderr
-__aura_stdout_cap__ = __import__('sys').stdout
+__aura_stderr_cap__ = _aura_sys.stderr
+__aura_stdout_cap__ = _aura_sys.stdout
 
-# Capture output
-_stdout_capture = _io.StringIO()
-_stderr_capture = _io.StringIO()
+class _AuraCaptureIO(_io.StringIO):
+    def __init__(self, bucket, start_ref):
+        super().__init__()
+        self._bucket = bucket
+        self._start = start_ref
+    def write(self, s):
+        if s:
+            self._bucket.append({{"t": round(_aura_time.time() - self._start, 4), "text": s}})
+        return super().write(s)
 
+_stdout_capture = _AuraCaptureIO(_aura_trace["stdout_lines"], _aura_trace["start_time"])
+_stderr_capture = _AuraCaptureIO(_aura_trace["stderr_lines"], _aura_trace["start_time"])
+
+# Pre-bind traceback module — survives the del inside `with` so the except
+# block below can format the user traceback without re-importing.
+_aura_tb = __import__("traceback")
+
+_aura_sys.settrace(_aura_trace_fn)
 try:
     with _redirect_stdout(_stdout_capture), _redirect_stderr(_stderr_capture):
         # SECURITY: Remove wrapper internals from namespace before user code runs
@@ -403,10 +555,20 @@ try:
         __aura_stderr_cap__.write(_errors)
 
 except Exception as _e:
+    _aura_trace["exception"] = {{
+        "type": type(_e).__name__,
+        "message": str(_e),
+        "traceback": _aura_tb.format_exc()[-2000:],
+    }}
     __aura_stderr_cap__.write(f"Error: {{type(_e).__name__}}: {{_e}}\\n")
+finally:
+    try:
+        _aura_sys.settrace(None)
+    except Exception:
+        pass
 '''
 
-        return self._run_subprocess(wrapper_code, code)
+        return self._run_subprocess(wrapper_code, code, seed=seed)
 
     def _execute_raw(self, full_script: str, user_code: str = "") -> dict:
         """Execute a pre-built script directly in a subprocess (PRIVATE).
