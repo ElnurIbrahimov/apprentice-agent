@@ -241,6 +241,9 @@ class MCTSConfig:
         stagnation_exploration_boost: float = 0.5,
         beam_width: int = 3,
         max_json_retries: int = 2,
+        # Learned value function
+        use_learned_value: bool = True,
+        learned_value_weight: float = 0.3,
     ):
         self.max_iterations = max_iterations
         self.max_depth = max_depth
@@ -257,6 +260,8 @@ class MCTSConfig:
         self.stagnation_exploration_boost = stagnation_exploration_boost
         self.beam_width = beam_width
         self.max_json_retries = max_json_retries
+        self.use_learned_value = use_learned_value
+        self.learned_value_weight = learned_value_weight
 
 
 @dataclass
@@ -407,6 +412,15 @@ class MCTSReasoning:
 
         # Thread pool for parallel node evaluation
         self._eval_pool = ThreadPoolExecutor(max_workers=4)
+
+        # Learned value predictor (lazy — loads pickle on first predict call)
+        self._value_predictor = None
+        if self.config.use_learned_value:
+            try:
+                from aura.tools.mcts_value_fn import ValuePredictor
+                self._value_predictor = ValuePredictor()
+            except Exception as e:
+                logger.debug(f"[MCTS] learned value predictor unavailable: {e}")
 
         # Callbacks for UI updates
         self.on_node_created: Optional[Callable[[MCTSNode], None]] = None
@@ -995,6 +1009,20 @@ Provide your evaluation as JSON:
             # Blend with rollout: alpha fades rollout influence as visits increase
             alpha = min(0.7, 0.5 + node.visits * 0.02)
             combined_value = (1 - alpha) * rollout_value + alpha * eval_value
+
+            # Learned value function: a third term weighted by its own confidence.
+            # Predictor returns (0.5, 0.0) when untrained — a no-op mix.
+            if self._value_predictor is not None and self.config.use_learned_value:
+                try:
+                    learned_pred, learned_conf = self._value_predictor.predict(
+                        node.thought.content,
+                        path_context,
+                    )
+                    if learned_conf > 0.0:
+                        w = learned_conf * self.config.learned_value_weight
+                        combined_value = (1.0 - w) * combined_value + w * learned_pred
+                except Exception as e:
+                    logger.debug(f"[MCTS] learned value predict failed: {e}")
 
             return combined_value
 

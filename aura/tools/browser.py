@@ -5,9 +5,10 @@ import functools
 import json
 import logging
 import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,10 @@ class BrowserTool:
         self._vision_tool = None       # Lazy VisionTool
         self._downloads: Dict[str, dict] = {}  # Download tracking
         self.session_file = self.output_dir / "session.json"
+
+        # Planner-verifier loop support
+        self._console_errors: deque = deque(maxlen=20)
+        self._hooked_pages: set = set()
 
     def _validate_file_path(self, path: Optional[str], default: Path) -> tuple:
         """Validate that a user-provided path is within output_dir. Returns (Path, error_str|None)."""
@@ -1194,7 +1199,7 @@ class BrowserTool:
             return {"success": False, "error": str(e)}
 
     def _get_page_context(self) -> dict:
-        """Extract current page context for LLM planning."""
+        """Extract current page context for LLM planning (legacy; see _get_dom_snapshot)."""
         try:
             self._ensure_browser()
             return {
@@ -1207,8 +1212,348 @@ class BrowserTool:
         except Exception:
             return {"url": "unknown", "title": "", "text": "", "forms_count": 0, "links_count": 0}
 
+    # ------------------------------------------------------------------
+    # DOM snapshot + step-wise planner-verifier loop
+    # ------------------------------------------------------------------
+
+    _INTERACTIVE_ROLES = {
+        "button", "link", "textbox", "checkbox", "radio", "combobox",
+        "searchbox", "menuitem", "menuitemcheckbox", "menuitemradio",
+        "tab", "switch", "slider", "spinbutton",
+    }
+
+    def _ensure_console_listeners(self, page) -> None:
+        """Attach pageerror/console listeners once per Playwright Page."""
+        pid = id(page)
+        if pid in self._hooked_pages:
+            return
+        try:
+            def _on_error(err):
+                try:
+                    self._console_errors.append(f"pageerror: {str(err)[:200]}")
+                except Exception:
+                    pass
+
+            def _on_console(msg):
+                try:
+                    if msg.type in ("error", "warning"):
+                        self._console_errors.append(f"{msg.type}: {msg.text[:200]}")
+                except Exception:
+                    pass
+
+            page.on("pageerror", _on_error)
+            page.on("console", _on_console)
+            self._hooked_pages.add(pid)
+        except Exception as e:
+            logger.debug(f"[BrowserTool] console listener attach failed: {e}")
+
+    # JS injected into the page to walk the DOM and return interactive elements.
+    # Runs in the browser; returns a plain array so no AX-API dependency is needed.
+    _DOM_SNAPSHOT_JS = r"""
+    (maxElements) => {
+      const INTERACTIVE_TAGS = {
+        'A': 'link', 'BUTTON': 'button', 'INPUT': 'textbox',
+        'TEXTAREA': 'textbox', 'SELECT': 'combobox', 'LABEL': 'label',
+      };
+      const INPUT_TYPES = {
+        'checkbox': 'checkbox', 'radio': 'radio', 'submit': 'button',
+        'button': 'button', 'search': 'searchbox', 'email': 'textbox',
+        'password': 'textbox', 'tel': 'textbox', 'text': 'textbox',
+        'url': 'textbox', 'number': 'spinbutton',
+      };
+      const out = [];
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) return false;
+        const cs = window.getComputedStyle(el);
+        if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') return false;
+        return true;
+      };
+      const getName = (el) => {
+        return (
+          el.getAttribute('aria-label') ||
+          el.getAttribute('alt') ||
+          el.getAttribute('title') ||
+          el.getAttribute('placeholder') ||
+          (el.innerText || '').trim().slice(0, 80) ||
+          el.getAttribute('name') ||
+          ''
+        ).trim();
+      };
+      const all = document.querySelectorAll(
+        'a, button, input, textarea, select, [role], [tabindex]:not([tabindex="-1"])'
+      );
+      for (const el of all) {
+        if (out.length >= maxElements) break;
+        if (!isVisible(el)) continue;
+        let role = (el.getAttribute('role') || '').toLowerCase();
+        if (!role) {
+          role = INTERACTIVE_TAGS[el.tagName] || '';
+          if (el.tagName === 'INPUT') {
+            const t = (el.type || 'text').toLowerCase();
+            role = INPUT_TYPES[t] || role;
+          }
+        }
+        if (!role) continue;
+        const name = getName(el);
+        if (!name && role !== 'textbox' && role !== 'searchbox' && role !== 'combobox') continue;
+        out.push({
+          role,
+          name: name.slice(0, 80),
+          value: (el.value || '').toString().slice(0, 40),
+          tag: el.tagName.toLowerCase(),
+          id: el.id || '',
+        });
+      }
+      return out;
+    }
+    """
+
+    def _get_dom_snapshot(self, max_elements: int = 40) -> dict:
+        """Structured page snapshot for planning and verification.
+
+        Returns interactive elements (role, name, selector), visible text,
+        URL/title, and recent console errors — enough for an LLM to make
+        one good action decision without hallucinating selectors.
+        """
+        try:
+            self._ensure_browser()
+            page = self._page
+            if page is None:
+                return {"error": "no active page"}
+
+            self._ensure_console_listeners(page)
+
+            url = page.url
+            try:
+                title = page.title()
+            except Exception:
+                title = ""
+
+            interactive: List[dict] = []
+            try:
+                raw = page.evaluate(self._DOM_SNAPSHOT_JS, max_elements)
+                for el in raw or []:
+                    role = el.get("role", "")
+                    name = el.get("name", "")
+                    el_id = el.get("id", "")
+                    # Prefer a stable selector: role+name, then id, then text
+                    if role and name:
+                        selector = f'role={role}[name="{name[:60]}"]'
+                    elif el_id:
+                        selector = f"#{el_id}"
+                    elif name:
+                        selector = f'text="{name[:60]}"'
+                    else:
+                        selector = el.get("tag", "")
+                    interactive.append({
+                        "role": role,
+                        "name": name,
+                        "selector": selector,
+                        "value": el.get("value", ""),
+                    })
+            except Exception as e:
+                logger.debug(f"[BrowserTool] dom snapshot js failed: {e}")
+
+            try:
+                visible_text = page.inner_text("body")[:1500]
+            except Exception:
+                visible_text = ""
+
+            return {
+                "url": url,
+                "title": title,
+                "visible_text": visible_text,
+                "interactive": interactive,
+                "interactive_count": len(interactive),
+                "console_errors": list(self._console_errors)[-10:],
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _format_snapshot_for_prompt(self, snap: dict) -> str:
+        lines = [
+            f"URL: {snap.get('url', '')}",
+            f"Title: {snap.get('title', '')}",
+            f"Visible text (first 800 chars): {(snap.get('visible_text') or '')[:800]}",
+            f"Interactive elements ({snap.get('interactive_count', 0)}):",
+        ]
+        for i, el in enumerate(snap.get("interactive", [])[:25]):
+            val = f" value={el['value']!r}" if el.get("value") else ""
+            lines.append(f"  [{i}] {el['role']}: {el['name']!r}{val}")
+        errs = snap.get("console_errors") or []
+        if errs:
+            lines.append("Recent console errors:")
+            for e in errs[-5:]:
+                lines.append(f"  - {e}")
+        return "\n".join(lines)
+
+    def _plan_next_action(self, goal: str, snapshot: dict, history: List[dict], brain) -> dict:
+        """Ask the LLM for ONE next action given current page state + history."""
+        history_txt = "\n".join(
+            f"  step {i+1}: {h.get('action', {}).get('action','?')} "
+            f"selector={h.get('action',{}).get('selector','')} "
+            f"-> verdict={h.get('verdict','?')}"
+            for i, h in enumerate(history[-6:])
+        ) or "  (none)"
+
+        prompt = (
+            f"You are controlling a browser to achieve a goal.\n\n"
+            f"GOAL: {goal}\n\n"
+            f"PAGE STATE:\n{self._format_snapshot_for_prompt(snapshot)}\n\n"
+            f"ACTION HISTORY:\n{history_txt}\n\n"
+            f"Return ONE next action as JSON, no prose:\n"
+            f'  {{"action":"goto|click|fill|wait|get_text|done","selector":"...","value":"...","reasoning":"..."}}\n'
+            f"Rules:\n"
+            f"- Use role= selectors that match an interactive element from PAGE STATE when possible.\n"
+            f"- Use \"done\" when the goal is clearly satisfied. Put the answer in reasoning.\n"
+            f"- Prefer one concrete action over a plan. You will be called again after it executes.\n"
+        )
+
+        try:
+            import re as _re
+            resp = brain.chat(prompt) if hasattr(brain, "chat") else brain.think(prompt)
+            # Extract first JSON object
+            match = _re.search(r"\{[^{}]*\}", resp, _re.DOTALL)
+            if not match:
+                # More forgiving: look for balanced braces with nested
+                match = _re.search(r"\{.*\}", resp, _re.DOTALL)
+            if not match:
+                return {"action": "error", "error": f"no JSON in response: {resp[:200]}"}
+            action = json.loads(match.group())
+            if not isinstance(action, dict) or "action" not in action:
+                return {"action": "error", "error": "malformed action"}
+            return action
+        except Exception as e:
+            return {"action": "error", "error": f"planner failed: {e}"}
+
+    def _verify_action(self, goal: str, before: dict, after: dict, action: dict, result: dict, brain) -> str:
+        """Ask the LLM whether the action moved toward the goal.
+        Returns one of PROGRESS / NEUTRAL / REGRESS."""
+        # Cheap heuristic first — skip LLM if the action already errored.
+        if not result.get("success", False):
+            return "REGRESS"
+        if before.get("url") != after.get("url"):
+            return "PROGRESS"
+        if before.get("interactive_count") != after.get("interactive_count"):
+            return "PROGRESS"
+
+        prompt = (
+            f"GOAL: {goal}\n"
+            f"ACTION TAKEN: {json.dumps(action)[:300]}\n"
+            f"BEFORE: url={before.get('url','')} elements={before.get('interactive_count',0)}\n"
+            f"AFTER: url={after.get('url','')} elements={after.get('interactive_count',0)}\n"
+            f"AFTER visible text: {(after.get('visible_text') or '')[:400]}\n\n"
+            f"Did this action make progress toward the goal? Reply with exactly one word: "
+            f"PROGRESS, NEUTRAL, or REGRESS."
+        )
+        try:
+            resp = brain.chat(prompt) if hasattr(brain, "chat") else brain.think(prompt)
+            up = (resp or "").strip().upper()
+            for tok in ("PROGRESS", "REGRESS", "NEUTRAL"):
+                if tok in up:
+                    return tok
+            return "NEUTRAL"
+        except Exception:
+            return "NEUTRAL"
+
+    def _dispatch_action(self, action: dict) -> dict:
+        """Execute one planner-emitted action via existing primitives."""
+        act = (action.get("action") or "").lower()
+        sel = action.get("selector", "") or ""
+        val = action.get("value", "") or ""
+
+        try:
+            if act == "goto":
+                return self.open(val or sel)
+            if act == "click":
+                return self.click(sel)
+            if act == "fill":
+                return self.fill(sel, val)
+            if act == "wait":
+                return self.wait_for_text(val, timeout=5)
+            if act == "get_text":
+                return self.get_page_text()
+            if act == "screenshot":
+                return self.screenshot()
+            return {"success": False, "error": f"unknown action: {act}"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def plan_and_execute(self, goal: str, max_steps: int = 10) -> dict:
-        """Decompose a goal into browser steps via LLM, execute with re-planning."""
+        """Achieve a goal one step at a time with DOM-snapshot planning and per-step verification.
+
+        Each loop iteration: snapshot DOM → plan ONE action → execute → re-snapshot
+        → verify progress. Stops when the planner says "done", when max_steps is
+        reached, or after 3 consecutive non-progress steps (stagnation).
+        Falls back to the legacy multi-step planner if the LLM is unavailable.
+        """
+        try:
+            self._ensure_browser()
+        except Exception as e:
+            return {"success": False, "error": f"browser init failed: {e}"}
+
+        try:
+            from aura.brain import OllamaBrain
+            brain = OllamaBrain()
+        except Exception:
+            return self._plan_and_execute_legacy(goal, max_steps)
+
+        history: List[dict] = []
+        stagnation = 0
+
+        for step in range(max_steps):
+            snap_before = self._get_dom_snapshot()
+            if "error" in snap_before:
+                return {"success": False, "error": f"snapshot failed: {snap_before['error']}", "log": history}
+
+            action = self._plan_next_action(goal, snap_before, history, brain)
+            if action.get("action") == "done":
+                return {
+                    "success": True,
+                    "goal": goal,
+                    "steps": len(history),
+                    "answer": action.get("reasoning", ""),
+                    "log": history,
+                }
+            if action.get("action") == "error":
+                return {"success": False, "error": action.get("error", "planner error"), "log": history}
+
+            result = self._dispatch_action(action)
+            snap_after = self._get_dom_snapshot()
+            verdict = self._verify_action(goal, snap_before, snap_after, action, result, brain)
+
+            history.append({
+                "step": step + 1,
+                "action": action,
+                "result_success": result.get("success", False),
+                "result_error": result.get("error", ""),
+                "verdict": verdict,
+            })
+
+            if verdict == "PROGRESS":
+                stagnation = 0
+            else:
+                stagnation += 1
+                if stagnation >= 3:
+                    return {
+                        "success": False,
+                        "goal": goal,
+                        "steps": len(history),
+                        "error": "stagnation: 3 consecutive non-progress steps",
+                        "log": history,
+                    }
+
+        return {
+            "success": False,
+            "goal": goal,
+            "steps": len(history),
+            "error": "max_steps reached",
+            "log": history,
+        }
+
+    def _plan_and_execute_legacy(self, goal: str, max_steps: int = 10) -> dict:
+        """Original multi-step plan-then-execute flow, kept as LLM-unavailable fallback."""
         try:
             self._ensure_browser()
             try:

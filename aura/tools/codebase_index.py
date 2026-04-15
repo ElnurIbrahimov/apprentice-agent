@@ -956,22 +956,31 @@ def _extract_chunks(rel_path: str, content: str) -> List[dict]:
 # ── Import graph extraction ─────────────────────────────────────
 
 def _extract_imports_python(content: str) -> List[str]:
-    """Extract imported module names from Python source."""
-    imports = []
+    """Extract imported module names from Python source.
+
+    Returns both the full dotted path (e.g. 'aura.tools.browser') and
+    the top-level package ('aura'). The full path enables cross-repo
+    resolution; the top-level is kept for backward-compatible lookups.
+    """
+    imports: set = set()
     try:
         tree = ast.parse(content)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    imports.append(alias.name.split(".")[0])
+                    imports.add(alias.name)
+                    imports.add(alias.name.split(".")[0])
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
-                    imports.append(node.module.split(".")[0])
+                    imports.add(node.module)
+                    imports.add(node.module.split(".")[0])
     except SyntaxError:
         # Regex fallback
         for m in re.finditer(r'^\s*(?:from|import)\s+([\w.]+)', content, re.MULTILINE):
-            imports.append(m.group(1).split(".")[0])
-    return list(set(imports))
+            mod = m.group(1)
+            imports.add(mod)
+            imports.add(mod.split(".")[0])
+    return sorted(imports)
 
 
 def _extract_imports_js(content: str) -> List[str]:
@@ -1141,7 +1150,13 @@ class CodebaseIndex:
     Supports incremental indexing, multi-signal ranking, and project analysis.
     """
 
-    def __init__(self, project_path: str, db_path: Optional[str] = None):
+    def __init__(
+        self,
+        project_path: str,
+        db_path: Optional[str] = None,
+        workspace_roots: Optional[List[str]] = None,
+        _is_sibling: bool = False,
+    ):
         self.project_path = Path(project_path).resolve()
 
         # DB location: explicit path, or data/codebase_index/index.db
@@ -1160,6 +1175,126 @@ class CodebaseIndex:
         self._embedding_cache = EmbeddingCache(
             cache_path=str(cache_dir / "embedding_cache.db")
         )
+
+        # Repo identity
+        self._repo_id = self._compute_repo_id(self.project_path)
+        self._register_repo(self._repo_id, self.project_path)
+
+        # Sibling indexes for cross-repo resolution. Each sibling owns its
+        # own SQLite file so tables stay clean and there's no PK conflict.
+        self._siblings: Dict[str, "CodebaseIndex"] = {}
+        if workspace_roots and not _is_sibling:
+            for root in workspace_roots:
+                self.add_workspace_root(root, auto_index=False)
+
+    @staticmethod
+    def _compute_repo_id(path: Path) -> str:
+        """Short stable id derived from the absolute path."""
+        return hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:12]
+
+    def _register_repo(self, repo_id: str, root_path: Path) -> None:
+        with self._lock:
+            self._get_conn().execute(
+                "INSERT OR REPLACE INTO workspace_repos (repo_id, root_path, last_indexed) "
+                "VALUES (?, ?, COALESCE((SELECT last_indexed FROM workspace_repos WHERE repo_id=?), 0))",
+                (repo_id, str(root_path), repo_id),
+            )
+            self._get_conn().commit()
+
+    def _sibling_db_path(self, repo_id: str) -> Path:
+        """DB file path for a sibling index (lives next to the primary DB)."""
+        stem = self._db_path.stem
+        return self._db_path.with_name(f"{stem}_repo_{repo_id}.db")
+
+    def add_workspace_root(self, path: str, auto_index: bool = True) -> dict:
+        """Register an additional repo root as a sibling index.
+
+        The sibling gets its own SQLite file next to the primary DB, so
+        tables stay independent and there's no path collision. Cross-repo
+        dependency resolution walks all siblings.
+        """
+        p = Path(path).resolve()
+        if p == self.project_path:
+            return {"success": False, "error": "already the primary root"}
+        rid = self._compute_repo_id(p)
+        if rid in self._siblings:
+            return {"success": True, "repo_id": rid, "already_registered": True}
+
+        sibling = CodebaseIndex(
+            project_path=str(p),
+            db_path=str(self._sibling_db_path(rid)),
+            _is_sibling=True,
+        )
+        self._siblings[rid] = sibling
+        self._register_repo(rid, p)
+
+        result = {"success": True, "repo_id": rid, "root": str(p)}
+        if auto_index:
+            idx_result = sibling.index()
+            result["indexed"] = idx_result
+        return result
+
+    def index_workspace(self, progress_callback=None, force: bool = False) -> dict:
+        """Index the primary repo and every registered sibling, then resolve
+        cross-repo imports."""
+        primary = self.index(progress_callback=progress_callback, force=force)
+        siblings = {}
+        for rid, sib in self._siblings.items():
+            siblings[rid] = sib.index(progress_callback=progress_callback, force=force)
+        resolution = self._resolve_cross_repo_imports()
+        return {"primary": primary, "siblings": siblings, "resolution": resolution}
+
+    def _resolve_cross_repo_imports(self) -> dict:
+        """Walk imports in every repo (primary + siblings) and try to resolve
+        each one against files in the OTHER repos. Stores the resolution on
+        the import row via resolved_repo_id / resolved_file."""
+        all_repos: Dict[str, "CodebaseIndex"] = {self._repo_id: self}
+        all_repos.update(self._siblings)
+        if len(all_repos) < 2:
+            return {"resolved": 0, "skipped": "need 2+ repos"}
+
+        # For each repo, build a stem/dotted-path → file lookup
+        repo_file_index: Dict[str, Dict[str, str]] = {}
+        for rid, repo in all_repos.items():
+            idx: Dict[str, str] = {}
+            with repo._lock:
+                rows = repo._get_conn().execute("SELECT rel_path FROM files").fetchall()
+            for (fp,) in rows:
+                stem = Path(fp).stem
+                dotted = fp.replace("/", ".").rsplit(".", 1)[0]
+                idx.setdefault(stem, fp)
+                idx.setdefault(dotted, fp)
+            repo_file_index[rid] = idx
+
+        resolved_total = 0
+        for rid, repo in all_repos.items():
+            with repo._lock:
+                conn = repo._get_conn()
+                rows = conn.execute(
+                    "SELECT rowid, imports_module FROM imports WHERE resolved_repo_id IS NULL"
+                ).fetchall()
+
+                for rowid, module in rows:
+                    if not module:
+                        continue
+                    for other_rid, other_idx in repo_file_index.items():
+                        if other_rid == rid:
+                            continue
+                        target = other_idx.get(module)
+                        if not target:
+                            stem = module.rsplit(".", 1)[-1]
+                            target = other_idx.get(stem)
+                        if target:
+                            conn.execute(
+                                "UPDATE imports SET resolved_repo_id=?, resolved_file=? "
+                                "WHERE rowid=?",
+                                (other_rid, target, rowid),
+                            )
+                            resolved_total += 1
+                            break
+                conn.commit()
+
+        return {"resolved": resolved_total, "repos_scanned": len(all_repos)}
 
     # ── DB setup ────────────────────────────────────────────────
 
@@ -1214,12 +1349,46 @@ class CodebaseIndex:
                     value TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS workspace_repos (
+                    repo_id TEXT PRIMARY KEY,
+                    root_path TEXT UNIQUE NOT NULL,
+                    last_indexed REAL DEFAULT 0
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(file_path);
                 CREATE INDEX IF NOT EXISTS idx_chunks_kind ON chunks(kind);
                 CREATE INDEX IF NOT EXISTS idx_chunks_name ON chunks(name);
                 CREATE INDEX IF NOT EXISTS idx_imports_module ON imports(imports_module);
                 CREATE INDEX IF NOT EXISTS idx_files_type ON files(file_type);
             """)
+            conn.commit()
+
+            # ── Schema migration: add repo_id / resolution columns ──
+            # Uses SQLite ALTER TABLE ADD COLUMN (nullable). Safe on re-run.
+            def _has_column(table: str, col: str) -> bool:
+                cur = conn.execute(f"PRAGMA table_info({table})")
+                return any(row[1] == col for row in cur.fetchall())
+
+            migrations = [
+                ("files", "repo_id TEXT"),
+                ("chunks", "repo_id TEXT"),
+                ("imports", "repo_id TEXT"),
+                ("imports", "resolved_repo_id TEXT"),
+                ("imports", "resolved_file TEXT"),
+            ]
+            for table, coldef in migrations:
+                colname = coldef.split()[0]
+                if not _has_column(table, colname):
+                    try:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {coldef}")
+                        logger.info(f"[CodebaseIndex] migrated {table}: +{colname}")
+                    except sqlite3.OperationalError as e:
+                        logger.warning(f"[CodebaseIndex] migration {table}.{colname} failed: {e}")
+
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_repo ON chunks(repo_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_files_repo ON files(repo_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_imports_repo ON imports(repo_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_imports_resolved ON imports(resolved_repo_id)")
             conn.commit()
 
     # ── Indexing ────────────────────────────────────────────────
@@ -1425,19 +1594,42 @@ class CodebaseIndex:
 
     # ── Search (hybrid BM25 + semantic + recency + importance) ──
 
-    def search(self, query: str, limit: int = 10, top_k: int | None = None) -> list:
+    def search(self, query: str, limit: int = 10, top_k: int | None = None,
+               scope: str = "repo") -> list:
         """Hybrid search: BM25 + semantic + recency + file importance.
 
         Args:
             query: Natural language or keyword query
             limit: Number of results (also accepts top_k for backward compat)
+            scope: "repo" (default, primary only) or "workspace"
+                   (primary + all registered sibling repos, merged by score)
 
         Returns:
             List of {file_path, name, kind, line_start, line_end, content,
-                     score, score_breakdown}
+                     score, score_breakdown, repo_id (when scope=workspace)}
         """
         if top_k is not None:
             limit = top_k
+
+        if scope == "workspace" and self._siblings:
+            primary = self._search_single(query, limit * 2)
+            for r in primary:
+                r["repo_id"] = self._repo_id
+                r["repo_root"] = str(self.project_path)
+            for rid, sib in self._siblings.items():
+                sib_results = sib._search_single(query, limit * 2)
+                for r in sib_results:
+                    r["repo_id"] = rid
+                    r["repo_root"] = str(sib.project_path)
+                primary.extend(sib_results)
+            primary.sort(key=lambda x: x["score"], reverse=True)
+            return primary[:limit]
+
+        return self._search_single(query, limit)
+
+    def _search_single(self, query: str, limit: int) -> list:
+        """Original single-repo hybrid search. Factored out so scope='workspace'
+        can fan out across siblings."""
 
         query_vec = _embed(query)
         query_terms = re.findall(r'\b\w+\b', query.lower())
@@ -1730,30 +1922,49 @@ class CodebaseIndex:
             path: Relative path to the file
 
         Returns:
-            {file_path, imports: [str], imported_by: [str]}
+            {file_path, imports: [str], imported_by: [str],
+             cross_repo: [{module, repo_id, file}] }
         """
         rel = str(Path(path)).replace("\\", "/")
 
         with self._lock:
             conn = self._get_conn()
 
-            # What this file imports
             imports = conn.execute(
-                "SELECT imports_module FROM imports WHERE file_path = ?", (rel,)
+                "SELECT imports_module, resolved_repo_id, resolved_file FROM imports "
+                "WHERE file_path = ?", (rel,)
             ).fetchall()
 
-            # What files import modules matching this file's name/path
-            # Match on the stem of the file as a module name
             stem = Path(rel).stem
             imported_by = conn.execute(
                 "SELECT DISTINCT file_path FROM imports WHERE imports_module = ? OR imports_module LIKE ?",
                 (stem, f"%.{stem}")
             ).fetchall()
 
+        in_repo = [r[0] for r in imports]
+        cross_repo = [
+            {"module": r[0], "repo_id": r[1], "file": r[2]}
+            for r in imports if r[1] and r[2]
+        ]
+
+        # Also check siblings: does any of them import this file's stem?
+        cross_imported_by: List[dict] = []
+        for rid, sib in self._siblings.items():
+            with sib._lock:
+                rows = sib._get_conn().execute(
+                    "SELECT DISTINCT file_path FROM imports "
+                    "WHERE imports_module = ? OR imports_module LIKE ?",
+                    (stem, f"%.{stem}"),
+                ).fetchall()
+            for (fp,) in rows:
+                cross_imported_by.append({"repo_id": rid, "file": fp})
+
         return {
             "file_path": rel,
-            "imports": [r[0] for r in imports],
+            "imports": in_repo,
             "imported_by": [r[0] for r in imported_by if r[0] != rel],
+            "cross_repo": cross_repo,
+            "cross_imported_by": cross_imported_by,
         }
 
     # ── Repo Map (Aider-style compact symbol listing) ──────────

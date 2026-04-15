@@ -16,8 +16,11 @@ import json
 import logging
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -280,25 +283,13 @@ def _parse_test_output(framework: str, output: str) -> Dict:
         return result
 
     if framework in ("pytest", "unittest"):
-        # pytest short summary: "5 passed, 2 failed, 1 skipped in 1.23s"
-        match = re.search(
-            r'(\d+) passed(?:.*?(\d+) failed)?(?:.*?(\d+) skipped)?'
-            r'(?:.*?(\d+) error)?',
-            output,
-        )
-        if match:
-            result["passed"] = int(match.group(1) or 0)
-            result["failed"] = int(match.group(2) or 0)
-            result["skipped"] = int(match.group(3) or 0)
-            result["errors"] = int(match.group(4) or 0)
-        else:
-            # Try "X failed" alone
-            failed_match = re.search(r'(\d+) failed', output)
-            if failed_match:
-                result["failed"] = int(failed_match.group(1))
-            passed_match = re.search(r'(\d+) passed', output)
-            if passed_match:
-                result["passed"] = int(passed_match.group(1))
+        # pytest summary order varies: "5 passed, 2 failed" OR "1 failed, 2 passed".
+        # Parse each counter independently.
+        for key, label in [("passed", "passed"), ("failed", "failed"),
+                           ("skipped", "skipped"), ("errors", "error")]:
+            m = re.search(rf'(\d+)\s+{label}', output)
+            if m:
+                result[key] = int(m.group(1))
 
     elif framework in ("jest", "vitest"):
         # Jest/Vitest: "Tests:  3 passed, 1 failed, 4 total"
@@ -377,6 +368,279 @@ def _find_affected_test_names(changed_files: List[str]) -> List[str]:
     return function_names
 
 
+def _parse_individual_tests(framework: str, output: str) -> List[Dict[str, str]]:
+    """Extract per-test results from test runner output.
+
+    Returns a list of {test_name, status, error} dicts. Used by the differential
+    runner to compute regressions vs the git baseline.
+    """
+    tests: List[Dict[str, str]] = []
+    if not output:
+        return tests
+
+    if framework in ("pytest", "unittest"):
+        # pytest -v: "path/to/test_foo.py::test_bar PASSED" / "FAILED" / "SKIPPED"
+        pattern = re.compile(
+            r"^([^\s]+?::[^\s]+?)\s+(PASSED|FAILED|SKIPPED|ERROR|XFAIL|XPASS)",
+            re.MULTILINE,
+        )
+        for m in pattern.finditer(output):
+            status = m.group(2).lower()
+            if status in ("xfail", "xpass"):
+                status = "passed"
+            tests.append({"name": m.group(1), "status": status, "error": ""})
+        # Also capture FAILED lines from the short summary at the bottom
+        for m in re.finditer(r"^FAILED\s+([^\s]+?::[^\s]+?)(?:\s+-\s+(.*))?$", output, re.MULTILINE):
+            name = m.group(1)
+            err = (m.group(2) or "").strip()
+            # De-dup against earlier parse; update error text
+            found = False
+            for t in tests:
+                if t["name"] == name:
+                    t["status"] = "failed"
+                    if err:
+                        t["error"] = err
+                    found = True
+                    break
+            if not found:
+                tests.append({"name": name, "status": "failed", "error": err})
+
+    elif framework in ("jest", "vitest"):
+        # "  ✓ test name (5 ms)"  /  "  ✗ test name" / "  × test name"
+        for line in output.splitlines():
+            ls = line.strip()
+            m = re.match(r"^(✓|✗|×|✘|PASS|FAIL)\s+(.+?)(?:\s+\(\d+\s*ms\))?$", ls)
+            if m:
+                tok = m.group(1)
+                name = m.group(2).strip()
+                status = "passed" if tok in ("✓", "PASS") else "failed"
+                tests.append({"name": name, "status": status, "error": ""})
+
+    elif framework == "mocha":
+        # "    ✓ test name"  /  "    1) test name"  /  "    - test name" (pending)
+        for line in output.splitlines():
+            ls = line.strip()
+            if ls.startswith("✓ "):
+                tests.append({"name": ls[2:].strip(), "status": "passed", "error": ""})
+            elif re.match(r"^\d+\)\s+", ls):
+                name = re.sub(r"^\d+\)\s+", "", ls)
+                tests.append({"name": name, "status": "failed", "error": ""})
+            elif ls.startswith("- "):
+                tests.append({"name": ls[2:].strip(), "status": "skipped", "error": ""})
+
+    elif framework == "go":
+        # "--- PASS: TestFoo (0.00s)" / "--- FAIL: TestBar (0.00s)"
+        pattern = re.compile(r"^---\s+(PASS|FAIL|SKIP):\s+(\S+)", re.MULTILINE)
+        for m in pattern.finditer(output):
+            status = {"PASS": "passed", "FAIL": "failed", "SKIP": "skipped"}[m.group(1)]
+            tests.append({"name": m.group(2), "status": status, "error": ""})
+
+    elif framework == "cargo":
+        # "test tests::foo ... ok"  /  "test tests::bar ... FAILED"
+        pattern = re.compile(r"^test\s+(\S+)\s+\.\.\.\s+(ok|FAILED|ignored)", re.MULTILINE)
+        for m in pattern.finditer(output):
+            name = m.group(1)
+            raw = m.group(2)
+            status = {"ok": "passed", "FAILED": "failed", "ignored": "skipped"}[raw]
+            tests.append({"name": name, "status": status, "error": ""})
+
+    return tests
+
+
+def _git_file_at_head(project_path: str, rel_file: str) -> Optional[str]:
+    """Return the HEAD version of `rel_file` via `git show HEAD:<path>`, or None."""
+    try:
+        proc = subprocess.run(
+            ["git", "show", f"HEAD:{rel_file}"],
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode == 0:
+            return proc.stdout
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
+def _run_baseline_tests(
+    project_path: str,
+    changed_files: List[str],
+    framework: str,
+    shell_tool,
+) -> Tuple[Optional[List[Dict[str, str]]], Optional[str]]:
+    """Re-run the current test command against the git HEAD version of changed files.
+
+    Strategy: copy the project into a shadow dir, overwrite the changed files
+    with their HEAD content, run tests there. Returns (per-test results, raw output)
+    or (None, reason_string) if the baseline couldn't be established.
+    """
+    if not changed_files:
+        return None, "no changed files"
+
+    try:
+        in_git = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if in_git.returncode != 0:
+            return None, "not a git repo"
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None, "git not available"
+
+    # Resolve changed files to their HEAD content BEFORE cloning
+    baseline_content: Dict[str, str] = {}
+    for f in changed_files:
+        abs_f = os.path.abspath(f)
+        try:
+            rel = os.path.relpath(abs_f, project_path).replace(os.sep, "/")
+        except ValueError:
+            continue
+        content = _git_file_at_head(project_path, rel)
+        if content is None:
+            continue  # file is new — no baseline version
+        baseline_content[rel] = content
+
+    if not baseline_content:
+        return None, "no changed files exist at HEAD"
+
+    shadow_dir = tempfile.mkdtemp(prefix="aura_verify_baseline_")
+    try:
+        # Copy project (skipping heavy dirs). Use copytree with ignore.
+        def _ignore(_src, names):
+            return {
+                n for n in names
+                if n in {".git", "node_modules", ".venv", "venv", "__pycache__",
+                         ".next", "dist", "build", ".mypy_cache", ".pytest_cache",
+                         "target", ".gradle", ".idea", ".vscode"}
+            }
+        shadow_proj = os.path.join(shadow_dir, "proj")
+        shutil.copytree(project_path, shadow_proj, ignore=_ignore, symlinks=False)
+
+        # Overwrite changed files with baseline content
+        for rel, content in baseline_content.items():
+            dest = os.path.join(shadow_proj, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            Path(dest).write_text(content, encoding="utf-8")
+
+        # Build a baseline test command. For pytest we drop -x so we see every
+        # test; the per-test diff depends on seeing the full set, not bailing early.
+        cmd_list = _build_test_command(framework, shadow_proj, list(baseline_content.keys()))
+        if framework == "pytest" and "-x" in cmd_list:
+            cmd_list = [c for c in cmd_list if c != "-x"]
+            if "-q" in cmd_list:
+                cmd_list = [c if c != "-q" else "-v" for c in cmd_list]
+            else:
+                cmd_list.append("-v")
+
+        cmd_str = " ".join(cmd_list)
+        logger.info(f"[AutoVerify][baseline] {cmd_str} in {shadow_proj}")
+        try:
+            result = shell_tool.run(command=cmd_str, cwd=shadow_proj, timeout=180)
+        except Exception as e:
+            return None, f"baseline shell error: {e}"
+
+        output = (result.get("stdout", "") or result.get("output", "") or "")
+        stderr = result.get("stderr", "")
+        if stderr:
+            output = f"{output}\n{stderr}".strip()
+
+        per_test = _parse_individual_tests(framework, output)
+        return per_test, output[:5000]
+    finally:
+        shutil.rmtree(shadow_dir, ignore_errors=True)
+
+
+def _diff_test_results(
+    baseline: List[Dict[str, str]],
+    current: List[Dict[str, str]],
+) -> Dict[str, List[Dict[str, str]]]:
+    """Compare two per-test result lists, return regressions / fixes / new / removed."""
+    base_by_name = {t["name"]: t for t in baseline}
+    cur_by_name = {t["name"]: t for t in current}
+
+    regressions = []
+    fixes = []
+    new_tests = []
+    removed = []
+
+    for name, cur in cur_by_name.items():
+        if name not in base_by_name:
+            new_tests.append(cur)
+            continue
+        base = base_by_name[name]
+        if base["status"] == "passed" and cur["status"] == "failed":
+            regressions.append({**cur, "was": "passed"})
+        elif base["status"] == "failed" and cur["status"] == "passed":
+            fixes.append({**cur, "was": "failed"})
+
+    for name, base in base_by_name.items():
+        if name not in cur_by_name:
+            removed.append(base)
+
+    return {
+        "regressions": regressions,
+        "fixes": fixes,
+        "new_tests": new_tests,
+        "removed": removed,
+    }
+
+
+def _run_property_tests(
+    project_path: str,
+    changed_files: List[str],
+    shell_tool,
+) -> Optional[Dict]:
+    """Generate and run Hypothesis property tests for changed Python files."""
+    py_files = [f for f in changed_files if f.endswith(".py")]
+    if not py_files:
+        return None
+
+    try:
+        from .auto_verify_hypothesis import generate_property_tests, cleanup_tempdir
+    except ImportError as e:
+        logger.info(f"[AutoVerify] hypothesis generator unavailable: {e}")
+        return None
+
+    tmp_dir, test_files = generate_property_tests(py_files, project_path)
+    if not tmp_dir:
+        return None
+
+    try:
+        cmd_str = f"python -m pytest -v --tb=short -p no:cacheprovider {tmp_dir}"
+        logger.info(f"[AutoVerify][property] {cmd_str}")
+        try:
+            result = shell_tool.run(command=cmd_str, cwd=project_path, timeout=180)
+        except Exception as e:
+            return {"skipped": True, "reason": f"shell error: {e}", "generated": len(test_files)}
+
+        output = (result.get("stdout", "") or result.get("output", "") or "")
+        stderr = result.get("stderr", "")
+        if stderr:
+            output = f"{output}\n{stderr}".strip()
+        exit_code = result.get("exit_code", 1)
+
+        parsed = _parse_test_output("pytest", output)
+        per_test = _parse_individual_tests("pytest", output)
+
+        return {
+            "generated": len(test_files),
+            "exit_code": exit_code,
+            "success": exit_code == 0,
+            "summary": parsed.get("summary", ""),
+            "passed": parsed.get("passed", 0),
+            "failed": parsed.get("failed", 0),
+            "failures": [t for t in per_test if t["status"] == "failed"][:10],
+            "output": output[:3000],
+        }
+    finally:
+        cleanup_tempdir(tmp_dir)
+
+
 def detect_test_command(project_path: str) -> Optional[List[str]]:
     """Detect the appropriate test command for a project.
 
@@ -402,19 +666,29 @@ def detect_test_command(project_path: str) -> Optional[List[str]]:
 
 
 def detect_and_run_tests(project_path: str, shell_tool,
-                         changed_files: Optional[List[str]] = None) -> dict:
+                         changed_files: Optional[List[str]] = None,
+                         differential: bool = True,
+                         property_based: bool = True) -> dict:
     """Detect test framework and run relevant tests.
 
     Smarter than auto_verify: targets tests for changed files when possible,
-    parses output for pass/fail counts, and reports affected functions.
+    parses output for pass/fail counts, reports affected functions, and
+    optionally runs a differential pass against the git HEAD baseline plus
+    Hypothesis-generated property tests.
 
     Args:
         project_path: Root directory of the project
         shell_tool: ShellExecutorTool instance with .run() method
         changed_files: Optional list of recently changed file paths
+        differential: If True and git is available, re-run tests against the
+            HEAD version of changed files and diff the results. Regressions
+            and fixes are reported in the return dict.
+        property_based: If True, generate Hypothesis smoke tests for changed
+            Python files with type-annotated public functions.
 
     Returns:
         dict with: success, framework, tests_found, test_command, parsed_results,
+                   per_test, regressions, fixes, property_results,
                    affected_functions, exit_code, output
     """
     framework = _detect_framework(project_path)
@@ -426,15 +700,23 @@ def detect_and_run_tests(project_path: str, shell_tool,
         return {"success": True, "framework": framework, "tests_found": True,
                 "skipped": True, "reason": "No shell tool available"}
 
+    # For pytest we want full verbosity in the differential pass so the diff
+    # engine has individual test names. Don't bail on first failure.
     cmd_list = _build_test_command(framework, project_path, changed_files)
     if not cmd_list:
         return {"success": True, "framework": framework, "tests_found": False,
                 "skipped": True, "reason": "Could not build test command"}
 
+    if differential and framework == "pytest":
+        cmd_list = [c for c in cmd_list if c != "-x"]
+        if "-q" in cmd_list:
+            cmd_list = [c if c != "-q" else "-v" for c in cmd_list]
+        elif "-v" not in cmd_list:
+            cmd_list.append("-v")
+
     cmd_str = " ".join(cmd_list)
     logger.info(f"[AutoVerify] Running: {cmd_str} in {project_path}")
 
-    # Identify affected functions for context
     affected_functions = []
     if changed_files:
         affected_functions = _find_affected_test_names(changed_files)
@@ -447,10 +729,10 @@ def detect_and_run_tests(project_path: str, shell_tool,
             output = f"{output}\n{stderr}".strip()
         exit_code = result.get("exit_code", 1)
 
-        # Parse test output for structured results
         parsed = _parse_test_output(framework, output)
+        per_test = _parse_individual_tests(framework, output)
 
-        return {
+        response = {
             "success": exit_code == 0,
             "framework": framework,
             "tests_found": True,
@@ -458,8 +740,37 @@ def detect_and_run_tests(project_path: str, shell_tool,
             "output": output[:5000],
             "test_command": cmd_str,
             "parsed_results": parsed,
-            "affected_functions": affected_functions[:20],  # Cap at 20
+            "per_test": per_test,
+            "affected_functions": affected_functions[:20],
         }
+
+        # Differential: re-run against git HEAD baseline
+        if differential and changed_files:
+            baseline, baseline_info = _run_baseline_tests(
+                project_path, changed_files, framework, shell_tool,
+            )
+            if baseline is not None:
+                diff = _diff_test_results(baseline, per_test)
+                response["baseline_per_test"] = baseline
+                response["regressions"] = diff["regressions"]
+                response["fixes"] = diff["fixes"]
+                response["new_tests"] = diff["new_tests"]
+                response["removed_tests"] = diff["removed"]
+                if diff["regressions"]:
+                    response["success"] = False
+            else:
+                response["baseline_skipped"] = baseline_info
+
+        # Property-based: generate + run Hypothesis smoke tests
+        if property_based and changed_files:
+            prop = _run_property_tests(project_path, changed_files, shell_tool)
+            if prop is not None:
+                response["property_results"] = prop
+                if prop.get("failed", 0) > 0:
+                    response["success"] = False
+
+        return response
+
     except Exception as e:
         logger.warning(f"[AutoVerify] Test execution failed: {e}")
         return {
