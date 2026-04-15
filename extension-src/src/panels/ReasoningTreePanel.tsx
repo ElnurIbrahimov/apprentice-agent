@@ -242,7 +242,8 @@ export default function ReasoningTreePanel() {
   );
 }
 
-function TreeNodeView({ node, depth }: { node: TreeNode; depth: number }) {
+// Memoized recursive node — toggling one node doesn't re-render siblings.
+const TreeNodeView = React.memo(function TreeNodeView({ node, depth }: { node: TreeNode; depth: number }) {
   const [open, setOpen] = useState(depth < 2);
   const hasChildren = (node.children?.length ?? 0) > 0;
   return (
@@ -276,7 +277,7 @@ function TreeNodeView({ node, depth }: { node: TreeNode; depth: number }) {
       ))}
     </div>
   );
-}
+});
 
 function ModeButton({ label, icon, active, onClick }: { label: string; icon: React.ReactNode; active: boolean; onClick: () => void }) {
   return (

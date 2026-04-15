@@ -37,6 +37,13 @@ const SENSITIVE_HOSTS = [
   'lastpass.com',
   'bitwarden.com',
   'dashlane.com',
+  // Webmail — subject lines + recipient names + draft content are personally
+  // identifying data we should never auto-send to the completion endpoint.
+  'mail.google.com',
+  'outlook.live.com',
+  'outlook.office.com',
+  'mail.yahoo.com',
+  'mail.proton.me',
 ];
 
 function isDenylisted(): boolean {
@@ -59,6 +66,21 @@ let overlay: HTMLDivElement | null = null;
 let mirror: HTMLDivElement | null = null;
 let enabled = true;
 let mode: 'inline' | 'chip' | 'off' = 'inline';
+
+// Cached canvas+ctx for text-width measurement in single-line <input>
+// placement. Creating a new OffscreenCanvas on every keystroke is wasteful.
+let _measureCanvas: HTMLCanvasElement | null = null;
+let _measureCtx: CanvasRenderingContext2D | null = null;
+function getMeasureCtx(): CanvasRenderingContext2D | null {
+  if (_measureCtx) return _measureCtx;
+  try {
+    _measureCanvas = document.createElement('canvas');
+    _measureCtx = _measureCanvas.getContext('2d');
+    return _measureCtx;
+  } catch {
+    return null;
+  }
+}
 
 function ensureOverlay(): HTMLDivElement {
   if (overlay && document.body.contains(overlay)) return overlay;
@@ -204,8 +226,7 @@ function placeOverlayAtInputCaret(input: HTMLInputElement, suggestion: string): 
   try {
     const rect = input.getBoundingClientRect();
     const cs = window.getComputedStyle(input);
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
+    const ctx = getMeasureCtx();
     if (!ctx) return false;
     ctx.font = cs.font;
     const caret = input.selectionStart ?? input.value.length;

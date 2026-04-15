@@ -206,11 +206,16 @@ export default function ChatPanel() {
     setUserScrolledUp(false);
     setNewMsgCount(0);
 
+    // Snapshot the chat model at send time so routing feedback on this
+    // message later attributes to the actual generator, not whatever model
+    // the user has selected when they click thumbs-up/down.
+    const messageModel = overrideModel || useStore.getState().featureModels['chat'] || undefined;
+
     // Add user + AI placeholder messages
     addMessage({ id: crypto.randomUUID(), role: 'user', text, timestamp: Date.now() });
     const aiId = crypto.randomUUID();
     streamingMsgId.current = aiId;
-    addMessage({ id: aiId, role: 'ai', text: '', timestamp: Date.now() });
+    addMessage({ id: aiId, role: 'ai', text: '', timestamp: Date.now(), model: messageModel });
 
     const stream: StreamState = {
       type: 'chat',
@@ -222,7 +227,7 @@ export default function ChatPanel() {
         useStore.setState(s => ({
           messages: s.messages.map(m =>
             m.id === aiId
-              ? { ...m, text: rawText, thinkingContent: thinkingContent || undefined }
+              ? { ...m, text: rawText, thinkingContent: thinkingContent || undefined, model: messageModel }
               : m
           ),
         }));

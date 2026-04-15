@@ -51,12 +51,20 @@ export default function EvolutionPanel() {
   useEffect(() => {
     if (tab === 'evolve') {
       loadStatus();
-      const id = setInterval(loadStatus, 5000);
+      // Poll fast (5s) only while an evolution run is in-flight; otherwise
+      // back off to 15s. Stop polling entirely on terminal states; a final
+      // manual refresh is enough.
+      const currentStatus = status?.status;
+      if (currentStatus === 'complete' || currentStatus === 'error') {
+        return; // no interval — user can click refresh
+      }
+      const interval = currentStatus === 'running' ? 5000 : 15000;
+      const id = setInterval(loadStatus, interval);
       return () => clearInterval(id);
     } else {
       loadSelf();
     }
-  }, [tab, loadStatus, loadSelf]);
+  }, [tab, loadStatus, loadSelf, status?.status]);
 
   const buildBody = () => ({
     skill_ids: skillIds.trim() ? skillIds.split(',').map((s) => s.trim()).filter(Boolean) : undefined,

@@ -5,7 +5,7 @@
  * Click an event that has a URL to open it in a new tab.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, RefreshCw, ExternalLink } from 'lucide-react';
 import { activity as activityApi } from '../api/client';
 import type { ActivityEvent } from '../api/types';
@@ -51,9 +51,17 @@ export default function ActivityPanel() {
     load();
   }, [load]);
 
-  const categories = Array.from(new Set(events.map((e) => e.category).filter(Boolean))) as string[];
-  const filtered = filter === 'all' ? events : events.filter((e) => e.category === filter);
-  const grouped = groupByDay(filtered);
+  // Memoize derived arrays so a parent re-render (or a filter click that
+  // doesn't change `events`) doesn't recompute all three at O(n).
+  const categories = useMemo(
+    () => Array.from(new Set(events.map((e) => e.category).filter(Boolean))) as string[],
+    [events],
+  );
+  const filtered = useMemo(
+    () => (filter === 'all' ? events : events.filter((e) => e.category === filter)),
+    [events, filter],
+  );
+  const grouped = useMemo(() => groupByDay(filtered), [filtered]);
 
   return (
     <div className="panel-scroll-root" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

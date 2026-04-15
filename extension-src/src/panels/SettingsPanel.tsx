@@ -4,6 +4,7 @@ import { User, FileText, Sparkles, RotateCcw, Save, Check, Server, Key, ChevronD
 import { getBackendUrl, setBackendUrl, setApiKey, API_KEY } from '../api';
 import { connectWS, fetchStatus, resetWsRetry } from '../ws';
 import { getDefaultCreationSettings, loadCreationSettings, saveCreationSettings, type CreationSettings } from '../utils/creationSettings';
+import ext from '../ext';
 
 // Direct API provider definitions — categorized
 const API_PROVIDER_CATEGORIES = [
@@ -120,6 +121,41 @@ export default function SettingsPanel() {
   const [saved, setSaved] = useState(false);
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // SOTA-upgrade opt-in flags — stored directly in chrome.storage.local (not
+  // through Zustand) because they're read by the content script and newtab
+  // which don't have access to the sidebar store.
+  const [ambientSurfaceEnabled, setAmbientSurfaceEnabled] = useState(false);
+  const [cockpitDisabled, setCockpitDisabled] = useState(false);
+  const [ghostTextMode, setGhostTextMode] = useState<'inline' | 'chip' | 'off'>('inline');
+
+  useEffect(() => {
+    if (!ext?.storage?.local) return;
+    ext.storage.local.get(
+      ['ambientSurfaceEnabled', 'cockpitDisabled', 'ghostTextMode'],
+      (d: any) => {
+        setAmbientSurfaceEnabled(!!d?.ambientSurfaceEnabled);
+        setCockpitDisabled(!!d?.cockpitDisabled);
+        const mode = d?.ghostTextMode;
+        if (mode === 'chip' || mode === 'off' || mode === 'inline') {
+          setGhostTextMode(mode);
+        }
+      },
+    );
+  }, []);
+
+  const updateAmbientSurface = useCallback((v: boolean) => {
+    setAmbientSurfaceEnabled(v);
+    ext?.storage?.local?.set({ ambientSurfaceEnabled: v });
+  }, []);
+  const updateCockpitDisabled = useCallback((v: boolean) => {
+    setCockpitDisabled(v);
+    ext?.storage?.local?.set({ cockpitDisabled: v });
+  }, []);
+  const updateGhostTextMode = useCallback((v: 'inline' | 'chip' | 'off') => {
+    setGhostTextMode(v);
+    ext?.storage?.local?.set({ ghostTextMode: v });
+  }, []);
 
   // Backend connection state
   const [localBackendUrl, setLocalBackendUrl] = useState('');
@@ -950,6 +986,107 @@ export default function SettingsPanel() {
               style={{ marginTop: 2, accentColor: 'var(--pl)' }}
             />
           </label>
+
+          {/* Ambient memory surfacing — sidebar pop-up with prior memories for the current page */}
+          <label style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '12px 14px',
+            borderRadius: 10,
+            border: '1px solid var(--b2)',
+            background: 'var(--glass)',
+            cursor: 'pointer',
+            marginTop: 10,
+          }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', marginBottom: 3 }}>
+                Ambient memory surfacing
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--fg3)', lineHeight: 1.45 }}>
+                On every new page, Aura quietly checks its memory and prior browsing for anything relevant, and pops a dismissable recall card at the top of the sidebar. Opt-in; banks, password managers, webmail always skipped. Max one surface per URL per hour.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={ambientSurfaceEnabled}
+              onChange={(e) => updateAmbientSurface(e.target.checked)}
+              style={{ marginTop: 2, accentColor: 'var(--pl)' }}
+            />
+          </label>
+
+          {/* New-tab cockpit toggle — off = classic minimal clock, on = live dashboard */}
+          <label style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '12px 14px',
+            borderRadius: 10,
+            border: '1px solid var(--b2)',
+            background: 'var(--glass)',
+            cursor: 'pointer',
+            marginTop: 10,
+          }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', marginBottom: 3 }}>
+                New-tab cockpit
+              </div>
+              <div style={{ fontSize: 10.5, color: 'var(--fg3)', lineHeight: 1.45 }}>
+                Replace the new-tab page with a live Aura dashboard: thinking stream, context heatmap, recent memories, activity timeline, hands status. Turn off for a minimal clock-only new tab. Polling pauses when the tab is not visible.
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={!cockpitDisabled}
+              onChange={(e) => updateCockpitDisabled(!e.target.checked)}
+              style={{ marginTop: 2, accentColor: 'var(--pl)' }}
+            />
+          </label>
+
+          {/* Ghost-text completion mode — three-way selector */}
+          <div style={{
+            padding: '12px 14px',
+            borderRadius: 10,
+            border: '1px solid var(--b2)',
+            background: 'var(--glass)',
+            marginTop: 10,
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg)', marginBottom: 3 }}>
+              Inline ghost-text
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--fg3)', lineHeight: 1.45, marginBottom: 10 }}>
+              Aura suggests a continuation when you pause typing in any textarea or editable field. Inline draws at the caret, chip draws below the field, off disables entirely. Banks, password fields, and webmail always skipped.
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {(['inline', 'chip', 'off'] as const).map((m) => {
+                const active = ghostTextMode === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => updateGhostTextMode(m)}
+                    style={{
+                      flex: 1,
+                      padding: '7px 10px',
+                      borderRadius: 6,
+                      border: active ? '1px solid var(--pl)' : '1px solid var(--b2)',
+                      background: active ? 'rgba(124, 58, 237, 0.15)' : 'var(--bg)',
+                      color: active ? 'var(--pl)' : 'var(--fg2)',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      textTransform: 'capitalize',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {m}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </section>
 
         {/* Section 1: Your Profile */}

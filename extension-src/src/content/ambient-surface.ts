@@ -24,6 +24,10 @@ const MIN_DELAY_MS = 2500; // wait for page to stabilize
 const SENSITIVE_HOSTS = [
   'accounts.google.com', 'login.microsoftonline.com', 'okta.com',
   '1password.com', 'lastpass.com', 'bitwarden.com', 'dashlane.com',
+  // Webmail — the page title ("Re: contract negotiations - Inbox") is PII
+  // we don't want leaking into the memory search stream.
+  'mail.google.com', 'outlook.live.com', 'outlook.office.com',
+  'mail.yahoo.com', 'mail.proton.me',
 ];
 
 function isDenylisted(): boolean {

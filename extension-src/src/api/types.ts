@@ -187,6 +187,17 @@ export interface EvolutionRunRequest {
 export interface SelfImprovementParams {
   status: string;
   params?: Record<string, number | string | boolean>;
+  /** Optional raw descriptors (min/max/path) — populated when the backend
+   *  returns full descriptor objects rather than plain scalars. Panels can
+   *  consume `params` for quick scalar display and `descriptors` for sliders. */
+  descriptors?: Record<string, {
+    name?: string;
+    path?: string;
+    current_value?: number | string | boolean;
+    min_value?: number;
+    max_value?: number;
+    description?: string;
+  }>;
 }
 
 export interface SelfImprovementStatus {

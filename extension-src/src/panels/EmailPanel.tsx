@@ -18,12 +18,22 @@ export default function EmailPanel() {
     setLoading(true);
     try {
       const s = await tools.email.status();
-      setConfigured(s.configured);
-      setProvider(s.provider || '');
-      setAccount(s.account || '');
-      if (s.configured) {
-        const r = await tools.email.inbox(30);
-        setEmails(r.emails ?? []);
+      // Backend can return {success: false, error: "…not loaded"} when the
+      // email tool isn't installed. Treat either unset `configured` or an
+      // explicit `success: false` as "not configured" for display.
+      const raw = s as any;
+      if (raw?.success === false) {
+        setConfigured(false);
+        setProvider('');
+        setAccount('');
+      } else {
+        setConfigured(!!s.configured);
+        setProvider(s.provider || '');
+        setAccount(s.account || '');
+        if (s.configured) {
+          const r = await tools.email.inbox(30);
+          setEmails(r.emails ?? []);
+        }
       }
     } catch { /* silent */ }
     setLoading(false);

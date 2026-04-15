@@ -38,6 +38,22 @@ export default function MultiAgentPanel() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [turns]);
 
+  // Specialist context-menu hook — App.tsx dispatches aura-specialist-prefill
+  // when the user right-clicks selected text and picks an "Ask specialist…"
+  // entry. We pre-fill the input with the selected text + a @specialist
+  // mention so the backend routes to that specialist. The real routing happens
+  // server-side via /api/multi-agent/chat — prepending the name to the message
+  // is the simplest signal until the backend supports an explicit override.
+  useEffect(() => {
+    const onPrefill = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail as { specialist: string; text: string };
+      if (!detail?.text) return;
+      setInput(`@${detail.specialist} ${detail.text}`);
+    };
+    window.addEventListener('aura-specialist-prefill', onPrefill);
+    return () => window.removeEventListener('aura-specialist-prefill', onPrefill);
+  }, []);
+
   const send = useCallback(async () => {
     const msg = input.trim();
     if (!msg || sending) return;

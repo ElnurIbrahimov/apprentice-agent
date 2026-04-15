@@ -37,7 +37,10 @@ export default function ContextHeatmapPanel() {
 
   useEffect(() => {
     fetchAll();
-    const id = setInterval(fetchAll, 5000);
+    // 10s interval — was 5s, but fetchAll fans out to 3 endpoints in parallel,
+    // so 5s produced 0.6 rps per mounted panel. 10s halves that while still
+    // feeling live.
+    const id = setInterval(fetchAll, 10000);
     return () => clearInterval(id);
   }, [fetchAll]);
 

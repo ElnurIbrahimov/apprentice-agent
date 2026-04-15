@@ -67,6 +67,11 @@ ext.alarms?.onAlarm?.addListener((alarm: chrome.alarms.Alarm) => {
   if (alarm.name !== 'aura-health-check') return;
   // Wake-up ping — sidebar will handle WS reconnect if needed
   ext.runtime.sendMessage({ type: 'HEALTH_CHECK' }).catch(() => {});
+  // Retry specialist menu population if the previous attempt (on install or
+  // on startup) came back empty because the backend was unreachable.
+  if (_knownSpecialistMenuIds.size === 0) {
+    try { refreshSpecialistMenu(); } catch { /* noop */ }
+  }
 });
 
 // ── Global hotkeys (chrome.commands) ────────────────────────────────────────
@@ -686,6 +691,7 @@ interface OpenSidebarMessage {
   panel?: string;
   message?: string;
   conversationId?: string;
+  newConversation?: boolean;
 }
 
 interface SerpFetchMessage {
@@ -864,6 +870,9 @@ interface PendingStorage {
   pendingTitle?: string;
   pendingPanelSwitch?: string;
   pendingImageDataUrl?: string;
+  pendingSpecialist?: string;
+  pendingConversationId?: string;
+  pendingNewConversation?: boolean;
 }
 
 interface SaveKnowledgeResponse {
@@ -1107,26 +1116,88 @@ ext.runtime.onInstalled.addListener((): void => {
       contexts: ['selection'],
     });
 
-    // Fetch agent list and create one menu item per specialist.
-    // Silent failure: if the backend is unreachable, no children appear.
-    fetch(`${BACKEND}/api/multi-agent/agents?session_id=default`, {
-      headers: backendHeaders(),
-      signal: AbortSignal.timeout(4000),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { agents?: Array<{ name: string; description: string }> } | null) => {
-        if (!data?.agents) return;
-        for (const agent of data.agents) {
-          ext.contextMenus.create({
-            id: `aura-specialist-${agent.name}`,
-            parentId: 'aura-specialists-parent',
-            title: agent.name,
-            contexts: ['selection'],
-          });
-        }
-      })
-      .catch(() => {});
+    // Populate specialist submenu from the backend. Factored into a named
+    // function so we can retry on startup and from the health-check alarm —
+    // without retry, a backend that's down at install time leaves the submenu
+    // empty until the user reinstalls the extension.
+    refreshSpecialistMenu();
   });
+});
+
+// Tracks which specialist items we've already created so we can remove them
+// before refreshing and avoid Chrome's duplicate-id error.
+const _knownSpecialistMenuIds = new Set<string>();
+
+function refreshSpecialistMenu(): void {
+  fetch(`${BACKEND}/api/multi-agent/agents?session_id=default`, {
+    headers: backendHeaders(),
+    signal: AbortSignal.timeout(4000),
+  })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data: { agents?: Array<{ name: string; description: string }> } | null) => {
+      if (!data?.agents) return;
+      // Remove stale entries first. Each remove is fire-and-forget because
+      // the menu may not exist yet on the cold path.
+      const pending: Promise<void>[] = [];
+      for (const id of _knownSpecialistMenuIds) {
+        pending.push(
+          new Promise((resolve) => {
+            try {
+              ext.contextMenus.remove(id, () => {
+                // Ignore runtime.lastError — id may not exist.
+                resolve();
+              });
+            } catch {
+              resolve();
+            }
+          }),
+        );
+      }
+      Promise.all(pending).then(() => {
+        _knownSpecialistMenuIds.clear();
+        // Also make sure the parent exists; on startup paths the parent
+        // may be absent even though the fetch succeeded.
+        try {
+          ext.contextMenus.create(
+            {
+              id: 'aura-specialists-parent',
+              parentId: MENU_IDS.parent,
+              title: 'Ask specialist…',
+              contexts: ['selection'],
+            },
+            () => {
+              // Ignore duplicate-id error if the parent already exists.
+              void chrome.runtime.lastError;
+            },
+          );
+        } catch { /* silent */ }
+
+        for (const agent of data.agents!) {
+          // Only accept alphanumeric + underscore + dash in the menu ID to
+          // prevent any injection through the agent.name field. The backend
+          // is trusted today, but treating cross-trust-boundary strings with
+          // an allowlist is the correct shape for future-proofing.
+          if (!/^[A-Za-z0-9_\-]{1,64}$/.test(agent.name)) continue;
+          const id = `aura-specialist-${agent.name}`;
+          try {
+            ext.contextMenus.create({
+              id,
+              parentId: 'aura-specialists-parent',
+              title: agent.name,
+              contexts: ['selection'],
+            });
+            _knownSpecialistMenuIds.add(id);
+          } catch { /* silent */ }
+        }
+      });
+    })
+    .catch(() => {});
+}
+
+// Retry on startup: if the extension was reloaded without a reinstall, the
+// onInstalled path didn't run, so populate here.
+ext.runtime.onStartup?.addListener?.(() => {
+  refreshSpecialistMenu();
 });
 
 // ── Context Menu Click Handler ────────────────────────────────────────────────
@@ -1255,12 +1326,59 @@ ext.runtime.onMessage.addListener(
     sendResponse: (response?: unknown) => void
   ): boolean => {
     switch (msg.type) {
-      // Sidebar has loaded — send any pending prefill text or panel switch
+      // Sidebar has loaded — drain every pending action in order. We consume
+      // all keys on every ready event (not an if/else chain) because multiple
+      // pending keys can coexist, e.g. a specialist submenu click sets both
+      // pendingPanelSwitch and pendingSpecialist.
       case 'SIDEBAR_READY': {
         ext.storage.local.get(
-          ['pendingQuery', 'pendingAction', 'pendingUrl', 'pendingTitle', 'pendingPanelSwitch', 'pendingImageDataUrl'],
+          [
+            'pendingQuery', 'pendingAction', 'pendingUrl', 'pendingTitle',
+            'pendingPanelSwitch', 'pendingImageDataUrl',
+            'pendingSpecialist', 'pendingConversationId', 'pendingNewConversation',
+          ],
           (data: PendingStorage) => {
-            if (data.pendingQuery) {
+            const toRemove: string[] = [];
+
+            // Panel switch comes first so the target panel is mounted before
+            // PREFILL_TEXT or SPECIALIST_PREFILL race to populate it.
+            if (data.pendingPanelSwitch) {
+              ext.runtime.sendMessage({
+                type: 'SWITCH_PANEL',
+                panel: data.pendingPanelSwitch,
+              } satisfies SwitchPanelMessage).catch(() => {});
+              toRemove.push('pendingPanelSwitch');
+            }
+
+            if (data.pendingNewConversation) {
+              ext.runtime.sendMessage({ type: 'NEW_CONVERSATION' }).catch(() => {});
+              toRemove.push('pendingNewConversation');
+            }
+
+            if (data.pendingConversationId) {
+              ext.runtime.sendMessage({
+                type: 'LOAD_CONVERSATION',
+                conversationId: data.pendingConversationId,
+              }).catch(() => {});
+              toRemove.push('pendingConversationId');
+            }
+
+            if (data.pendingSpecialist) {
+              ext.runtime.sendMessage({
+                type: 'SPECIALIST_PREFILL',
+                specialist: data.pendingSpecialist,
+                text: data.pendingQuery || '',
+                url: data.pendingUrl || '',
+                title: data.pendingTitle || '',
+              }).catch(() => {});
+              toRemove.push('pendingSpecialist');
+              // When a specialist is targeted, skip the generic PREFILL_TEXT
+              // path so the text only lands in the multi-agent input, not
+              // the chat input as well.
+              if (data.pendingQuery) {
+                toRemove.push('pendingQuery', 'pendingAction', 'pendingUrl', 'pendingTitle');
+              }
+            } else if (data.pendingQuery) {
               ext.runtime.sendMessage({
                 type: 'PREFILL_TEXT',
                 text: data.pendingQuery,
@@ -1268,9 +1386,10 @@ ext.runtime.onMessage.addListener(
                 url: data.pendingUrl || '',
                 title: data.pendingTitle || '',
               } satisfies PrefillTextMessage).catch(() => {});
-              ext.storage.local.remove(['pendingQuery', 'pendingAction', 'pendingUrl', 'pendingTitle']);
-            } else if (data.pendingImageDataUrl) {
-              // Image edit was requested before sidebar was open
+              toRemove.push('pendingQuery', 'pendingAction', 'pendingUrl', 'pendingTitle');
+            }
+
+            if (data.pendingImageDataUrl) {
               ext.runtime.sendMessage({
                 type: 'SWITCH_PANEL',
                 panel: 'image',
@@ -1279,13 +1398,11 @@ ext.runtime.onMessage.addListener(
                 type: 'IMAGE_EDIT_LOAD',
                 dataUrl: data.pendingImageDataUrl,
               } satisfies ImageEditLoadMessage).catch(() => {});
-              ext.storage.local.remove(['pendingImageDataUrl']);
-            } else if (data.pendingPanelSwitch) {
-              ext.runtime.sendMessage({
-                type: 'SWITCH_PANEL',
-                panel: data.pendingPanelSwitch,
-              } satisfies SwitchPanelMessage).catch(() => {});
-              ext.storage.local.remove(['pendingPanelSwitch']);
+              toRemove.push('pendingImageDataUrl');
+            }
+
+            if (toRemove.length > 0) {
+              ext.storage.local.remove(toRemove);
             }
           }
         );
@@ -1447,9 +1564,11 @@ ext.runtime.onMessage.addListener(
         return false;
       }
 
-      // New tab page: open sidebar with optional panel, message, or conversationId
+      // New tab page: open sidebar with optional panel, message, or conversationId.
+      // This handler consumes every field in parallel (not if/else) so a click
+      // that includes both panel and message triggers both actions.
       case 'OPEN_SIDEBAR': {
-        // Open the sidebar in the current window
+        // Open the sidebar in the current window.
         ext.tabs.query({ active: true, currentWindow: true }, (tabs) => {
           const tab = tabs?.[0];
           if (tab?.windowId != null && chrome.sidePanel) {
@@ -1457,18 +1576,45 @@ ext.runtime.onMessage.addListener(
           }
         });
 
-        if (msg.message) {
-          // Pre-fill chat with the message
-          ext.storage.local.set({
-            pendingQuery: msg.message,
-            pendingAction: 'ask',
-          });
-        } else if (msg.panel) {
+        // Everything the newtab cockpit can ask for: panel, message, conv load,
+        // new conv. Each writes to pendingStorage if the direct sendMessage fails
+        // (which it will on a cold sidebar). The SIDEBAR_READY handler drains
+        // every pending key atomically when the sidebar boots.
+        const pending: Record<string, unknown> = {};
+
+        if (msg.panel) {
           ext.runtime
             .sendMessage({ type: 'SWITCH_PANEL', panel: msg.panel } satisfies SwitchPanelMessage)
             .catch(() => {
-              ext.storage.local.set({ pendingPanelSwitch: msg.panel });
+              pending.pendingPanelSwitch = msg.panel;
             });
+        }
+
+        if (msg.message) {
+          // Always queue via storage — the sidebar may not be fully mounted
+          // yet even if the previous sendMessage call succeeded.
+          pending.pendingQuery = msg.message;
+          pending.pendingAction = 'ask';
+        }
+
+        if (msg.newConversation) {
+          ext.runtime
+            .sendMessage({ type: 'NEW_CONVERSATION' })
+            .catch(() => {
+              pending.pendingNewConversation = true;
+            });
+        }
+
+        if (msg.conversationId) {
+          ext.runtime
+            .sendMessage({ type: 'LOAD_CONVERSATION', conversationId: msg.conversationId })
+            .catch(() => {
+              pending.pendingConversationId = msg.conversationId;
+            });
+        }
+
+        if (Object.keys(pending).length > 0) {
+          ext.storage.local.set(pending);
         }
         return false;
       }

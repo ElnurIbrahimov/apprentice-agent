@@ -99,7 +99,7 @@ const PANEL_ENTRIES: { id: PanelId; Component: React.ComponentType }[] = [
 ];
 
 export default function App() {
-  const { activePanel, setPanel, setPendingCtx } = useStore();
+  const { activePanel, setPanel, setPendingCtx, loadConversation, newConversation } = useStore();
   const [visiblePanel, setVisiblePanel] = useState<PanelId>(activePanel);
   const [transitioning, setTransitioning] = useState(false);
   const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('right');
@@ -208,6 +208,32 @@ export default function App() {
         setPanel(msg.panel === 'search' ? 'search' : 'chat');
         setTimeout(() => {
           window.dispatchEvent(new CustomEvent('aura-send', { detail: { text: msg.text } }));
+        }, 120);
+      }
+      // Load a specific server-side conversation (from newtab cockpit click).
+      if (msg.type === 'LOAD_CONVERSATION' && msg.conversationId) {
+        setPanel('chat');
+        loadConversation(msg.conversationId).catch(() => { /* silent */ });
+      }
+      // Start a fresh conversation (from newtab new-chat button).
+      if (msg.type === 'NEW_CONVERSATION') {
+        setPanel('chat');
+        newConversation().catch(() => { /* silent */ });
+      }
+      // Specialist context-menu click — route selected text to a named
+      // specialist in MultiAgentPanel. Panel switch is handled via SWITCH_PANEL
+      // earlier; MultiAgentPanel consumes the detail via the custom event.
+      if (msg.type === 'SPECIALIST_PREFILL' && msg.specialist) {
+        setPanel('multi-agent');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('aura-specialist-prefill', {
+            detail: {
+              specialist: msg.specialist,
+              text: msg.text || '',
+              url: msg.url || '',
+              title: msg.title || '',
+            },
+          }));
         }, 120);
       }
     };

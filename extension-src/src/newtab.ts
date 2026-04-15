@@ -209,10 +209,40 @@ function getDayQuote(): string {
   return QUOTES[dayIndex];
 }
 
+/**
+ * HTML entity escape covering all 5 characters that matter in both text-node
+ * AND attribute contexts. The prior implementation used textContent→innerHTML
+ * which does not escape " or ' (irrelevant in text nodes, critical in
+ * quoted attribute values). All server-originated strings interpolated into
+ * template literals MUST go through this.
+ */
 function esc(s: string): string {
-  const el = document.createElement('span');
-  el.textContent = s;
-  return el.innerHTML;
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Allowlist-only URL check for anywhere we load or navigate to a server-provided URL.
+ * Rejects javascript:, data:, file:, vbscript:, and anything with control chars or spaces.
+ */
+function isSafeHttpUrl(s: unknown): s is string {
+  if (typeof s !== 'string' || !s) return false;
+  if (/[\x00-\x1f\s]/.test(s)) return false;
+  return /^https?:\/\/[^\s]+$/i.test(s);
+}
+
+/**
+ * Allowlist-only color check for anywhere a server value is interpolated into
+ * a CSS style attribute. Even quote-safe values can inject via
+ * `background-image:url(...)` — the only safe approach is a whitelist.
+ */
+const COLOR_RE = /^(#[0-9a-fA-F]{3,8}|rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(?:,\s*(?:\d*\.)?\d+\s*)?\))$/;
+function isSafeColor(s: unknown): s is string {
+  return typeof s === 'string' && COLOR_RE.test(s);
 }
 
 /* ── Chrome storage ── */
@@ -399,21 +429,28 @@ function mount() {
     </div>
   `;
 
-  // ── Clock tick (1s for colon blink) ──
+  // ── Clock tick ──
+  // Time updates every second (colon blinks); greeting + date only need to
+  // refresh on the minute boundary. Splitting the two avoids replacing the
+  // weather span's innerHTML every second — previously the weather node was
+  // re-serialized 60× per minute.
   setInterval(() => {
     const d = new Date();
     const timeEl = document.getElementById('clock-time');
+    if (timeEl) timeEl.innerHTML = formatTime(d);
+  }, 1000);
+  setInterval(() => {
+    const d = new Date();
     const greetEl = document.getElementById('clock-greeting');
     const dateEl = document.getElementById('clock-date');
-    if (timeEl) timeEl.innerHTML = formatTime(d);
     if (greetEl) greetEl.textContent = getGreeting(d);
-    // Update date every tick but preserve weather span
     if (dateEl) {
+      // Preserve the existing weather span instead of re-creating it.
       const weatherEl = document.getElementById('weather');
       const weatherHTML = weatherEl ? weatherEl.outerHTML : '<span class="nt-weather" id="weather"></span>';
       dateEl.innerHTML = esc(formatDate(d)) + weatherHTML;
     }
-  }, 1000);
+  }, 60_000);
 
   // ── Weather (non-blocking async) ──
   fetchWeather().then((w) => {
@@ -611,15 +648,50 @@ function fmtTimeShort(ts: number): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Coerce ISO string or epoch-ms/epoch-s into unix seconds. */
+function normalizeTimestamp(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value > 1e12 ? Math.floor(value / 1000) : value;
+  }
+  if (typeof value === 'string' && value) {
+    const ms = Date.parse(value);
+    if (!Number.isNaN(ms)) return Math.floor(ms / 1000);
+  }
+  return 0;
+}
+
 function openSidebar(panel: string, extras: Record<string, unknown> = {}) {
   sendToBackground({ type: 'OPEN_SIDEBAR', panel, ...extras });
 }
 
-function mountCockpit(): void {
-  const cockpit = document.getElementById('cockpit');
-  if (!cockpit) return;
-  cockpit.style.display = '';
+/**
+ * Cockpit polling — all 7 intervals are tracked so we can pause them when
+ * the new-tab page is not visible. Without this, a backgrounded newtab keeps
+ * firing 7 intervals against Hetzner forever, which adds up fast across many
+ * open tabs.
+ */
+let cockpitIntervalHandles: number[] = [];
+let cockpitMounted = false;
 
+function startCockpitPolling(): void {
+  if (cockpitIntervalHandles.length > 0) return; // already running
+  cockpitIntervalHandles = [
+    window.setInterval(refreshTicker,   8000),
+    window.setInterval(refreshHeatmap, 30000),
+    window.setInterval(refreshStarter, 20000),
+    window.setInterval(refreshHands,   15000),
+    window.setInterval(refreshActivity, 60000),
+    window.setInterval(refreshMemories, 60000),
+    window.setInterval(refreshFeed,     60000),
+  ];
+}
+
+function stopCockpitPolling(): void {
+  for (const id of cockpitIntervalHandles) clearInterval(id);
+  cockpitIntervalHandles = [];
+}
+
+function refreshCockpitCards(): void {
   refreshTicker();
   refreshHeatmap();
   refreshStarter();
@@ -627,15 +699,30 @@ function mountCockpit(): void {
   refreshActivity();
   refreshMemories();
   refreshFeed();
+}
 
-  // Polling intervals — stagger to avoid thundering herd.
-  setInterval(refreshTicker, 8000);
-  setInterval(refreshHeatmap, 30000);
-  setInterval(refreshStarter, 20000);
-  setInterval(refreshHands, 15000);
-  setInterval(refreshActivity, 60000);
-  setInterval(refreshMemories, 60000);
-  setInterval(refreshFeed, 60000);
+function mountCockpit(): void {
+  const cockpit = document.getElementById('cockpit');
+  if (!cockpit) return;
+  cockpit.style.display = '';
+  cockpitMounted = true;
+
+  refreshCockpitCards();
+  startCockpitPolling();
+
+  // Pause polling when the tab is hidden. Chrome already throttles intervals
+  // on hidden tabs, but it still fires them periodically — pausing avoids
+  // the network calls entirely.
+  document.addEventListener('visibilitychange', () => {
+    if (!cockpitMounted) return;
+    if (document.hidden) {
+      stopCockpitPolling();
+    } else {
+      // Fresh fetch on visibility-gained, then resume the intervals.
+      refreshCockpitCards();
+      startCockpitPolling();
+    }
+  });
 }
 
 async function refreshTicker(): Promise<void> {
@@ -667,9 +754,13 @@ async function refreshHeatmap(): Promise<void> {
     return;
   }
   host.innerHTML = data.items.slice(0, 12).map((it) => {
-    const op = Math.max(0.35, it.opacity);
-    const fs = Math.round(9 + it.size * 3);
-    return `<span class="nt-heatchip" style="background:${esc(it.color)};opacity:${op};font-size:${fs}px">${esc(it.name)}</span>`;
+    const op = Math.max(0.35, Number(it.opacity) || 0.5);
+    const fs = Math.round(9 + (Number(it.size) || 0) * 3);
+    // Colors go into a `style` attribute — esc() alone isn't sufficient for CSS
+    // injection (e.g. `red;background-image:url(evil)` has no HTML special chars).
+    // Strict allowlist is the only safe approach.
+    const safeColor = isSafeColor(it.color) ? it.color : '#7c3aed';
+    return `<span class="nt-heatchip" style="background:${safeColor};opacity:${op};font-size:${fs}px">${esc(it.name)}</span>`;
   }).join('');
   const card = document.getElementById('card-heatmap');
   if (card) {
@@ -737,40 +828,53 @@ async function refreshHands(): Promise<void> {
 
 async function refreshActivity(): Promise<void> {
   const since = Math.floor(Date.now() / 1000) - 86400;
-  const data = await fetchJson<{ events: Array<{ timestamp: number; title?: string; description?: string; url?: string }> }>(`/api/activity/events?limit=15&after=${since}`);
+  // Server field names: event_type/summary/payload/timestamp(ISO).
+  // Normalize here because newtab.ts bypasses api/client.ts.
+  const data = await fetchJson<{ events: Array<any> }>(`/api/activity/events?limit=15&after=${since}`);
   const list = document.getElementById('activity-list');
   if (!list) return;
-  const events = data?.events ?? [];
+  const rawEvents = Array.isArray(data?.events) ? data!.events : [];
+  const events = rawEvents.map((e) => ({
+    timestamp: normalizeTimestamp(e?.timestamp),
+    title: e?.title ?? e?.summary ?? e?.description ?? '',
+    url: e?.url ?? '',
+  }));
   if (events.length === 0) {
     list.innerHTML = '<span class="nt-card-empty">No events</span>';
     return;
   }
   list.innerHTML = events.slice(0, 10).map((e) => {
-    const label = e.title || e.description || '(event)';
-    return `<div class="nt-li" data-url="${esc(e.url || '')}">
+    const label = e.title || '(event)';
+    // Only carry the URL through data-url if it's a real http(s) link.
+    // The click handler also revalidates before calling window.open().
+    const safeUrl = isSafeHttpUrl(e.url) ? e.url : '';
+    return `<div class="nt-li" data-url="${esc(safeUrl)}">
       <span class="nt-li-time">${fmtTimeShort(e.timestamp)}</span>
       <span class="nt-li-text">${esc(label)}</span>
     </div>`;
   }).join('');
   list.querySelectorAll<HTMLElement>('.nt-li').forEach((el) => {
     const url = el.dataset.url;
-    if (url) {
+    if (url && isSafeHttpUrl(url)) {
       el.onclick = () => window.open(url, '_blank', 'noopener');
     }
   });
 }
 
 async function refreshMemories(): Promise<void> {
-  const data = await fetchJson<{ memories: Array<{ id: string; content: string; timestamp: number }> }>('/api/memory/recent?limit=8');
+  // Server returns ISO-string timestamps; fetchJson itself is untyped here so
+  // we just pull content and ignore timestamp (the newtab memories card
+  // doesn't render it).
+  const data = await fetchJson<{ memories: Array<any> }>('/api/memory/recent?limit=8');
   const list = document.getElementById('memories-list');
   if (!list) return;
-  const mems = data?.memories ?? [];
+  const mems = Array.isArray(data?.memories) ? data!.memories : [];
   if (mems.length === 0) {
     list.innerHTML = '<span class="nt-card-empty">No memories</span>';
     return;
   }
   list.innerHTML = mems.slice(0, 8).map((m) => {
-    const snippet = (m.content || '').slice(0, 80);
+    const snippet = String(m?.content ?? '').slice(0, 80);
     return `<div class="nt-li"><span class="nt-li-text">${esc(snippet)}</span></div>`;
   }).join('');
   const card = document.getElementById('card-memories');
@@ -791,8 +895,12 @@ async function refreshFeed(): Promise<void> {
   }
   row.innerHTML = items.map((it) => {
     const title = it.title || 'Capture';
+    // Skip the <img> entirely unless the thumbnail is a real http(s) URL.
+    // A `javascript:` or `data:` URL here could fire network requests from
+    // the new-tab page, which has access to the extension's API key in storage.
+    const thumb = isSafeHttpUrl(it.thumbnail) ? `<img src="${esc(it.thumbnail)}" alt="">` : '';
     return `<div class="nt-feed-item" title="${esc(title)}" data-id="${esc(it.id)}">
-      ${it.thumbnail ? `<img src="${esc(it.thumbnail)}" alt="">` : ''}
+      ${thumb}
     </div>`;
   }).join('');
   row.querySelectorAll<HTMLElement>('.nt-feed-item').forEach((el) => {

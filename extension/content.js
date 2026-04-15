@@ -5948,7 +5948,14 @@ I have a follow-up question: `,
     "1password.com",
     "lastpass.com",
     "bitwarden.com",
-    "dashlane.com"
+    "dashlane.com",
+    // Webmail — draft subject lines + recipients are PII we should never
+    // auto-send to completion endpoints.
+    "mail.google.com",
+    "outlook.live.com",
+    "outlook.office.com",
+    "mail.yahoo.com",
+    "mail.proton.me"
   ];
   function isDenylisted$3() {
     const host = location.hostname;
@@ -6164,7 +6171,14 @@ I have a follow-up question: `,
     "1password.com",
     "lastpass.com",
     "bitwarden.com",
-    "dashlane.com"
+    "dashlane.com",
+    // Webmail — subject lines + recipient names + draft content are personally
+    // identifying data we should never auto-send to the completion endpoint.
+    "mail.google.com",
+    "outlook.live.com",
+    "outlook.office.com",
+    "mail.yahoo.com",
+    "mail.proton.me"
   ];
   function isDenylisted$2() {
     const host = location.hostname;
@@ -6177,6 +6191,18 @@ I have a follow-up question: `,
   let mirror = null;
   let enabled$1 = true;
   let mode = "inline";
+  let _measureCanvas = null;
+  let _measureCtx = null;
+  function getMeasureCtx() {
+    if (_measureCtx) return _measureCtx;
+    try {
+      _measureCanvas = document.createElement("canvas");
+      _measureCtx = _measureCanvas.getContext("2d");
+      return _measureCtx;
+    } catch {
+      return null;
+    }
+  }
   function ensureOverlay() {
     if (overlay && document.body.contains(overlay)) return overlay;
     const div = document.createElement("div");
@@ -6323,8 +6349,7 @@ I have a follow-up question: `,
     try {
       const rect = input.getBoundingClientRect();
       const cs = window.getComputedStyle(input);
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
+      const ctx = getMeasureCtx();
       if (!ctx) return false;
       ctx.font = cs.font;
       const caret = input.selectionStart ?? input.value.length;
@@ -6641,7 +6666,14 @@ I have a follow-up question: `,
     "1password.com",
     "lastpass.com",
     "bitwarden.com",
-    "dashlane.com"
+    "dashlane.com",
+    // Webmail — the page title ("Re: contract negotiations - Inbox") is PII
+    // we don't want leaking into the memory search stream.
+    "mail.google.com",
+    "outlook.live.com",
+    "outlook.office.com",
+    "mail.yahoo.com",
+    "mail.proton.me"
   ];
   function isDenylisted() {
     const host = location.hostname;

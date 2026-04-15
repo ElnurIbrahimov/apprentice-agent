@@ -30,6 +30,7 @@ export default function ConversationHistory({ open, onClose }: Props) {
   const {
     conversations, activeConversationId, loadConversation, deleteConversation, clearAllHistory,
     folders, createFolder, deleteFolder, pinConversation, moveToFolder,
+    searchServerConversations,
   } = useStore();
   const [search, setSearch] = useState('');
   const [confirmClearAll, setConfirmClearAll] = useState(false);
@@ -37,9 +38,11 @@ export default function ConversationHistory({ open, onClose }: Props) {
   const [showFolderInput, setShowFolderInput] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [serverHits, setServerHits] = useState<Array<{ conversation_id: string; conversation_title: string; snippet: string; timestamp: number }>>([]);
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const serverSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -70,6 +73,29 @@ export default function ConversationHistory({ open, onClose }: Props) {
     if (showFolderInput) setTimeout(() => folderInputRef.current?.focus(), 50);
   }, [showFolderInput]);
 
+  // Debounced server-side search — fires 300ms after the user stops typing.
+  // Local IDB filter always runs synchronously and renders first; server hits
+  // are appended when they arrive. Fails silently to preserve local-only UX.
+  useEffect(() => {
+    if (serverSearchTimer.current) clearTimeout(serverSearchTimer.current);
+    const q = search.trim();
+    if (q.length < 3) {
+      setServerHits([]);
+      return;
+    }
+    serverSearchTimer.current = setTimeout(async () => {
+      try {
+        const hits = await searchServerConversations(q, 20);
+        setServerHits(hits);
+      } catch {
+        setServerHits([]);
+      }
+    }, 300);
+    return () => {
+      if (serverSearchTimer.current) clearTimeout(serverSearchTimer.current);
+    };
+  }, [search, searchServerConversations]);
+
   const filtered = useMemo(() => {
     let list = conversations;
     // Filter by tab
@@ -79,9 +105,20 @@ export default function ConversationHistory({ open, onClose }: Props) {
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(c => c.title.toLowerCase().includes(q));
+      // Merge server hits: include any conversation id returned by the server
+      // that isn't already in the local filtered list. Promotes stale-local
+      // conversations (archived / synced from another device) to be findable.
+      if (serverHits.length > 0) {
+        const localIds = new Set(list.map(c => c.id));
+        const extras = serverHits
+          .filter(h => !localIds.has(h.conversation_id))
+          .map(h => conversations.find(c => c.id === h.conversation_id))
+          .filter((c): c is typeof conversations[number] => !!c);
+        list = [...list, ...extras];
+      }
     }
     return list;
-  }, [conversations, search, activeTab]);
+  }, [conversations, search, activeTab, serverHits]);
 
   const handleLoad = async (id: string) => {
     try { await loadConversation(id); } catch {}

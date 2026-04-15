@@ -41,6 +41,13 @@ const SENSITIVE_HOSTS = [
   'lastpass.com',
   'bitwarden.com',
   'dashlane.com',
+  // Webmail — draft subject lines + recipients are PII we should never
+  // auto-send to completion endpoints.
+  'mail.google.com',
+  'outlook.live.com',
+  'outlook.office.com',
+  'mail.yahoo.com',
+  'mail.proton.me',
 ];
 
 function isDenylisted(): boolean {

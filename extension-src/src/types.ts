@@ -117,6 +117,10 @@ export interface Message {
   agentTask?: string;
   /** False while the agent loop is running, true when finished or stopped. */
   agentDone?: boolean;
+  /** Model that generated this assistant message — used for routing feedback
+   *  so thumbs-up/down attribute to the actual generator, not whatever model
+   *  happens to be selected at click time. */
+  model?: string;
 }
 
 export interface StreamState {

@@ -14,6 +14,7 @@ export default function FlashcardsPanel() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [stats, setStats] = useState<{ total_cards: number; due_today: number } | null>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -22,10 +23,23 @@ export default function FlashcardsPanel() {
         tools.flashcards.due(),
         tools.flashcards.stats(),
       ]);
-      setDue(d.due_count);
+      // Backend returns {success: false, error: "…tool not loaded"} when the
+      // flashcards subsystem isn't installed. Treat as a graceful "feature
+      // not available" state rather than rendering undefined fields.
+      const rawDue = d as any;
+      if (rawDue?.success === false) {
+        setUnavailable(rawDue?.error || 'Flashcards tool not loaded on the server');
+        setCard(null);
+        setDue(0);
+        setStats(null);
+        setLoading(false);
+        return;
+      }
+      setUnavailable(null);
+      setDue(d.due_count ?? 0);
       setCard(d.next_card || null);
       setShowBack(false);
-      setStats({ total_cards: s.total_cards, due_today: s.due_today });
+      setStats({ total_cards: s?.total_cards ?? 0, due_today: s?.due_today ?? 0 });
     } catch { /* silent */ }
     setLoading(false);
   }, []);
@@ -61,7 +75,23 @@ export default function FlashcardsPanel() {
 
       {loading && <div style={{ fontSize: 11, color: 'var(--mu)' }}>Loading…</div>}
 
-      {!loading && !card && due === 0 && (
+      {unavailable && !loading && (
+        <div style={{
+          padding: 16,
+          textAlign: 'center',
+          background: 'var(--s2)',
+          border: '1px dashed var(--b1)',
+          borderRadius: 10,
+          color: 'var(--mu)',
+          fontSize: 11,
+          lineHeight: 1.5,
+        }}>
+          <div style={{ marginBottom: 4, color: 'var(--tx)', fontSize: 12 }}>Feature unavailable</div>
+          {unavailable}
+        </div>
+      )}
+
+      {!unavailable && !loading && !card && due === 0 && (
         <div style={{ fontSize: 11, color: 'var(--mu)', textAlign: 'center', padding: 20 }}>
           No cards due. 🎉
         </div>

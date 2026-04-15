@@ -27,7 +27,11 @@ export default function MessageBubble({ message, isLatest, isStreaming: isStream
   const thinkContentRef = useRef<HTMLDivElement>(null);
 
   const sendFeedback = (signal: 'up' | 'down' | 'regen') => {
-    const model = featureModels['chat'] || 'unknown';
+    // Prefer the model stored on the message (captured at generation time) so
+    // feedback attributes to the actual generator, not the currently-selected
+    // model. Fall back to the live selection if the message is old and
+    // predates the model-attribution patch.
+    const model = message.model || featureModels['chat'] || 'unknown';
     const conversationId = useStore.getState().activeConversationId || undefined;
     routing
       .feedback({
