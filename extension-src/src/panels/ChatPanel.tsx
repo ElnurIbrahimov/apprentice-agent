@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import MessageBubble from '../components/MessageBubble';
 import HomeScreen from '../components/HomeScreen';
 import ContextBar from '../components/ContextBar';
+import CurrentTabContext from '../components/CurrentTabContext';
 import InputBar from '../components/InputBar';
 import DropZone from '../components/DropZone';
 import { PAGE_KEYWORDS } from '../ws';
@@ -381,6 +382,7 @@ export default function ChatPanel() {
   return (
     <DropZone onFilesAdded={handleFilesAdded}>
     <div className="flex flex-col h-full overflow-hidden" style={{ position: 'relative' }}>
+      <CurrentTabContext />
       <ContextBar />
 
       {/* Messages */}

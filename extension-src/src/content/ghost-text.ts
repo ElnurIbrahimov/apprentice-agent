@@ -229,6 +229,27 @@ function onScrollOrResize(): void {
 
 export function initGhostText(): void {
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
+
+  // Respect ghostTextMode: only run chip mode when explicitly selected (or as
+  // legacy default when the new inline renderer has disabled itself).
+  // The new ghost-text-inline.ts sets the default to 'inline' and owns
+  // rendering when that's set — we silently stand down in that case.
+  try {
+    ext.storage?.local?.get(['ghostTextMode'], (d: any) => {
+      const m = d?.ghostTextMode;
+      if (m === 'inline' || m === 'off') {
+        enabled = false;
+      }
+    });
+    ext.storage?.onChanged?.addListener((changes: any, area: string) => {
+      if (area === 'local' && changes.ghostTextMode) {
+        const v = changes.ghostTextMode.newValue;
+        enabled = v === 'chip';
+        if (!enabled) clearChip();
+      }
+    });
+  } catch { /* silent */ }
+
   document.addEventListener('input', onInput, { capture: true, passive: true });
   document.addEventListener('keydown', onKeyDown, { capture: true });
   window.addEventListener('scroll', onScrollOrResize, { capture: true, passive: true });

@@ -536,11 +536,136 @@
       .nt-fade-d5 { animation-delay: 320ms; }
       .nt-fade-d6 { animation-delay: 400ms; }
 
+      /* ── Cockpit dashboard ─────────────────────────────────────── */
+      .nt-cockpit {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 4px;
+      }
+      .nt-card {
+        background: var(--s2);
+        border: 1px solid var(--b1);
+        border-radius: var(--r-md);
+        padding: 12px 14px;
+        min-height: 62px;
+        transition: border-color 0.15s, transform 0.15s;
+      }
+      .nt-card:hover { border-color: rgba(124, 58, 237, 0.28); }
+      .nt-card-title {
+        font-size: 9px;
+        color: var(--mu);
+        text-transform: uppercase;
+        letter-spacing: 0.7px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-bottom: 6px;
+      }
+      .nt-card-body {
+        font-size: 12px;
+        color: var(--tx);
+        line-height: 1.45;
+      }
+      .nt-card-empty {
+        font-size: 11px;
+        color: var(--di);
+      }
+      .nt-card-span2 { grid-column: 1 / -1; }
+
+      /* Thinking ticker */
+      .nt-ticker {
+        font-size: 13px;
+        color: var(--pl2);
+        font-weight: 400;
+        line-height: 1.5;
+        min-height: 18px;
+        animation: tickerFade 600ms ease-out;
+      }
+      @keyframes tickerFade {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .nt-ticker-meta { font-size: 9px; color: var(--di); margin-top: 3px; }
+
+      /* Heatmap strip chips */
+      .nt-heatmap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+      .nt-heatchip {
+        padding: 2px 8px;
+        border-radius: 10px;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.2px;
+      }
+
+      /* Starter card */
+      .nt-starter { color: var(--tx); font-size: 12px; line-height: 1.5; }
+      .nt-starter-actions { display: flex; gap: 6px; margin-top: 8px; }
+      .nt-starter-btn {
+        padding: 5px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--b1);
+        background: var(--s3);
+        color: var(--mu);
+        font-size: 11px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .nt-starter-btn.primary { background: rgba(124, 58, 237, 0.25); color: var(--pl); border-color: rgba(124, 58, 237, 0.4); }
+      .nt-starter-btn:hover { color: var(--tx); border-color: rgba(124, 58, 237, 0.4); }
+
+      /* Timeline + lists */
+      .nt-list { display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; scrollbar-width: thin; }
+      .nt-list::-webkit-scrollbar { width: 4px; }
+      .nt-list::-webkit-scrollbar-thumb { background: var(--b1); border-radius: 2px; }
+      .nt-li {
+        font-size: 11px;
+        color: var(--tx);
+        padding: 3px 0;
+        display: flex;
+        gap: 6px;
+        align-items: baseline;
+      }
+      .nt-li-time { font-size: 9px; color: var(--di); flex-shrink: 0; width: 32px; }
+      .nt-li-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .nt-li:hover .nt-li-text { color: var(--pl); text-decoration: underline; cursor: pointer; }
+
+      /* Hands status row */
+      .nt-hand { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; }
+      .nt-hand-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+      .nt-hand-dot.running { background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.5); }
+      .nt-hand-dot.paused { background: #fbbf24; }
+      .nt-hand-dot.idle { background: var(--di); }
+
+      /* Feed thumbs */
+      .nt-feed { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+      .nt-feed::-webkit-scrollbar { display: none; }
+      .nt-feed-item {
+        flex-shrink: 0;
+        width: 58px;
+        height: 58px;
+        border-radius: 6px;
+        background: var(--s3);
+        border: 1px solid var(--b1);
+        overflow: hidden;
+        cursor: pointer;
+      }
+      .nt-feed-item img { width: 100%; height: 100%; object-fit: cover; }
+      .nt-feed-item:hover { border-color: rgba(124, 58, 237, 0.4); }
+
       /* Responsive */
       @media (max-width: 600px) {
         .nt-clock-time { font-size: 48px; }
         #root { padding: 28px 16px; gap: 24px; }
         .nt-action { padding: 8px 14px; font-size: 12px; }
+        .nt-cockpit { grid-template-columns: 1fr; }
       }
     </style>
   </head>

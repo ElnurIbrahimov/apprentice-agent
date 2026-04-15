@@ -2048,27 +2048,27 @@ ${url}`;
       internals.originRect = originRect;
       internals.content = content;
       internals.isOpen = true;
-      const overlay = document.createElement("div");
-      overlay.className = "aura-modal-overlay";
-      Object.assign(overlay.style, {
+      const overlay2 = document.createElement("div");
+      overlay2.className = "aura-modal-overlay";
+      Object.assign(overlay2.style, {
         position: "fixed",
         inset: "0",
         background: "rgba(0,0,0,0.3)",
         zIndex: String(Z_TOP - 1),
         opacity: "0"
       });
-      document.body.appendChild(overlay);
-      internals.overlay = overlay;
+      document.body.appendChild(overlay2);
+      internals.overlay = overlay2;
       const modal = document.createElement("div");
       modal.className = "aura-modal";
       applyGlassStyle(modal, originRect);
       document.body.appendChild(modal);
       internals.modal = modal;
-      fadeIn(overlay, {
+      fadeIn(overlay2, {
         duration: ANIM.flowDuration,
         easing: "ease-out"
       }).then(() => {
-        overlay.style.opacity = "1";
+        overlay2.style.opacity = "1";
       });
       const target = centeredRect();
       await morph(modal, originRect, target, {
@@ -2101,14 +2101,14 @@ ${url}`;
           }
         });
       }
-      overlay.addEventListener("click", () => close());
+      overlay2.addEventListener("click", () => close());
       document.addEventListener("keydown", onKeyDown2);
       internals.opening = false;
     }
     async function close() {
       if (!internals.isOpen || internals.closing) return;
       internals.closing = true;
-      const { modal, overlay, originRect } = internals;
+      const { modal, overlay: overlay2, originRect } = internals;
       document.removeEventListener("keydown", onKeyDown2);
       const animations = [];
       if (modal && originRect) {
@@ -2121,9 +2121,9 @@ ${url}`;
           })
         );
       }
-      if (overlay) {
+      if (overlay2) {
         animations.push(
-          dissolve(overlay, {
+          dissolve(overlay2, {
             duration: ANIM.morphDuration,
             easing: "ease-in"
           }).catch(() => {
@@ -2132,7 +2132,7 @@ ${url}`;
       }
       await Promise.all(animations);
       modal == null ? void 0 : modal.remove();
-      overlay == null ? void 0 : overlay.remove();
+      overlay2 == null ? void 0 : overlay2.remove();
       internals = {
         overlay: null,
         modal: null,
@@ -3755,8 +3755,8 @@ ${url}`;
     return { ok: false, error: "Unknown action: " + action.action };
   }
   function showOcrOverlay(dataUrl, sendResponse) {
-    const overlay = document.createElement("div");
-    Object.assign(overlay.style, {
+    const overlay2 = document.createElement("div");
+    Object.assign(overlay2.style, {
       position: "fixed",
       top: "0",
       left: "0",
@@ -3769,7 +3769,7 @@ ${url}`;
     const img = new Image();
     img.src = dataUrl;
     img.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;opacity:0.7;pointer-events:none;";
-    overlay.appendChild(img);
+    overlay2.appendChild(img);
     const canvas = document.createElement("canvas");
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -3780,7 +3780,7 @@ ${url}`;
       width: "100%",
       height: "100%"
     });
-    overlay.appendChild(canvas);
+    overlay2.appendChild(canvas);
     const ctx = canvas.getContext("2d");
     const hint = document.createElement("div");
     Object.assign(hint.style, {
@@ -3796,8 +3796,8 @@ ${url}`;
       pointerEvents: "none"
     });
     hint.textContent = "Drag to select region • Press Esc to cancel";
-    overlay.appendChild(hint);
-    document.body.appendChild(overlay);
+    overlay2.appendChild(hint);
+    document.body.appendChild(overlay2);
     let startX = 0;
     let startY = 0;
     let dragging = false;
@@ -3811,30 +3811,30 @@ ${url}`;
       ctx.fillStyle = "rgba(124,58,237,0.12)";
       ctx.fillRect(x, y, w, h);
     }
-    overlay.addEventListener("mousedown", (e) => {
+    overlay2.addEventListener("mousedown", (e) => {
       startX = e.clientX;
       startY = e.clientY;
       dragging = true;
     });
-    overlay.addEventListener("mousemove", (e) => {
+    overlay2.addEventListener("mousemove", (e) => {
       if (!dragging) return;
       drawRect(startX, startY, e.clientX - startX, e.clientY - startY);
     });
     function onEsc(e) {
       if (e.key === "Escape") {
-        if (document.body.contains(overlay)) document.body.removeChild(overlay);
+        if (document.body.contains(overlay2)) document.body.removeChild(overlay2);
         document.removeEventListener("keydown", onEsc);
         sendResponse({ ok: false });
       }
     }
-    overlay.addEventListener("mouseup", (e) => {
+    overlay2.addEventListener("mouseup", (e) => {
       dragging = false;
       const x = Math.min(startX, e.clientX);
       const y = Math.min(startY, e.clientY);
       const w = Math.abs(e.clientX - startX);
       const h = Math.abs(e.clientY - startY);
       document.removeEventListener("keydown", onEsc);
-      if (document.body.contains(overlay)) document.body.removeChild(overlay);
+      if (document.body.contains(overlay2)) document.body.removeChild(overlay2);
       if (w < 5 || h < 5) {
         sendResponse({ ok: false });
         return;
@@ -3843,7 +3843,7 @@ ${url}`;
     });
     document.addEventListener("keydown", onEsc);
     const ocrCleanupObserver = new MutationObserver(() => {
-      if (!document.body.contains(overlay)) {
+      if (!document.body.contains(overlay2)) {
         document.removeEventListener("keydown", onEsc);
         ocrCleanupObserver.disconnect();
       }
@@ -4623,10 +4623,10 @@ ${description}
         modeBtn.textContent = state2.mode === "bilingual" ? "Bilingual" : "Translated";
       }
     }
-    function setMode(mode) {
-      state2.mode = mode;
+    function setMode(mode2) {
+      state2.mode = mode2;
       for (const pair of state2.elements) {
-        if (mode === "translated") {
+        if (mode2 === "translated") {
           pair.original.style.display = "none";
           pair.translation.style.marginTop = "0";
         } else {
@@ -5784,7 +5784,7 @@ I have a follow-up question: `,
       }
     );
   }
-  const ext$3 = typeof browser !== "undefined" ? browser : chrome;
+  const ext$5 = typeof browser !== "undefined" ? browser : chrome;
   const MIN_INTERVAL_MS = 5 * 60 * 1e3;
   const REVISIT_WINDOW_MS = 48 * 60 * 60 * 1e3;
   const REVISIT_DEDUPE_MS = 10 * 60 * 1e3;
@@ -5810,7 +5810,7 @@ I have a follow-up question: `,
     if (now - lastSignalAt < MIN_INTERVAL_MS) return;
     lastSignalAt = now;
     try {
-      ext$3.runtime.sendMessage({
+      ext$5.runtime.sendMessage({
         type: "STUCK_SIGNAL",
         kind,
         url: location.href,
@@ -5824,7 +5824,7 @@ I have a follow-up question: `,
   async function recordVisitAndCheck(rawUrl) {
     const url = normalizeUrl(rawUrl);
     try {
-      const data = await ext$3.storage.local.get(["aura_visit_log"]);
+      const data = await ext$5.storage.local.get(["aura_visit_log"]);
       const log = data.aura_visit_log || {};
       const now = Date.now();
       const entry = log[url] || { ts: [] };
@@ -5842,7 +5842,7 @@ I have a follow-up question: `,
           const sorted = keys.sort((a, b) => (log[a].ts[0] || 0) - (log[b].ts[0] || 0));
           for (const k of sorted.slice(0, keys.length - MAX_TRACKED_URLS)) delete log[k];
         }
-        await ext$3.storage.local.set({ aura_visit_log: log });
+        await ext$5.storage.local.set({ aura_visit_log: log });
       }
       if (entry.ts.length >= REVISIT_THRESHOLD) {
         sendStuckSignal("tab_revisit", { count: entry.ts.length });
@@ -5907,7 +5907,7 @@ I have a follow-up question: `,
       const hasUnsaved = document.querySelector('textarea:focus, [contenteditable="true"]:focus');
       if (hasUnsaved) {
         try {
-          ext$3.runtime.sendMessage({
+          ext$5.runtime.sendMessage({
             type: "STUCK_SIGNAL",
             kind: "workflow_boundary_unsaved",
             url: location.href,
@@ -5932,16 +5932,16 @@ I have a follow-up question: `,
       window.addEventListener("load", () => setTimeout(setup, 500), { once: true });
     }
   }
-  const ext$2 = typeof browser !== "undefined" ? browser : chrome;
-  const DEBOUNCE_MS = 800;
-  const MIN_TEXT_LEN = 3;
-  const MAX_TEXT_LEN = 2e3;
+  const ext$4 = typeof browser !== "undefined" ? browser : chrome;
+  const DEBOUNCE_MS$1 = 800;
+  const MIN_TEXT_LEN$1 = 3;
+  const MAX_TEXT_LEN$1 = 2e3;
   const MAX_SUGGESTION_LEN = 200;
   const CHIP_ID = "aura-ghost-chip";
-  let state = null;
+  let state$1 = null;
   let chipNode = null;
-  let enabled$1 = true;
-  const SENSITIVE_HOSTS = [
+  let enabled$2 = true;
+  const SENSITIVE_HOSTS$2 = [
     "accounts.google.com",
     "login.microsoftonline.com",
     "okta.com",
@@ -5950,9 +5950,9 @@ I have a follow-up question: `,
     "bitwarden.com",
     "dashlane.com"
   ];
-  function isDenylisted$1() {
+  function isDenylisted$3() {
     const host = location.hostname;
-    if (SENSITIVE_HOSTS.some((d) => host === d || host.endsWith("." + d))) return true;
+    if (SENSITIVE_HOSTS$2.some((d) => host === d || host.endsWith("." + d))) return true;
     if (/\bbank\b|\bpayment\b|\bcheckout\b/i.test(host)) return true;
     return false;
   }
@@ -5991,7 +5991,7 @@ I have a follow-up question: `,
       chipNode.style.display = "none";
       chipNode.textContent = "";
     }
-    if (state) state.suggestion = "";
+    if (state$1) state$1.suggestion = "";
   }
   function showChipFor(el, suggestion) {
     const node = ensureChipNode();
@@ -6044,42 +6044,42 @@ I have a follow-up question: `,
       }
     }
     clearChip();
-    state = null;
+    state$1 = null;
   }
-  async function requestCompletion(el, text) {
-    if (!state) return;
-    if (state.abortCtrl) state.abortCtrl.abort();
+  async function requestCompletion$1(el, text) {
+    if (!state$1) return;
+    if (state$1.abortCtrl) state$1.abortCtrl.abort();
     const ctrl = new AbortController();
-    state.abortCtrl = ctrl;
+    state$1.abortCtrl = ctrl;
     try {
-      const resp = await ext$2.runtime.sendMessage({
+      const resp = await ext$4.runtime.sendMessage({
         type: "GHOST_COMPLETE",
-        text: text.slice(-MAX_TEXT_LEN),
+        text: text.slice(-MAX_TEXT_LEN$1),
         url: location.href,
         title: document.title
       });
       if (!resp || typeof resp.continuation !== "string") return;
       const s = String(resp.continuation || "").trim();
       if (!s || s.length > MAX_SUGGESTION_LEN) return;
-      if (state && state.el === el && state.text === text) {
-        state.suggestion = s;
+      if (state$1 && state$1.el === el && state$1.text === text) {
+        state$1.suggestion = s;
         showChipFor(el, s);
       }
     } catch {
     }
   }
   function scheduleCompletion(el) {
-    if (!state || state.el !== el) return;
-    if (state.debounceTimer) window.clearTimeout(state.debounceTimer);
-    state.debounceTimer = window.setTimeout(() => {
-      if (!state || state.el !== el) return;
+    if (!state$1 || state$1.el !== el) return;
+    if (state$1.debounceTimer) window.clearTimeout(state$1.debounceTimer);
+    state$1.debounceTimer = window.setTimeout(() => {
+      if (!state$1 || state$1.el !== el) return;
       const text = getInputText(el);
-      state.text = text;
-      if (text.length < MIN_TEXT_LEN) return;
-      requestCompletion(el, text);
-    }, DEBOUNCE_MS);
+      state$1.text = text;
+      if (text.length < MIN_TEXT_LEN$1) return;
+      requestCompletion$1(el, text);
+    }, DEBOUNCE_MS$1);
   }
-  function isEligibleTarget(el) {
+  function isEligibleTarget$1(el) {
     if (!el || !(el instanceof HTMLElement)) return false;
     if (el instanceof HTMLInputElement) {
       if (["password", "email", "tel", "number", "date", "url"].includes(el.type)) return false;
@@ -6093,10 +6093,10 @@ I have a follow-up question: `,
     return el.isContentEditable;
   }
   function onInput(e) {
-    if (!enabled$1 || isDenylisted$1()) return;
-    if (!isEligibleTarget(e.target)) return;
+    if (!enabled$2 || isDenylisted$3()) return;
+    if (!isEligibleTarget$1(e.target)) return;
     const target = e.target;
-    state = {
+    state$1 = {
       el: target,
       text: getInputText(target),
       suggestion: "",
@@ -6107,19 +6107,36 @@ I have a follow-up question: `,
     scheduleCompletion(target);
   }
   function onKeyDown(e) {
-    if (!state) return;
-    if (e.key === "Tab" && !e.shiftKey && state.suggestion) {
+    if (!state$1) return;
+    if (e.key === "Tab" && !e.shiftKey && state$1.suggestion) {
       e.preventDefault();
-      applySuggestion(state.el, state.suggestion);
+      applySuggestion(state$1.el, state$1.suggestion);
       return;
     }
-    if (state.suggestion) clearChip();
+    if (state$1.suggestion) clearChip();
   }
   function onScrollOrResize() {
     clearChip();
   }
   function initGhostText() {
+    var _a, _b, _c, _d;
     if (location.protocol !== "http:" && location.protocol !== "https:") return;
+    try {
+      (_b = (_a = ext$4.storage) == null ? void 0 : _a.local) == null ? void 0 : _b.get(["ghostTextMode"], (d) => {
+        const m = d == null ? void 0 : d.ghostTextMode;
+        if (m === "inline" || m === "off") {
+          enabled$2 = false;
+        }
+      });
+      (_d = (_c = ext$4.storage) == null ? void 0 : _c.onChanged) == null ? void 0 : _d.addListener((changes, area) => {
+        if (area === "local" && changes.ghostTextMode) {
+          const v = changes.ghostTextMode.newValue;
+          enabled$2 = v === "chip";
+          if (!enabled$2) clearChip();
+        }
+      });
+    } catch {
+    }
     document.addEventListener("input", onInput, { capture: true, passive: true });
     document.addEventListener("keydown", onKeyDown, { capture: true });
     window.addEventListener("scroll", onScrollOrResize, { capture: true, passive: true });
@@ -6127,13 +6144,394 @@ I have a follow-up question: `,
     window.addEventListener("blur", clearChip);
   }
   window.addEventListener("aura-ghost-disable", () => {
-    enabled$1 = false;
+    enabled$2 = false;
     clearChip();
   });
   window.addEventListener("aura-ghost-enable", () => {
-    enabled$1 = true;
+    enabled$2 = true;
   });
-  const ext$1 = typeof browser !== "undefined" ? browser : chrome;
+  const ext$3 = typeof browser !== "undefined" ? browser : chrome;
+  const DEBOUNCE_MS = 600;
+  const MIN_TEXT_LEN = 8;
+  const MAX_TEXT_LEN = 2e3;
+  const MIN_WORDS = 3;
+  const OVERLAY_ID = "aura-ghost-inline";
+  const MIRROR_ID = "aura-ghost-mirror";
+  const SENSITIVE_HOSTS$1 = [
+    "accounts.google.com",
+    "login.microsoftonline.com",
+    "okta.com",
+    "1password.com",
+    "lastpass.com",
+    "bitwarden.com",
+    "dashlane.com"
+  ];
+  function isDenylisted$2() {
+    const host = location.hostname;
+    if (SENSITIVE_HOSTS$1.some((d) => host === d || host.endsWith("." + d))) return true;
+    if (/\bbank\b|\bpayment\b|\bcheckout\b/i.test(host)) return true;
+    return false;
+  }
+  let state = null;
+  let overlay = null;
+  let mirror = null;
+  let enabled$1 = true;
+  let mode = "inline";
+  function ensureOverlay() {
+    if (overlay && document.body.contains(overlay)) return overlay;
+    const div = document.createElement("div");
+    div.id = OVERLAY_ID;
+    div.style.cssText = [
+      "position:fixed",
+      "z-index:2147483646",
+      "pointer-events:none",
+      "color:rgba(167,139,250,0.55)",
+      "font-family:inherit",
+      "white-space:pre-wrap",
+      "overflow:hidden",
+      "display:none"
+    ].join(";");
+    document.body.appendChild(div);
+    overlay = div;
+    return div;
+  }
+  function ensureMirror() {
+    if (mirror && document.body.contains(mirror)) return mirror;
+    const div = document.createElement("div");
+    div.id = MIRROR_ID;
+    div.style.cssText = [
+      "position:absolute",
+      "top:0",
+      "left:-9999px",
+      "visibility:hidden",
+      "white-space:pre-wrap",
+      "word-wrap:break-word",
+      "overflow-wrap:break-word",
+      "pointer-events:none"
+    ].join(";");
+    document.body.appendChild(div);
+    mirror = div;
+    return div;
+  }
+  function copyTypography(src, dst) {
+    const cs = window.getComputedStyle(src);
+    const props = [
+      "boxSizing",
+      "width",
+      "height",
+      "overflow",
+      "fontFamily",
+      "fontSize",
+      "fontWeight",
+      "fontStyle",
+      "fontVariant",
+      "letterSpacing",
+      "textTransform",
+      "textIndent",
+      "lineHeight",
+      "paddingTop",
+      "paddingRight",
+      "paddingBottom",
+      "paddingLeft",
+      "borderTopWidth",
+      "borderRightWidth",
+      "borderBottomWidth",
+      "borderLeftWidth",
+      "borderTopStyle",
+      "borderRightStyle",
+      "borderBottomStyle",
+      "borderLeftStyle"
+    ];
+    for (const p of props) {
+      dst.style[p] = cs[p];
+    }
+  }
+  function placeOverlayAtTextareaCaret(ta, suggestion) {
+    try {
+      const m = ensureMirror();
+      const rect = ta.getBoundingClientRect();
+      copyTypography(ta, m);
+      m.style.width = `${rect.width}px`;
+      m.style.height = "auto";
+      const caret = ta.selectionStart ?? ta.value.length;
+      const before = ta.value.substring(0, caret).replace(/\n$/, "\n ");
+      m.textContent = before;
+      const markerSpan = document.createElement("span");
+      markerSpan.textContent = "​";
+      m.appendChild(markerSpan);
+      const markerRect = markerSpan.getBoundingClientRect();
+      const mirrorRect = m.getBoundingClientRect();
+      const localX = markerRect.left - mirrorRect.left;
+      const localY = markerRect.top - mirrorRect.top;
+      const absX = rect.left + localX - ta.scrollLeft;
+      const absY = rect.top + localY - ta.scrollTop;
+      if (absX < rect.left || absX > rect.right || absY < rect.top || absY > rect.bottom) {
+        return false;
+      }
+      const ov = ensureOverlay();
+      const cs = window.getComputedStyle(ta);
+      ov.style.font = cs.font;
+      ov.style.fontSize = cs.fontSize;
+      ov.style.fontFamily = cs.fontFamily;
+      ov.style.lineHeight = cs.lineHeight;
+      ov.style.letterSpacing = cs.letterSpacing;
+      ov.style.left = `${absX}px`;
+      ov.style.top = `${absY}px`;
+      ov.style.maxWidth = `${rect.right - absX - 4}px`;
+      ov.textContent = suggestion;
+      ov.style.display = "";
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function placeOverlayAtContentEditableCaret(suggestion) {
+    var _a;
+    try {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return false;
+      const range = sel.getRangeAt(0).cloneRange();
+      range.collapse(false);
+      const marker = document.createElement("span");
+      marker.textContent = "​";
+      range.insertNode(marker);
+      const mRect = marker.getBoundingClientRect();
+      const parent = marker.parentNode;
+      parent == null ? void 0 : parent.removeChild(marker);
+      if (mRect.width === 0 && mRect.height === 0) return false;
+      const ov = ensureOverlay();
+      const anchor = (_a = sel.anchorNode) == null ? void 0 : _a.parentElement;
+      if (anchor) {
+        const cs = window.getComputedStyle(anchor);
+        ov.style.font = cs.font;
+        ov.style.fontSize = cs.fontSize;
+        ov.style.fontFamily = cs.fontFamily;
+        ov.style.lineHeight = cs.lineHeight;
+        ov.style.letterSpacing = cs.letterSpacing;
+      }
+      ov.style.left = `${mRect.left}px`;
+      ov.style.top = `${mRect.top}px`;
+      ov.style.maxWidth = `${Math.max(240, window.innerWidth - mRect.left - 20)}px`;
+      ov.textContent = suggestion;
+      ov.style.display = "";
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function placeOverlayAtInputCaret(input, suggestion) {
+    try {
+      const rect = input.getBoundingClientRect();
+      const cs = window.getComputedStyle(input);
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return false;
+      ctx.font = cs.font;
+      const caret = input.selectionStart ?? input.value.length;
+      const textWidth = ctx.measureText(input.value.substring(0, caret)).width;
+      const paddingLeft = parseFloat(cs.paddingLeft) || 0;
+      const borderLeft = parseFloat(cs.borderLeftWidth) || 0;
+      const absX = rect.left + borderLeft + paddingLeft + textWidth - input.scrollLeft;
+      const absY = rect.top + (rect.height - parseFloat(cs.fontSize)) / 2;
+      if (absX > rect.right - 8) return false;
+      const ov = ensureOverlay();
+      ov.style.font = cs.font;
+      ov.style.fontSize = cs.fontSize;
+      ov.style.fontFamily = cs.fontFamily;
+      ov.style.letterSpacing = cs.letterSpacing;
+      ov.style.left = `${absX}px`;
+      ov.style.top = `${absY}px`;
+      ov.style.maxWidth = `${rect.right - absX - 6}px`;
+      ov.textContent = suggestion;
+      ov.style.display = "";
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function placeOverlay(el, suggestion) {
+    if (el.tagName === "TEXTAREA") {
+      return placeOverlayAtTextareaCaret(el, suggestion);
+    }
+    if (el.tagName === "INPUT") {
+      return placeOverlayAtInputCaret(el, suggestion);
+    }
+    if (el.isContentEditable) {
+      return placeOverlayAtContentEditableCaret(suggestion);
+    }
+    return false;
+  }
+  function hideOverlay() {
+    if (overlay) {
+      overlay.style.display = "none";
+      overlay.textContent = "";
+    }
+    if (state) state.suggestion = "";
+  }
+  function getElementText(el) {
+    if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+      return el.value || "";
+    }
+    if (el.isContentEditable) {
+      return el.textContent || "";
+    }
+    return "";
+  }
+  function countWords(s) {
+    return (s.trim().match(/\S+/g) || []).length;
+  }
+  function isEligibleTarget(el) {
+    if (!(el instanceof HTMLElement)) return false;
+    if (el.tagName === "INPUT") {
+      const type = (el.type || "").toLowerCase();
+      if (["password", "email", "tel", "number", "search", "url", "hidden"].includes(type)) return false;
+      if (el.getAttribute("autocomplete") === "off") return false;
+    }
+    if (el.tagName === "TEXTAREA") return true;
+    if (el.isContentEditable) return true;
+    if (el.tagName === "INPUT") return true;
+    return false;
+  }
+  async function requestCompletion(text, signal) {
+    return new Promise((resolve) => {
+      try {
+        ext$3.runtime.sendMessage(
+          {
+            type: "GHOST_COMPLETE",
+            text,
+            url: location.href,
+            title: document.title
+          },
+          (response) => {
+            var _a, _b;
+            if (signal.aborted) {
+              resolve(null);
+              return;
+            }
+            const suggestion = ((_b = (_a = response == null ? void 0 : response.continuation) == null ? void 0 : _a.trim) == null ? void 0 : _b.call(_a)) || "";
+            resolve(suggestion || null);
+          }
+        );
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+  function handleInput(e) {
+    var _a;
+    if (!enabled$1 || mode !== "inline") return;
+    const el = e.target;
+    if (!isEligibleTarget(el)) return;
+    const text = getElementText(el);
+    if (text.length < MIN_TEXT_LEN || text.length > MAX_TEXT_LEN) {
+      hideOverlay();
+      return;
+    }
+    if (countWords(text) < MIN_WORDS) {
+      hideOverlay();
+      return;
+    }
+    if (state == null ? void 0 : state.debounceTimer) clearTimeout(state.debounceTimer);
+    (_a = state == null ? void 0 : state.abortCtrl) == null ? void 0 : _a.abort();
+    state = {
+      el,
+      text,
+      suggestion: "",
+      debounceTimer: null,
+      abortCtrl: null
+    };
+    state.debounceTimer = window.setTimeout(async () => {
+      if (!state || state.el !== el) return;
+      const ctrl = new AbortController();
+      state.abortCtrl = ctrl;
+      const suggestion = await requestCompletion(text, ctrl.signal);
+      if (!suggestion || ctrl.signal.aborted) {
+        hideOverlay();
+        return;
+      }
+      if (!state || state.el !== el) return;
+      state.suggestion = suggestion;
+      const ok = placeOverlay(el, suggestion);
+      if (!ok) hideOverlay();
+    }, DEBOUNCE_MS);
+  }
+  function handleKeyDown(e) {
+    if (!state || !state.suggestion) return;
+    if (e.target !== state.el) return;
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const el = state.el;
+      const suggestion = state.suggestion;
+      if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+        const field = el;
+        const caret = field.selectionStart ?? field.value.length;
+        const before = field.value.substring(0, caret);
+        const after = field.value.substring(caret);
+        field.value = before + suggestion + after;
+        field.selectionStart = field.selectionEnd = caret + suggestion.length;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      } else if (el.isContentEditable) {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          range.insertNode(document.createTextNode(suggestion));
+          range.collapse(false);
+        }
+      }
+      hideOverlay();
+      state = null;
+      return;
+    }
+    if (e.key === "Escape") {
+      hideOverlay();
+      state = null;
+    }
+  }
+  function handleBlur() {
+    hideOverlay();
+  }
+  function handleScrollOrResize() {
+    if ((state == null ? void 0 : state.suggestion) && state.el) {
+      placeOverlay(state.el, state.suggestion);
+    }
+  }
+  function reloadMode() {
+    var _a, _b;
+    try {
+      (_b = (_a = ext$3.storage) == null ? void 0 : _a.local) == null ? void 0 : _b.get(["ghostTextMode"], (d) => {
+        const m = d == null ? void 0 : d.ghostTextMode;
+        if (m === "chip" || m === "off" || m === "inline") {
+          mode = m;
+        }
+      });
+    } catch {
+    }
+  }
+  function initGhostTextInline() {
+    var _a, _b;
+    if (isDenylisted$2()) {
+      enabled$1 = false;
+      return;
+    }
+    reloadMode();
+    try {
+      (_b = (_a = ext$3.storage) == null ? void 0 : _a.onChanged) == null ? void 0 : _b.addListener((changes, area) => {
+        if (area === "local" && changes.ghostTextMode) {
+          const v = changes.ghostTextMode.newValue;
+          if (v === "chip" || v === "off" || v === "inline") mode = v;
+          if (mode !== "inline") hideOverlay();
+        }
+      });
+    } catch {
+    }
+    document.addEventListener("input", handleInput, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("blur", handleBlur, true);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+  }
+  const ext$2 = typeof browser !== "undefined" ? browser : chrome;
   let enabled = false;
   let startTs = 0;
   let maxScrollPct = 0;
@@ -6148,15 +6546,15 @@ I have a follow-up question: `,
     "bitwarden.com",
     "dashlane.com"
   ];
-  function isDenylisted() {
+  function isDenylisted$1() {
     const host = location.hostname;
     if (DENYLIST_HOSTS.some((d) => host.endsWith(d))) return true;
     if (/\bbank|\bpayment|\bcheckout\b/i.test(host)) return true;
     return false;
   }
-  function isLoggablePage() {
+  function isLoggablePage$1() {
     if (location.protocol !== "http:" && location.protocol !== "https:") return false;
-    if (isDenylisted()) return false;
+    if (isDenylisted$1()) return false;
     return true;
   }
   function trackScroll() {
@@ -6178,7 +6576,7 @@ I have a follow-up question: `,
     }
   }
   function buildEvent() {
-    if (!enabled || !isLoggablePage()) return null;
+    if (!enabled || !isLoggablePage$1()) return null;
     if (!startTs) return null;
     const dwell = Date.now() - startTs;
     if (dwell < 3e3) return null;
@@ -6198,21 +6596,21 @@ I have a follow-up question: `,
     if (!ev) return;
     sent = true;
     try {
-      ext$1.runtime.sendMessage({ type: "LIFELOG_EVENT", event: ev }).catch(() => {
+      ext$2.runtime.sendMessage({ type: "LIFELOG_EVENT", event: ev }).catch(() => {
       });
     } catch {
     }
   }
   async function loadEnabled() {
     try {
-      const data = await ext$1.storage.local.get(["lifelogEnabled"]);
+      const data = await ext$2.storage.local.get(["lifelogEnabled"]);
       enabled = !!(data == null ? void 0 : data.lifelogEnabled);
     } catch {
     }
   }
   function initLifelog() {
     var _a, _b;
-    if (!isLoggablePage()) return;
+    if (!isLoggablePage$1()) return;
     loadEnabled().then(() => {
       if (!enabled) return;
       startTs = Date.now();
@@ -6227,11 +6625,100 @@ I have a follow-up question: `,
       window.addEventListener("pagehide", flush);
       window.addEventListener("beforeunload", flush);
     });
-    (_b = (_a = ext$1.storage) == null ? void 0 : _a.onChanged) == null ? void 0 : _b.addListener((changes, area) => {
+    (_b = (_a = ext$2.storage) == null ? void 0 : _a.onChanged) == null ? void 0 : _b.addListener((changes, area) => {
       if (area !== "local" || !changes.lifelogEnabled) return;
       enabled = !!changes.lifelogEnabled.newValue;
       if (enabled && !startTs) startTs = Date.now();
     });
+  }
+  const ext$1 = typeof browser !== "undefined" ? browser : chrome;
+  const SURFACE_COOLDOWN_MS = 60 * 60 * 1e3;
+  const MIN_DELAY_MS = 2500;
+  const SENSITIVE_HOSTS = [
+    "accounts.google.com",
+    "login.microsoftonline.com",
+    "okta.com",
+    "1password.com",
+    "lastpass.com",
+    "bitwarden.com",
+    "dashlane.com"
+  ];
+  function isDenylisted() {
+    const host = location.hostname;
+    if (SENSITIVE_HOSTS.some((d) => host === d || host.endsWith("." + d))) return true;
+    if (/\bbank\b|\bpayment\b|\bcheckout\b/i.test(host)) return true;
+    return false;
+  }
+  function isLoggablePage() {
+    if (location.protocol !== "http:" && location.protocol !== "https:") return false;
+    if (isDenylisted()) return false;
+    return true;
+  }
+  function urlKey() {
+    try {
+      const u = new URL(location.href);
+      return u.origin + u.pathname;
+    } catch {
+      return location.href;
+    }
+  }
+  async function wasSurfacedRecently() {
+    var _a, _b;
+    try {
+      const data = await ((_b = (_a = ext$1.storage) == null ? void 0 : _a.local) == null ? void 0 : _b.get(["ambientSurfaceLog"]));
+      const log = (data == null ? void 0 : data.ambientSurfaceLog) || {};
+      const key = urlKey();
+      const last = log[key];
+      if (!last) return false;
+      return Date.now() - last < SURFACE_COOLDOWN_MS;
+    } catch {
+      return true;
+    }
+  }
+  async function markSurfaced() {
+    var _a, _b, _c, _d;
+    try {
+      const data = await ((_b = (_a = ext$1.storage) == null ? void 0 : _a.local) == null ? void 0 : _b.get(["ambientSurfaceLog"]));
+      const log = (data == null ? void 0 : data.ambientSurfaceLog) || {};
+      log[urlKey()] = Date.now();
+      const cutoff = Date.now() - 24 * 60 * 60 * 1e3;
+      for (const k in log) {
+        if (log[k] < cutoff) delete log[k];
+      }
+      (_d = (_c = ext$1.storage) == null ? void 0 : _c.local) == null ? void 0 : _d.set({ ambientSurfaceLog: log });
+    } catch {
+    }
+  }
+  async function requestSurface() {
+    if (!isLoggablePage()) return;
+    if (await wasSurfacedRecently()) return;
+    const title = document.title || "";
+    if (!title.trim()) return;
+    try {
+      ext$1.runtime.sendMessage({
+        type: "AMBIENT_SURFACE_REQUEST",
+        url: location.href,
+        title,
+        host: location.hostname
+      });
+      markSurfaced();
+    } catch {
+    }
+  }
+  function initAmbientSurface() {
+    var _a, _b;
+    if (!isLoggablePage()) return;
+    try {
+      (_b = (_a = ext$1.storage) == null ? void 0 : _a.local) == null ? void 0 : _b.get(["ambientSurfaceEnabled"], (d) => {
+        if (!(d == null ? void 0 : d.ambientSurfaceEnabled)) return;
+        setTimeout(() => {
+          if (document.visibilityState === "visible") {
+            requestSurface();
+          }
+        }, MIN_DELAY_MS);
+      });
+    } catch {
+    }
   }
   const ext = typeof browser !== "undefined" ? browser : chrome;
   const STALE_IDS = [
@@ -6371,7 +6858,9 @@ I have a follow-up question: `,
     initGoogleSerp(ext, safeSend);
     initStuckDetector();
     initGhostText();
+    initGhostTextInline();
     initLifelog();
+    initAmbientSurface();
     setupMessageListener(ext, {
       extractMainContent,
       serializeDOM,
@@ -6385,7 +6874,7 @@ I have a follow-up question: `,
         translation.remove();
         translateActive = false;
       },
-      setTranslateMode: (mode) => translation.setMode(mode),
+      setTranslateMode: (mode2) => translation.setMode(mode2),
       scrollToHighlight: (id) => highlights.scrollTo(id),
       showDock: () => fab.showDock(),
       startCaptureMode: () => capture.start(),

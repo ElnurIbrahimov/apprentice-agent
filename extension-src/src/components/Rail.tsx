@@ -7,6 +7,9 @@ import {
   Camera, Youtube, FlaskConical, Calculator, Code2,
   Image, BarChart2, Bot, Cpu, Settings, Crosshair,
   Brain, MousePointerClick, Headphones, Settings2, Hand, Plug,
+  // SOTA upgrade icons
+  GitBranch, Users, Activity, Sparkles, Flame, Dna,
+  HardDrive, CalendarDays, Layers, Mail, Rss, Share2,
 } from 'lucide-react';
 import { useStore } from '../store';
 import type { PanelId } from '../types';
@@ -81,6 +84,11 @@ const CATEGORIES: CategoryTab[] = [
       { id: 'tools', label: 'Tools', Icon: Wrench },
       { id: 'compare', label: 'Compare', Icon: BarChart2 },
       { id: 'artifacts', label: 'Artifacts', Icon: Code2 },
+      { id: 'calendar', label: 'Calendar', Icon: CalendarDays },
+      { id: 'flashcards', label: 'Flashcards', Icon: Layers },
+      { id: 'email', label: 'Email', Icon: Mail },
+      { id: 'feed', label: 'Feed', Icon: Rss },
+      { id: 'share', label: 'Share', Icon: Share2 },
     ],
   },
   {
@@ -89,8 +97,22 @@ const CATEGORIES: CategoryTab[] = [
     Icon: Brain,
     panels: [
       { id: 'aura-status', label: 'Mind', Icon: Brain },
+      { id: 'memory-browser', label: 'Memory', Icon: HardDrive },
+      { id: 'activity', label: 'Activity', Icon: Activity },
       { id: 'hands', label: 'Hands', Icon: Hand },
       { id: 'agent', label: 'Agent', Icon: Bot },
+    ],
+  },
+  {
+    key: 'intelligence',
+    label: 'Intelligence',
+    Icon: Sparkles,
+    panels: [
+      { id: 'reasoning-tree', label: 'Reasoning', Icon: GitBranch },
+      { id: 'multi-agent', label: 'Council', Icon: Users },
+      { id: 'context-heatmap', label: 'Context', Icon: Flame },
+      { id: 'bandit', label: 'Bandit', Icon: BarChart2 },
+      { id: 'evolution', label: 'Evolution', Icon: Dna },
     ],
   },
   {

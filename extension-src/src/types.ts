@@ -177,7 +177,20 @@ export type PanelId =
   | 'aura-status'
   | 'models'
   | 'mcp'
-  | 'settings';
+  | 'settings'
+  // SOTA upgrade — new panels wired to recent backend routes
+  | 'reasoning-tree'
+  | 'multi-agent'
+  | 'bandit'
+  | 'context-heatmap'
+  | 'memory-browser'
+  | 'activity'
+  | 'evolution'
+  | 'calendar'
+  | 'flashcards'
+  | 'email'
+  | 'feed'
+  | 'share';
 
 export interface FeatureDef {
   key: string;

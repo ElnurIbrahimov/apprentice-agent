@@ -28,7 +28,9 @@ import {
 } from './page-services';
 import { initStuckDetector } from './stuck-detector';
 import { initGhostText } from './ghost-text';
+import { initGhostTextInline } from './ghost-text-inline';
 import { initLifelog } from './lifelog';
+import { initAmbientSurface } from './ambient-surface';
 
 // ── Firefox compat shim ────────────────────────────────────────────────────────
 
@@ -223,7 +225,9 @@ export function init(): void {
   initGoogleSerp(ext as typeof chrome, safeSend);
   initStuckDetector();
   initGhostText();
+  initGhostTextInline();
   initLifelog();
+  initAmbientSurface();
 
   // ── Setup message listener ─────────────────────────────────────────────────
 

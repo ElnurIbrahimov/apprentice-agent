@@ -349,6 +349,40 @@ ext.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return false;
   }
 
+  if (msg.type === 'AMBIENT_SURFACE_REQUEST' && typeof msg.title === 'string') {
+    // Only query when sidebar is open (nothing to show the user otherwise).
+    if (!sidebarOpen) return false;
+    const title = msg.title as string;
+    const url = String(msg.url || '');
+    const host = String(msg.host || '');
+    const query = host ? `${title} ${host}` : title;
+    (async () => {
+      try {
+        const [memR, lifelogR] = await Promise.all([
+          fetch(`${BACKEND}/api/memory/search?q=${encodeURIComponent(query)}`, { headers: backendHeaders() })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          fetch(`${BACKEND}/api/lifelog/search?q=${encodeURIComponent(title)}&limit=5`, { headers: backendHeaders() })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+        ]);
+        const memHits = memR?.results ?? [];
+        const lifelogHits = lifelogR?.items ?? [];
+        if (memHits.length === 0 && lifelogHits.length === 0) return;
+        ext.runtime
+          .sendMessage({
+            type: 'AMBIENT_SURFACE_HINT',
+            url,
+            title,
+            memories: memHits.slice(0, 3),
+            lifelog: lifelogHits.slice(0, 3),
+          })
+          .catch(() => {});
+      } catch { /* silent */ }
+    })();
+    return false;
+  }
+
   if (msg.type === 'PROACTIVE_COUNT_CHANGED') {
     const n = Number(msg.count || 0);
     try {
@@ -1057,6 +1091,41 @@ ext.runtime.onInstalled.addListener((): void => {
       title: 'Add to knowledge base',
       contexts: ['selection'],
     });
+
+    // Specialists submenu (populated dynamically from /api/multi-agent/agents)
+    ext.contextMenus.create({
+      id: 'aura-sep-specialists',
+      parentId: MENU_IDS.parent,
+      type: 'separator',
+      contexts: ['selection'],
+    });
+
+    ext.contextMenus.create({
+      id: 'aura-specialists-parent',
+      parentId: MENU_IDS.parent,
+      title: 'Ask specialist…',
+      contexts: ['selection'],
+    });
+
+    // Fetch agent list and create one menu item per specialist.
+    // Silent failure: if the backend is unreachable, no children appear.
+    fetch(`${BACKEND}/api/multi-agent/agents?session_id=default`, {
+      headers: backendHeaders(),
+      signal: AbortSignal.timeout(4000),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { agents?: Array<{ name: string; description: string }> } | null) => {
+        if (!data?.agents) return;
+        for (const agent of data.agents) {
+          ext.contextMenus.create({
+            id: `aura-specialist-${agent.name}`,
+            parentId: 'aura-specialists-parent',
+            title: agent.name,
+            contexts: ['selection'],
+          });
+        }
+      })
+      .catch(() => {});
   });
 });
 
@@ -1065,12 +1134,33 @@ ext.runtime.onInstalled.addListener((): void => {
 ext.contextMenus.onClicked.addListener(
   (info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab): void => {
     const menuId = info.menuItemId as string;
-    const mapping = MENU_ACTION_MAP[menuId];
-    if (!mapping) return; // Clicked the parent or separator — ignore
 
     const selectedText: string = info.selectionText || '';
     const pageUrl: string = tab?.url || '';
     const pageTitle: string = tab?.title || '';
+
+    // Specialist submenu: "aura-specialist-<name>" → open sidebar at multi-agent panel
+    // with the selected text pre-routed to that specialist.
+    if (menuId.startsWith('aura-specialist-')) {
+      const specialistName = menuId.slice('aura-specialist-'.length);
+      ext.storage.local.set({
+        pendingQuery: selectedText,
+        pendingAction: 'ask',
+        pendingUrl: pageUrl,
+        pendingTitle: pageTitle,
+        pendingPanelSwitch: 'multi-agent',
+        pendingSpecialist: specialistName,
+      });
+      if (chrome.sidePanel && tab) {
+        chrome.sidePanel.open({ windowId: tab.windowId! });
+      } else if (typeof browser !== 'undefined' && (browser as any)?.sidebarAction) {
+        (browser as any).sidebarAction.open();
+      }
+      return;
+    }
+
+    const mapping = MENU_ACTION_MAP[menuId];
+    if (!mapping) return; // Clicked the parent or separator — ignore
 
     // "Save to memory" / "Add to KB" go directly to the backend, no sidebar needed
     if (menuId === MENU_IDS.saveMemory || menuId === MENU_IDS.addToKb) {

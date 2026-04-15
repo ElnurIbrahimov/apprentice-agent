@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import ChatPanel from './panels/ChatPanel';
 import CommandPalette from './components/CommandPalette';
 import ProactiveNotifications from './components/ProactiveCard';
+import AmbientSurfaceCard from './components/AmbientSurfaceCard';
 import ext from './ext';
 import type { PanelId } from './types';
 
@@ -34,6 +35,19 @@ const AuraStatusPanel = React.lazy(() => import('./panels/AuraStatusPanel'));
 const ModelsPanel = React.lazy(() => import('./panels/ModelsPanel'));
 const McpPanel = React.lazy(() => import('./panels/McpPanel'));
 const SettingsPanel = React.lazy(() => import('./panels/SettingsPanel'));
+// SOTA upgrade panels
+const ReasoningTreePanel = React.lazy(() => import('./panels/ReasoningTreePanel'));
+const MultiAgentPanel = React.lazy(() => import('./panels/MultiAgentPanel'));
+const BanditPanel = React.lazy(() => import('./panels/BanditPanel'));
+const ContextHeatmapPanel = React.lazy(() => import('./panels/ContextHeatmapPanel'));
+const MemoryBrowserPanel = React.lazy(() => import('./panels/MemoryBrowserPanel'));
+const ActivityPanel = React.lazy(() => import('./panels/ActivityPanel'));
+const EvolutionPanel = React.lazy(() => import('./panels/EvolutionPanel'));
+const CalendarPanel = React.lazy(() => import('./panels/CalendarPanel'));
+const FlashcardsPanel = React.lazy(() => import('./panels/FlashcardsPanel'));
+const EmailPanel = React.lazy(() => import('./panels/EmailPanel'));
+const FeedPanel = React.lazy(() => import('./panels/FeedPanel'));
+const SharePanel = React.lazy(() => import('./panels/SharePanel'));
 
 function LazyFallback() {
   return (
@@ -69,6 +83,19 @@ const PANEL_ENTRIES: { id: PanelId; Component: React.ComponentType }[] = [
   { id: 'models', Component: ModelsPanel },
   { id: 'mcp', Component: McpPanel },
   { id: 'settings', Component: SettingsPanel },
+  // SOTA upgrade panels (Phase 1-3)
+  { id: 'reasoning-tree', Component: ReasoningTreePanel },
+  { id: 'multi-agent', Component: MultiAgentPanel },
+  { id: 'bandit', Component: BanditPanel },
+  { id: 'context-heatmap', Component: ContextHeatmapPanel },
+  { id: 'memory-browser', Component: MemoryBrowserPanel },
+  { id: 'activity', Component: ActivityPanel },
+  { id: 'evolution', Component: EvolutionPanel },
+  { id: 'calendar', Component: CalendarPanel },
+  { id: 'flashcards', Component: FlashcardsPanel },
+  { id: 'email', Component: EmailPanel },
+  { id: 'feed', Component: FeedPanel },
+  { id: 'share', Component: SharePanel },
 ];
 
 export default function App() {
@@ -215,6 +242,7 @@ export default function App() {
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         <Header />
+        <AmbientSurfaceCard />
         <ProactiveNotifications onAccept={handleProactiveAccept} />
         <div className={`flex-1 relative panel-container ${transitioning ? 'panel-transitioning' : ''}`}>
           {/* ChatPanel always mounted — keeps WebSocket alive */}

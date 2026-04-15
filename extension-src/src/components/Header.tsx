@@ -5,6 +5,7 @@ import { fetchStatus } from '../ws';
 import { exportChat } from '../exportChat';
 import { getServerLabel } from '../api';
 import ConversationHistory from './ConversationHistory';
+import ThinkingModeToggle from './ThinkingModeToggle';
 import ext from '../ext';
 
 const STATUS_DOT: Record<string, string> = {
@@ -189,6 +190,9 @@ export default function Header() {
               width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
             }}
           />
+
+          {/* Thinking mode toggle — system 1 / 2 / auto */}
+          <ThinkingModeToggle />
 
           {/* Theme toggle */}
           <button

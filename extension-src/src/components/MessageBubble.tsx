@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Copy, Check, Volume2, VolumeX, ChevronDown, Download, Bot } from 'lucide-react';
+import { Copy, Check, Volume2, VolumeX, ChevronDown, Download, Bot, ThumbsUp, ThumbsDown, RotateCw } from 'lucide-react';
 import type { Message } from '../types';
 import { md } from '../markdown';
 import { speak, stopSpeaking, isSpeaking } from '../tts';
 import { useStore } from '../store';
 import { messageAsMarkdown, messageAsText, downloadFile } from '../exportChat';
 import AgentStepRow from './AgentStepRow';
+import { routing } from '../api/client';
 
 interface Props {
   message: Message;
@@ -21,8 +22,22 @@ export default function MessageBubble({ message, isLatest, isStreaming: isStream
   const [hovered, setHovered] = useState(false);
   const [thinkExpanded, setThinkExpanded] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const thinkContentRef = useRef<HTMLDivElement>(null);
+
+  const sendFeedback = (signal: 'up' | 'down' | 'regen') => {
+    const model = featureModels['chat'] || 'unknown';
+    const conversationId = useStore.getState().activeConversationId || undefined;
+    routing
+      .feedback({
+        signal: signal === 'up' ? 'positive' : signal === 'down' ? 'negative' : 'regenerate',
+        model,
+        conversation_id: conversationId,
+      })
+      .catch(() => {});
+    if (signal !== 'regen') setFeedback(signal);
+  };
 
   const isStreaming = isStreamingProp || (isLatest && !!activeStream);
   const hasThinking = !!message.thinkingContent;
@@ -420,6 +435,59 @@ export default function MessageBubble({ message, isLatest, isStreaming: isStream
             }}
           >
             {speaking ? <VolumeX size={11} /> : <Volume2 size={11} />}
+          </button>
+
+          {/* Routing feedback — thumbs up / down / regenerate (AI messages only) */}
+          <button
+            onClick={() => sendFeedback('up')}
+            className="msg-action-btn"
+            title="Good response"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: feedback === 'up' ? 'var(--gr)' : 'var(--di)',
+              cursor: 'pointer',
+              padding: 2,
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: 4,
+            }}
+          >
+            <ThumbsUp size={11} />
+          </button>
+          <button
+            onClick={() => sendFeedback('down')}
+            className="msg-action-btn"
+            title="Bad response"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: feedback === 'down' ? 'var(--rd)' : 'var(--di)',
+              cursor: 'pointer',
+              padding: 2,
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: 4,
+            }}
+          >
+            <ThumbsDown size={11} />
+          </button>
+          <button
+            onClick={() => sendFeedback('regen')}
+            className="msg-action-btn"
+            title="Regenerate"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--di)',
+              cursor: 'pointer',
+              padding: 2,
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: 4,
+            }}
+          >
+            <RotateCw size={11} />
           </button>
         </div>
       </div>

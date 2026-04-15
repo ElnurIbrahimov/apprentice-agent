@@ -340,6 +340,37 @@ function mount() {
       </button>
     </div>
 
+    <div class="nt-cockpit nt-fade nt-fade-d5" id="cockpit" style="display:none">
+      <div class="nt-card nt-card-span2" id="card-ticker">
+        <div class="nt-card-title">💭 Aura is thinking</div>
+        <div class="nt-card-body"><div class="nt-ticker" id="ticker-text">—</div><div class="nt-ticker-meta" id="ticker-meta"></div></div>
+      </div>
+      <div class="nt-card nt-card-span2" id="card-heatmap">
+        <div class="nt-card-title">🔥 Context focus</div>
+        <div class="nt-card-body"><div class="nt-heatmap" id="heatmap-chips"><span class="nt-card-empty">No active topics</span></div></div>
+      </div>
+      <div class="nt-card" id="card-starter">
+        <div class="nt-card-title">✨ Starter</div>
+        <div class="nt-card-body" id="starter-body"><span class="nt-card-empty">Quiet.</span></div>
+      </div>
+      <div class="nt-card" id="card-hands">
+        <div class="nt-card-title">🤖 Hands</div>
+        <div class="nt-card-body" id="hands-body"><span class="nt-card-empty">No hands running</span></div>
+      </div>
+      <div class="nt-card" id="card-activity">
+        <div class="nt-card-title">📊 Activity</div>
+        <div class="nt-card-body"><div class="nt-list" id="activity-list"><span class="nt-card-empty">No events</span></div></div>
+      </div>
+      <div class="nt-card" id="card-memories">
+        <div class="nt-card-title">🧠 Memories</div>
+        <div class="nt-card-body"><div class="nt-list" id="memories-list"><span class="nt-card-empty">No memories</span></div></div>
+      </div>
+      <div class="nt-card nt-card-span2" id="card-feed">
+        <div class="nt-card-title">📎 Recent captures</div>
+        <div class="nt-card-body"><div class="nt-feed" id="feed-row"><span class="nt-card-empty">No captures</span></div></div>
+      </div>
+    </div>
+
     <div class="nt-topsites nt-fade nt-fade-d5" id="topsites-section" style="display:none">
       <div class="nt-topsites-row" id="topsites-row"></div>
     </div>
@@ -539,10 +570,234 @@ function mount() {
 
         // Fetch mood data for breathing dot color
         fetchAndApplyMood();
+
+        // Mount cockpit dashboard (gated on backend reachable + user opt-in)
+        storageGet(['cockpitDisabled']).then((d) => {
+          if (d?.cockpitDisabled) return;
+          mountCockpit();
+        });
       }
     })
     .catch(() => {});
   setTimeout(() => ctrl.abort(), 3000);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Cockpit dashboard — live cards polled from the backend.
+// ═════════════════════════════════════════════════════════════════════════
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const d = await storageGet(['apiKey']);
+  const key = d?.apiKey?.trim?.() || '';
+  return key ? { 'X-API-Key': key } : {};
+}
+
+async function fetchJson<T>(path: string, timeoutMs = 4000): Promise<T | null> {
+  try {
+    const headers = await authHeaders();
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    const r = await fetch(`${BACKEND_URL}${path}`, { headers, signal: ctrl.signal });
+    clearTimeout(t);
+    if (!r.ok) return null;
+    return (await r.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+function fmtTimeShort(ts: number): string {
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function openSidebar(panel: string, extras: Record<string, unknown> = {}) {
+  sendToBackground({ type: 'OPEN_SIDEBAR', panel, ...extras });
+}
+
+function mountCockpit(): void {
+  const cockpit = document.getElementById('cockpit');
+  if (!cockpit) return;
+  cockpit.style.display = '';
+
+  refreshTicker();
+  refreshHeatmap();
+  refreshStarter();
+  refreshHands();
+  refreshActivity();
+  refreshMemories();
+  refreshFeed();
+
+  // Polling intervals — stagger to avoid thundering herd.
+  setInterval(refreshTicker, 8000);
+  setInterval(refreshHeatmap, 30000);
+  setInterval(refreshStarter, 20000);
+  setInterval(refreshHands, 15000);
+  setInterval(refreshActivity, 60000);
+  setInterval(refreshMemories, 60000);
+  setInterval(refreshFeed, 60000);
+}
+
+async function refreshTicker(): Promise<void> {
+  const data = await fetchJson<{ has_teaser: boolean; teaser?: { content: string; topics?: string[]; intensity?: number } }>('/api/thinking/teaser');
+  const textEl = document.getElementById('ticker-text');
+  const metaEl = document.getElementById('ticker-meta');
+  if (!textEl || !metaEl) return;
+  if (!data?.has_teaser || !data.teaser) {
+    textEl.textContent = '—';
+    metaEl.textContent = '';
+    return;
+  }
+  textEl.textContent = data.teaser.content;
+  const topics = data.teaser.topics?.slice(0, 4).join(' · ') || '';
+  metaEl.textContent = topics;
+  const card = document.getElementById('card-ticker');
+  if (card) {
+    card.onclick = () => openSidebar('multi-agent');
+    card.style.cursor = 'pointer';
+  }
+}
+
+async function refreshHeatmap(): Promise<void> {
+  const data = await fetchJson<{ items: Array<{ name: string; color: string; opacity: number; size: number; weight: number }> }>('/api/context/heatmap');
+  const host = document.getElementById('heatmap-chips');
+  if (!host) return;
+  if (!data?.items || data.items.length === 0) {
+    host.innerHTML = '<span class="nt-card-empty">No active topics</span>';
+    return;
+  }
+  host.innerHTML = data.items.slice(0, 12).map((it) => {
+    const op = Math.max(0.35, it.opacity);
+    const fs = Math.round(9 + it.size * 3);
+    return `<span class="nt-heatchip" style="background:${esc(it.color)};opacity:${op};font-size:${fs}px">${esc(it.name)}</span>`;
+  }).join('');
+  const card = document.getElementById('card-heatmap');
+  if (card) {
+    card.onclick = () => openSidebar('context-heatmap');
+    card.style.cursor = 'pointer';
+  }
+}
+
+async function refreshStarter(): Promise<void> {
+  const data = await fetchJson<{ has_starter: boolean; starter?: { content: string; topic?: string } }>('/api/conversation/starter/pending');
+  const body = document.getElementById('starter-body');
+  if (!body) return;
+  if (!data?.has_starter || !data.starter) {
+    body.innerHTML = '<span class="nt-card-empty">Quiet.</span>';
+    return;
+  }
+  const content = data.starter.content;
+  const topic = data.starter.topic || '';
+  body.innerHTML = `
+    <div class="nt-starter">${esc(content)}</div>
+    <div class="nt-starter-actions">
+      <button class="nt-starter-btn primary" id="starter-accept">Reply</button>
+      <button class="nt-starter-btn" id="starter-dismiss">Dismiss</button>
+    </div>
+  `;
+  document.getElementById('starter-accept')?.addEventListener('click', () => {
+    openSidebar('chat', { message: content });
+  });
+  document.getElementById('starter-dismiss')?.addEventListener('click', async () => {
+    if (topic) {
+      const headers = await authHeaders();
+      fetch(`${BACKEND_URL}/api/conversation/starter/dismiss?topic=${encodeURIComponent(topic)}`, {
+        method: 'POST',
+        headers,
+      }).catch(() => {});
+    }
+    body.innerHTML = '<span class="nt-card-empty">Dismissed.</span>';
+  });
+}
+
+async function refreshHands(): Promise<void> {
+  const data = await fetchJson<{ hands: Array<{ name: string; state?: string }> }>('/api/hands');
+  const body = document.getElementById('hands-body');
+  if (!body) return;
+  const hands = data?.hands ?? [];
+  if (hands.length === 0) {
+    body.innerHTML = '<span class="nt-card-empty">No hands running</span>';
+    return;
+  }
+  const active = hands.filter((h) => h.state === 'running' || h.state === 'active' || h.state === 'paused').slice(0, 6);
+  if (active.length === 0) {
+    body.innerHTML = '<span class="nt-card-empty">All hands idle</span>';
+    return;
+  }
+  body.innerHTML = active.map((h) => {
+    const cls = h.state === 'running' || h.state === 'active' ? 'running' : h.state === 'paused' ? 'paused' : 'idle';
+    return `<div class="nt-hand"><span class="nt-hand-dot ${cls}"></span>${esc(h.name)}</div>`;
+  }).join('');
+  const card = document.getElementById('card-hands');
+  if (card) {
+    card.onclick = () => openSidebar('hands');
+    card.style.cursor = 'pointer';
+  }
+}
+
+async function refreshActivity(): Promise<void> {
+  const since = Math.floor(Date.now() / 1000) - 86400;
+  const data = await fetchJson<{ events: Array<{ timestamp: number; title?: string; description?: string; url?: string }> }>(`/api/activity/events?limit=15&after=${since}`);
+  const list = document.getElementById('activity-list');
+  if (!list) return;
+  const events = data?.events ?? [];
+  if (events.length === 0) {
+    list.innerHTML = '<span class="nt-card-empty">No events</span>';
+    return;
+  }
+  list.innerHTML = events.slice(0, 10).map((e) => {
+    const label = e.title || e.description || '(event)';
+    return `<div class="nt-li" data-url="${esc(e.url || '')}">
+      <span class="nt-li-time">${fmtTimeShort(e.timestamp)}</span>
+      <span class="nt-li-text">${esc(label)}</span>
+    </div>`;
+  }).join('');
+  list.querySelectorAll<HTMLElement>('.nt-li').forEach((el) => {
+    const url = el.dataset.url;
+    if (url) {
+      el.onclick = () => window.open(url, '_blank', 'noopener');
+    }
+  });
+}
+
+async function refreshMemories(): Promise<void> {
+  const data = await fetchJson<{ memories: Array<{ id: string; content: string; timestamp: number }> }>('/api/memory/recent?limit=8');
+  const list = document.getElementById('memories-list');
+  if (!list) return;
+  const mems = data?.memories ?? [];
+  if (mems.length === 0) {
+    list.innerHTML = '<span class="nt-card-empty">No memories</span>';
+    return;
+  }
+  list.innerHTML = mems.slice(0, 8).map((m) => {
+    const snippet = (m.content || '').slice(0, 80);
+    return `<div class="nt-li"><span class="nt-li-text">${esc(snippet)}</span></div>`;
+  }).join('');
+  const card = document.getElementById('card-memories');
+  if (card) {
+    card.onclick = () => openSidebar('memory-browser');
+    card.style.cursor = 'pointer';
+  }
+}
+
+async function refreshFeed(): Promise<void> {
+  const data = await fetchJson<{ items: Array<{ id: string; thumbnail?: string; title?: string }> }>('/api/feed/list?limit=6&offset=0');
+  const row = document.getElementById('feed-row');
+  if (!row) return;
+  const items = data?.items ?? [];
+  if (items.length === 0) {
+    row.innerHTML = '<span class="nt-card-empty">No captures</span>';
+    return;
+  }
+  row.innerHTML = items.map((it) => {
+    const title = it.title || 'Capture';
+    return `<div class="nt-feed-item" title="${esc(title)}" data-id="${esc(it.id)}">
+      ${it.thumbnail ? `<img src="${esc(it.thumbnail)}" alt="">` : ''}
+    </div>`;
+  }).join('');
+  row.querySelectorAll<HTMLElement>('.nt-feed-item').forEach((el) => {
+    el.onclick = () => openSidebar('feed');
+  });
 }
 
 // ── Init ──

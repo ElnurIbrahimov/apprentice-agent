@@ -8,6 +8,8 @@ import {
   Code2, Image, BarChart2, Crosshair,
   Bot, Cpu, Settings, Hand, Plug,
   Command,
+  GitBranch, Users, Activity, Flame, Dna, Sparkles,
+  HardDrive, CalendarDays, Layers, Mail, Rss, Share2, Brain,
 } from 'lucide-react';
 
 interface PanelEntry {
@@ -43,6 +45,20 @@ const PANELS: PanelEntry[] = [
   { id: 'models', label: 'Models', icon: <Cpu size={ICON_SIZE} /> },
   { id: 'mcp', label: 'Connections', icon: <Plug size={ICON_SIZE} /> },
   { id: 'settings', label: 'Settings', icon: <Settings size={ICON_SIZE} /> },
+  // SOTA upgrade panels
+  { id: 'aura-status', label: 'Mind', icon: <Brain size={ICON_SIZE} /> },
+  { id: 'reasoning-tree', label: 'Reasoning Tree', icon: <GitBranch size={ICON_SIZE} /> },
+  { id: 'multi-agent', label: 'Council', icon: <Users size={ICON_SIZE} /> },
+  { id: 'bandit', label: 'Bandit', icon: <BarChart2 size={ICON_SIZE} /> },
+  { id: 'context-heatmap', label: 'Context Heatmap', icon: <Flame size={ICON_SIZE} /> },
+  { id: 'memory-browser', label: 'Memory', icon: <HardDrive size={ICON_SIZE} /> },
+  { id: 'activity', label: 'Activity', icon: <Activity size={ICON_SIZE} /> },
+  { id: 'evolution', label: 'Evolution', icon: <Dna size={ICON_SIZE} /> },
+  { id: 'calendar', label: 'Calendar', icon: <CalendarDays size={ICON_SIZE} /> },
+  { id: 'flashcards', label: 'Flashcards', icon: <Layers size={ICON_SIZE} /> },
+  { id: 'email', label: 'Email', icon: <Mail size={ICON_SIZE} /> },
+  { id: 'feed', label: 'Feed', icon: <Rss size={ICON_SIZE} /> },
+  { id: 'share', label: 'Share', icon: <Share2 size={ICON_SIZE} /> },
 ];
 
 function fuzzyMatch(query: string, text: string): boolean {

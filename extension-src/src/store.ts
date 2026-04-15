@@ -204,6 +204,8 @@ interface AuraStore {
   deleteConversation: (id: string) => Promise<void>;
   clearAllHistory: () => Promise<void>;
   newConversation: () => Promise<void>;
+  /** Search server-side conversation index (distinct from local IDB cache). */
+  searchServerConversations: (q: string, limit?: number) => Promise<Array<{ conversation_id: string; conversation_title: string; role: string; snippet: string; timestamp: number }>>;
 
   // Folder & Pin Actions
   folders: string[];
@@ -969,6 +971,22 @@ export const useStore = create<AuraStore>((set, get) => {
       await storageRemove([ACTIVE_CONV_KEY]);
       if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {
         fetch(`${HTTP}/api/chat/clear`, { method: 'POST', headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).catch(() => {});
+      }
+    },
+
+    searchServerConversations: async (q: string, limit = 30) => {
+      if (!q.trim()) return [];
+      try {
+        const params = new URLSearchParams({ q: q.trim(), limit: String(limit) });
+        const r = await fetch(`${HTTP}/api/chat/conversations/search?${params}`, {
+          headers: API_KEY ? { 'X-API-Key': API_KEY } : {},
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!r.ok) return [];
+        const data = await r.json();
+        return data.results ?? [];
+      } catch {
+        return [];
       }
     },
 
