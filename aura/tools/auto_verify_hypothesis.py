@@ -205,13 +205,13 @@ def _emit_test_file(
         arg_names = [a[0] for a in fn["args"]]
         kwargs = ", ".join(f"{n}={n}" for n in arg_names)
         decorator_args = ", ".join(f"{n}={s}" for n, s in fn["args"])
-        lines.append(f"@_settings")
+        lines.append("@_settings")
         lines.append(f"@given({decorator_args})")
         lines.append(f"def test_{fn['name']}_smoke({', '.join(arg_names)}):")
-        lines.append(f"    try:")
+        lines.append("    try:")
         lines.append(f"        {fn['name']}({kwargs})")
-        lines.append(f"    except _EXPECTED:")
-        lines.append(f"        pass")
+        lines.append("    except _EXPECTED:")
+        lines.append("        pass")
         lines.append("")
 
     Path(out_path).write_text("\n".join(lines), encoding="utf-8")
