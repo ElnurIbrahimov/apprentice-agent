@@ -233,7 +233,7 @@ def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any =
         if is_shutting_down():
             return default
     except Exception:
-        pass
+        logger.debug("Shutdown check failed in call_with_timeout", exc_info=True)
     try:
         future = _llm_pool_fn().submit(func)
         try:
@@ -263,7 +263,7 @@ def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any =
             if is_shutting_down():
                 return default
         except Exception:
-            pass
+            logger.debug("Shutdown re-check failed in call_with_timeout", exc_info=True)
         # Also detect interpreter-level shutdown (sys.is_finalizing() is Python 3.9+)
         if getattr(sys, 'is_finalizing', lambda: False)():
             return default

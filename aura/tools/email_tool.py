@@ -430,7 +430,7 @@ class IMAPConnectionPool:
                     try:
                         conn.logout()
                     except Exception:
-                        pass
+                        logger.debug("IMAP logout failed during idle eviction")
                     continue
                 # Test if connection is still alive
                 try:
@@ -440,7 +440,7 @@ class IMAPConnectionPool:
                     try:
                         conn.logout()
                     except Exception:
-                        pass
+                        logger.debug("IMAP logout failed after noop failure")
                     continue
 
         # Create new connection
@@ -465,7 +465,7 @@ class IMAPConnectionPool:
                 try:
                     conn.logout()
                 except Exception:
-                    pass
+                    logger.debug("IMAP logout failed during pool release overflow")
 
     def close_all(self):
         """Close all pooled connections."""
@@ -474,7 +474,7 @@ class IMAPConnectionPool:
                 try:
                     conn.logout()
                 except Exception:
-                    pass
+                    logger.debug("IMAP logout failed during close_all")
             self._pool.clear()
 
 
@@ -887,7 +887,7 @@ class EmailTool:
                 try:
                     conn.logout()
                 except Exception:
-                    pass
+                    logger.debug("IMAP logout failed during fetch error cleanup")
             return {"success": False, "error": f"Fetch failed: {_sanitize_error(e)}"}
 
     def read_email(self, email_id: str) -> dict:
@@ -923,7 +923,7 @@ class EmailTool:
                 try:
                     conn.logout()
                 except Exception:
-                    pass
+                    logger.debug("IMAP logout failed during read error cleanup")
             return {"success": False, "error": f"Read failed: {_sanitize_error(e)}"}
 
     def send_email(self, to: str, subject: str, body: str,
@@ -1055,7 +1055,7 @@ class EmailTool:
                 try:
                     conn.logout()
                 except Exception:
-                    pass
+                    logger.debug("IMAP logout failed during search error cleanup")
             return {"success": False, "error": f"Search failed: {_sanitize_error(e)}"}
 
     def list_folders(self) -> dict:
@@ -1095,7 +1095,7 @@ class EmailTool:
                 try:
                     conn.logout()
                 except Exception:
-                    pass
+                    logger.debug("IMAP logout failed during list_folders error cleanup")
             return {"success": False, "error": f"List folders failed: {_sanitize_error(e)}"}
 
     def list_attachments(self, email_id: str) -> dict:
@@ -1208,7 +1208,7 @@ class EmailTool:
                 try:
                     conn.logout()
                 except Exception:
-                    pass
+                    logger.debug("IMAP logout failed during download error cleanup")
             return {"success": False, "error": f"Download failed: {_sanitize_error(e)}"}
 
     def mark_read(self, email_id: str) -> dict:
@@ -1243,7 +1243,7 @@ class EmailTool:
                 try:
                     conn.logout()
                 except Exception:
-                    pass
+                    logger.debug("IMAP logout failed during flag error cleanup")
             return {"success": False, "error": f"Flag failed: {_sanitize_error(e)}"}
 
     # ------------------------------------------------------------------

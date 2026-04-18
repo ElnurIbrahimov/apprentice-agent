@@ -7,7 +7,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_ERROR_SENTINELS = ["I'm having trouble processing", "[LLM Error]"]
+from ._constants import ERROR_SENTINELS as _ERROR_SENTINELS
 
 
 class SessionRuntimeController:
@@ -57,7 +57,14 @@ class SessionRuntimeController:
             self._session._channel_lock.release()
 
     def submit_background(self, user_input: str) -> None:
-        """Handle the '&' prefix for background task submission."""
+        """Handle the '&' prefix for background task submission.
+
+        Routes the prompt through a sibling AgenticLoop with its own
+        PermissionManager in 'careful' mode and no confirm callback — so
+        any tool that would normally prompt the user (writes, shell) is
+        denied without blocking the bg thread. Reads and safe shell
+        commands still work. See AgenticLoop.clone_for_background().
+        """
         bg_prompt = user_input[2:].strip() if user_input.startswith("& ") else user_input[1:].strip()
         if not bg_prompt:
             self._session.console.print("[dim]Usage: & <prompt>[/dim]")
@@ -65,11 +72,16 @@ class SessionRuntimeController:
 
         def _bg_task_fn(prompt: str) -> dict[str, Any]:
             try:
-                response = self._session.agent.brain.think(prompt)
-                if isinstance(response, dict):
-                    response = response.get("response", response.get("content", str(response)))
-                return {"success": True, "response": response or "", "iterations": 1}
+                from aura.core.permissions import PermissionManager
+
+                bg_perms = PermissionManager()
+                bg_perms.set_mode("careful")
+                # No confirm callback — any PROMPT-tier tool silently denies.
+                bg_loop = self._session.agentic.clone_for_background(bg_perms)
+                result = bg_loop.run(prompt)
+                return result or {"success": False, "error": "no result"}
             except Exception as exc:
+                logger.debug("background_task_failed", exc_info=True)
                 return {"success": False, "error": str(exc)}
 
         if not self._session.bg_manager:
@@ -121,8 +133,6 @@ class SessionRuntimeController:
             else:
                 self._session._follow_up_depth = 0
                 user_input = get_input(self._session._pt_session)
-
-            self.drain_channels()
 
             if user_input is None:
                 self._handle_exit()
@@ -210,33 +220,76 @@ class SessionRuntimeController:
             )
         self._session.console.print("\n[dim]Goodbye.[/dim]\n")
 
+    # IPC heartbeat config — env-driven so tests and non-daemon setups can
+    # opt out without code changes. The daemon publishes its token under
+    # $AURA_DATA_DIR/ipc_token (default 'data/') per aura_daemon.py:619, and
+    # listens on $AURA_DAEMON_PORT (default 19733) or the Windows named pipe
+    # \\.\pipe\aura_daemon.
+    _IPC_HEARTBEAT_INTERVAL = 30.0
+    _IPC_BACKOFF_SECONDS = 300.0  # skip heartbeats for 5 min after a failure
+    _IPC_PIPE_NAME = r"\\.\pipe\aura_daemon"
+
     def _send_ipc_heartbeat_if_due(self) -> None:
         import time as _t_ipc
 
-        if _t_ipc.time() - self._session._last_ipc_heartbeat <= 30.0:
+        if os.environ.get("AURA_DAEMON_IPC", "1") == "0":
             return
-        self._session._last_ipc_heartbeat = _t_ipc.time()
+
+        now = _t_ipc.time()
+        if now - self._session._last_ipc_heartbeat <= self._IPC_HEARTBEAT_INTERVAL:
+            return
+        if self._session._daemon_unreachable_until > now:
+            return
+        self._session._last_ipc_heartbeat = now
+
+        if not self._try_ipc_send():
+            # Back off so a missing daemon doesn't cost a socket per 30s.
+            self._session._daemon_unreachable_until = now + self._IPC_BACKOFF_SECONDS
+            logger.debug(
+                "IPC heartbeat failed; backing off for %.0fs", self._IPC_BACKOFF_SECONDS
+            )
+
+    def _try_ipc_send(self) -> bool:
+        """Attempt to deliver one activity ping. Returns True on success."""
+        import json as _json
+
+        payload = _json.dumps({"type": "activity", "token": self._read_ipc_token()}) + "\n"
+        data = payload.encode()
+
+        # Windows: prefer the named pipe to match the daemon's primary channel.
+        if os.name == "nt":
+            try:
+                # Open-write-close keeps us consistent with a one-shot TCP send.
+                with open(self._IPC_PIPE_NAME, "wb", buffering=0) as pipe:
+                    pipe.write(data)
+                return True
+            except OSError:
+                pass  # fall back to TCP
+
         try:
-            import json as _json
             import socket
 
-            ipc_token = ""
-            token_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                "data",
-                "ipc_token",
-            )
-            if os.path.isfile(token_path):
-                with open(token_path) as token_file:
-                    ipc_token = token_file.read().strip()
+            port = int(os.environ.get("AURA_DAEMON_PORT", "19733"))
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(0.1)
-                sock.connect(("127.0.0.1", 19733))
-                sock.send(
-                    (_json.dumps({"type": "activity", "token": ipc_token}) + "\n").encode()
-                )
+                sock.connect(("127.0.0.1", port))
+                sock.send(data)
+            return True
         except (OSError, ValueError):
+            return False
+
+    @staticmethod
+    def _read_ipc_token() -> str:
+        """Resolve the daemon's auth token via $AURA_DATA_DIR/ipc_token."""
+        try:
+            data_dir = os.environ.get("AURA_DATA_DIR", "data")
+            token_path = os.path.join(data_dir, "ipc_token")
+            if os.path.isfile(token_path):
+                with open(token_path, encoding="utf-8") as f:
+                    return f.read().strip()
+        except OSError:
             pass
+        return ""
 
     def _show_channels(self) -> None:
         from .display import show_info
@@ -298,7 +351,7 @@ class SessionRuntimeController:
                     "local",
                 )
             except Exception:
-                pass
+                logger.debug("Failed to sync ConversationManager after plan response", exc_info=True)
 
         self._session.msg_count += 1
         if self._session.msg_count == 1 and user_input:

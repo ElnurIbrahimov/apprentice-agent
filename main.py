@@ -14,7 +14,17 @@ if '_wmi' not in _sys.modules:
 import argparse
 import os
 import sys
-from typing import Any, NoReturn
+from typing import Any, NoReturn, Optional
+
+
+def _get_console():
+    """Lazy accessor for the shared Rich console (deferred to avoid import cost at startup)."""
+    try:
+        from aura.cli.display import console
+        return console
+    except ImportError:
+        from rich.console import Console
+        return Console()
 
 
 def _suppress_warnings() -> None:
@@ -98,11 +108,23 @@ def _argv_has_subcommand(argv: list[str]) -> bool:
     return False
 
 
-def main() -> None:
-    _suppress_warnings()
+def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
+    """Build and return the CLI argument parser plus the use_subparsers flag.
+
+    Returns a (parser, use_subparsers) tuple so callers can check whether
+    subparser-mode was activated before calling parser.parse_args().
+    """
     from aura._version import __version__
     parser = argparse.ArgumentParser(
-        description="AURA - Autonomous Universal Reasoning Agent",
+        description="AURA - Autonomous Universal Reasoning Agent\n\n"
+        "Usage examples:\n"
+        "  aura                     Interactive chat mode\n"
+        "  aura \"fix the login bug\"  One-shot agentic execution\n"
+        "  aura init                Create AURA.md for current project\n"
+        "  aura doctor              Check Ollama, models, dependencies\n"
+        "  aura commit --all        AI-generated commit message\n"
+        "  aura --voice             Voice mode with speech input/output\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         prog="aura"
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -245,7 +267,10 @@ def main() -> None:
         "--format",
         choices=["text", "json", "markdown"],
         default="text",
-        help="Output format for non-interactive mode (default: text)"
+        help="Output format for non-interactive mode (default: text). "
+             "JSON mode denies tool-permission prompts unless --trust is set; "
+             "denied tools emit a 'permission_denied' event so scripted "
+             "consumers can react."
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -272,6 +297,70 @@ def main() -> None:
         help="Log every ModelRouter decision (category, confidence, tier, model) "
              "to stderr so scripts can audit which model handled a prompt."
     )
+    return parser, use_subparsers
+
+
+def _handle_resume(agent: Any, args: argparse.Namespace) -> Optional[str]:
+    """List sessions and let the user pick one to resume. Returns selected session id or None."""
+    from aura.core.session import AgenticSession as _SessionCheck
+    _ses = _SessionCheck()
+    agentic_sessions = _ses.list_sessions()
+    brain_conversations = agent.brain.list_conversations()
+
+    _resume_console = _get_console()
+    if args.resume == "last":
+        if agentic_sessions:
+            latest = agentic_sessions[0]
+            agent._resume_session_id = latest["id"]
+            _resume_console.print(f"  [green]Resuming:[/green] {latest.get('title', 'Untitled')} [dim]({latest.get('message_count', 0)} messages)[/dim]")
+        elif brain_conversations:
+            latest = brain_conversations[0]
+            agent.brain.switch_conversation(latest["id"])
+            _resume_console.print(f"  [green]Resumed (legacy):[/green] {latest.get('title', 'Untitled')}")
+        else:
+            _resume_console.print("[dim]No previous sessions found.[/dim]")
+        return None
+
+    all_sessions = []
+    for s in agentic_sessions:
+        s["_source"] = "agentic"
+        all_sessions.append(s)
+    for c in brain_conversations:
+        c["_source"] = "brain"
+        all_sessions.append(c)
+    all_sessions.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
+
+    if not all_sessions:
+        _resume_console.print("[dim]No previous sessions found.[/dim]")
+        return None
+
+    _resume_console.print("\n  [bold]Recent sessions:[/bold]\n")
+    for i, s in enumerate(all_sessions[:10], 1):
+        title = s.get("title", "Untitled")[:50]
+        msgs = s.get("message_count", 0)
+        src = s.get("_source", "?")
+        _resume_console.print(f"    [cyan]{i}.[/cyan] {title} [dim]({msgs} msgs) [{src}][/dim]")
+    _resume_console.print()
+    try:
+        choice = input("  Pick a session (number): ").strip()
+        idx = int(choice) - 1
+        if 0 <= idx < len(all_sessions[:10]):
+            picked = all_sessions[idx]
+            if picked["_source"] == "agentic":
+                agent._resume_session_id = picked["id"]
+            else:
+                agent.brain.switch_conversation(picked["id"])
+            _resume_console.print(f"  [green]Resuming:[/green] {picked.get('title', 'Untitled')}")
+        else:
+            _resume_console.print("  [yellow]Invalid choice, starting new session.[/yellow]")
+    except (ValueError, EOFError, KeyboardInterrupt):
+        _resume_console.print("  [dim]Starting new session.[/dim]")
+    return None
+
+
+def main() -> None:
+    _suppress_warnings()
+    parser, use_subparsers = _build_argument_parser()
 
     args = parser.parse_args()
     if not use_subparsers:
@@ -292,7 +381,7 @@ def main() -> None:
             from aura.auth.chatgpt_oauth import login
             sys.exit(0 if login() else 1)
         else:
-            print(f"Unknown provider: {args.login}. Available: chatgpt")
+            _get_console().print(f"[red]Unknown provider: {args.login}. Available: chatgpt[/red]")
             sys.exit(1)
 
     if args.logout:
@@ -301,7 +390,7 @@ def main() -> None:
             logout()
             sys.exit(0)
         else:
-            print(f"Unknown provider: {args.logout}. Available: chatgpt")
+            _get_console().print(f"[red]Unknown provider: {args.logout}. Available: chatgpt[/red]")
             sys.exit(1)
 
     # Handle MCP server (lightweight, no agent needed)
@@ -313,33 +402,34 @@ def main() -> None:
     # Handle log subcommand (lightweight, no agent needed)
     if args.command == "log":
         from aura.cli.activity_log import ActivityLog
+        _log_console = _get_console()
         log = ActivityLog()
         if args.action == "search":
             query = " ".join(args.query)
             results = log.search(query, limit=args.limit)
             for r in results:
-                print(f"[{r['model']}] {r['prompt'][:80]}")
-                print(f"  -> {r['response'][:120]}")
+                _log_console.print(f"[cyan][{r['model']}][/cyan] {r['prompt'][:80]}")
+                _log_console.print(f"  [dim]-> {r['response'][:120]}[/dim]")
         elif args.action == "stats":
             stats = log.get_stats()
             for k, v in stats.items():
-                print(f"  {k}: {v}")
+                _log_console.print(f"  [bold]{k}[/bold]: {v}")
         elif args.action == "export":
             if not args.session:
-                print("Usage: aura log export --session <session_id>")
+                _log_console.print("[yellow]Usage: aura log export --session <session_id>[/yellow]")
                 sys.exit(1)
             md = log.export_session(args.session, format=args.log_format)
-            print(md)
+            print(md)  # raw output for export (may be piped)
         else:  # recent
             for r in log.get_recent(args.limit):
-                print(f"  {r['prompt'][:80]}")
+                _log_console.print(f"  [dim]{r['prompt'][:80]}[/dim]")
         sys.exit(0)
 
     # Handle exec subcommand — convert to non-interactive --prompt path
     if args.command == "exec":
         exec_prompt = getattr(args, "exec_prompt", None) or args.prompt
         if not exec_prompt:
-            print("Usage: aura exec 'your prompt here'")
+            _get_console().print("[yellow]Usage: aura exec 'your prompt here'[/yellow]")
             sys.exit(1)
         args.prompt = exec_prompt  # normalize for the shared --prompt path below
         # Fall through to the non-interactive --prompt path below
@@ -356,42 +446,43 @@ def main() -> None:
 
     # Handle dream mode first (doesn't need agent)
     if args.dream:
+        _dream_console = _get_console()
         date_label = args.dream_date or "today"
-        print(f"[Dream] Analyzing metacognition logs for {date_label}...")
+        _dream_console.print(f"[cyan][Dream] Analyzing metacognition logs for {date_label}...[/cyan]")
         result = run_dream_mode(args.dream_date)
         if result.get("success"):
             insights = result.get("insights", [])
-            print(
-                f"[Dream] Analyzed {result.get('logs_analyzed', 0)} log entries, "
+            _dream_console.print(
+                f"[green][Dream] Analyzed {result.get('logs_analyzed', 0)} log entries, "
                 f"generated {len(insights)} insights, "
-                f"stored {len(result.get('stored_ids', []))} in memory."
+                f"stored {len(result.get('stored_ids', []))} in memory.[/green]"
             )
             for i, ins in enumerate(insights, 1):
-                print(f"  {i}. {ins}")
+                _dream_console.print(f"  [dim]{i}. {ins}[/dim]")
             cons = result.get("consolidation") or {}
             if cons:
-                print(
-                    f"[Dream] Consolidation: merged={cons.get('merged', 0)}, "
-                    f"pruned={cons.get('pruned', 0)}"
+                _dream_console.print(
+                    f"[cyan][Dream] Consolidation: merged={cons.get('merged', 0)}, "
+                    f"pruned={cons.get('pruned', 0)}[/cyan]"
                 )
             sys.exit(0)
         err = result.get("error", "Unknown error")
-        print(f"[Dream] {err}")
+        _dream_console.print(f"[dim][Dream] {err}[/dim]")
         # "No logs found" is informational, not a failure.
         sys.exit(0 if err == "No logs found" else 1)
 
     try:
         agent = ApprenticeAgent()
     except ConnectionError as e:
-        print(f"\n[AURA] Cannot connect to Ollama: {e}")
-        print("Start it with: ollama serve")
+        _get_console().print(f"\n[red][AURA] Cannot connect to Ollama: {e}[/red]")
+        _get_console().print("[dim]Start it with: ollama serve[/dim]")
         sys.exit(1)
     except (FileNotFoundError, PermissionError) as e:
-        print(f"\n[AURA] Config/filesystem error: {e}")
+        _get_console().print(f"\n[red][AURA] Config/filesystem error: {e}[/red]")
         sys.exit(1)
     except Exception as e:
-        print(f"\n[AURA] Failed to initialize agent: {e}")
-        print("Run 'aura doctor' to diagnose the issue.")
+        _get_console().print(f"\n[red][AURA] Failed to initialize agent: {e}[/red]")
+        _get_console().print("[dim]Run 'aura doctor' to diagnose the issue.[/dim]")
         sys.exit(1)
     agent.max_iterations = args.max_iterations
     agent.use_fastpath = not args.no_fastpath
@@ -402,56 +493,7 @@ def main() -> None:
 
     # Handle session resume — try agentic sessions first, fall back to brain conversations
     if args.resume:
-        from aura.core.session import AgenticSession as _SessionCheck
-        _ses = _SessionCheck()
-        agentic_sessions = _ses.list_sessions()
-        brain_conversations = agent.brain.list_conversations()
-
-        if args.resume == "last":
-            if agentic_sessions:
-                latest = agentic_sessions[0]
-                agent._resume_session_id = latest["id"]
-                print(f"  Resuming: {latest.get('title', 'Untitled')} ({latest.get('message_count', 0)} messages)")
-            elif brain_conversations:
-                latest = brain_conversations[0]
-                agent.brain.switch_conversation(latest["id"])
-                print(f"  Resumed (legacy): {latest.get('title', 'Untitled')}")
-            else:
-                print("No previous sessions found.")
-        else:
-            all_sessions = []
-            for s in agentic_sessions:
-                s["_source"] = "agentic"
-                all_sessions.append(s)
-            for c in brain_conversations:
-                c["_source"] = "brain"
-                all_sessions.append(c)
-            all_sessions.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
-
-            if not all_sessions:
-                print("No previous sessions found.")
-            else:
-                print("\n  Recent sessions:\n")
-                for i, s in enumerate(all_sessions[:10], 1):
-                    title = s.get("title", "Untitled")[:50]
-                    msgs = s.get("message_count", 0)
-                    src = s.get("_source", "?")
-                    print(f"    {i}. {title} ({msgs} msgs) [{src}]")
-                print()
-                try:
-                    choice = input("  Pick a session (number): ").strip()
-                    idx = int(choice) - 1
-                    if 0 <= idx < len(all_sessions[:10]):
-                        picked = all_sessions[idx]
-                        if picked["_source"] == "agentic":
-                            agent._resume_session_id = picked["id"]
-                        else:
-                            agent.brain.switch_conversation(picked["id"])
-                        print(f"  Resuming: {picked.get('title', 'Untitled')}")
-                    else:
-                        print("  Invalid choice, starting new session.")
-                except (ValueError, EOFError, KeyboardInterrupt):
-                    print("  Starting new session.")
+        _handle_resume(agent, args)
 
     # Read piped stdin if available (for composability)
     from aura.cli.pipe_mode import PipeOutput, read_piped_input, EXIT_SUCCESS, EXIT_ERROR
@@ -481,12 +523,12 @@ def main() -> None:
                     from aura.channels.extension_channel import ExtensionChannel
                     bridge.add_channel(ExtensionChannel())
                 else:
-                    print(f"Unknown channel: {ch_name}")
+                    _get_console().print(f"[red]Unknown channel: {ch_name}[/red]")
                     sys.exit(1)
 
             bridge.start()
         except Exception as e:
-            print(f"[AURA] Channel bridge failed to start: {e}")
+            _get_console().print(f"[red][AURA] Channel bridge failed to start: {e}[/red]")
             bridge = None
 
     # Unified non-interactive dispatch: -p/--prompt, `exec` subcommand (which

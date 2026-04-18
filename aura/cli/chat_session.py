@@ -39,7 +39,6 @@ class ChatSession:
         from aura.core.session import AgenticSession
 
         from .checkpoint import CheckpointManager
-        from .context import CLIContext, set_ctx
         from .context_bar import get_context_limit
         from .display import (
             console,
@@ -132,70 +131,7 @@ class ChatSession:
             self.agentic.executor._checkpoint_mgr = self.checkpoint_mgr
 
         # ── Optional subsystems ──
-        try:
-            from .background import (
-                BackgroundManager,
-                create_background_indicator,
-                notify_completion,
-            )
-            self._BackgroundManager = BackgroundManager
-            self._notify_completion = notify_completion
-            self._create_background_indicator = create_background_indicator
-        except ImportError:
-            logger.warning("BackgroundManager unavailable — background tasks disabled")
-            self._BackgroundManager = None
-            self._notify_completion = None
-            self._create_background_indicator = lambda *a, **k: ""
-
-        try:
-            from .research_mode import ResearchContext, create_research_indicator
-            self._ResearchContext = ResearchContext
-            self._create_research_indicator = create_research_indicator
-        except ImportError:
-            logger.warning("ResearchContext unavailable — /research mode disabled")
-            self._ResearchContext = None
-            self._create_research_indicator = lambda *a, **k: ""
-
-        try:
-            from .hooks import HookEvent, HookManager
-            self._HookManager = HookManager
-            self._HookEvent = HookEvent
-        except ImportError:
-            logger.warning("HookManager unavailable — hooks from AURA.md will not fire")
-            console.print("  [dim yellow]Hooks unavailable[/dim yellow]")
-            self._HookManager = None
-            self._HookEvent = None
-
-        try:
-            from .mood_display import create_mood_indicator
-            self._create_mood_indicator = create_mood_indicator
-        except ImportError:
-            logger.warning("mood_display unavailable — mood indicator disabled")
-            self._create_mood_indicator = lambda *a, **k: ""
-
-        self.bg_manager = self._BackgroundManager() if self._BackgroundManager else None
-        if self.bg_manager and self._notify_completion:
-            self.bg_manager.set_completion_callback(self._notify_completion)
-
-        self.research_ctx = self._ResearchContext() if self._ResearchContext else None
-
-        self.hook_mgr = self._HookManager() if self._HookManager else None
-        if self.hook_mgr and aura_config:
-            self.hook_mgr.load_from_config(aura_config)
-            self.hook_mgr.load_builtin_hooks(aura_config)
-
-        # Always install a DisclosureManager so tool output gets wrapped in
-        # collapsible sections. --verbose flips default_expanded=True so the
-        # full content shows inline; otherwise sections render as one-line
-        # summaries and the scroll stays clean.
-        from . import display as _display_mod
-        from .disclosure import DisclosureManager
-        _display_mod._disclosure = DisclosureManager(default_expanded=bool(verbose))
-        if verbose:
-            _display_mod._disclosure.set_verbose(True)
-
-        if self.hook_mgr:
-            self.hook_mgr.fire(self._HookEvent.SESSION_START, {"project_root": project_root})
+        self._load_optional_subsystems(aura_config=aura_config, project_root=project_root, verbose=verbose)
 
         # ── Steering ──
         from .steering import SteeringQueue
@@ -212,43 +148,8 @@ class ChatSession:
             logger.warning("ActivityLog failed to initialize (OS error)")
             self.activity_log = None
 
-        # ── Build CLIContext and publish it ──
-        cli_ctx = CLIContext(
-            agent=agent,
-            agentic_loop=self.agentic,
-            permissions=self.permissions,
-            session=self.agentic_session,
-            bg_manager=self.bg_manager,
-            research_ctx=self.research_ctx,
-            hook_manager=self.hook_mgr,
-            speak=speak,
-            verbose=verbose,
-            resume_session_id=getattr(agent, '_resume_session_id', None),
-        )
-        set_ctx(cli_ctx)
-        self._cli_ctx = cli_ctx
-
-        # ── Cross-surface sync via ConversationManager ──
-        self._cm_conv_id = None
-        try:
-            from aura.core.conversation_manager import get_conversation_manager
-            _cm = get_conversation_manager()
-            if _cm._brain is not None:
-                self._cm_conv_id = _cm.get_or_create_session("cli", "local")
-                _cm.switch_conversation(self._cm_conv_id, surface="cli")
-        except ImportError:
-            logger.warning("ConversationManager unavailable — cross-surface sync disabled")
-        except Exception:
-            logger.debug("conversation_manager_init_failed", exc_info=True)
-
-        # ── Resume session if requested ──
-        resume_id = cli_ctx.resume_session_id
-        if resume_id:
-            if self.agentic.load_session(resume_id):
-                self.agentic_session.load(resume_id)
-                show_info(f"Session restored ({len(self.agentic._conversation_history)} messages)")
-            if hasattr(agent, '_resume_session_id'):
-                delattr(agent, '_resume_session_id')
+        # ── Build CLIContext, ConversationManager sync, and resume ──
+        self._setup_context(agent=agent, speak=speak, verbose=verbose)
 
         # ── State variables ──
         self.current_model = boot.model or "auto"
@@ -259,6 +160,9 @@ class ChatSession:
 
         self._last_ctrl_c_time = 0.0
         self._last_ipc_heartbeat = 0.0
+        # After a connection failure the heartbeat is skipped until this
+        # timestamp passes — avoids reconnect storms against a dead daemon.
+        self._daemon_unreachable_until = 0.0
         self._injected_input: Optional[str] = None
 
         import threading
@@ -316,6 +220,120 @@ class ChatSession:
         # H3: Auto-test after each edit
         self._auto_test_enabled = bool(aura_config.get("auto_test", False)) if aura_config else False
 
+    # ── Optional subsystem loading ────────────────────────────────────────
+
+    def _load_optional_subsystems(self, *, aura_config: Any, project_root: str, verbose: bool) -> None:
+        """Load optional subsystem classes (ImportError-safe) and instantiate them."""
+        try:
+            from .background import (
+                BackgroundManager,
+                create_background_indicator,
+                notify_completion,
+            )
+            self._BackgroundManager = BackgroundManager
+            self._notify_completion = notify_completion
+            self._create_background_indicator = create_background_indicator
+        except ImportError:
+            logger.warning("BackgroundManager unavailable — background tasks disabled")
+            self._BackgroundManager = None
+            self._notify_completion = None
+            self._create_background_indicator = lambda *a, **k: ""
+
+        try:
+            from .research_mode import ResearchContext, create_research_indicator
+            self._ResearchContext = ResearchContext
+            self._create_research_indicator = create_research_indicator
+        except ImportError:
+            logger.warning("ResearchContext unavailable — /research mode disabled")
+            self._ResearchContext = None
+            self._create_research_indicator = lambda *a, **k: ""
+
+        try:
+            from .hooks import HookEvent, HookManager
+            self._HookManager = HookManager
+            self._HookEvent = HookEvent
+        except ImportError:
+            logger.warning("HookManager unavailable — hooks from AURA.md will not fire")
+            self.console.print("  [dim yellow]Hooks unavailable[/dim yellow]")
+            self._HookManager = None
+            self._HookEvent = None
+
+        try:
+            from .mood_display import create_mood_indicator
+            self._create_mood_indicator = create_mood_indicator
+        except ImportError:
+            logger.warning("mood_display unavailable — mood indicator disabled")
+            self._create_mood_indicator = lambda *a, **k: ""
+
+        self.bg_manager = self._BackgroundManager() if self._BackgroundManager else None
+        if self.bg_manager and self._notify_completion:
+            self.bg_manager.set_completion_callback(self._notify_completion)
+
+        self.research_ctx = self._ResearchContext() if self._ResearchContext else None
+
+        self.hook_mgr = self._HookManager() if self._HookManager else None
+        if self.hook_mgr and aura_config:
+            self.hook_mgr.load_from_config(aura_config)
+            self.hook_mgr.load_builtin_hooks(aura_config)
+
+        # Always install a DisclosureManager so tool output gets wrapped in
+        # collapsible sections. --verbose flips default_expanded=True so the
+        # full content shows inline; otherwise sections render as one-line
+        # summaries and the scroll stays clean.
+        from . import display as _display_mod
+        from .disclosure import DisclosureManager
+        _display_mod._disclosure = DisclosureManager(default_expanded=bool(verbose))
+        if verbose:
+            _display_mod._disclosure.set_verbose(True)
+
+        if self.hook_mgr:
+            self.hook_mgr.fire(self._HookEvent.SESSION_START, {"project_root": project_root})
+
+    # ── Context setup ─────────────────────────────────────────────────────
+
+    def _setup_context(self, *, agent: Any, speak: bool, verbose: bool) -> None:
+        """Build CLIContext, sync ConversationManager, and resume session if requested."""
+        from .context import CLIContext, set_ctx
+        from .display import show_info
+
+        # ── Build CLIContext and publish it ──
+        cli_ctx = CLIContext(
+            agent=agent,
+            agentic_loop=self.agentic,
+            permissions=self.permissions,
+            session=self.agentic_session,
+            bg_manager=self.bg_manager,
+            research_ctx=self.research_ctx,
+            hook_manager=self.hook_mgr,
+            speak=speak,
+            verbose=verbose,
+            resume_session_id=getattr(agent, '_resume_session_id', None),
+        )
+        set_ctx(cli_ctx)
+        self._cli_ctx = cli_ctx
+
+        # ── Cross-surface sync via ConversationManager ──
+        self._cm_conv_id = None
+        try:
+            from aura.core.conversation_manager import get_conversation_manager
+            _cm = get_conversation_manager()
+            if _cm._brain is not None:
+                self._cm_conv_id = _cm.get_or_create_session("cli", "local")
+                _cm.switch_conversation(self._cm_conv_id, surface="cli")
+        except ImportError:
+            logger.warning("ConversationManager unavailable — cross-surface sync disabled")
+        except Exception:
+            logger.debug("conversation_manager_init_failed", exc_info=True)
+
+        # ── Resume session if requested ──
+        resume_id = cli_ctx.resume_session_id
+        if resume_id:
+            if self.agentic.load_session(resume_id):
+                self.agentic_session.load(resume_id)
+                show_info(f"Session restored ({len(self.agentic._conversation_history)} messages)")
+            if hasattr(agent, '_resume_session_id'):
+                delattr(agent, '_resume_session_id')
+
     # ── Permission setup ──────────────────────────────────────────────────
 
     def _build_permissions(self, trust: bool, aura_config: dict[str, Any]) -> None:
@@ -325,43 +343,22 @@ class ChatSession:
         if aura_config:
             self.permissions.apply_aura_md_overrides(aura_config)
 
-    def _cli_confirm(self, tool_name: str, description: str) -> bool:
-        """Interactive permission prompt — references self.perm_mode."""
+    def _cli_confirm(self, tool_name: str, description: str) -> str:
+        """Interactive permission prompt — delegates to the shared Rich dialog.
+
+        Returns one of ``'allow_once' | 'allow_session' | 'allow_always' | 'deny'``.
+        ``PermissionManager.check`` understands this vocabulary
+        (see aura/core/permissions.py:180-192) and records session-scope or
+        always-scope approvals accordingly.
+        """
+        from .permissions_dialog import request_permission
         from .permissions_ui import should_auto_approve_command, should_auto_approve_edit
 
         if should_auto_approve_edit(self.perm_mode) and tool_name in ("edit_file", "write_file"):
-            return True
+            return "allow_once"
         if should_auto_approve_command(self.perm_mode):
-            return True
-
-        try:
-            from aura.cli.themes import get_theme
-            theme = get_theme()
-            warn = theme.warning
-            accent = theme.permission_accent
-        except (ImportError, AttributeError):
-            warn = "#FFC107"
-            accent = "#B1B9F9"
-
-        self.console.print()
-        self.console.print(f"  [{warn}]\u25b3[/{warn}] [{accent}]Allow {tool_name}?[/{accent}]", end="")
-        if description:
-            self.console.print(f" [dim]{description[:80]}[/dim]")
-        else:
-            self.console.print()
-        self.console.print(f"    [{accent}]> 1. Yes[/{accent}]")
-        self.console.print("      2. Yes, always (trust mode)", style="dim")
-        self.console.print("      3. No", style="dim")
-        try:
-            response = input("  Choose (1-3, Enter=yes): ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            return False
-        if response in ("2", "always"):
-            self.permissions.set_trust_mode(True)
-            return True
-        if response in ("3", "n", "no"):
-            return False
-        return response in ("", "1", "y", "yes")
+            return "allow_once"
+        return request_permission(self.console, tool_name, description)
 
     # ── Permission banner ─────────────────────────────────────────────────
 

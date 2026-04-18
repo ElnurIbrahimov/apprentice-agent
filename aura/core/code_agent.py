@@ -324,8 +324,8 @@ class CodeAgentMode:
                             if is_previewable(path):
                                 import os
                                 broadcast_artifact(os.path.basename(path), content)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[CodeAgent] Artifact broadcast for write_file failed: {e}")
                     return res
                 except Exception as e:
                     return {"success": False, "error": str(e)}
@@ -393,8 +393,8 @@ class CodeAgentMode:
                     if is_previewable(path):
                         with open(path, "r", encoding="utf-8", errors="replace") as f:
                             broadcast_artifact(os.path.basename(path), f.read())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[CodeAgent] Artifact broadcast for edit_file failed: {e}")
             return result
         ns["edit_file"] = edit_file
 
@@ -541,8 +541,8 @@ class CodeAgentMode:
         if sub_result["parsed_result"] is not None:
             try:
                 result["return_value"] = str(sub_result["parsed_result"])[:4000]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[CodeAgent] Failed to convert subprocess parsed_result to string: {e}")
 
         return result
 

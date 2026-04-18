@@ -275,7 +275,7 @@ def migrate_episodic(store, dry_run=False):
             if tc and hasattr(tc, 'timestamp'):
                 ts = tc.timestamp.isoformat() if hasattr(tc.timestamp, 'isoformat') else str(tc.timestamp)
         except Exception:
-            pass
+            logger.debug("[migrate] Failed to extract temporal_context for %s", ep_id)
 
         record = MemoryRecord(
             id=f"ep_{ep_id}" if not ep_id.startswith("ep_") else ep_id,
@@ -300,7 +300,7 @@ def migrate_episodic(store, dry_run=False):
     try:
         ep_store.close()
     except Exception:
-        pass
+        logger.debug("[migrate] Failed to close episodic store cleanly")
     return count
 
 

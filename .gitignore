@@ -1,3 +1,9 @@
+# Coverage + pytest artifacts
+.coverage
+.coverage.*
+.pytest-temp/
+.tmp-pytest/
+
 # Virtual environment
 venv/
 .venv/

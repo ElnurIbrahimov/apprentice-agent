@@ -4,8 +4,23 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
+
+
+class RecallResult(NamedTuple):
+    """Return type for _recall_memories — formatted block + stats for callers."""
+
+    formatted: str
+    count: int
+    top: str
+
+    def __str__(self) -> str:  # back-compat: str(result) == result.formatted
+        return self.formatted
+
+    def __bool__(self) -> bool:  # back-compat: `if memories:` still truthy when non-empty
+        return bool(self.formatted)
 
 console = None
 MAX_TOOL_OUTPUT_CHARS = 15000
@@ -191,12 +206,12 @@ def _truncate(text: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:
     return text[:half] + f"\n\n... ({len(text) - max_chars} chars truncated) ...\n\n" + text[-half:]
 
 
-def _recall_memories(prompt: str, max_results: int = 8) -> str:
+def _recall_memories(prompt: str, max_results: int = 8) -> RecallResult:
     """Query UnifiedMemory for relevant context.
 
-    Returns a formatted "## Relevant Memories" block or empty string. The
-    last recall count is cached on this function object so the caller can
-    surface how many memories were injected without re-querying.
+    Returns a ``RecallResult`` with the formatted "## Relevant Memories" block,
+    the number of results, and a short preview of the top hit. ``str(result)``
+    yields the formatted block for callers that treat it as a plain string.
     """
 
     try:
@@ -208,12 +223,9 @@ def _recall_memories(prompt: str, max_results: int = 8) -> str:
         # calibrated against raw BM25 scores and silently returned empty for
         # most real queries since the fused rank+rerank scores live below it.
         results = unified_memory.query(prompt, k=max_results, min_score=0.05)
-        _recall_memories.last_count = len(results)  # type: ignore[attr-defined]
-        _recall_memories.last_top = (
-            results[0].content[:80] if results else ""
-        )  # type: ignore[attr-defined]
+        top = results[0].content[:80] if results else ""
         if not results:
-            return ""
+            return RecallResult(formatted="", count=0, top="")
 
         lines = ["## Relevant Memories"]
         for result in results:
@@ -221,18 +233,10 @@ def _recall_memories(prompt: str, max_results: int = 8) -> str:
             source = getattr(result, "source", "memory")
             score = getattr(result, "score", 0)
             lines.append(f"- [{source}, relevance={score:.2f}] {content}")
-        return "\n".join(lines)
+        return RecallResult(formatted="\n".join(lines), count=len(results), top=top)
     except Exception as exc:
         logger.debug("[AgenticLoop] Memory recall failed (non-fatal): %s", exc)
-        _recall_memories.last_count = 0  # type: ignore[attr-defined]
-        _recall_memories.last_top = ""  # type: ignore[attr-defined]
-        return ""
-
-
-# Initialize the cached attributes so callers don't AttributeError before the
-# first recall has run.
-_recall_memories.last_count = 0  # type: ignore[attr-defined]
-_recall_memories.last_top = ""  # type: ignore[attr-defined]
+        return RecallResult(formatted="", count=0, top="")
 
 
 def _store_interaction(prompt: str, response: str) -> None:

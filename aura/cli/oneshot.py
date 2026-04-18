@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from typing import Any, NoReturn
+
+logger = logging.getLogger(__name__)
 
 
 def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) -> NoReturn:
@@ -70,11 +73,18 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
     if boot.aura_config:
         permissions.apply_aura_md_overrides(boot.aura_config)
 
-    def _confirm(tool_name: str, description: str) -> bool | str:
+    # Emitter is created up front so _confirm can reach it without a forward ref.
+    emitter: StreamingJSONEmitter | None = StreamingJSONEmitter() if json_mode else None
+
+    def _confirm(tool_name: str, description: str) -> str:
         if json_mode:
-            # In JSON mode we can't prompt — deny by default. Callers that need
-            # tool calls should pass --trust or set AURA.md permissions to auto.
-            return False
+            # In JSON mode we can't prompt — announce the denial so scripted
+            # consumers see why the agent stopped touching tools. Callers that
+            # need tool calls should pass --trust or set AURA.md permissions
+            # to auto.
+            if emitter is not None:
+                emitter.emit_permission_denied(tool_name, description)
+            return "deny"
         from .permissions_dialog import request_permission
         return request_permission(console, tool_name, description)
 
@@ -84,9 +94,8 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
 
     # Wire event callbacks for JSONL streaming output.
     on_chunk = on_tool_start = on_tool_call = on_response = None
-    emitter: StreamingJSONEmitter | None = None
     if json_mode:
-        emitter = StreamingJSONEmitter()
+        assert emitter is not None  # narrow for type-checkers
         def on_chunk(text: str) -> None:
             if text:
                 emitter.emit_chunk(text)
@@ -105,14 +114,12 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
         # long-term recall for the context it's answering in.
         try:
             from aura.core.agentic_loop_support import _recall_memories
-            _recall_memories(prompt)
-            n = getattr(_recall_memories, "last_count", 0)
-            top = getattr(_recall_memories, "last_top", "")
-            if n:
-                snippet = (top[:60] + "...") if len(top) > 60 else top
-                console.print(f"  [dim cyan]\u25ce recalled {n} memories (top: {snippet!r})[/dim cyan]")
-        except Exception:
-            pass
+            recall = _recall_memories(prompt)
+            if recall.count:
+                snippet = (recall.top[:60] + "...") if len(recall.top) > 60 else recall.top
+                console.print(f"  [dim cyan]\u25ce recalled {recall.count} memories (top: {snippet!r})[/dim cyan]")
+        except Exception as e:
+            logger.debug(f"[Oneshot] Memory preview recall failed: {e}")
         console.print()
 
     try:

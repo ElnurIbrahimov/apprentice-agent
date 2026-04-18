@@ -272,8 +272,8 @@ class SelfImprovementEngine:
             # Fail if both coherence and judge are low
             if quality.get("coherence_score", 0.5) < 0.4 and quality.get("judge_score", 0.5) < 0.3:
                 return False
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[SelfImprovement] Quality metrics from strategy bandit failed in _infer_success: {e}")
 
         return True
 
@@ -298,7 +298,8 @@ class SelfImprovementEngine:
             # Low scores = high confidence in failure (inverted below)
             quality_signal = 0.4 * coherence + 0.6 * judge
             confidence = 0.3 + 0.6 * quality_signal  # range: 0.3 - 0.9
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[SelfImprovement] Quality metrics from strategy bandit failed in _compute_confidence: {e}")
             # Fallback to length-based if import fails
             if len(response) > 200:
                 confidence += 0.1

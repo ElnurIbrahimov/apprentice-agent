@@ -1,6 +1,7 @@
 """Tests for editable plan mode."""
 import pytest
 from unittest.mock import patch
+from aura.core.agentic_loop_support import RecallResult
 from aura.cli.plan_mode import (
     PlanStep, ExecutionPlan, StepStatus,
     parse_plan_from_llm, render_plan, PLAN_GENERATION_PROMPT,
@@ -179,7 +180,7 @@ def test_edit_plan_text_editor_fails():
 
 # ── plan_first tests (agentic loop) ─────────────────────────────────
 
-@patch("aura.core.agentic_loop._recall_memories", return_value="")
+@patch("aura.core.agentic_loop._recall_memories", return_value=RecallResult("", 0, ""))
 @patch("aura.core.agentic_loop.os.path.getmtime", side_effect=OSError)
 def test_plan_first_returns_plan_dict(mock_getmtime, mock_recall):
     """plan_first should return a dict with plan_text, plan, and prompt."""
@@ -214,7 +215,7 @@ def test_plan_first_returns_plan_dict(mock_getmtime, mock_recall):
     assert "error" not in result
 
 
-@patch("aura.core.agentic_loop._recall_memories", return_value="")
+@patch("aura.core.agentic_loop._recall_memories", return_value=RecallResult("", 0, ""))
 @patch("aura.core.agentic_loop.os.path.getmtime", side_effect=OSError)
 def test_plan_first_empty_llm_response(mock_getmtime, mock_recall):
     """plan_first with empty LLM response should still return a plan (with defaults)."""

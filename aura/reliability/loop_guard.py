@@ -184,8 +184,8 @@ class SessionLoopGuard:
                     extra={"reason": reason, "detail": detail,
                            "actions": self._total_actions},
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[LoopGuard] Telemetry emission failed: {e}")
 
         return LoopGuardResult(
             triggered=True,

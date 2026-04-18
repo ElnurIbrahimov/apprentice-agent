@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-_ERROR_SENTINELS = ["I'm having trouble processing", "[LLM Error]"]
+from ._constants import ERROR_SENTINELS as _ERROR_SENTINELS
 
 
 class SessionExecutionController:
@@ -81,12 +81,12 @@ class SessionExecutionController:
                 cost_delta = max(0.0, cur_cost - prev_cost)
                 self._session._last_session_cost = cur_cost
             except Exception:
-                pass
+                logger.debug("Failed to compute cost delta for turn stats", exc_info=True)
             ctx_used = estimate_messages_tokens(self._session.agentic._conversation_history)
             ctx_limit = get_context_limit(self._session.current_model)
             streamer.set_turn_stats(cost_delta=cost_delta, ctx_used=ctx_used, ctx_limit=ctx_limit)
         except Exception:
-            pass
+            logger.debug("Failed to set turn stats on streamer", exc_info=True)
 
         streamer.finish()
         self._session._streamer_displayed = True
@@ -144,7 +144,7 @@ class SessionExecutionController:
                                     "\n  [red]Aborted (Esc).[/red]"
                                 )
                             except Exception:
-                                pass
+                                logger.debug("Failed to cancel agentic loop on Esc", exc_info=True)
                             return
                 except Exception:
                     return
@@ -293,7 +293,7 @@ class SessionExecutionController:
                         }
                     )
             except Exception:
-                pass
+                logger.debug("Failed to run auto-test after file edit", exc_info=True)
 
     def _print_execution_summary(self, summary_parts: list[str]) -> None:
         try:
@@ -370,4 +370,4 @@ class SessionExecutionController:
                     "local",
                 )
             except Exception:
-                pass
+                logger.debug("Failed to sync ConversationManager after response", exc_info=True)

@@ -6,6 +6,7 @@ customization via ~/.aura/keybindings.json.
 """
 
 from pathlib import Path
+from typing import Callable
 
 HISTORY_FILE = Path.home() / ".aura_history"
 
@@ -47,81 +48,50 @@ SIGNAL_OPEN_EDITOR = "__OPEN_EDITOR__"
 SIGNAL_REWIND = "__REWIND__"
 SIGNAL_CYCLE_PERMS = "__CYCLE_PERMS__"
 
-# All slash commands with descriptions (for autocomplete)
-SLASH_COMMANDS = [
-    ("/quit", "Exit AURA"),
-    ("/exit", "Exit AURA"),
-    ("/clear", "Clear conversation history"),
-    ("/model", "View/set model (auto, <name>)"),
-    ("/compact", "Compact conversation history"),
-    ("/plan", "Create and execute a plan"),
-    ("/shell", "Execute shell command"),
-    ("/bash", "Execute shell command"),
-    ("/run", "Execute shell command"),
-    ("/grep", "Search code content"),
-    ("/search", "Search files by pattern"),
-    ("/find", "Find definitions/references"),
-    ("/edit", "View file contents with line numbers"),
-    ("/project", "Project info/context/index"),
-    ("/agent", "Run specialist agent"),
-    ("/sessions", "Manage sessions"),
-    ("/browse", "Browse web pages"),
-    ("/hook", "Manage hooks"),
-    ("/speak", "Text-to-speech"),
-    ("/say", "Text-to-speech (alias)"),
-    ("/recall", "Search memories"),
-    ("/goal", "Run a goal"),
-    ("/trust", "Enable trust mode (auto-approve all tools)"),
-    ("/cost", "Show session cost breakdown"),
-    ("/context", "Show context window usage"),
-    ("/trace", "Show structured session trace and run summaries"),
-    ("/rewind", "Rewind file changes to a checkpoint"),
-    ("/theme", "Switch color theme"),
-    ("/fleet", "Run parallel sub-agents"),
-    ("/tasks", "Show background tasks"),
-    ("/research", "Start research mode"),
-    ("/sources", "Show research sources"),
-    ("/export", "Export research to Markdown"),
-    ("/mood", "Show emotional state"),
-    ("/pr", "Create pull request"),
-    ("/branch", "Create git branch"),
-    ("/stash", "Smart git stash"),
-    ("/blame", "Git blame with context"),
-    ("/test", "Run tests"),
-    ("/watch", "Watch files for AI comments"),
-    ("/evolve", "Evolve skills with GEPA"),
-    ("/diff", "Show git diff with syntax highlighting"),
-    ("/git", "Run read-only git commands"),
-    ("/mcp", "Manage MCP server connections"),
-    ("/audit", "Inspect Merkle audit chain"),
-    ("/hand", "Manage autonomous Hands"),
-    ("/retry", "Re-run the last prompt"),
-    ("/undo", "Undo last file edit"),
-    ("/debate", "Multi-model debate on a question"),
-    ("/fork", "Fork conversation into a new branch"),
-    ("/branches", "List conversation branches"),
-    ("/checkout", "Switch to a conversation branch"),
-    ("/merge", "Merge branch back to parent"),
-    ("/chain", "Run prompt pipelines (step1 -> step2 -> ...)"),
-    ("/changes", "Show files modified in this session"),
-    ("/channels", "Show active channel bridges and status"),
-    ("/snippet", "Manage prompt templates/snippets"),
-]
+# Slash commands for autocomplete — single source of truth lives in
+# aura.cli.commands. Re-exported here so prompt_toolkit completers (and
+# the command palette in chat_session_signals.py) import from the CLI
+# entry point without a circular module layout.
+from aura.cli.commands import SLASH_COMMANDS  # noqa: F401
 
-# Subcommand completions for commands that accept them
-SUBCOMMANDS: dict[str, list[tuple[str, str]]] = {
-    "/model": [
-        ("auto", "Auto-select best model"),
-        ("minimax-m2.7:cloud", "MiniMax M2.7 (cloud, 1M ctx)"),
-        ("minimax-m2.5:cloud", "MiniMax M2.5 (cloud, SWE 80.2%)"),
-        ("kimi-k2.5:cloud", "Kimi K2.5 (cloud, agentic)"),
-        ("qwen3.5:397b-cloud", "Qwen 3.5 397B (cloud, reasoning)"),
-        ("deepseek-v3.2:cloud", "DeepSeek V3.2 (cloud, all-rounder)"),
-        ("qwen3-coder:480b-cloud", "Qwen 3 Coder 480B (cloud, code)"),
-        ("nemotron-3-super:cloud", "Nemotron 3 Super (cloud, fast)"),
-        ("glm-5:cloud", "GLM-5 (cloud, general)"),
-        ("gpt-oss:120b-cloud", "GPT-OSS 120B (cloud)"),
-    ],
+# ---------------------------------------------------------------------------
+# Dynamic /model completer — reads the live provider registry so the list
+# doesn't drift when models are added or removed. Cached to avoid rebuilding
+# on every keystroke.
+# ---------------------------------------------------------------------------
+_MODEL_CACHE_TTL: float = 30.0
+_model_cache: list[tuple[str, str]] = []
+_model_cache_ts: float = 0.0
+
+
+def _dynamic_models() -> list[tuple[str, str]]:
+    """Return ('model_id', 'display') tuples from configured providers.
+
+    Falls back to a single 'auto' entry on import failure so the completer
+    never crashes the prompt.
+    """
+    global _model_cache, _model_cache_ts
+    import time as _t
+    now = _t.time()
+    if _model_cache and (now - _model_cache_ts) < _MODEL_CACHE_TTL:
+        return _model_cache
+    try:
+        from aura.providers import list_all_provider_models
+        items: list[tuple[str, str]] = [("auto", "Auto-select best model")]
+        for model, display in list_all_provider_models():
+            items.append((model, display))
+        _model_cache = items
+        _model_cache_ts = now
+        return items
+    except Exception:
+        return [("auto", "Auto-select best model")]
+
+
+# Subcommand completions for commands that accept them.
+# Values are either a static list OR a zero-arg callable returning the list.
+SubcommandList = list[tuple[str, str]]
+SUBCOMMANDS: dict[str, "SubcommandList | Callable[[], SubcommandList]"] = {
+    "/model": _dynamic_models,
     "/project": [
         ("info", "Show project summary"),
         ("init", "Initialize project config"),
@@ -257,6 +227,11 @@ def create_session():
                     # Command is complete, offer subcommands
                     sub_prefix = parts[1].lower() if len(parts) > 1 else ""
                     subs = SUBCOMMANDS.get(base_cmd)
+                    if callable(subs):
+                        try:
+                            subs = subs()
+                        except Exception:
+                            subs = []
                     if subs:
                         for sub, desc in subs:
                             if sub.startswith(sub_prefix):

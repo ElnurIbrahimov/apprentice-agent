@@ -694,7 +694,7 @@ class AgentCoreMixin:
             try:
                 events_queue.put(None)
             except Exception:
-                pass
+                logger.error("[Telegram] Failed to put sentinel into events queue — stream editor may hang")
 
         # === Fallback 1: agent.chat() ===
         try:

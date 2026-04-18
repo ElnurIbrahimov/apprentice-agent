@@ -2,6 +2,7 @@ import logging
 from typing import Optional
 
 from ..context import get_ctx
+from ..display import console
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +44,16 @@ def handle_mcp(agent, arg, context) -> Optional[str]:
     if ctx and ctx.agentic_loop and hasattr(ctx.agentic_loop, '_mcp_client'):
         mgr = ctx.agentic_loop._mcp_client
         if not mgr.connections:
-            print("  No MCP servers connected. Configure in AURA.md under mcp_servers:")
+            console.print("  [dim]No MCP servers connected. Configure in AURA.md under mcp_servers:[/dim]")
         else:
             for name, conn in mgr.connections.items():
-                print(f"  {name}: {len(conn.tools)} tools")
+                console.print(f"  [cyan]{name}[/cyan]: {len(conn.tools)} tools")
                 for t in conn.tools[:5]:
-                    print(f"    - {t['name']}: {t.get('description', '')[:60]}")
+                    console.print(f"    [dim]- {t['name']}: {t.get('description', '')[:60]}[/dim]")
                 if len(conn.tools) > 5:
-                    print(f"    ... and {len(conn.tools) - 5} more")
+                    console.print(f"    [dim]... and {len(conn.tools) - 5} more[/dim]")
     else:
-        print("  No MCP servers connected. Configure in AURA.md under mcp_servers:")
+        console.print("  [dim]No MCP servers connected. Configure in AURA.md under mcp_servers:[/dim]")
 
 
 def handle_audit(agent, arg, context) -> Optional[str]:
@@ -71,12 +72,12 @@ def _handle_audit_command(arg: str):
     subcmd = parts[0].lower() if parts else "tail"
 
     if subcmd == "verify":
-        print("  Verifying audit chain integrity...")
+        console.print("  Verifying audit chain integrity...")
         valid, count, error = chain.verify()
         if valid:
-            print(f"  VALID — {count} entries verified, chain intact.")
+            console.print(f"  [green]VALID[/green] — {count} entries verified, chain intact.")
         else:
-            print(f"  TAMPERED — integrity failure at entry {count}: {error}")
+            console.print(f"  [red]TAMPERED[/red] — integrity failure at entry {count}: {error}")
 
     elif subcmd == "tail":
         n = 15
@@ -86,24 +87,24 @@ def _handle_audit_command(arg: str):
             pass
         entries = chain.tail(n)
         if not entries:
-            print("  Audit chain is empty.")
+            console.print("  [dim]Audit chain is empty.[/dim]")
             return
-        print(f"\n  Last {len(entries)} audit entries:")
+        console.print(f"\n  [bold]Last {len(entries)} audit entries:[/bold]")
         from datetime import datetime
         for e in entries:
             ts = datetime.fromtimestamp(e.timestamp).strftime("%H:%M:%S")
             data_preview = e.action_data[:60] + "..." if len(e.action_data) > 60 else e.action_data
-            print(f"  [{ts}] {e.action_type:<16} {e.agent_id:<12} {data_preview}")
-        print(f"\n  Total entries: {chain.count()} | Chain hash: {entries[-1].entry_hash[:16]}...")
+            console.print(f"  [dim][{ts}][/dim] [cyan]{e.action_type:<16}[/cyan] {e.agent_id:<12} {data_preview}")
+        console.print(f"\n  [dim]Total entries: {chain.count()} | Chain hash: {entries[-1].entry_hash[:16]}...[/dim]")
 
     elif subcmd == "count":
-        print(f"  Audit chain: {chain.count()} entries")
+        console.print(f"  Audit chain: [bold]{chain.count()}[/bold] entries")
 
     else:
-        print("Usage: /audit <verify|tail|count> [args]")
-        print("  /audit verify    — Verify chain integrity (detect tampering)")
-        print("  /audit tail [n]  — Show last N entries (default 15)")
-        print("  /audit count     — Show total entry count")
+        console.print("[yellow]Usage: /audit <verify|tail|count> [args][/yellow]")
+        console.print("  [dim]/audit verify    — Verify chain integrity (detect tampering)[/dim]")
+        console.print("  [dim]/audit tail [n]  — Show last N entries (default 15)[/dim]")
+        console.print("  [dim]/audit count     — Show total entry count[/dim]")
 
 
 def _handle_evolve_command(agent, arg: str):
@@ -111,7 +112,7 @@ def _handle_evolve_command(agent, arg: str):
         from aura.evolution.runner import run_evolution
         from aura_skill_library.skill_store import SkillStore
     except ImportError as e:
-        print(f"\n  [GEPA] Import error: {e}\n")
+        console.print(f"\n  [red][GEPA] Import error: {e}[/red]\n")
         return
 
     parts = arg.split() if arg else []
@@ -128,7 +129,7 @@ def _handle_evolve_command(agent, arg: str):
             try:
                 max_iterations = int(parts[i + 1])
             except ValueError:
-                print(f"  [GEPA] Invalid --max-iterations value: {parts[i + 1]}")
+                console.print(f"  [red][GEPA] Invalid --max-iterations value: {parts[i + 1]}[/red]")
                 return
 
     before_procedures = {}
@@ -143,13 +144,13 @@ def _handle_evolve_command(agent, arg: str):
         logger.debug("gepa_skill_snapshot_failed", exc_info=True)
 
     if dry_run:
-        print("\n  [GEPA] Dry run — previewing evolution plan...")
+        console.print("\n  [yellow][GEPA] Dry run — previewing evolution plan...[/yellow]")
     else:
-        print(f"\n  [GEPA] Starting skill evolution (max {max_iterations} iterations)...")
+        console.print(f"\n  [cyan][GEPA] Starting skill evolution (max {max_iterations} iterations)...[/cyan]")
         if skill_ids:
-            print(f"  Target skills: {', '.join(skill_ids)}")
+            console.print(f"  Target skills: [cyan]{', '.join(skill_ids)}[/cyan]")
         else:
-            print("  Target: all skills in library")
+            console.print("  [dim]Target: all skills in library[/dim]")
 
     try:
         result = run_evolution(
@@ -158,37 +159,38 @@ def _handle_evolve_command(agent, arg: str):
             dry_run=dry_run,
         )
     except Exception as e:
-        print(f"  [GEPA] Failed: {e}\n")
+        console.print(f"  [red][GEPA] Failed: {e}[/red]\n")
         return
 
     if result.get("error"):
-        print(f"  [GEPA] Error: {result['error']}")
+        console.print(f"  [red][GEPA] Error: {result['error']}[/red]")
     elif result.get("dry_run"):
-        print("\n  [GEPA] Dry-run results:")
-        print(f"  Skills to evolve: {len(result.get('skills', []))}")
+        console.print("\n  [bold][GEPA] Dry-run results:[/bold]")
+        console.print(f"  Skills to evolve: [bold]{len(result.get('skills', []))}[/bold]")
         for sid in result.get("skills", []):
             name = store.index.get(sid, {}).get("name", sid) if store else sid
-            print(f"    - {name} ({sid})")
+            console.print(f"    [dim]- {name} ({sid})[/dim]")
         config = result.get("config", {})
-        print(f"  Max iterations: {config.get('max_iterations', '?')}")
-        print(f"  Reflection model: {config.get('reflection_model', '?')}")
-        print(f"  Eval model: {config.get('eval_model', '?')}")
+        console.print(f"  Max iterations: {config.get('max_iterations', '?')}")
+        console.print(f"  Reflection model: [cyan]{config.get('reflection_model', '?')}[/cyan]")
+        console.print(f"  Eval model: [cyan]{config.get('eval_model', '?')}[/cyan]")
     else:
         improvement = result.get("improvement", 0)
         seed_score = result.get("seed_score", 0)
         best_score = result.get("best_score", 0)
         updated = result.get("skills_updated", 0)
 
-        print("\n  [GEPA] Evolution complete!")
-        print(f"  Score: {seed_score:.3f} -> {best_score:.3f} (+{improvement:.3f})")
-        print(f"  Skills updated: {updated}")
-        print(f"  Iterations: {result.get('iterations', 0)}, Evals: {result.get('total_evals', 0)}")
-        print(f"  Time: {result.get('duration_seconds', 0):.1f}s")
-        print(f"  Stop reason: {result.get('stop_reason', 'N/A')}")
-        print(f"  Run saved to: {result.get('run_dir', 'N/A')}")
+        console.print("\n  [green][GEPA] Evolution complete![/green]")
+        console.print(f"  Score: {seed_score:.3f} -> [green]{best_score:.3f}[/green] ([green]+{improvement:.3f}[/green])")
+        console.print(f"  Skills updated: [bold]{updated}[/bold]")
+        console.print(f"  Iterations: {result.get('iterations', 0)}, Evals: {result.get('total_evals', 0)}")
+        console.print(f"  Time: {result.get('duration_seconds', 0):.1f}s")
+        console.print(f"  Stop reason: [dim]{result.get('stop_reason', 'N/A')}[/dim]")
+        console.print(f"  Run saved to: [cyan]{result.get('run_dir', 'N/A')}[/cyan]")
 
         if updated > 0 and before_procedures:
-            print("\n  --- Procedure diffs ---")
+            console.print("\n  [bold]--- Procedure diffs ---[/bold]")
+            import difflib
             try:
                 store_after = SkillStore(storage_path="./aura_data/skill_library")
                 for sid, old_proc in before_procedures.items():
@@ -199,10 +201,9 @@ def _handle_evolve_command(agent, arg: str):
                     if old_proc == new_proc:
                         continue
                     name = store_after.index.get(sid, {}).get("name", sid)
-                    print(f"\n  [{name}] (v{skill_after.metadata.version}):")
+                    console.print(f"\n  [bold]{name}[/bold] (v{skill_after.metadata.version}):")
                     old_lines = old_proc.splitlines()
                     new_lines = new_proc.splitlines()
-                    import difflib
                     diff = difflib.unified_diff(
                         old_lines, new_lines,
                         fromfile=f"{name} (before)",
@@ -219,12 +220,12 @@ def _handle_evolve_command(agent, arg: str):
                                 prefix = "  - "
                             elif line.startswith("@@"):
                                 prefix = "  "
-                            print(f"  {prefix}{line}")
+                            console.print(f"  {prefix}{line}")
                         if len(diff_lines) > 40:
-                            print(f"    ... ({len(diff_lines) - 40} more lines)")
+                            console.print(f"    [dim]... ({len(diff_lines) - 40} more lines)[/dim]")
                     else:
-                        print("    (no textual changes)")
+                        console.print("    [dim](no textual changes)[/dim]")
             except (OSError, KeyError, TypeError, AttributeError) as e:
-                print(f"  (Could not generate diff: {e})")
+                console.print(f"  [dim](Could not generate diff: {e})[/dim]")
 
-    print()
+    console.print()

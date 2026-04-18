@@ -1482,8 +1482,8 @@ class WorldModel:
             unresolved_count = len(self.get_unresolved_contradictions())
             if unresolved_count > 0:
                 sections.append(f"Contradictions: {unresolved_count} unresolved")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[WorldModel] Failed to get unresolved contradiction count: {e}")
 
         # Pending proactive insight
         try:

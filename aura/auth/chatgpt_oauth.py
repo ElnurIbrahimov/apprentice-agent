@@ -209,8 +209,8 @@ def load_tokens() -> Optional[dict]:
             if fernet:
                 try:
                     raw = fernet.decrypt(raw)
-                except Exception:
-                    pass  # May be plaintext from before encryption was added
+                except Exception as e:
+                    logger.debug(f"[ChatGPTOAuth] Fernet decryption failed (may be plaintext): {e}")
             if isinstance(raw, bytes):
                 raw = raw.decode("utf-8")
             data = json.loads(raw)

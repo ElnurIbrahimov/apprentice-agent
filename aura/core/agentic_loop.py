@@ -127,6 +127,9 @@ class AgenticLoop:
         # MCP client for external tool servers
         from .mcp_client import MCPClientManager
         self._mcp_client = MCPClientManager()
+        # Clones set _owns_mcp=False so they don't tear down the parent's
+        # connections in __del__. See clone_for_background().
+        self._owns_mcp = True
         if aura_config:
             try:
                 self._mcp_client.load_from_config(aura_config)
@@ -148,16 +151,90 @@ class AgenticLoop:
             from .response_cache import ResponseCache
             self._response_cache = ResponseCache()
         except Exception:
-            pass
+            logger.debug("ResponseCache unavailable", exc_info=True)
 
     def __del__(self):
         """Clean up MCP connections to prevent process leaks."""
         try:
-            if hasattr(self, '_mcp_client') and self._mcp_client:
+            if (
+                getattr(self, "_owns_mcp", True)
+                and hasattr(self, "_mcp_client")
+                and self._mcp_client
+            ):
                 self._mcp_client.disconnect_all()
         except Exception:
             # Can't use logger in __del__ reliably, but at least bind the exception
             pass  # MCP cleanup during GC — best-effort
+
+    def clone_for_background(self, permissions: PermissionManager) -> "AgenticLoop":
+        """Create a sibling loop for background '&' tasks.
+
+        Shares the expensive read-mostly state (brain, MCP client, project
+        context, router, planner) so each background task doesn't re-spawn
+        MCP servers or rebuild the context index. Gets its own permissions,
+        executor, conversation history, and iteration counters so it can't
+        pollute the foreground session's state or escalate privileges.
+
+        The clone is marked ``_owns_mcp=False`` so its ``__del__`` won't
+        disconnect MCP servers that the parent is still using.
+        """
+        from .sub_agent import SubAgentManager
+        from .tool_executor import ToolExecutor
+
+        clone = AgenticLoop.__new__(AgenticLoop)
+
+        # Shared state (read-only or thread-safe).
+        clone.brain = self.brain
+        clone.project_root = self.project_root
+        clone.context = self.context
+        clone._router = self._router
+        clone._mcp_client = self._mcp_client
+        clone._owns_mcp = False
+        clone._planner = getattr(self, "_planner", None)
+        clone._response_cache = getattr(self, "_response_cache", None)
+        clone.context_mgr = self.context_mgr
+
+        # Fresh mutable state.
+        clone.permissions = permissions
+        clone.model_override = self.model_override
+        clone.max_iterations = 10  # bg tasks stay short
+        clone.budget_usd = None
+        clone.session = None
+        clone.aura_config = getattr(self, "aura_config", None)
+        clone._conversation_history = []
+        clone.iteration = 0
+        clone.tool_calls_total = 0
+        clone._edits_this_turn = 0
+        clone._is_sub_agent = False
+        clone._current_run_id = ""
+        clone._has_edits = False
+        clone._has_test_failure = False
+        clone._last_tools_were_reads = True
+        clone._current_action_mode = None
+        clone._budget_warned_50 = False
+        clone._budget_warned_80 = False
+        clone.last_turn_cost = 0.0
+        clone._hot_files = []
+        clone._hot_file_contents = {}
+        clone._cancel_event = threading.Event()
+        clone._tool_failure_streak = 0
+        clone._reflexion_fired_this_run = False
+        clone._verify_completion = False  # skip verification overhead for bg
+        clone._show_cost_estimates_enabled = False
+        clone._trust_all_edits = False
+
+        # Fresh executor because permissions are bound at construction.
+        clone._sub_agent_mgr = SubAgentManager(clone)
+        clone.executor = ToolExecutor(
+            clone.project_root,
+            sub_agent_mgr=clone._sub_agent_mgr,
+            permissions=permissions,
+            brain=clone.brain,
+        )
+        clone.executor._mcp_client = clone._mcp_client
+        clone._tool_call_coordinator = type(self._tool_call_coordinator)(clone)
+        clone._model_step_controller = type(self._model_step_controller)(clone)
+        return clone
 
     def cancel(self):
         """Signal the loop to stop after the current LLM/tool call finishes."""
@@ -200,7 +277,7 @@ class AgenticLoop:
 
         system_prompt = AGENTIC_SYSTEM_PROMPT.format(
             context=self.context or "(No project context loaded)",
-            memories=memories or "(No relevant memories found)",
+            memories=memories.formatted or "(No relevant memories found)",
         )
 
         # Inject design system for frontend tasks
@@ -512,7 +589,7 @@ class AgenticLoop:
         try:
             _prev_cost = self.brain.get_session_stats().get("cost_usd", 0.0)
         except Exception:
-            pass
+            logger.debug("Failed to read baseline cost for per-turn tracking", exc_info=True)
 
         # Reset cancellation for this run
         self._cancel_event.clear()
@@ -599,7 +676,7 @@ class AgenticLoop:
             if _corrections:
                 system_prompt += "\n\n" + _corrections
         except Exception:
-            pass
+            logger.debug("CorrectionTracker injection failed", exc_info=True)
 
         # H1: Cost estimation before execution
         if self._show_cost_estimates_enabled and self.budget_usd:
@@ -987,7 +1064,7 @@ class AgenticLoop:
             try:
                 event_emitter.emit("reflexion", text=reflection[:500])
             except Exception:
-                pass
+                logger.debug("Failed to emit reflexion event", exc_info=True)
 
         logger.info(f"[Reflexion] fired after {self._tool_failure_streak} failures")
 

@@ -2,6 +2,8 @@ import logging
 import os
 from typing import Optional
 
+from ..display import console
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,7 +43,7 @@ def handle_diff(agent, arg, context) -> Optional[str]:
 
 def handle_git(agent, arg, context) -> Optional[str]:
     if not arg:
-        print("Usage: /git <command> (e.g., /git status, /git log, /git diff)")
+        console.print("[yellow]Usage: /git <command> (e.g., /git status, /git log, /git diff)[/yellow]")
     else:
         import subprocess as _sp
         GIT_SAFE_SUBCOMMANDS = frozenset({
@@ -53,10 +55,10 @@ def handle_git(agent, arg, context) -> Optional[str]:
         git_subcmd = git_tokens[0].lower() if git_tokens else ""
         has_dangerous_flag = any(t == "-c" or t.startswith("-c=") or t.startswith("--exec") or t.startswith("--upload-pack") for t in git_tokens)
         if has_dangerous_flag:
-            print("  Blocked: dangerous git flags (-c, --exec, --upload-pack) are not allowed")
+            console.print("  [red]Blocked: dangerous git flags (-c, --exec, --upload-pack) are not allowed[/red]")
         elif git_subcmd not in GIT_SAFE_SUBCOMMANDS:
-            print(f"  Blocked: '/git {git_subcmd}' — only read-only git commands are allowed")
-            print(f"  Allowed: {', '.join(sorted(GIT_SAFE_SUBCOMMANDS))}")
+            console.print(f"  [red]Blocked: '/git {git_subcmd}' — only read-only git commands are allowed[/red]")
+            console.print(f"  [dim]Allowed: {', '.join(sorted(GIT_SAFE_SUBCOMMANDS))}[/dim]")
         else:
             from ..display import console as _git_console
             from ..display import show_error as _git_err

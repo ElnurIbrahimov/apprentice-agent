@@ -365,7 +365,7 @@ class MemoryWriteGate:
             base = max(base, alma_score)
             return max(0.0, min(1.0, base))
         except Exception:
-            pass
+            logger.debug("Failed to read ALMA emotional state for salience scoring", exc_info=True)
 
         # --- Keyword fallback (ALMA unavailable) ---
         emotional_words = {"love", "hate", "fear", "excited", "angry", "sad",

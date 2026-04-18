@@ -10,9 +10,15 @@ from typing import List, Optional
 
 DEBATER_TIMEOUT = 60  # seconds per model call
 
-from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
+
+from rich.console import Console  # kept at module scope for test mockability
+
+try:
+    from .display import console
+except ImportError:
+    console = Console()
 
 # ── Data classes ──────────────────────────────────────────────────────
 
@@ -208,7 +214,6 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
         question: The question to debate
         user_models: Optional comma-separated model list
     """
-    console = Console()
     models = _select_models(brain, user_models)
 
     result = DebateResult(question=question)

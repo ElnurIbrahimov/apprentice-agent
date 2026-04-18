@@ -1,6 +1,7 @@
 """Tests for input.py — SLASH_COMMANDS, SUBCOMMANDS, signals, completer."""
 import pytest
 
+from aura.cli.commands import COMMAND_REGISTRY
 from aura.cli.input import (
     SLASH_COMMANDS,
     SUBCOMMANDS,
@@ -17,25 +18,40 @@ from aura.cli.input import (
 
 # ── SLASH_COMMANDS completeness ───────────────────────────────────────────
 
-EXPECTED_SLASH_COMMANDS = [
-    "/quit", "/exit", "/clear", "/model", "/compact", "/plan", "/shell",
-    "/bash", "/run", "/grep", "/search", "/find", "/edit", "/project",
-    "/agent", "/sessions", "/browse", "/hook", "/speak", "/say", "/recall",
+# Canonical commands expected in the completer (aliases excluded by design).
+EXPECTED_CANONICAL_COMMANDS = [
+    "/quit", "/clear", "/model", "/compact", "/plan", "/shell",
+    "/grep", "/search", "/edit", "/project",
+    "/agent", "/sessions", "/browse", "/hook", "/speak", "/recall",
     "/goal", "/trust", "/cost", "/context", "/trace", "/rewind", "/theme", "/fleet",
     "/tasks", "/research", "/sources", "/export", "/mood", "/pr", "/branch",
     "/stash", "/blame", "/test", "/watch", "/evolve", "/diff", "/git",
     "/mcp", "/audit", "/hand", "/retry", "/undo",
 ]
 
+# Aliases — present in COMMAND_REGISTRY for dispatch but NOT in SLASH_COMMANDS.
+EXPECTED_ALIASES = ["/exit", "/bash", "/run", "/find", "/say", "/memory"]
 
-def test_slash_commands_has_all_expected():
+
+def test_slash_commands_has_all_canonical():
     command_names = [cmd for cmd, _ in SLASH_COMMANDS]
-    for expected in EXPECTED_SLASH_COMMANDS:
-        assert expected in command_names, f"Missing command: {expected}"
+    for expected in EXPECTED_CANONICAL_COMMANDS:
+        assert expected in command_names, f"Missing canonical command: {expected}"
+
+
+def test_aliases_in_registry_not_completer():
+    completer_names = {cmd for cmd, _ in SLASH_COMMANDS}
+    for alias in EXPECTED_ALIASES:
+        assert alias in COMMAND_REGISTRY, f"Alias {alias} missing from dispatch registry"
+        assert alias not in completer_names, (
+            f"Alias {alias} leaked into completer — aliases should dispatch only, "
+            "not clutter autocomplete"
+        )
 
 
 def test_slash_commands_count():
-    assert len(SLASH_COMMANDS) == 57
+    # 54 canonical + 2 runtime-only (/retry, /channels) = 56 in completer.
+    assert len(SLASH_COMMANDS) == 56
 
 
 def test_every_command_has_description():
@@ -69,9 +85,16 @@ def test_subcommands_keys_are_valid_commands():
         assert key in command_names, f"SUBCOMMANDS key {key} is not a valid command"
 
 
+def _resolve_subcommands(key):
+    """SUBCOMMANDS values may be a static list or a zero-arg callable (Fix 2)."""
+    slot = SUBCOMMANDS[key]
+    return slot() if callable(slot) else slot
+
+
 def test_subcommands_values_are_lists_of_tuples():
-    for key, subs in SUBCOMMANDS.items():
-        assert isinstance(subs, list), f"SUBCOMMANDS[{key}] is not a list"
+    for key in SUBCOMMANDS:
+        subs = _resolve_subcommands(key)
+        assert isinstance(subs, list), f"SUBCOMMANDS[{key}] did not resolve to a list"
         for item in subs:
             assert isinstance(item, tuple) and len(item) == 2, (
                 f"SUBCOMMANDS[{key}] entry is not a (name, desc) tuple: {item}"
@@ -81,13 +104,13 @@ def test_subcommands_values_are_lists_of_tuples():
 
 def test_subcommands_has_model():
     assert "/model" in SUBCOMMANDS
-    model_subs = [name for name, _ in SUBCOMMANDS["/model"]]
+    model_subs = [name for name, _ in _resolve_subcommands("/model")]
     assert "auto" in model_subs
 
 
 def test_subcommands_has_project():
     assert "/project" in SUBCOMMANDS
-    project_subs = [name for name, _ in SUBCOMMANDS["/project"]]
+    project_subs = [name for name, _ in _resolve_subcommands("/project")]
     assert "info" in project_subs
     assert "index" in project_subs
     assert "search" in project_subs
@@ -95,7 +118,7 @@ def test_subcommands_has_project():
 
 def test_subcommands_has_sessions():
     assert "/sessions" in SUBCOMMANDS
-    session_subs = [name for name, _ in SUBCOMMANDS["/sessions"]]
+    session_subs = [name for name, _ in _resolve_subcommands("/sessions")]
     assert "list" in session_subs
     assert "new" in session_subs
     assert "delete" in session_subs
@@ -103,7 +126,7 @@ def test_subcommands_has_sessions():
 
 def test_subcommands_has_trace():
     assert "/trace" in SUBCOMMANDS
-    trace_subs = [name for name, _ in SUBCOMMANDS["/trace"]]
+    trace_subs = [name for name, _ in _resolve_subcommands("/trace")]
     assert "last" in trace_subs
     assert "runs" in trace_subs
     assert "failures" in trace_subs
@@ -113,14 +136,14 @@ def test_subcommands_has_trace():
 
 def test_subcommands_has_theme():
     assert "/theme" in SUBCOMMANDS
-    theme_subs = [name for name, _ in SUBCOMMANDS["/theme"]]
+    theme_subs = [name for name, _ in _resolve_subcommands("/theme")]
     assert "dark" in theme_subs
     assert "light" in theme_subs
 
 
 def test_subcommands_has_git():
     assert "/git" in SUBCOMMANDS
-    git_subs = [name for name, _ in SUBCOMMANDS["/git"]]
+    git_subs = [name for name, _ in _resolve_subcommands("/git")]
     assert "status" in git_subs
     assert "log" in git_subs
     assert "diff" in git_subs
@@ -177,27 +200,12 @@ def test_slash_completer_class_exists():
     assert len(SUBCOMMANDS) > 0
 
 
-def test_slash_commands_descriptions_not_duplicated():
-    """Each command should have a unique description (detect copy-paste errors)."""
-    [desc for _, desc in SLASH_COMMANDS]
-    # Aliases can share descriptions (e.g., /shell and /bash both say "Execute shell command")
-    # But non-alias commands should have distinct descriptions
-    non_alias_cmds = {}
+def test_slash_commands_descriptions_unique():
+    """Now that aliases are excluded from the completer, every entry should have
+    a distinct description — duplicate descriptions signal a copy-paste error.
+    """
+    desc_to_cmds: dict[str, list[str]] = {}
     for cmd, desc in SLASH_COMMANDS:
-        if desc not in non_alias_cmds:
-            non_alias_cmds[desc] = []
-        non_alias_cmds[desc].append(cmd)
-
-    # Known acceptable duplicates (aliases)
-    for desc, cmds in non_alias_cmds.items():
-        if len(cmds) > 1:
-            # These should be known alias groups
-            cmd_set = set(cmds)
-            known_groups = [
-                {"/quit", "/exit"},
-                {"/shell", "/bash", "/run"},
-                {"/speak", "/say"},
-                {"/search", "/find"},
-            ]
-            found_group = any(cmd_set.issubset(g) for g in known_groups)
-            assert found_group, f"Unexpected duplicate description '{desc}' for commands: {cmds}"
+        desc_to_cmds.setdefault(desc, []).append(cmd)
+    dupes = {d: cs for d, cs in desc_to_cmds.items() if len(cs) > 1}
+    assert not dupes, f"Duplicate descriptions in completer (aliases should dispatch only): {dupes}"

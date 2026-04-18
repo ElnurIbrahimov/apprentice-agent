@@ -2,12 +2,15 @@
 """Background agent mode — run tasks asynchronously with notifications."""
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from rich.console import Console
 from rich.table import Table
@@ -103,8 +106,8 @@ class BackgroundManager:
             if self._on_complete:
                 try:
                     self._on_complete(task)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[Background] on_complete callback failed for task {task_id}: {e}")
 
         thread = threading.Thread(target=_worker, daemon=True, name=f"bg-{task_id}")
         task.thread = thread
@@ -223,8 +226,8 @@ def notify_completion(task: BackgroundTask) -> None:
                 pass
         # Fallback: bell character
         print("\a", end="", flush=True)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[Background] Task completion desktop notification failed: {e}")
 
 
 def notify_operation_complete(operation: str, summary: str, success: bool = True) -> None:
@@ -245,8 +248,8 @@ def notify_operation_complete(operation: str, summary: str, success: bool = True
                 pass
         # Fallback: terminal bell
         print("\a", end="", flush=True)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[Background] Operation complete desktop notification failed: {e}")
 
 
 def create_background_indicator(manager: BackgroundManager) -> str:

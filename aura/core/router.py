@@ -43,7 +43,7 @@ def _emit_trace(decision: dict) -> None:
         sys.stderr.write(msg)
         sys.stderr.flush()
     except Exception:
-        pass
+        logger.debug("Failed to write routing debug to stderr", exc_info=True)
 
 # The 3 concurrent model slots for Ollama cloud ($20/mo plan).
 # Each tier picks 3 models that cover all task categories.
@@ -236,7 +236,7 @@ def _ensure_centroids() -> None:
         except ImportError:
             pass  # numpy or ollama not available
         except Exception:
-            pass  # Ollama not running, etc.
+            logger.debug("Failed to compute embedding centroids for routing", exc_info=True)
         finally:
             _centroids_computed = True
 
@@ -276,7 +276,7 @@ def classify_task_embedding(prompt: str) -> "tuple[str, float] | None":
     except ImportError:
         pass  # numpy or ollama not available
     except Exception:
-        pass  # Embedding call failed
+        logger.debug("Failed to classify prompt via embedding", exc_info=True)
 
     return None
 

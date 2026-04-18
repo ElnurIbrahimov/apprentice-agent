@@ -1351,8 +1351,8 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         try:
             import aura.pools as _pools
             _pools._shutting_down = True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to mark pools as shutting down: %s", e)
 
         # 1. Shutdown NeuroDream if sleeping
         try:

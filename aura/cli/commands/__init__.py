@@ -77,68 +77,87 @@ def _handle_voice(agent, args, context=None, **kwargs):
     run_voice_mode(agent)
 
 
-COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {
-    "/quit": handle_quit,
-    "/exit": handle_quit,
-    "/help": handle_help,
-    "/goal": handle_goal,
-    "/recall": handle_recall,
-    "/memory": handle_recall,
-    "/clear": handle_clear,
-    "/speak": handle_speak,
-    "/say": handle_speak,
-    "/model": handle_model,
-    "/compact": handle_compact,
-    "/plan": handle_plan,
-    "/hand": handle_hand,
-    "/audit": handle_audit,
-    "/browse": handle_browse,
-    "/grep": handle_grep,
-    "/search": handle_search,
-    "/find": handle_search,
-    "/edit": handle_edit,
-    "/project": handle_project,
-    "/shell": handle_shell,
-    "/bash": handle_shell,
-    "/run": handle_shell,
-    "/agent": handle_agent,
-    "/evolve": handle_evolve,
-    "/fleet": handle_fleet,
-    "/tasks": handle_tasks,
-    "/research": handle_research,
-    "/sources": handle_sources,
-    "/export": handle_export,
-    "/mood": handle_mood,
-    "/hook": handle_hook,
-    "/sessions": handle_sessions,
-    "/theme": handle_theme,
-    "/trust": handle_trust,
-    "/context": handle_context,
-    "/trace": handle_trace,
-    "/rewind": handle_rewind,
-    "/cost": handle_cost,
-    "/undo": handle_undo,
-    "/diff": handle_diff,
-    "/git": handle_git,
-    "/pr": handle_pr,
-    "/branch": handle_branch,
-    "/stash": handle_stash,
-    "/blame": handle_blame,
-    "/test": handle_test,
-    "/watch": handle_watch,
-    "/mcp": handle_mcp,
-    "/debate": handle_debate,
-    "/chain": handle_chain,
-    "/fork": handle_fork,
-    "/branches": handle_branches,
-    "/checkout": handle_checkout,
-    "/merge": handle_merge,
-    "/voice": _handle_voice,
-    "/changes": handle_changes,
-    "/routing": handle_routing,
-    "/copy": handle_copy,
-    "/snippet": handle_snippet,
-}
+# ─────────────────────────────────────────────────────────────────────────────
+# Single source of truth for slash commands.
+# (name, description, handler, aliases) — aliases route to the same handler
+# but are excluded from the completer list to keep autocomplete uncluttered.
+# ─────────────────────────────────────────────────────────────────────────────
+COMMANDS: list[tuple[str, str, Callable[..., Any], list[str]]] = [
+    ("/quit",     "Exit AURA",                                       handle_quit,     ["/exit"]),
+    ("/help",     "Show help",                                       handle_help,     []),
+    ("/clear",    "Clear conversation history",                      handle_clear,    []),
+    ("/model",    "View/set model (auto, <name>)",                   handle_model,    []),
+    ("/compact",  "Compact conversation history",                    handle_compact,  []),
+    ("/plan",     "Create and execute a plan",                       handle_plan,     []),
+    ("/shell",    "Execute shell command",                           handle_shell,    ["/bash", "/run"]),
+    ("/grep",     "Search code content",                             handle_grep,     []),
+    ("/search",   "Search files by pattern",                         handle_search,   ["/find"]),
+    ("/edit",     "View file contents with line numbers",            handle_edit,     []),
+    ("/project",  "Project info/context/index",                      handle_project,  []),
+    ("/agent",    "Run specialist agent",                            handle_agent,    []),
+    ("/sessions", "Manage sessions",                                 handle_sessions, []),
+    ("/browse",   "Browse web pages",                                handle_browse,   []),
+    ("/hook",     "Manage hooks",                                    handle_hook,     []),
+    ("/speak",    "Text-to-speech",                                  handle_speak,    ["/say"]),
+    ("/recall",   "Search memories",                                 handle_recall,   ["/memory"]),
+    ("/goal",     "Run a goal",                                      handle_goal,     []),
+    ("/trust",    "Enable trust mode (auto-approve all tools)",      handle_trust,    []),
+    ("/cost",     "Show session cost breakdown",                     handle_cost,     []),
+    ("/context",  "Show context window usage",                       handle_context,  []),
+    ("/trace",    "Show structured session trace and run summaries", handle_trace,    []),
+    ("/rewind",   "Rewind file changes to a checkpoint",             handle_rewind,   []),
+    ("/theme",    "Switch color theme",                              handle_theme,    []),
+    ("/fleet",    "Run parallel sub-agents",                         handle_fleet,    []),
+    ("/tasks",    "Show background tasks",                           handle_tasks,    []),
+    ("/research", "Start research mode",                             handle_research, []),
+    ("/sources",  "Show research sources",                           handle_sources,  []),
+    ("/export",   "Export research to Markdown",                     handle_export,   []),
+    ("/mood",     "Show emotional state",                            handle_mood,     []),
+    ("/pr",       "Create pull request",                             handle_pr,       []),
+    ("/branch",   "Create git branch",                               handle_branch,   []),
+    ("/stash",    "Smart git stash",                                 handle_stash,    []),
+    ("/blame",    "Git blame with context",                          handle_blame,    []),
+    ("/test",     "Run tests",                                       handle_test,     []),
+    ("/watch",    "Watch files for AI comments",                     handle_watch,    []),
+    ("/evolve",   "Evolve skills with GEPA",                         handle_evolve,   []),
+    ("/diff",     "Show git diff with syntax highlighting",          handle_diff,     []),
+    ("/git",      "Run read-only git commands",                      handle_git,      []),
+    ("/mcp",      "Manage MCP server connections",                   handle_mcp,      []),
+    ("/audit",    "Inspect Merkle audit chain",                      handle_audit,    []),
+    ("/hand",     "Manage autonomous Hands",                         handle_hand,     []),
+    ("/undo",     "Undo last file edit",                             handle_undo,     []),
+    ("/debate",   "Multi-model debate on a question",                handle_debate,   []),
+    ("/fork",     "Fork conversation into a new branch",             handle_fork,     []),
+    ("/branches", "List conversation branches",                      handle_branches, []),
+    ("/checkout", "Switch to a conversation branch",                 handle_checkout, []),
+    ("/merge",    "Merge branch back to parent",                     handle_merge,    []),
+    ("/chain",    "Run prompt pipelines (step1 -> step2 -> ...)",    handle_chain,    []),
+    ("/changes",  "Show files modified in this session",             handle_changes,  []),
+    ("/routing",  "Show/set routing preference",                     handle_routing,  []),
+    ("/copy",     "Copy last response or code block to clipboard",   handle_copy,     []),
+    ("/voice",    "Voice mode (speech input/output)",                _handle_voice,   []),
+    ("/snippet",  "Manage prompt templates/snippets",                handle_snippet,  []),
+]
+
+# Pseudo-commands handled inline in chat_session_runtime.py — no registry entry,
+# but they still appear in the completer so users can tab to them.
+RUNTIME_ONLY_COMMANDS: list[tuple[str, str]] = [
+    ("/retry",    "Re-run the last prompt"),
+    ("/channels", "Show active channel bridges and status"),
+]
+
+# Derived dispatch map: canonical names + aliases → handler.
+COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {}
+for _name, _desc, _handler, _aliases in COMMANDS:
+    COMMAND_REGISTRY[_name] = _handler
+    for _alias in _aliases:
+        COMMAND_REGISTRY[_alias] = _handler
+
+# Completer list: canonical commands + runtime-only. Aliases excluded to avoid
+# showing /bash, /run, /say, /find, /memory, /exit as separate entries.
+SLASH_COMMANDS: list[tuple[str, str]] = [
+    (name, desc) for name, desc, _h, _a in COMMANDS
+] + RUNTIME_ONLY_COMMANDS
 
 
 def handle_command(agent: Any, command: str, speak: bool = False) -> None:
@@ -153,10 +172,11 @@ def handle_command(agent: Any, command: str, speak: bool = False) -> None:
         handler = COMMAND_REGISTRY.get(cmd)
 
     if handler is None:
-        print(f"Unknown command: {cmd}")
+        from aura.cli.display import console
+        console.print(f"[red]Unknown command:[/red] {cmd}")
         matches = difflib.get_close_matches(cmd, COMMAND_REGISTRY.keys(), n=1, cutoff=0.6)
         if matches:
-            print(f"  Did you mean {matches[0]}?")
+            console.print(f"  [dim]Did you mean[/dim] [cyan]{matches[0]}[/cyan]?")
         return
 
     context: dict[str, Any] = {"speak": speak}
