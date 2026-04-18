@@ -49,7 +49,13 @@ def _make_session() -> SimpleNamespace:
 def test_submit_background_starts_task_and_reports_id():
     session = _make_session()
     session.bg_manager.submit.return_value = SimpleNamespace(id="bg-1")
-    session.agent.brain.think.return_value = "done"
+    # Background tasks now go through AgenticLoop.clone_for_background() so
+    # they pick up a restricted PermissionManager instead of calling
+    # brain.think() directly. The stub loop accepts any permissions and
+    # returns a canned result.
+    expected = {"success": True, "response": "done", "iterations": 1, "tool_calls": 0}
+    bg_loop = SimpleNamespace(run=MagicMock(return_value=expected))
+    session.agentic.clone_for_background = MagicMock(return_value=bg_loop)
     controller = SessionRuntimeController(session)
 
     controller.submit_background("& fix it")
@@ -57,11 +63,11 @@ def test_submit_background_starts_task_and_reports_id():
     session.bg_manager.submit.assert_called_once()
     submitted_prompt, submitted_fn = session.bg_manager.submit.call_args.args
     assert submitted_prompt == "fix it"
-    assert submitted_fn("fix it") == {
-        "success": True,
-        "response": "done",
-        "iterations": 1,
-    }
+    assert submitted_fn("fix it") == expected
+    session.agentic.clone_for_background.assert_called_once()
+    (bg_perms,), _ = session.agentic.clone_for_background.call_args
+    assert bg_perms.current_mode == "careful"
+    bg_loop.run.assert_called_once_with("fix it")
     session.console.print.assert_called_with("[cyan]Background task started: bg-1[/cyan]")
 
 

@@ -6,11 +6,14 @@ proposes file edits, and handles user approval flow.
 
 import difflib
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-console = Console()
+try:
+    from aura.cli.display import console
+except ImportError:
+    from rich.console import Console
+    console = Console()
 
 
 def make_unified_diff(path: str, old: str, new: str) -> str:

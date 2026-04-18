@@ -225,7 +225,7 @@ class UnifiedMemory:
                 if any(v != 0.0 for v in pad.values()):
                     emotional_pad = pad
             except Exception:
-                pass  # ALMA not running — proceed without PAD
+                logger.debug("Failed to read ALMA PAD state for memory store", exc_info=True)
 
         self._ensure_store()
         ids: Dict[str, str] = {}
@@ -291,7 +291,7 @@ class UnifiedMemory:
                 if any(v != 0.0 for v in pad.values()):
                     emotional_pad = pad
             except Exception:
-                pass  # ALMA not running — proceed without PAD
+                logger.debug("Failed to read ALMA PAD state for gated memory store", exc_info=True)
 
         self._ensure_store()
 

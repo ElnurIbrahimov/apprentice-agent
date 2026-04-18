@@ -145,8 +145,8 @@ class MemoryHand(Hand):
                             actions_taken.append(f"Resolved contradiction: {str(c.get('fact_a', ''))[:50]}")
                             artifacts.append({"type": "contradiction_resolved", "resolution": str(response)[:200]})
                         iterations += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[MemoryHand] Contradiction resolution LLM call failed: {e}")
             tasks_completed += 1
         except Exception as e:
             tasks_failed += 1

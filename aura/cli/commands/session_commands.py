@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 from typing import Optional
 
 from ..context import get_ctx
@@ -582,8 +583,6 @@ def handle_changes(agent, arg, context) -> Optional[str]:
 
     console.print(f"\n[bold]Files modified this session ({len(hot_files)}):[/bold]\n")
     for f in hot_files:
-        import os
-        import subprocess
         basename = os.path.basename(f)
         # Guard against git argument injection: paths starting with - could be interpreted as flags
         safe_path = f if not f.startswith("-") else "./" + f

@@ -3,6 +3,7 @@ import sys
 from typing import Optional
 
 from ..context import get_ctx
+from ..display import console
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 def handle_model(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if not arg:
-        from ..display import console, show_info
+        from ..display import show_info
         from ..model_picker import pick_model
         current = agent.brain._model_override or "auto"
         choice = pick_model(console, current)
@@ -29,12 +30,12 @@ def handle_model(agent, arg, context) -> Optional[str]:
         agent.brain.set_model_override(None)
         if ctx and ctx.agentic_loop:
             ctx.agentic_loop.model_override = None
-        print("Model override cleared. Using auto-selection.")
+        console.print("[green]Model override cleared. Using auto-selection.[/green]")
     else:
         agent.brain.set_model_override(arg)
         if ctx and ctx.agentic_loop:
             ctx.agentic_loop.model_override = arg
-        print(f"Model locked to: {arg}")
+        console.print(f"[green]Model locked to: [cyan]{arg}[/cyan][/green]")
 
 
 def handle_theme(agent, arg, context) -> Optional[str]:
@@ -76,23 +77,23 @@ def handle_mood(agent, arg, context) -> Optional[str]:
 def handle_speak(agent, arg, context) -> Optional[str]:
     if arg:
         agent._speak(arg)
-        print(f"[Spoke: {arg}]")
+        console.print(f"[dim][Spoke: {arg}][/dim]")
     else:
-        print("Usage: /speak <text to speak>")
+        console.print("[yellow]Usage: /speak <text to speak>[/yellow]")
 
 
 def handle_trust(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if not ctx or not ctx.permissions:
-        print("  Permissions not available outside chat mode.")
+        console.print("  [yellow]Permissions not available outside chat mode.[/yellow]")
         return
 
     if arg and arg.strip().lower() == "off":
         ctx.permissions.set_trust_mode(False)
-        print("  Trust mode disabled — tool calls require approval.")
+        console.print("  [yellow]Trust mode disabled — tool calls require approval.[/yellow]")
     else:
         ctx.permissions.set_trust_mode(True)
-        print("  Trust mode enabled — all tool calls auto-approved.")
+        console.print("  [green]Trust mode enabled — all tool calls auto-approved.[/green]")
 
 
 def handle_help(agent, arg, context) -> Optional[str]:
@@ -161,7 +162,7 @@ def handle_quit(agent, arg, context) -> Optional[str]:
     if hook_mgr:
         from ..hooks import HookEvent as _HE
         hook_mgr.fire(_HE.SESSION_END, {"reason": "quit_command"})
-    print("Goodbye!")
+    console.print("[dim]Goodbye![/dim]")
     sys.exit(0)
 
 

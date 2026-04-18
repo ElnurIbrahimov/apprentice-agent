@@ -1,3 +1,4 @@
+import argparse
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,15 @@ import os
 import subprocess
 from pathlib import Path
 
+from rich.panel import Panel
+from rich.table import Table
+
+try:
+    from aura.cli.display import console
+except ImportError:
+    from rich.console import Console
+    console = Console()
+
 
 def _create_subcommand_permission_manager():
     """Create a permission manager for top-level subcommands.
@@ -25,12 +35,12 @@ def _create_subcommand_permission_manager():
     permissions.set_mode("careful")
 
     def _confirm(tool_name: str, description: str) -> bool | str:
-        print()
-        print("  Permission required:")
-        print(f"    {tool_name}")
+        console.print()
+        console.print("  [bold yellow]Permission required:[/]")
+        console.print(f"    {tool_name}")
         if description:
             for line in description.split("\n"):
-                print(f"    {line}")
+                console.print(f"    [dim]{line}[/]")
         try:
             response = input("    Allow? [y/n/always]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
@@ -43,7 +53,7 @@ def _create_subcommand_permission_manager():
     return permissions
 
 
-def handle_subcommand(command: str, args) -> int:
+def handle_subcommand(command: str, args: argparse.Namespace) -> int:
     """Dispatch subcommand. Returns exit code."""
     handlers = {
         "init": cmd_init,
@@ -62,13 +72,13 @@ def handle_subcommand(command: str, args) -> int:
         except KeyboardInterrupt:
             return 130
         except Exception as e:
-            print(f"Error: {e}")
+            console.print(f"[red]Error:[/] {e}")
             return 1
-    print(f"Unknown command: {command}")
+    console.print(f"[red]Unknown command:[/] {command}")
     return 1
 
 
-def cmd_init(args) -> int:
+def cmd_init(args: argparse.Namespace) -> int:
     """Create AURA.md in the current project."""
     from aura.tools.code_search import CodeSearchTool
 
@@ -76,7 +86,7 @@ def cmd_init(args) -> int:
     aura_md = os.path.join(cwd, "AURA.md")
 
     if os.path.exists(aura_md):
-        print(f"AURA.md already exists at {aura_md}")
+        console.print(f"  AURA.md already exists at [cyan]{aura_md}[/]")
         return 0
 
     # Detect project type for template customization
@@ -130,38 +140,40 @@ def cmd_init(args) -> int:
     with open(aura_md, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(f"Created {aura_md}")
+    console.print(f"  [green]Created[/] {aura_md}")
     if project_type != "unknown":
-        print(f"  Detected: {project_type} project ({', '.join(stack)})")
+        console.print(f"  Detected: [cyan]{project_type}[/] project ({', '.join(stack)})")
     if test_cmd:
-        print(f"  Test command: {test_cmd}")
-    print("\n  Edit AURA.md to customize Aura's behavior for this project.")
+        console.print(f"  Test command: [cyan]{test_cmd}[/]")
+    console.print("\n  Edit AURA.md to customize Aura's behavior for this project.")
     return 0
 
 
-def cmd_doctor(args) -> int:
+def cmd_doctor(args: argparse.Namespace) -> int:
     """Check Ollama, models, dependencies."""
-    print("\nAura Doctor\n")
+    console.print("\n[bold]Aura Doctor[/]\n")
     all_ok = True
 
     # 1. Check Ollama
-    print("  Ollama:")
+    console.print("  [bold]Ollama:[/]")
     try:
         import ollama
         models = ollama.list()
         model_names = [m.get("name", m.get("model", "?")) for m in models.get("models", [])]
-        print(f"    Running, {len(model_names)} models loaded")
+        console.print(f"    [green]Running[/], {len(model_names)} models loaded")
         for name in sorted(model_names)[:15]:
-            print(f"      {name}")
+            console.print(f"      [dim]{name}[/]")
         if len(model_names) > 15:
-            print(f"      ... and {len(model_names) - 15} more")
+            console.print(f"      [dim]... and {len(model_names) - 15} more[/]")
     except Exception as e:
-        print(f"    [ERROR] Not reachable: {e}")
-        print("    Run: ollama serve")
+        console.print(f"    [red]ERROR[/] Not reachable: {e}")
+        console.print("    Run: [cyan]ollama serve[/]")
         all_ok = False
 
     # 2. Check key dependencies
-    print("\n  Dependencies:")
+    dep_table = Table(show_header=False, box=None, padding=(0, 2))
+    dep_table.add_column("Package", style="bold")
+    dep_table.add_column("Status")
     deps = [
         ("rich", "rich"),
         ("prompt_toolkit", "prompt_toolkit"),
@@ -171,13 +183,15 @@ def cmd_doctor(args) -> int:
     for module, pkg in deps:
         try:
             __import__(module)
-            print(f"    {pkg}: OK")
+            dep_table.add_row(pkg, "[green]OK[/]")
         except ImportError:
-            print(f"    {pkg}: MISSING (pip install {pkg})")
+            dep_table.add_row(pkg, f"[red]MISSING[/] (pip install {pkg})")
             all_ok = False
+    console.print("\n  [bold]Dependencies:[/]")
+    console.print(dep_table)
 
     # 3. Check optional tools
-    print("\n  Optional tools:")
+    console.print("\n  [bold]Optional tools:[/]")
     optionals = [
         ("aura.tools.brave_search", "BraveSearchTool", "BRAVE_API_KEY"),
         ("aura.tools.tavily_tool", "TavilyTool", "TAVILY_API_KEY"),
@@ -186,18 +200,18 @@ def cmd_doctor(args) -> int:
         try:
             __import__(module)
             has_key = bool(os.environ.get(env_var))
-            status = "OK" if has_key else f"no {env_var}"
-            print(f"    {cls}: {status}")
+            status = "[green]OK[/]" if has_key else f"[yellow]no {env_var}[/]"
+            console.print(f"    {cls}: {status}")
         except ImportError:
-            print(f"    {cls}: not installed")
+            console.print(f"    {cls}: [dim]not installed[/]")
 
     # 4. Check AURA.md
-    print("\n  Project:")
+    console.print("\n  [bold]Project:[/]")
     aura_md = os.path.join(os.getcwd(), "AURA.md")
     if os.path.exists(aura_md):
-        print("    AURA.md: found")
+        console.print("    AURA.md: [green]found[/]")
     else:
-        print("    AURA.md: not found (run: aura init)")
+        console.print("    AURA.md: [yellow]not found[/] (run: [cyan]aura init[/])")
 
     # 5. Check git
     try:
@@ -206,33 +220,36 @@ def cmd_doctor(args) -> int:
             capture_output=True, text=True, timeout=5, cwd=os.getcwd(),
         )
         if result.returncode == 0:
-            print("    Git repo: yes")
+            console.print("    Git repo: [green]yes[/]")
         else:
-            print("    Git repo: no")
+            console.print("    Git repo: [yellow]no[/]")
     except Exception:
-        print("    Git: not available")
+        console.print("    Git: [dim]not available[/]")
 
-    print(f"\n  {'All checks passed!' if all_ok else 'Some issues found.'}\n")
+    if all_ok:
+        console.print("\n  [bold green]All checks passed![/]\n")
+    else:
+        console.print("\n  [bold yellow]Some issues found.[/]\n")
     return 0 if all_ok else 1
 
 
-def cmd_config(args) -> int:
+def cmd_config(args: argparse.Namespace) -> int:
     """Show current configuration including AURA.md overrides."""
     from aura.config import Config
     from aura.core.context import get_aura_md_config
 
-    print("\nAura Configuration\n")
+    console.print("\n[bold]Aura Configuration[/]\n")
 
     # Global config
-    print("  Global:")
-    config_items = [
-        ("Model (fast)", Config.MODEL_FAST),
-        ("Model (reason)", Config.MODEL_REASON),
-        ("Model (code)", Config.MODEL_CODE),
-        ("Ollama host", getattr(Config, "OLLAMA_HOST", "http://localhost:11434")),
-    ]
-    for label, value in config_items:
-        print(f"    {label:20s}: {value}")
+    tbl = Table(show_header=False, box=None, padding=(0, 2))
+    tbl.add_column("Setting", style="bold")
+    tbl.add_column("Value", style="cyan")
+    tbl.add_row("Model (fast)", str(Config.MODEL_FAST))
+    tbl.add_row("Model (reason)", str(Config.MODEL_REASON))
+    tbl.add_row("Model (code)", str(Config.MODEL_CODE))
+    tbl.add_row("Ollama host", str(getattr(Config, "OLLAMA_HOST", "http://localhost:11434")))
+    console.print("  [bold]Global:[/]")
+    console.print(tbl)
 
     # Model chains
     chains = {
@@ -242,60 +259,69 @@ def cmd_config(args) -> int:
     }
     has_chains = any(chains.values())
     if has_chains:
-        print()
-        print("  Model chains:")
+        console.print("\n  [bold]Model chains:[/]")
         for label, chain in chains.items():
             if chain:
-                print(f"    {label}: {' -> '.join(chain)}")
+                console.print(f"    {label}: [cyan]{' -> '.join(chain)}[/]")
 
     # Project-level AURA.md overrides
     aura_config = get_aura_md_config(os.getcwd())
     if aura_config:
-        print()
-        print("  Project (AURA.md):")
+        proj_tbl = Table(show_header=False, box=None, padding=(0, 2))
+        proj_tbl.add_column("Key", style="bold")
+        proj_tbl.add_column("Value", style="cyan")
         for key in ["tier", "model", "test_cmd", "auto_test", "max_iterations", "budget"]:
             val = aura_config.get(key)
             if val is not None:
-                print(f"    {key:20s}: {val}")
+                proj_tbl.add_row(key, str(val))
         perms = aura_config.get("permissions")
         if perms:
-            print(f"    {'permissions':20s}: {perms}")
+            proj_tbl.add_row("permissions", str(perms))
+        console.print("\n  [bold]Project (AURA.md):[/]")
+        console.print(proj_tbl)
     else:
-        print(f"\n  No AURA.md found in {os.getcwd()} (run: aura init)")
+        console.print(f"\n  No AURA.md found in {os.getcwd()} (run: [cyan]aura init[/])")
 
-    print()
+    console.print()
     return 0
 
 
-def cmd_models(args) -> int:
+def cmd_models(args: argparse.Namespace) -> int:
     """List available models with routing roles."""
     from aura.core.router import ROUTING_TABLE
 
-    print("\nAura Model Routing\n")
-    print(f"  {'Category':<16} {'local':<22} {'balanced':<28} {'max'}")
-    print(f"  {'─' * 16} {'─' * 22} {'─' * 28} {'─' * 28}")
+    console.print("\n[bold]Aura Model Routing[/]\n")
+
+    tbl = Table(box=None, padding=(0, 2))
+    tbl.add_column("Category", style="bold")
+    tbl.add_column("local", style="dim")
+    tbl.add_column("balanced", style="cyan")
+    tbl.add_column("max", style="green")
 
     for category, tiers in ROUTING_TABLE.items():
-        local = tiers.get("local", "-")
-        balanced = tiers.get("balanced", "-")
-        max_ = tiers.get("max", "-")
-        print(f"  {category:<16} {local:<22} {balanced:<28} {max_}")
+        tbl.add_row(
+            category,
+            tiers.get("local", "-"),
+            tiers.get("balanced", "-"),
+            tiers.get("max", "-"),
+        )
+    console.print(tbl)
 
     # Show which models are actually available
-    print()
+    console.print()
     try:
         import ollama
         models = ollama.list()
         available = {m.get("name", m.get("model", "")) for m in models.get("models", [])}
-        print(f"  {len(available)} models available locally")
+        console.print(f"  [green]{len(available)}[/] models available locally")
     except Exception:
-        print("  (Could not check available models — is Ollama running?)")
+        console.print("  [dim](Could not check available models — is Ollama running?)[/]")
 
-    print()
+    console.print()
     return 0
 
 
-def cmd_commit(args) -> int:
+def cmd_commit(args: argparse.Namespace) -> int:
     """Smart commit with AI-generated message."""
     from aura import ApprenticeAgent
     from aura.tools.git_tool import GitTool
@@ -307,24 +333,24 @@ def cmd_commit(args) -> int:
     # Check for changes
     status = git.status(cwd)
     if not status.get("success"):
-        print("Not in a git repository or git error.")
+        console.print("[red]Not in a git repository or git error.[/]")
         return 1
 
     diff_result = git.diff(cwd)
     diff_text = diff_result.get("diff", "")
 
     if not diff_text and not status.get("dirty_count", 0):
-        print("No changes to commit.")
+        console.print("No changes to commit.")
         return 0
 
     # Stage all if --all flag
     if getattr(args, 'all', False):
         if not permissions.check("git", {"action": "add", "files": "."}):
-            print("  Cancelled.")
+            console.print("  Cancelled.")
             return 0
         add_result = git.add(cwd, files=".")
         if not add_result.get("success"):
-            print(f"Stage failed: {add_result.get('error', 'unknown error')}")
+            console.print(f"[red]Stage failed:[/] {add_result.get('error', 'unknown error')}")
             return 1
 
     # Get diff of staged changes
@@ -342,11 +368,11 @@ def cmd_commit(args) -> int:
         diff_text = diff_result.get("diff", "")
 
     if not diff_text:
-        print("No staged changes. Use 'git add' first or pass --all.")
+        console.print("No staged changes. Use [cyan]git add[/] first or pass [cyan]--all[/].")
         return 1
 
     # Generate commit message
-    print("Generating commit message...")
+    console.print("[dim]Generating commit message...[/]")
     try:
         agent = ApprenticeAgent()
         # Use more diff context for better messages
@@ -369,14 +395,14 @@ Diff:
                 break
 
         if not message:
-            print("Error: LLM returned empty commit message.")
+            console.print("[red]Error:[/] LLM returned empty commit message.")
             return 1
 
     except Exception as e:
-        print(f"Error generating message: {e}")
+        console.print(f"[red]Error generating message:[/] {e}")
         return 1
 
-    print(f"\n  Commit message: {message}\n")
+    console.print(f"\n  Commit message: [bold]{message}[/]\n")
     try:
         confirm = input("  Edit commit message before approval? [y/N]: ").strip().lower()
     except (EOFError, KeyboardInterrupt):
@@ -393,34 +419,34 @@ Diff:
         except (EOFError, KeyboardInterrupt):
             return 1
     elif confirm not in ("n", "no", ""):
-        print("  Cancelled.")
+        console.print("  Cancelled.")
         return 0
 
     if not permissions.check("git", {"action": "commit", "message": message}):
-        print("  Cancelled.")
+        console.print("  Cancelled.")
         return 0
 
     result = git.commit(cwd, message=message)
     if result.get("success"):
-        print(f"  Committed: {message}")
+        console.print(f"  [green]Committed:[/] {message}")
         return 0
     else:
-        print(f"  Commit failed: {result.get('error', 'unknown error')}")
+        console.print(f"  [red]Commit failed:[/] {result.get('error', 'unknown error')}")
         return 1
 
 
-def cmd_cost(args) -> int:
+def cmd_cost(args: argparse.Namespace) -> int:
     """Show session cost breakdown from activity log."""
     try:
         from aura.cli.activity_log import ActivityLog
         log = ActivityLog()
         stats = log.get_stats()
     except (ImportError, OSError) as e:
-        print(f"\nCould not read activity log: {e}")
-        print("Cost data is tracked during interactive sessions.\n")
+        console.print(f"\n[red]Could not read activity log:[/] {e}")
+        console.print("Cost data is tracked during interactive sessions.\n")
         return 1
 
-    print("\nAura Cost Summary\n")
+    console.print("\n[bold]Aura Cost Summary[/]\n")
     total_cost = stats.get("total_cost", 0.0)
     total_interactions = stats.get("total_interactions", 0)
     tokens_in = stats.get("total_tokens_in", 0)
@@ -428,16 +454,20 @@ def cmd_cost(args) -> int:
     total_tokens = tokens_in + tokens_out
     total_tool_calls = stats.get("total_tool_calls", 0)
 
-    print(f"  Total cost:     ${total_cost:.4f}")
-    print(f"  Interactions:   {total_interactions}")
-    print(f"  Tokens:         {total_tokens:,} (in: {tokens_in:,} / out: {tokens_out:,})")
-    print(f"  Tool calls:     {total_tool_calls}")
+    tbl = Table(show_header=False, box=None, padding=(0, 2))
+    tbl.add_column("Metric", style="bold")
+    tbl.add_column("Value", style="cyan")
+    tbl.add_row("Total cost", f"${total_cost:.4f}")
+    tbl.add_row("Interactions", str(total_interactions))
+    tbl.add_row("Tokens", f"{total_tokens:,} (in: {tokens_in:,} / out: {tokens_out:,})")
+    tbl.add_row("Tool calls", str(total_tool_calls))
+    console.print(tbl)
 
-    print()
+    console.print()
     return 0
 
 
-def cmd_ide_setup(args) -> int:
+def cmd_ide_setup(args: argparse.Namespace) -> int:
     """Generate VS Code tasks.json and print MCP config snippet."""
     import sys as _sys
 
@@ -528,17 +558,17 @@ def cmd_ide_setup(args) -> int:
     with open(tasks_path, "w", encoding="utf-8") as f:
         json.dump(tasks_data, f, indent=2)
 
-    print(f"\n  Created {tasks_path}")
-    print("    - Aura: Chat (interactive mode)")
-    print("    - Aura: Run Prompt (one-shot)")
-    print("    - Aura: Init Project")
-    print("    - Aura: Smart Commit")
+    console.print(f"\n  [green]Created[/] {tasks_path}")
+    console.print("    - Aura: Chat (interactive mode)")
+    console.print("    - Aura: Run Prompt (one-shot)")
+    console.print("    - Aura: Init Project")
+    console.print("    - Aura: Smart Commit")
 
     # Print MCP config snippet
     # Point cwd at Aura's install dir so `python -m aura.core.mcp_server` can
     # resolve the package without requiring a site-packages install.
     aura_root = str(Path(__file__).resolve().parents[2])
-    print("\n  MCP Server config for VS Code settings.json:\n")
+    console.print("\n  [bold]MCP Server config for VS Code settings.json:[/]\n")
     mcp_config = {
         "mcp.servers": {
             "aura": {
@@ -548,8 +578,8 @@ def cmd_ide_setup(args) -> int:
             }
         }
     }
-    print(f"    {json.dumps(mcp_config, indent=4)}")
-    print()
+    console.print(Panel(json.dumps(mcp_config, indent=4), border_style="dim"))
+    console.print()
     return 0
 
 
@@ -589,15 +619,15 @@ def _detect_test_cmd(project_root: str) -> str:
     return ""
 
 
-def cmd_setup(args) -> int:
+def cmd_setup(args: argparse.Namespace) -> int:
     """Interactive setup wizard for configuring Aura in a project."""
     cwd = os.getcwd()
     project_name = Path(cwd).name
 
-    print(f"\n  Aura Setup Wizard for '{project_name}'\n")
+    console.print(f"\n  [bold]Aura Setup Wizard[/] for [cyan]'{project_name}'[/]\n")
 
     # Step 1: Detect project type
-    print("  Step 1: Detecting project...")
+    console.print("  [bold]Step 1:[/] Detecting project...")
     try:
         from aura.tools.code_search import CodeSearchTool
         searcher = CodeSearchTool()
@@ -606,23 +636,23 @@ def cmd_setup(args) -> int:
         frameworks = info.get("frameworks", [])
         stack = info.get("stack", [])
         if project_type != "unknown":
-            print(f"    Detected: {project_type} ({', '.join(stack)})")
+            console.print(f"    Detected: [cyan]{project_type}[/] ({', '.join(stack)})")
         else:
-            print("    Could not auto-detect project type.")
+            console.print("    [yellow]Could not auto-detect project type.[/]")
     except Exception:
         project_type = "unknown"
         frameworks = []
         stack = []
-        print("    Could not auto-detect (code_search unavailable).")
+        console.print("    [yellow]Could not auto-detect (code_search unavailable).[/]")
 
     # Step 2: Choose tier
-    print("\n  Step 2: Choose model tier")
-    print("    fast     — Quick responses, lower cost")
-    print("    balanced — Good balance of speed and quality (recommended)")
-    print("    max      — Best quality, higher cost")
+    console.print("\n  [bold]Step 2:[/] Choose model tier")
+    console.print("    [cyan]fast[/]     — Quick responses, lower cost")
+    console.print("    [cyan]balanced[/] — Good balance of speed and quality (recommended)")
+    console.print("    [cyan]max[/]      — Best quality, higher cost")
     tier = _prompt("    Tier", "balanced")
     if tier not in ("fast", "balanced", "max"):
-        print(f"    Invalid tier '{tier}', using 'balanced'.")
+        console.print(f"    [yellow]Invalid tier '{tier}', using 'balanced'.[/]")
         tier = "balanced"
 
     # Step 3: Model
@@ -636,20 +666,21 @@ def cmd_setup(args) -> int:
     auto_test = auto_test_str.lower() in ("y", "yes")
 
     # Step 5: API keys
-    print("\n  Step 5: Checking API keys...")
+    console.print("\n  [bold]Step 5:[/] Checking API keys...")
     for key_name in ["OLLAMA_API_KEY", "BRAVE_API_KEY", "TAVILY_API_KEY"]:
         has = bool(os.environ.get(key_name))
-        print(f"    {key_name}: {'found' if has else 'not set'}")
+        status = "[green]found[/]" if has else "[yellow]not set[/]"
+        console.print(f"    {key_name}: {status}")
 
     # Step 6: Generate AURA.md
-    print("\n  Step 6: Creating AURA.md...")
+    console.print("\n  [bold]Step 6:[/] Creating AURA.md...")
     aura_md_path = os.path.join(cwd, "AURA.md")
 
     if os.path.exists(aura_md_path):
         overwrite = _prompt("    AURA.md already exists. Overwrite? [y/n]", "n")
         if overwrite.lower() not in ("y", "yes"):
-            print("    Kept existing AURA.md.")
-            print("\n  Setup complete! Run 'aura' to start.\n")
+            console.print("    Kept existing AURA.md.")
+            console.print("\n  [bold green]Setup complete![/] Run [cyan]aura[/] to start.\n")
             return 0
 
     # Build content
@@ -685,8 +716,8 @@ def cmd_setup(args) -> int:
     with open(aura_md_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(f"    Created {aura_md_path}")
-    print("\n  Setup complete! Run 'aura' to start.\n")
+    console.print(f"    [green]Created[/] {aura_md_path}")
+    console.print("\n  [bold green]Setup complete![/] Run [cyan]aura[/] to start.\n")
     return 0
 
 

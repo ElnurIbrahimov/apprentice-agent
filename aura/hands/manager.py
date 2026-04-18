@@ -281,7 +281,7 @@ class HandManager:
                     agent_id=f"hand:{name}",
                 )
             except Exception:
-                pass
+                logger.warning("[HandManager] Audit chain write failed for hand_start(%s)", name)
 
             # Execute with duration enforcement
             try:
@@ -389,8 +389,8 @@ class HandManager:
                 # Force to COOLDOWN rather than leaving in RUNNING
                 try:
                     hand._state = HandState.COOLDOWN
-                except Exception:
-                    pass
+                except Exception as inner_err:
+                    logger.critical("[HandManager] Cannot force %s to COOLDOWN: %s — hand may be stuck in RUNNING", name, inner_err)
 
     def check_and_run(
         self,

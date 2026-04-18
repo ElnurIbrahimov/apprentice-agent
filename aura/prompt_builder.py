@@ -498,8 +498,8 @@ class SystemPromptBuilder:
                     hand_name = m.metadata.get("hand") if hasattr(m, 'metadata') and m.metadata else None
                     if hand_name:
                         mgr.record_finding_referenced(hand_name)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[PromptBuilder] Failed to record hand finding references for adaptive scheduling: {e}")
 
             self._episodic_cache = memory_section
             self._episodic_cache_ts = _now

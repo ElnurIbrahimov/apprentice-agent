@@ -890,8 +890,8 @@ class VerifiedMemory:
         if _EMBEDDINGS_AVAILABLE and trace.embedding is None:
             try:
                 trace.embedding = _get_embedding(trace.content, timeout=2.0)
-            except Exception:
-                pass  # Embeddings are optional — never block on failure
+            except Exception as e:
+                logger.debug(f"[TruthSpine] Embedding computation failed for trace: {e}")
 
     def store_belief(
         self,
@@ -1096,8 +1096,8 @@ class VerifiedMemory:
         if _EMBEDDINGS_AVAILABLE:
             try:
                 query_emb = _get_embedding(query, timeout=2.0)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[TruthSpine] Query embedding fetch failed: {e}")
 
         use_embeddings = query_emb is not None
 

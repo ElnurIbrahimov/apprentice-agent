@@ -170,11 +170,14 @@ def handle_hand(agent, arg, context) -> Optional[str]:
 
 def _handle_agent_command(agent, arg: str):
     from ..display import console as _agent_console
+
+    # Parse once and reuse throughout the function.
+    parts = arg.split(maxsplit=1) if arg else []
+    specialist = parts[0].lower() if parts else ""
+    task = parts[1] if len(parts) > 1 else ""
+
     try:
         if arg:
-            parts = arg.split(maxsplit=1)
-            specialist = parts[0].lower() if parts else ""
-            task = parts[1] if len(parts) > 1 else ""
             approval_args = {"task": task or arg, "specialist": specialist}
             if not confirm_action(
                 agent,
@@ -213,10 +216,6 @@ def _handle_agent_command(agent, arg: str):
         _agent_console.print("\n  Usage: /agent <specialist> <task>")
         _agent_console.print("         /agent parallel <task>")
         return
-
-    parts = arg.split(maxsplit=1)
-    specialist = parts[0].lower()
-    task = parts[1] if len(parts) > 1 else ""
 
     if not task:
         _agent_console.print(f"Usage: /agent {specialist} <task>")

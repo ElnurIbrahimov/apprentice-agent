@@ -131,8 +131,8 @@ def get_current_pad_dict() -> Optional[Dict[str, float]]:
                 "arousal": float(pad.get("arousal", 0.0)),
                 "dominance": float(pad.get("dominance", 0.0)),
             }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[EmotionIntegration] Failed to get PAD dict from ALMA: {e}")
     return None
 
 

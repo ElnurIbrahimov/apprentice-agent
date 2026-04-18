@@ -428,7 +428,7 @@ class ResearchCache:
                 )
                 self._conn.commit()
         except Exception:
-            pass
+            logger.debug("Failed to write search results to cache", exc_info=True)
 
     # ---- page cache ----
 
@@ -456,7 +456,7 @@ class ResearchCache:
                 )
                 self._conn.commit()
         except Exception:
-            pass
+            logger.debug("Failed to write page content to cache", exc_info=True)
 
     # ---- research history (cross-session memory) ----
 
@@ -529,7 +529,7 @@ class ResearchCache:
             self._conn.execute("DELETE FROM research_history WHERE expires_at < ?", (now,))
             self._conn.commit()
         except Exception:
-            pass
+            logger.debug("Failed to cleanup expired cache entries", exc_info=True)
 
 
 # ============================================================================
@@ -848,7 +848,7 @@ class HierarchicalSummarizer:
                     try:
                         claim_emb = get_embedding(sentence[:500], timeout=3.0)
                     except Exception:
-                        pass
+                        logger.debug("Failed to get citation claim embedding", exc_info=True)
 
                 # Match against each source using embedding similarity + keyword overlap
                 matching_urls = []
@@ -1181,7 +1181,7 @@ class DeepResearchTool:
                                 f"  -> related: {rel_node.label} ({rel_node.type})"
                             )
                 except Exception:
-                    pass  # Best-effort for related nodes
+                    logger.debug("Failed to get KG cross-references for prior context", exc_info=True)
 
             prior_context = "\n".join(context_parts) if context_parts else ""
             logger.info(
@@ -1302,7 +1302,7 @@ class DeepResearchTool:
                             if edge:
                                 edges_added += 1
                 except Exception:
-                    pass
+                    logger.debug("Failed to add KG topic edge during research save", exc_info=True)
 
                 # Handle explicit relationships
                 for related_label in ent.get("related_to", []):
@@ -1321,7 +1321,7 @@ class DeepResearchTool:
                             if edge:
                                 edges_added += 1
                         except Exception:
-                            pass
+                            logger.debug("Failed to add KG relationship edge during research save", exc_info=True)
 
             logger.info(
                 f"[DeepResearch] KG save: {nodes_added} nodes, {edges_added} edges "
@@ -1607,7 +1607,7 @@ Return as JSON (no markdown fences):
                 if emb:
                     c['embedding'] = emb
             except Exception:
-                pass  # Best-effort — skip on failure
+                logger.debug("Failed to embed search candidate", exc_info=True)
         return candidates
 
     # ------------------------------------------------------------------
@@ -1904,7 +1904,7 @@ Return as JSON (no markdown fences):
                 except FuturesTimeoutError:
                     pass
             except Exception:
-                pass
+                logger.debug("Gap search future failed", exc_info=True)
 
         # Rank new results
         if new_urls:
@@ -2394,7 +2394,7 @@ Return as JSON (no markdown fences):
         try:
             self.cache.cleanup()
         except Exception:
-            pass
+            logger.debug("Failed to cleanup expired research cache entries", exc_info=True)
 
         # --- Cross-session memory: save this research session ---
         try:
@@ -2407,7 +2407,7 @@ Return as JSON (no markdown fences):
                 "estimated_complexity": estimated_complexity,
             })
         except Exception:
-            pass
+            logger.debug("Failed to save research session to cache", exc_info=True)
 
         return {
             # Original keys (backward-compatible)

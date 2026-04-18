@@ -245,8 +245,8 @@ class MultiUserManager:
         for callback in self._on_session_start:
             try:
                 callback(user_id, session_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[MultiUserManager] Session start callback failed: {e}")
         logger.info(
             f"[MultiUserManager] New session for {user_id}: {session_id}"
         )
@@ -263,8 +263,8 @@ class MultiUserManager:
             for callback in self._on_session_end:
                 try:
                     callback(user_id, session.session_id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[MultiUserManager] Session end callback failed: {e}")
 
     def _switch_context(self, user_id: str) -> None:
         """Switch active user context and fire callbacks."""
@@ -273,8 +273,8 @@ class MultiUserManager:
         for callback in self._on_user_switch:
             try:
                 callback(prev_user, user_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[MultiUserManager] User switch callback failed: {e}")
         logger.debug(
             f"[MultiUserManager] Context switch: {prev_user} -> {user_id}"
         )

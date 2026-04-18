@@ -989,7 +989,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             if is_shutting_down():
                 return ""
         except Exception:
-            pass
+            logger.debug("Shutdown check failed in _quick_generate", exc_info=True)
 
         # Yield to user inference — poll briefly in case it finishes soon.
         # Event.wait(timeout) returns immediately when already set, so we poll manually.
@@ -1121,7 +1121,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 if is_shutting_down():
                     return None
             except Exception:
-                pass
+                logger.debug("Shutdown check failed in _run_with_retry", exc_info=True)
             try:
                 future = _llm_pool_fn().submit(func)
                 return future.result(timeout=timeout)
@@ -1447,7 +1447,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             if is_shutting_down():
                 return _user_facing_llm_error(model="shutdown")
         except Exception:
-            pass
+            logger.debug("Shutdown check failed in think()", exc_info=True)
 
         # Circuit breaker: if too many consecutive failures, return degraded response
         cb_response = self._check_think_circuit_breaker()

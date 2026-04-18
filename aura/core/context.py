@@ -215,7 +215,7 @@ def _get_git_info(project_root: str) -> Optional[str]:
                 if diff_result.stdout:
                     parts.append(f"\nRecent changes:\n{diff_result.stdout[:2000]}")
             except Exception:
-                pass
+                logger.debug("Failed to get git diff for context", exc_info=True)
 
         # Add last 3 commit messages for dev direction context
         try:
@@ -228,7 +228,7 @@ def _get_git_info(project_root: str) -> Optional[str]:
             if log_result.stdout:
                 parts.append(f"\nRecent commits:\n{log_result.stdout.strip()}")
         except Exception:
-            pass
+            logger.debug("Failed to get git log for context", exc_info=True)
 
         return "\n".join(parts)
     except Exception as e:

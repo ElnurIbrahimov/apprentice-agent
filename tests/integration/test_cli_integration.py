@@ -220,11 +220,14 @@ class TestNonInteractiveMode:
         env.pop("OLLAMA_API_KEY", None)
 
         main_py = os.path.join(_PROJECT_ROOT, "main.py")
+        # 60s budget — subprocess cold-start imports torch/transformers and
+        # warms the mock Ollama client; under parallel test load we've seen
+        # this tip past 30s, causing spurious TimeoutExpired failures.
         result = subprocess.run(
             [sys.executable, main_py, "-p", "hello"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
             env=env,
             cwd=_PROJECT_ROOT,
         )

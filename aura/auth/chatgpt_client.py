@@ -196,8 +196,8 @@ class ChatGPTClient:
             error_text = ""
             try:
                 error_text = resp.text[:500]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[ChatGPTClient] Failed to read error response text: {e}")
             logger.error(f"[CHATGPT] API error: {resp.status_code} {error_text}")
             raise ConnectionError(f"ChatGPT API error: {resp.status_code}")
 

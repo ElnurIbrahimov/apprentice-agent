@@ -459,7 +459,7 @@ class KnowledgeGraphTool:
                 try:
                     query_emb = get_embedding(query_lower, timeout=2.0)
                 except Exception:
-                    pass
+                    logger.debug("Embedding unavailable, falling back to keyword search", exc_info=True)
 
             matches = []
             for node_id in candidate_ids:
@@ -494,7 +494,7 @@ class KnowledgeGraphTool:
                         try:
                             node.embedding = get_embedding(node.label, timeout=2.0)
                         except Exception:
-                            pass
+                            logger.debug("Failed to compute node embedding for scoring", exc_info=True)
                     if node.embedding:
                         emb_score = self._compute_embedding_similarity(query_emb, node.embedding)
 
@@ -1259,7 +1259,7 @@ class KnowledgeGraphTool:
                         try:
                             node.embedding = get_embedding(node.label, timeout=1.5)
                         except Exception:
-                            pass
+                            logger.debug("Failed to compute node embedding for deduplication", exc_info=True)
                     if node.embedding:
                         candidates.append((nid, node))
 

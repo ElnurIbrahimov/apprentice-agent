@@ -993,8 +993,8 @@ class GatewayDaemon:
                         from .curiosity_scanner import get_curiosity_scanner
                         scanner = get_curiosity_scanner()
                         topics = scanner.get_topics_for_message(max_topics=2)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[GatewayDaemon] CuriosityScanner topics fetch failed: {e}")
 
                 content = get_curiosity_message(topics=topics or None, recent=recent)
 
@@ -1244,8 +1244,8 @@ class GatewayDaemon:
             if agent_service.agent and agent_service.agent.brain:
                 history = agent_service.agent.brain.conversation_history
                 recent_chat = history[-6:] if history else []
-        except BaseException:
-            pass
+        except Exception:
+            logger.debug("[GatewayDaemon] Failed to fetch recent chat history", exc_info=True)
 
         # 2. Memories relevant to recent conversation
         memory_snippets = []
@@ -1259,8 +1259,8 @@ class GatewayDaemon:
                     query = last_user_msgs[-1][:200]
                     results = um.query(query, k=3, min_score=0.3)
                     memory_snippets = [r.content[:150] for r in results[:3]]
-            except BaseException:
-                pass
+            except Exception:
+                logger.debug("[GatewayDaemon] Failed to fetch memory snippets", exc_info=True)
 
         # 3. Emotional state
         emotional_summary = ""
@@ -1277,8 +1277,8 @@ class GatewayDaemon:
                     f"Current mood — warmth: {warmth:.1f}, energy: {energy:.1f}, "
                     f"engagement: {engagement:.1f}"
                 )
-        except BaseException:
-            pass
+        except Exception:
+            logger.debug("[GatewayDaemon] Failed to fetch emotional state", exc_info=True)
 
         # 4. Idle time
         idle_minutes = 0.0
@@ -1303,8 +1303,8 @@ class GatewayDaemon:
                 drive_summary = f"Dominant drive: {dominant.drive_type.value} (urgency: {dominant.urgency:.2f})"
                 if dominant.triggers:
                     drive_summary += f" — triggers: {', '.join(dominant.triggers[:2])}"
-        except BaseException:
-            pass
+        except Exception:
+            logger.debug("[GatewayDaemon] Failed to fetch drive info", exc_info=True)
 
         # 5b. Phase 4.3: Curiosity targets from KG gaps
         curiosity_context = ""
@@ -1320,8 +1320,8 @@ class GatewayDaemon:
                 )
                 if top.question:
                     curiosity_context += f"\nSuggested question: {top.question}"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[GatewayDaemon] CuriosityScanner targets fetch failed: {e}")
 
         # 6. Time of day
         hour = datetime.now().hour

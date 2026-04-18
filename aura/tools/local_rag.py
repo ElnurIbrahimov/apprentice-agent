@@ -974,14 +974,14 @@ class LocalRAG:
                     from api.routes.memory import record_memory_recall
                     if results:
                         record_memory_recall("rag", len(results), query, [r.chunk.content[:80] for r in results[:5]])
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[RAG] Memory recall tracking failed: {e}")
                 try:
                     from api.routes.context import track_context_from_memory
                     if results:
                         track_context_from_memory([r.chunk.content[:80] for r in results[:5]])
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[RAG] Context tracking from memory failed: {e}")
                 return results
 
         # Fallback to keyword search

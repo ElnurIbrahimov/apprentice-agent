@@ -162,8 +162,8 @@ class ToolUsageTracker:
                     "total_uses": row[0], "success_rate": row[1],
                     "created_at": row[2], "last_used": row[3], "status": row[4],
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[ToolBuilder] Failed to get tool usage stats: {e}")
         return None
 
     def get_candidates_for_deprecation(self, min_age_days: int = 30, max_usage_pct: float = 0.05) -> list:
@@ -190,8 +190,8 @@ class ToolUsageTracker:
         if self._conn:
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[ToolBuilder] Failed to close SQLite connection: {e}")
 
 
 # Singleton tracker
@@ -1447,8 +1447,8 @@ that would make it pass. Return ONLY the corrected tool code between ```python a
                         try:
                             old_path.unlink()
                             logger.info(f"[Versioning] Cleaned up old v{old['version']} of {tool_name}")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"[ToolBuilder] Failed to delete old tool version file {old_path}: {e}")
                 tool["versions"] = versions
                 self._save_registry(registry)
                 logger.info(f"[Versioning] {tool_name} now at v{max_ver + 1}")
@@ -1522,8 +1522,8 @@ that would make it pass. Return ONLY the corrected tool code between ```python a
             if evo_path.exists():
                 try:
                     evo_data = json.loads(evo_path.read_text())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[ToolBuilder] Failed to load evolution registry JSON: {e}")
             evo_data[safe_name] = {
                 "trigger_reason": "low_success_rate",
                 "success_rate": stats.get("success_rate", 0),

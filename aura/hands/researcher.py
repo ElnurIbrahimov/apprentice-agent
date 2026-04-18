@@ -244,8 +244,8 @@ class ResearcherHand(Hand):
             curiosity_targets = context.get("curiosity_targets", [])
             if curiosity_targets:
                 candidates.extend(curiosity_targets[:3])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[ResearcherHand] Failed to get curiosity scanner targets: {e}")
 
         # Source 2: KG gaps (orphan nodes, low-confidence)
         try:
@@ -255,8 +255,8 @@ class ResearcherHand(Hand):
                 state = engine.get_drive_state("curiosity")
                 if state and state.triggers:
                     candidates.extend(state.triggers[:3])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[ResearcherHand] Failed to get motivation engine state: {e}")
 
         # Source 3: World model stale projects
         try:
@@ -266,8 +266,8 @@ class ResearcherHand(Hand):
                 projects = wm.get_stale_projects(days=7)
                 if projects:
                     candidates.extend([f"updates on {p['name']}" for p in projects[:2]])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[ResearcherHand] Failed to get stale projects from world model: {e}")
 
         if not candidates:
             return None

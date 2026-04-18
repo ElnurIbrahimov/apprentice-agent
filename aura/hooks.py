@@ -298,8 +298,8 @@ class HooksManager:
                 result = self.tools["screen_reader"].read_screen()
                 if result.get("success") and keyword.lower() in result.get("text", "").lower():
                     return True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Hooks] Screen reader OCR check failed: {e}")
 
         return False
 
@@ -354,8 +354,8 @@ class HooksManager:
                 )
             else:
                 subprocess.run(["notify-send", "AURA Hook", str(message)], timeout=5, check=False)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Hooks] Desktop notification action failed: {e}")
 
     def _action_speak(self, text: str):
         """Speak text using TTS."""

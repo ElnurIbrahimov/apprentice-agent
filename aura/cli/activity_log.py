@@ -110,7 +110,7 @@ class ActivityLog:
                     conn.execute("UPDATE interactions SET embedding = ? WHERE id = ?", (blob, row_id))
                     conn.commit()
             except Exception:
-                pass  # Non-fatal — embedding storage is optional
+                logger.debug("Failed to store embedding for activity log entry", exc_info=True)
             return row_id
         except Exception as e:
             logger.warning("[ActivityLog] Failed to log interaction: %s", e)
@@ -137,6 +137,7 @@ class ActivityLog:
             ).fetchall()
             return [dict(r) for r in rows]
         except Exception:
+            logger.debug("Failed to perform FTS search in activity log", exc_info=True)
             return []
         finally:
             conn.close()
@@ -188,6 +189,7 @@ class ActivityLog:
             scored.sort(key=lambda x: -x[1])
             return [r for r, _ in scored[:limit]]
         except Exception:
+            logger.debug("Semantic search failed, falling back to FTS5", exc_info=True)
             return self.search(query, limit)  # FTS5 fallback
 
     def get_recent(self, limit: int = 20) -> List[Dict]:
@@ -201,6 +203,7 @@ class ActivityLog:
             ).fetchall()
             return [dict(r) for r in rows]
         except Exception:
+            logger.debug("Failed to fetch recent interactions from activity log", exc_info=True)
             return []
         finally:
             conn.close()
@@ -225,6 +228,7 @@ class ActivityLog:
                 "total_tool_calls": row[4] or 0,
             }
         except Exception:
+            logger.debug("Failed to compute activity log stats", exc_info=True)
             return {"total_interactions": 0}
         finally:
             conn.close()

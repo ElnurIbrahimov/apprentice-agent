@@ -239,8 +239,8 @@ class CollectorHand(Hand):
                 wm_targets = wm.get_watch_targets()
                 if wm_targets:
                     targets.extend(wm_targets)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[CollectorHand] Failed to get watch targets from world model: {e}")
 
         # Source 2: KG nodes tagged as "monitoring"
         try:
@@ -256,8 +256,8 @@ class CollectorHand(Hand):
                     for url in urls[:2]:
                         if not any(t.get("url") == url for t in targets):
                             targets.append({"url": url, "source": "memory"})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[CollectorHand] Failed to get KG monitoring nodes from memory: {e}")
 
         # Source 3: Context-provided targets
         ctx_targets = context.get("watch_targets", [])
@@ -280,8 +280,8 @@ class CollectorHand(Hand):
                     hash_val = lines[0].replace("collector_hash:", "").strip()
                     stored_content = lines[1] if len(lines) > 1 else ""
                     return {"hash": hash_val, "content": stored_content}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[CollectorHand] Failed to get snapshot for {target}: {e}")
         return None
 
     def _store_snapshot(self, target: str, content: str, content_hash: str):

@@ -44,8 +44,8 @@ def _close_validation_session():
         if _validation_session is not None:
             try:
                 _validation_session.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[Config] Failed to close validation HTTP session: {e}")
             _validation_session = None
 
 
@@ -124,8 +124,8 @@ def validate_model(model_name: str, ollama_host: str | None = None) -> bool:
                 return True
             base_name = model_name.split(":")[0]
             return any(m.startswith(base_name) for m in available)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[Config] Failed to validate model via Ollama tags: {e}")
     return False
 
 

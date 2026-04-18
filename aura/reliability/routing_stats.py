@@ -224,8 +224,8 @@ class RoutingStatsStore:
                             s.failures += 1
                         s.total_latency_ms += entry.get("latency_ms", 0.0)
                         s.last_seen = entry.get("ts", s.last_seen)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"[RoutingStats] Failed to parse stat entry: {e}")
         except Exception as e:
             logger.warning("[RoutingStats] Failed to load persist file: %s", e)
 
@@ -260,8 +260,8 @@ class RoutingStatsStore:
                 model_used=model,
                 extra={"category": category},
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[RoutingStats] Telemetry emission failed: {e}")
 
 
 # ---------------------------------------------------------------------------

@@ -63,6 +63,21 @@ class StreamingJSONEmitter:
     def emit_tool_result(self, tool: str, args: dict, result: Any) -> None:
         self.emit({"type": "tool_result", "tool": tool, "args": args, "result": result})
 
+    def emit_permission_denied(self, tool: str, description: str) -> None:
+        """Announce a blocked tool call so scripted consumers see why nothing happened.
+
+        JSON mode can't prompt for permission, so any tool that would have
+        triggered a confirm dialog is auto-denied. Emitting this event lets
+        callers distinguish 'no tool calls because the model didn't want any'
+        from 'no tool calls because we blocked them'.
+        """
+        self.emit({
+            "type": "permission_denied",
+            "tool": tool,
+            "description": description,
+            "reason": "json_mode_no_prompt",
+        })
+
     def emit_final(self, response: str, model: str = "", cost: float = 0.0,
                    iterations: int = 0, tool_calls: int = 0, success: bool = True) -> None:
         self.emit({
