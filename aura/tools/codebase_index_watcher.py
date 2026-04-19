@@ -114,7 +114,7 @@ def start_watcher(index_obj, project_path: str) -> bool:
             _observer = obs
             logger.info("[CodebaseIndex] Watcher started on %s", project_path)
             return True
-        except Exception as e:
+        except Exception:
             logger.debug("codebase_watcher_start_failed", exc_info=True)
             return False
 
