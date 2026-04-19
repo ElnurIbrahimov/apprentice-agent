@@ -13,7 +13,11 @@ from typing import Iterator
 
 import requests
 
+from aura.reliability.error_classifier import FailoverReason
+from aura.reliability.provider_shim import ProviderGiveUp, request_with_retry
+
 from .base import BaseProvider
+from .credential_pool import get_pool
 from .registry import PROVIDER_CONFIGS
 
 logger = logging.getLogger(__name__)
@@ -26,6 +30,7 @@ class GeminiProvider(BaseProvider):
 
     def __init__(self):
         self._session = requests.Session()
+        get_pool().register("gemini", _CFG["env_var"])
 
     @property
     def display_name(self) -> str:
@@ -36,10 +41,24 @@ class GeminiProvider(BaseProvider):
         return "gemini:"
 
     def _get_api_key(self) -> str:
+        pool_key = get_pool().acquire("gemini")
+        if pool_key:
+            return pool_key
         return os.getenv(_CFG["env_var"], "")
 
     def is_configured(self) -> bool:
-        return bool(self._get_api_key())
+        if get_pool().pool_size("gemini") > 0:
+            return True
+        return bool(os.getenv(_CFG["env_var"], ""))
+
+    def _maybe_cooldown_key(self, give_up: ProviderGiveUp, api_key: str) -> None:
+        reason = give_up.classified.reason
+        if reason not in (FailoverReason.rate_limit, FailoverReason.billing, FailoverReason.auth):
+            return
+        if not api_key:
+            return
+        reason_str = reason.value if reason != FailoverReason.auth else "rate_limit"
+        get_pool().mark_exhausted("gemini", api_key, reason=reason_str)
 
     def list_models(self) -> list[str]:
         return [f"gemini:{m}" for m in _CFG["default_models"]]
@@ -137,15 +156,23 @@ class GeminiProvider(BaseProvider):
 
         safe_url = url.split("?")[0]
         try:
-            resp = self._session.post(url, headers=headers, json=body, timeout=120)
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[GEMINI] Request failed: {safe_url}: {type(e).__name__}")
-            raise ConnectionError(f"Gemini request failed: {type(e).__name__}")
-
-        if resp.status_code != 200:
-            error_text = resp.text[:500] if resp.text else ""
-            logger.error(f"[GEMINI] API error {resp.status_code} ({safe_url}): {error_text}")
-            raise ConnectionError(f"Gemini API error: {resp.status_code}")
+            resp = request_with_retry(
+                session=self._session,
+                method="POST",
+                url=url,
+                headers=headers,
+                json_body=body,
+                provider="gemini",
+                model=safe_url.rsplit("/", 1)[-1].split(":")[0],
+                timeout=(10, 120),
+            )
+        except ProviderGiveUp as give_up:
+            self._maybe_cooldown_key(give_up, api_key)
+            logger.error(
+                f"[GEMINI] gave up after {give_up.attempts} attempts ({safe_url}): "
+                f"{give_up.classified.reason.value}"
+            )
+            raise ConnectionError(str(give_up)) from give_up
 
         data = resp.json()
 
@@ -204,15 +231,24 @@ class GeminiProvider(BaseProvider):
 
         safe_url = url.split("?")[0]
         try:
-            resp = self._session.post(url, headers=headers, json=body, stream=True, timeout=(10, 90))
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[GEMINI] Stream request failed: {safe_url}: {type(e).__name__}")
-            raise ConnectionError(f"Gemini request failed: {type(e).__name__}")
-
-        if resp.status_code != 200:
-            error_text = resp.text[:500] if resp.text else ""
-            logger.error(f"[GEMINI] API error {resp.status_code} ({safe_url}): {error_text}")
-            raise ConnectionError(f"Gemini API error: {resp.status_code}")
+            resp = request_with_retry(
+                session=self._session,
+                method="POST",
+                url=url,
+                headers=headers,
+                json_body=body,
+                provider="gemini",
+                model=safe_url.rsplit("/", 1)[-1].split(":")[0],
+                timeout=(10, 90),
+                stream=True,
+            )
+        except ProviderGiveUp as give_up:
+            self._maybe_cooldown_key(give_up, api_key)
+            logger.error(
+                f"[GEMINI] stream gave up after {give_up.attempts} attempts ({safe_url}): "
+                f"{give_up.classified.reason.value}"
+            )
+            raise ConnectionError(str(give_up)) from give_up
 
         input_tokens = 0
         output_tokens = 0

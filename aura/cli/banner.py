@@ -96,4 +96,17 @@ def get_welcome_line(version: str | None = None) -> Text:
     result.append("Shift+Tab", style=f"bold {accent}")
     result.append(" perms", style="dim")
 
+    # Sandbox tier line (only shown when non-default)
+    try:
+        from aura.core.permissions import SandboxTier, get_sandbox_tier
+        tier = get_sandbox_tier()
+        if tier != SandboxTier.UNRESTRICTED:
+            label = "read-only" if tier == SandboxTier.READ_ONLY else "workspace-write"
+            warn_color = "yellow" if tier == SandboxTier.WORKSPACE_WRITE else "red"
+            result.append("\n   ")
+            result.append("\u2622", style=f"bold {warn_color}")
+            result.append(f" sandbox: {label}", style=warn_color)
+    except Exception:
+        pass
+
     return result

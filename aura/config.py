@@ -545,6 +545,10 @@ class Config:
     BUDGET_MEDIUM: int = int(os.getenv("BUDGET_MEDIUM", "1024"))
     BUDGET_LARGE: int = int(os.getenv("BUDGET_LARGE", "2048"))
 
+    # Context compression (aura.memory.context_compressor)
+    CONTEXT_COMPRESSION_THRESHOLD: int = int(os.getenv("CONTEXT_COMPRESSION_THRESHOLD", "80000"))
+    CONTEXT_COMPRESSION_KEEP_LAST: int = int(os.getenv("CONTEXT_COMPRESSION_KEEP_LAST", "10"))
+
     # ============================================================
     # RELIABILITY UPGRADE — Phase 1-4 (2026-03)
     # ============================================================

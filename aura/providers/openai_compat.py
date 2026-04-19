@@ -11,7 +11,11 @@ from typing import Iterator
 
 import requests
 
+from aura.reliability.error_classifier import FailoverReason
+from aura.reliability.provider_shim import ProviderGiveUp, record_rate_limit, request_with_retry
+
 from .base import BaseProvider
+from .credential_pool import get_pool
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,9 @@ class OpenAICompatProvider(BaseProvider):
         self._display_name = display_name
         self._default_models = default_models
         self._session = requests.Session()
+        # Register with the credential pool so comma-separated keys rotate
+        # automatically. Single-key env vars still work unchanged.
+        get_pool().register(provider_name, env_var)
 
     @property
     def display_name(self) -> str:
@@ -37,10 +44,18 @@ class OpenAICompatProvider(BaseProvider):
         return f"{self._provider_name}:"
 
     def _get_api_key(self) -> str:
+        # Prefer the pool (rotates on exhaustion); fall back to raw env var so
+        # tests that monkeypatch os.environ keep working.
+        pool_key = get_pool().acquire(self._provider_name)
+        if pool_key:
+            return pool_key
         return os.getenv(self._env_var, "")
 
     def is_configured(self) -> bool:
-        return bool(self._get_api_key())
+        # Pool-aware: configured if ANY key exists in env, even if currently cooling.
+        if get_pool().pool_size(self._provider_name) > 0:
+            return True
+        return bool(os.getenv(self._env_var, ""))
 
     def list_models(self) -> list[str]:
         return [f"{self._provider_name}:{m}" for m in self._default_models]
@@ -104,17 +119,28 @@ class OpenAICompatProvider(BaseProvider):
             return self._sync_chat(url, headers, body)
 
     def _sync_chat(self, url: str, headers: dict, body: dict) -> dict:
-        """Non-streaming chat — single JSON response."""
+        """Non-streaming chat — single JSON response with classifier-driven retries."""
+        model = body.get("model", "")
         try:
-            resp = self._session.post(url, headers=headers, json=body, timeout=(10, 120))
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[{self._provider_name.upper()}] Request failed: {e}")
-            raise ConnectionError(f"{self._display_name} request failed: {e}")
-
-        if resp.status_code != 200:
-            error_text = resp.text[:500] if resp.text else ""
-            logger.error(f"[{self._provider_name.upper()}] API error {resp.status_code}: {error_text}")
-            raise ConnectionError(f"{self._display_name} API error: {resp.status_code} - {resp.text[:200]}")
+            resp = request_with_retry(
+                session=self._session,
+                method="POST",
+                url=url,
+                headers=headers,
+                json_body=body,
+                provider=self._provider_name,
+                model=model,
+                timeout=(10, 120),
+            )
+        except ProviderGiveUp as give_up:
+            # Cooldown the current key if appropriate, then surface as ConnectionError
+            # (matching the prior contract so upstream code keeps working).
+            self._maybe_cooldown_key(give_up, headers)
+            logger.error(
+                f"[{self._provider_name.upper()}] gave up after {give_up.attempts} attempts: "
+                f"{give_up.classified.reason.value}"
+            )
+            raise ConnectionError(str(give_up)) from give_up
 
         data = resp.json()
         choice = data.get("choices", [{}])[0]
@@ -137,18 +163,42 @@ class OpenAICompatProvider(BaseProvider):
 
         return result
 
-    def _stream_chat(self, url: str, headers: dict, body: dict) -> Iterator[dict]:
-        """Streaming chat — parse SSE events."""
-        try:
-            resp = self._session.post(url, headers=headers, json=body, stream=True, timeout=(10, 90))
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[{self._provider_name.upper()}] Stream request failed: {e}")
-            raise ConnectionError(f"{self._display_name} request failed: {e}")
+    def _maybe_cooldown_key(self, give_up: ProviderGiveUp, headers: dict) -> None:
+        """If the failure is credential-scoped (rate/billing), cool down the key used."""
+        reason = give_up.classified.reason
+        if reason not in (FailoverReason.rate_limit, FailoverReason.billing, FailoverReason.auth):
+            return
+        auth_header = headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return
+        key = auth_header[len("Bearer "):].strip()
+        if not key:
+            return
+        reason_str = reason.value if reason != FailoverReason.auth else "rate_limit"
+        get_pool().mark_exhausted(self._provider_name, key, reason=reason_str)
 
-        if resp.status_code != 200:
-            error_text = resp.text[:500] if resp.text else ""
-            logger.error(f"[{self._provider_name.upper()}] API error {resp.status_code}: {error_text}")
-            raise ConnectionError(f"{self._display_name} API error: {resp.status_code} - {resp.text[:200]}")
+    def _stream_chat(self, url: str, headers: dict, body: dict) -> Iterator[dict]:
+        """Streaming chat — parse SSE events with classifier-driven retries."""
+        model = body.get("model", "")
+        try:
+            resp = request_with_retry(
+                session=self._session,
+                method="POST",
+                url=url,
+                headers=headers,
+                json_body=body,
+                provider=self._provider_name,
+                model=model,
+                timeout=(10, 90),
+                stream=True,
+            )
+        except ProviderGiveUp as give_up:
+            self._maybe_cooldown_key(give_up, headers)
+            logger.error(
+                f"[{self._provider_name.upper()}] stream gave up after {give_up.attempts} attempts: "
+                f"{give_up.classified.reason.value}"
+            )
+            raise ConnectionError(str(give_up)) from give_up
 
         input_tokens = 0
         output_tokens = 0

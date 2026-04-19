@@ -208,18 +208,21 @@ class ActivityLog:
         finally:
             conn.close()
 
-    def get_stats(self) -> Dict:
-        """Get aggregate statistics."""
+    def get_stats(self, session_id: str = "") -> Dict:
+        """Get aggregate statistics. Optionally filter to one session."""
         conn = sqlite3.connect(str(self._db_path), timeout=10)
         try:
-            row = conn.execute("""
+            where = "WHERE session_id = ?" if session_id else ""
+            params = (session_id,) if session_id else ()
+            row = conn.execute(f"""
                 SELECT COUNT(*) as total,
                        SUM(tokens_in) as total_tokens_in,
                        SUM(tokens_out) as total_tokens_out,
                        SUM(cost) as total_cost,
                        SUM(tool_calls) as total_tool_calls
                 FROM interactions
-            """).fetchone()
+                {where}
+            """, params).fetchone()
             return {
                 "total_interactions": row[0] or 0,
                 "total_tokens_in": row[1] or 0,
@@ -232,6 +235,65 @@ class ActivityLog:
             return {"total_interactions": 0}
         finally:
             conn.close()
+
+    def get_stats_by_model(self, session_id: str = "") -> list[dict]:
+        """Aggregate stats grouped by model."""
+        conn = sqlite3.connect(str(self._db_path), timeout=10)
+        try:
+            where = "WHERE session_id = ?" if session_id else ""
+            params = (session_id,) if session_id else ()
+            rows = conn.execute(f"""
+                SELECT model,
+                       COUNT(*) as interactions,
+                       SUM(tokens_in) as tokens_in,
+                       SUM(tokens_out) as tokens_out,
+                       SUM(cost) as cost
+                FROM interactions
+                {where}
+                GROUP BY model
+                ORDER BY cost DESC NULLS LAST
+            """, params).fetchall()
+            return [
+                {
+                    "model": r[0] or "(unknown)",
+                    "interactions": r[1] or 0,
+                    "tokens_in": r[2] or 0,
+                    "tokens_out": r[3] or 0,
+                    "cost": r[4] or 0.0,
+                }
+                for r in rows
+            ]
+        except Exception:
+            logger.debug("Failed to compute per-model stats", exc_info=True)
+            return []
+        finally:
+            conn.close()
+
+    def get_stats_by_provider(self, session_id: str = "") -> list[dict]:
+        """Aggregate per-model stats, then collapse by provider prefix.
+
+        'kimi-k2.5:cloud' → provider 'kimi'
+        'qwen3-coder:480b-cloud' → provider 'qwen3-coder'
+        """
+        per_model = self.get_stats_by_model(session_id=session_id)
+        by_provider: dict[str, dict] = {}
+        for row in per_model:
+            model = row["model"]
+            provider = model.split(":", 1)[0] if ":" in model else model.split("-", 1)[0]
+            bucket = by_provider.setdefault(provider, {
+                "provider": provider,
+                "interactions": 0,
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "cost": 0.0,
+                "models": 0,
+            })
+            bucket["interactions"] += row["interactions"]
+            bucket["tokens_in"] += row["tokens_in"]
+            bucket["tokens_out"] += row["tokens_out"]
+            bucket["cost"] += row["cost"]
+            bucket["models"] += 1
+        return sorted(by_provider.values(), key=lambda b: b["cost"], reverse=True)
 
     def export_session(self, session_id: str, format: str = "markdown") -> str:
         """Export a session's interactions."""

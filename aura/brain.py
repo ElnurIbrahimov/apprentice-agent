@@ -139,14 +139,40 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         self._cloud_client = None  # Default to None — prevents AttributeError in routing
         api_key = os.getenv("OLLAMA_API_KEY")
         if api_key:
+            # Register with the credential pool so multi-key OLLAMA_API_KEY=k1,k2,k3
+            # rotates on rate/billing failures.  Single-key setups pass through unchanged.
+            try:
+                from aura.providers.credential_pool import get_pool
+                get_pool().register("ollama_cloud", "OLLAMA_API_KEY")
+                pooled_key = get_pool().acquire("ollama_cloud") or api_key
+            except Exception:
+                pooled_key = api_key
+
             # Cloud models: 90s read timeout (cloud can be slower than local)
             _cloud_timeout = httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.0)
-            self._cloud_client = ollama.Client(
+
+            def _build_cloud_client(active_key: str) -> "ollama.Client":
+                return ollama.Client(
+                    host=self.OLLAMA_CLOUD_HOST,
+                    headers={"Authorization": f"Bearer {active_key}"},
+                    timeout=_cloud_timeout,
+                )
+
+            raw_cloud_client = _build_cloud_client(pooled_key)
+
+            # Wrap the cloud client with classifier-driven retries so transient
+            # 429/5xx/timeout failures on api.ollama.com recover transparently
+            # instead of bubbling up as ResponseError.
+            from aura.reliability.ollama_wrapper import ResilientOllamaClient
+            self._cloud_client = ResilientOllamaClient(
+                raw_cloud_client,
+                provider_label="ollama_cloud",
+                api_key=pooled_key,
                 host=self.OLLAMA_CLOUD_HOST,
-                headers={"Authorization": f"Bearer {api_key}"},
                 timeout=_cloud_timeout,
+                rebuild_client=_build_cloud_client,
             )
-            logger.debug("[BRAIN] Ollama cloud client initialized")
+            logger.debug("[BRAIN] Ollama cloud client initialized (resilient)")
         else:
             logger.debug("[BRAIN] Warning: OLLAMA_API_KEY not set, cloud models unavailable")
 

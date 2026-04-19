@@ -56,6 +56,9 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         "/api/auth/web/login",
         "/api/auth/web/logout",
         "/api/auth/web/me",
+        # PWA manifest + service worker must be reachable pre-login
+        "/manifest.json",
+        "/sw.js",
         "/api/telegram/validate-init",
         "/api/telegram/proactive/action",
         "/api/telegram/memory/browse",

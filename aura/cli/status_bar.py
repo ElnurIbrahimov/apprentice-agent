@@ -12,6 +12,35 @@ import os
 
 from rich.text import Text
 
+
+def _tightest_rate_limit() -> "tuple[str, int, int, str] | None":
+    """Return (provider, remaining, limit, bucket_label) for the tightest active bucket.
+
+    "Tightest" = highest usage_pct across all captured provider states. Returns None
+    if no bucket has been observed or every bucket is under 50% used (too loose to be
+    worth displaying).
+    """
+    try:
+        from aura.reliability.provider_shim import all_rate_limit_snapshots
+    except Exception:
+        return None
+    snaps = all_rate_limit_snapshots()
+    best = None  # (pct, provider, remaining, limit, label)
+    for provider, state in snaps.items():
+        for bucket, label in (
+            (state.requests_min, "RPM"),
+            (state.tokens_min, "TPM"),
+        ):
+            if bucket.limit <= 0:
+                continue
+            pct = bucket.usage_pct
+            if best is None or pct > best[0]:
+                best = (pct, provider, bucket.remaining, bucket.limit, label)
+    if best is None or best[0] < 50.0:
+        return None
+    _pct, provider, remaining, limit, label = best
+    return provider, remaining, limit, label
+
 _SPARK_CHARS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"  # ▁▂▃▄▅▆▇█
 
 
@@ -179,6 +208,18 @@ def build_status_bar(
     if msg_str:
         candidates.append((2, "msg", len(msg_str)))
 
+    # P2: rate-limit indicator (>= 120, only when a bucket is >= 50% used)
+    _rl = _tightest_rate_limit()
+    if _rl is not None:
+        _rl_prov, _rl_rem, _rl_lim, _rl_label = _rl
+        rl_str = f"{_rl_label} {_rl_rem}/{_rl_lim}"
+        _rl_pct = 100 - (100 * _rl_rem / max(_rl_lim, 1))
+        rl_color = "ansibrightred" if _rl_pct >= 80 else "ansibrightyellow"
+        candidates.append((2, "rl", len(rl_str)))
+    else:
+        rl_str = ""
+        rl_color = "ansibrightyellow"
+
     # Sort by priority (stable — preserves insertion order within tier)
     candidates.sort(key=lambda c: c[0])
 
@@ -264,6 +305,11 @@ def build_status_bar(
             _ansi_sep()
             parts.append(("", msg_str))
 
+        # Rate-limit indicator (P2)
+        if "rl" in included:
+            _ansi_sep()
+            parts.append((rl_color, rl_str))
+
         return parts
 
     # ===================================================================
@@ -320,6 +366,11 @@ def build_status_bar(
     # Message count (P2)
     if "msg" in included:
         rich_parts.append(Text(msg_str, style="dim"))
+
+    # Rate-limit indicator (P2)
+    if "rl" in included:
+        _rich_rl_color = "bright_red" if rl_color == "ansibrightred" else "yellow"
+        rich_parts.append(Text(rl_str, style=_rich_rl_color))
 
     # -- Assemble with separators --
     sep = Text("  \u2502  ", style="dim")

@@ -13,7 +13,11 @@ from typing import Iterator
 
 import requests
 
+from aura.reliability.error_classifier import FailoverReason
+from aura.reliability.provider_shim import ProviderGiveUp, request_with_retry
+
 from .base import BaseProvider
+from .credential_pool import get_pool
 from .registry import PROVIDER_CONFIGS
 
 logger = logging.getLogger(__name__)
@@ -26,6 +30,7 @@ class AnthropicProvider(BaseProvider):
 
     def __init__(self):
         self._session = requests.Session()
+        get_pool().register("anthropic", _CFG["env_var"])
 
     @property
     def display_name(self) -> str:
@@ -36,10 +41,25 @@ class AnthropicProvider(BaseProvider):
         return "anthropic:"
 
     def _get_api_key(self) -> str:
+        pool_key = get_pool().acquire("anthropic")
+        if pool_key:
+            return pool_key
         return os.getenv(_CFG["env_var"], "")
 
     def is_configured(self) -> bool:
-        return bool(self._get_api_key())
+        if get_pool().pool_size("anthropic") > 0:
+            return True
+        return bool(os.getenv(_CFG["env_var"], ""))
+
+    def _maybe_cooldown_key(self, give_up: ProviderGiveUp, headers: dict) -> None:
+        reason = give_up.classified.reason
+        if reason not in (FailoverReason.rate_limit, FailoverReason.billing, FailoverReason.auth):
+            return
+        key = headers.get("x-api-key", "").strip()
+        if not key:
+            return
+        reason_str = reason.value if reason != FailoverReason.auth else "rate_limit"
+        get_pool().mark_exhausted("anthropic", key, reason=reason_str)
 
     def list_models(self) -> list[str]:
         return [f"anthropic:{m}" for m in _CFG["default_models"]]
@@ -143,16 +163,25 @@ class AnthropicProvider(BaseProvider):
             return self._sync_chat(url, headers, body)
 
     def _sync_chat(self, url: str, headers: dict, body: dict) -> dict:
+        model = body.get("model", "")
         try:
-            resp = self._session.post(url, headers=headers, json=body, timeout=120)
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[ANTHROPIC] Request failed: {e}")
-            raise ConnectionError(f"Anthropic request failed: {e}")
-
-        if resp.status_code != 200:
-            error_text = resp.text[:500] if resp.text else ""
-            logger.error(f"[ANTHROPIC] API error {resp.status_code}: {error_text}")
-            raise ConnectionError(f"Anthropic API error: {resp.status_code} - {resp.text[:200]}")
+            resp = request_with_retry(
+                session=self._session,
+                method="POST",
+                url=url,
+                headers=headers,
+                json_body=body,
+                provider="anthropic",
+                model=model,
+                timeout=(10, 120),
+            )
+        except ProviderGiveUp as give_up:
+            self._maybe_cooldown_key(give_up, headers)
+            logger.error(
+                f"[ANTHROPIC] gave up after {give_up.attempts} attempts: "
+                f"{give_up.classified.reason.value}"
+            )
+            raise ConnectionError(str(give_up)) from give_up
 
         data = resp.json()
 
@@ -187,16 +216,26 @@ class AnthropicProvider(BaseProvider):
         return result
 
     def _stream_chat(self, url: str, headers: dict, body: dict) -> Iterator[dict]:
+        model = body.get("model", "")
         try:
-            resp = self._session.post(url, headers=headers, json=body, stream=True, timeout=(10, 90))
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[ANTHROPIC] Stream request failed: {e}")
-            raise ConnectionError(f"Anthropic request failed: {e}")
-
-        if resp.status_code != 200:
-            error_text = resp.text[:500] if resp.text else ""
-            logger.error(f"[ANTHROPIC] API error {resp.status_code}: {error_text}")
-            raise ConnectionError(f"Anthropic API error: {resp.status_code} - {resp.text[:200]}")
+            resp = request_with_retry(
+                session=self._session,
+                method="POST",
+                url=url,
+                headers=headers,
+                json_body=body,
+                provider="anthropic",
+                model=model,
+                timeout=(10, 90),
+                stream=True,
+            )
+        except ProviderGiveUp as give_up:
+            self._maybe_cooldown_key(give_up, headers)
+            logger.error(
+                f"[ANTHROPIC] stream gave up after {give_up.attempts} attempts: "
+                f"{give_up.classified.reason.value}"
+            )
+            raise ConnectionError(str(give_up)) from give_up
 
         input_tokens = 0
         output_tokens = 0

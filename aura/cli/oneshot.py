@@ -2,10 +2,33 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 import sys
+import threading
 from typing import Any, NoReturn
 
 logger = logging.getLogger(__name__)
+
+
+def _install_wallclock_timeout(seconds: int) -> None:
+    """Install a hard wall-clock timeout that sys.exit(124) if exceeded.
+
+    Uses threading.Timer so it works cross-platform (signal.SIGALRM is Unix-only).
+    """
+    if seconds <= 0:
+        return
+
+    def _kill():
+        try:
+            sys.stderr.write(f"\n[aura exec] hard timeout after {seconds}s — aborting\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(124)
+
+    t = threading.Timer(seconds, _kill)
+    t.daemon = True
+    t.start()
 
 
 def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) -> NoReturn:
@@ -19,6 +42,12 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
     # When caller asked for JSON output, suppress the banner and rich prompts
     # so stdout stays valid JSONL for scripted consumers.
     json_mode = getattr(args, "format", "text") == "json"
+    quiet_mode = bool(getattr(args, "quiet", False))
+    output_failures = bool(getattr(args, "output_failures", False))
+    exec_timeout = int(getattr(args, "exec_timeout", 0) or 0)
+
+    if exec_timeout > 0:
+        _install_wallclock_timeout(exec_timeout)
 
     mode = getattr(args, "mode", "chat")
     if mode == "debate":
@@ -107,7 +136,7 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
         def on_response(text: str, iteration: int) -> None:
             return None
 
-    if not json_mode:
+    if not json_mode and not quiet_mode:
         console.print(f"  [dim]Model: {boot.display_model} | Tier: {boot.tier}[/dim]")
         # Preview recalled memories for the current prompt (read-only, same
         # query the agentic loop is about to run). Shows users that Aura has
@@ -169,7 +198,18 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
             tool_calls=result.get("tool_calls", 0),
             success=bool(result.get("success")),
         )
+    elif quiet_mode:
+        response_text = result.get("response", "").strip()
+        if response_text:
+            print(response_text)
     else:
         console.print(f"\n  [dim]{result['iterations']} iterations, {result['tool_calls']} tool calls, ${cost:.4f}[/dim]")
+
+    if output_failures:
+        failures = result.get("tool_failures") or []
+        if failures:
+            import json as _json
+            for f in failures:
+                sys.stderr.write(_json.dumps({"type": "tool_failure", **f}) + "\n")
 
     sys.exit(0 if result.get("success") else 1)
