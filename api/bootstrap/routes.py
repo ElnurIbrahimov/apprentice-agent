@@ -62,6 +62,7 @@ ROUTE_MODULE_SPECS: tuple[RouteModuleSpec, ...] = (
     RouteModuleSpec("routing"),
     RouteModuleSpec("reliability"),
     RouteModuleSpec("auth"),
+    RouteModuleSpec("web_auth"),
     RouteModuleSpec("bandit"),
     # SOTA Round 2 additions — deploy with `git pull` + restart aura-api
     RouteModuleSpec("ghost"),
@@ -70,7 +71,7 @@ ROUTE_MODULE_SPECS: tuple[RouteModuleSpec, ...] = (
     RouteModuleSpec("mcp_manage"),
 )
 
-CRITICAL_ROUTE_MODULES = frozenset({"chat", "status", "auth"})
+CRITICAL_ROUTE_MODULES = frozenset({"chat", "status", "auth", "web_auth"})
 
 
 def _is_production() -> bool:

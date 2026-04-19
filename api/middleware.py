@@ -52,6 +52,10 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         "/api/status",
         "/api/auth/chatgpt/status",
         "/api/auth/chatgpt/login",
+        # Web login lives here — must itself be reachable without auth
+        "/api/auth/web/login",
+        "/api/auth/web/logout",
+        "/api/auth/web/me",
         "/api/telegram/validate-init",
         "/api/telegram/proactive/action",
         "/api/telegram/memory/browse",
@@ -103,24 +107,31 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/static") or request.url.path.startswith("/assets"):
             return await call_next(request)
 
-        # Check API key in header only (query params are logged and leaked in referrers)
+        # Accept EITHER the X-API-Key header (extensions, raw API clients) OR
+        # a valid aura_session cookie (web UI after login). Either is enough.
         api_key = request.headers.get("X-API-Key")
+        if api_key and secrets.compare_digest(api_key, self.api_key):
+            return await call_next(request)
 
-        if not api_key:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Missing API key. Provide X-API-Key header."}
-            )
+        # Fallback: session cookie from the login page.
+        try:
+            from api.auth_session import extract_session_username
+            if extract_session_username(request.headers):
+                return await call_next(request)
+        except Exception as e:
+            logger.debug(f"[Auth] Session cookie check failed: {e}")
 
-        if not secrets.compare_digest(api_key, self.api_key):
+        if api_key:
             client_host = request.client.host if request.client else "unknown"
             logger.warning(f"[Auth] Invalid API key from {client_host}")
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Invalid API key."}
             )
-
-        return await call_next(request)
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Authentication required. Provide X-API-Key header or log in via the web UI."}
+        )
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

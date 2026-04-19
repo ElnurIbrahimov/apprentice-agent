@@ -12,7 +12,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from starlette.responses import StreamingResponse
 
-from api.auth import _auth_is_enabled, require_api_key, verify_api_key_ws
+from api.auth import _auth_is_enabled, require_api_key, verify_api_key_ws, verify_websocket_auth
 from api.models.schemas import (
     AttachmentType,
     ChatRequest,
@@ -612,20 +612,18 @@ async def websocket_chat(websocket: WebSocket):
         Server -> Client: {"type": "stopped"} - Generation was stopped
     """
     # Auth strategy (in priority order):
-    # 1. X-API-Key header (best — not logged)
-    # 2. First-message auth: {"type": "auth", "api_key": "..."} (good — not logged)
-    # 3. ?api_key= query param (fallback — appears in access logs, avoid if possible)
-    api_key = websocket.headers.get("X-API-Key", "")
+    # 1. Session cookie from the web UI login (browsers send it on same-origin WS)
+    # 2. X-API-Key header (desktop clients / extension)
+    # 3. First-message auth: {"type": "auth", "api_key": "..."}
+    # 4. ?api_key= query param (fallback — appears in access logs)
     _auth_deferred = False
-    if not api_key:
-        # Check query param but prefer first-message auth
-        api_key = websocket.query_params.get("api_key", "")
-        if not api_key and _auth_is_enabled():
-            _auth_deferred = True  # Will require auth in first message
-
-    if not _auth_deferred and not verify_api_key_ws(api_key):
-        await websocket.close(code=1008)
-        return
+    if not verify_websocket_auth(websocket):
+        # Only defer when nothing was presented; reject if a bad key was given.
+        provided = websocket.headers.get("X-API-Key") or websocket.query_params.get("api_key")
+        if provided or not _auth_is_enabled():
+            await websocket.close(code=1008)
+            return
+        _auth_deferred = True  # Will require auth in first message
 
     # Reject if too many concurrent WebSocket connections
     if websocket_hub.connection_count >= 50:
