@@ -5,6 +5,12 @@ Specialized in navigating and searching codebases:
 - Find definitions (functions, classes, variables)
 - Find references to symbols
 - Explore project structure
+
+Implementation note: this agent uses a *fast-path* dispatch that bypasses the
+LLM when the intent is obvious (regex matches "find definition", "grep X",
+etc.). It calls CodeSearchTool sub-methods directly instead of going through
+the generic [TOOL:] parser. That's an intentional latency optimization — if no
+fast-path matches, it falls back to the ToolUsingSpecialist default execute().
 """
 
 import logging

@@ -1,6 +1,18 @@
-"""Rich-based display for AURA CLI — clean, polished, Claude Code / OpenCode aesthetic."""
+"""Rich-based display for AURA CLI — clean, polished, Claude Code / OpenCode aesthetic.
+
+This package replaces the former single-file ``aura/cli/display.py``. The
+public API is unchanged — every name that used to be importable from
+``aura.cli.display`` still is. Submodules group related rendering chunks:
+
+  - ``display.help`` — the /? help screen
+  - ``display.streaming`` — ``StreamingResponse`` + streaming splitters
+  - ``display.checkpoint_picker`` — checkpoint UI + rewind result
+
+Consumers should continue to ``from aura.cli.display import show_response`` etc.
+"""
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from typing import Any, Optional
@@ -19,8 +31,6 @@ from aura.cli.tool_output import ToolOutputRenderer
 
 _no_color = os.environ.get("NO_COLOR") is not None
 console: Console = Console(highlight=True, soft_wrap=True, no_color=_no_color)
-
-import functools
 
 
 @functools.lru_cache(maxsize=1)
@@ -85,7 +95,7 @@ def show_banner() -> None:
     """Display startup screen — cohesive bordered panel with logo, info, shortcuts."""
     from aura import __version__
 
-    from .banner import _LOGO_LINES, _apply_gradient
+    from ..banner import _LOGO_LINES, _apply_gradient
 
     colors = _get_theme_colors()
     try:
@@ -94,7 +104,6 @@ def show_banner() -> None:
     except (ImportError, AttributeError):
         gradient = ["#D777AF", "#B1B9F9", "#87D7D7"]
 
-    # Build the panel content
     content = Text()
     for line in _LOGO_LINES:
         content.append(" ")
@@ -127,14 +136,12 @@ def show_welcome_info(agent: Any) -> None:
     except (TypeError, AttributeError):
         logger.debug("welcome_tool_count_failed", exc_info=True)
 
-    # Model + tools line
     t = Text("  ")
     t.append(model, style=f"bold {colors['accent']}")
     if tool_count:
         t.append(f" \u00b7 {tool_count} tools", style="dim")
     console.print(t)
 
-    # CWD + Ollama cloud status + model count
     info = Text("  ")
     cwd = os.getcwd().replace("\\", "/")
     info.append(cwd, style="dim")
@@ -147,7 +154,6 @@ def show_welcome_info(agent: Any) -> None:
         info.append(" \u00b7 ", style="dim")
         info.append("Ollama local", style="dim")
 
-    # Count available models (fast, no network)
     try:
         from aura.providers import list_all_provider_models
         model_count = len(list_all_provider_models())
@@ -158,7 +164,6 @@ def show_welcome_info(agent: Any) -> None:
 
     console.print(info)
 
-    # Compact shortcut hints
     h = Text("  ")
     shortcuts = [
         ("/", "commands"),
@@ -196,8 +201,8 @@ def show_status_bar(
     project_type: str = "",
 ) -> None:
     """Update the persistent bottom toolbar."""
-    from .input import set_bottom_toolbar
-    from .status_bar import build_status_bar
+    from ..input import set_bottom_toolbar
+    from ..status_bar import build_status_bar
 
     toolbar_parts = build_status_bar(
         model=model,
@@ -224,14 +229,13 @@ def show_status_bar(
 
 def show_thinking(label: str | None = None, step: int | None = None) -> Live:
     """Context manager — shows animated shimmer spinner while agent runs."""
-    from .spinner import AuraSpinner
+    from ..spinner import AuraSpinner
     spinner = AuraSpinner(label=label, step=step)
     live = Live(spinner, console=console, refresh_per_second=12, transient=True)
-    live._aura_spinner = spinner  # expose for external verb/step/token updates
+    live._aura_spinner = spinner
     return live
 
 
-# Phase-aware verb mapping for contextual spinner labels
 _TOOL_PHASE_VERBS: dict[str, str] = {
     "web_search": "Searching the web",
     "search_web": "Searching the web",
@@ -278,15 +282,10 @@ def show_tool_call(
     step: int = 0,
     max_steps: int = 0,
 ) -> None:
-    """Print a tool call with step counter, status dot, label, and description.
-
-    Visual style: ┃ [N] ● Read src/main.py (0.3s)
-    Uses short text labels (Read, Edit, Run, etc.) instead of cryptic icons.
-    """
+    """Print a tool call with step counter, status dot, label, and description."""
     colors = _get_theme_colors()
     time_str = f" ({elapsed:.1f}s)" if elapsed >= 0.5 else ""
 
-    # For edit/write with diff info, show compact diff summary
     if tool_name in ("edit_file", "write_file") and result and isinstance(result, dict) and result.get("diff"):
         try:
             from aura.cli.diff_viewer import render_diff_compact
@@ -305,22 +304,13 @@ def show_tool_call(
         except (ImportError, ValueError, KeyError, TypeError):
             pass
 
-    # Status dot
     dot_char, dot_style = _get_status_dot(status, colors)
-
-    # Tool label (text, e.g. "Read", "Edit", "Run")
     label = get_tool_icon(tool_name)
 
-    # Build the line with left border + step counter
     line = Text()
-
-    # Left border for visual grouping
     line.append("  \u2503 ", style=f"{colors['accent']}")
-
-    # Step prefix
     if step > 0:
         line.append(f"[{step}] ", style=f"bold {colors['accent']}")
-
     line.append(dot_char, style=dot_style)
     line.append(f" {label}", style=f"bold {colors['tool']}")
     if description:
@@ -331,21 +321,11 @@ def show_tool_call(
 
 
 def show_tool_result_inline(tool_name: str, result: Any) -> None:
-    """Show a compact inline tool result — just enough to see what happened.
-
-    This is the KEY to workflow visibility. User sees:
-      [2] ● Read src/main.py (0.3s)
-        245 lines | python
-      [2] ● Edit src/app.py (1.2s)
-        +12/-3 lines changed
-      [3] ● Run npm test (4.5s)
-        ✓ (4 lines)
-    """
+    """Show a compact inline tool result — just enough to see what happened."""
     if not result:
         return
 
     colors = _get_theme_colors()
-    # Left border prefix for visual grouping
     B = f"  [{colors['accent']}]\u2503[/{colors['accent']}]   "
 
     try:
@@ -357,7 +337,6 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
         if not isinstance(parsed, dict):
             return
 
-        # Error display
         if parsed.get("error"):
             err_msg = str(parsed["error"])
             if len(err_msg) > 120:
@@ -365,7 +344,6 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
             console.print(f"{B}[{colors['error']}]\u2717 {err_msg}[/{colors['error']}]")
             return
 
-        # ── Search/match tools ──
         if tool_name in ("grep", "glob", "code_search", "search", "find"):
             results_list = parsed.get("results", parsed.get("matches", []))
             if isinstance(results_list, list):
@@ -373,7 +351,6 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
                 console.print(f"{B}[dim]{count} {'match' if count == 1 else 'matches'}[/dim]")
                 return
 
-        # ── Web tools ──
         if tool_name in ("web_search", "browse", "web_fetch", "browse_url"):
             status_code = parsed.get("status_code", 200)
             url = parsed.get("url", "")
@@ -382,7 +359,6 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
                 console.print(f"{B}[dim]{status_code} {short_url}[/dim]")
                 return
 
-        # ── Get output text ──
         output = parsed.get("output", parsed.get("content", parsed.get("result", "")))
         if not output or not isinstance(output, str):
             return
@@ -390,7 +366,6 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
         lines = output.splitlines()
         line_count = len(lines)
 
-        # ── File reads ──
         if tool_name in ("read_file", "cat"):
             lang = parsed.get("language", "")
             extras = []
@@ -401,7 +376,6 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
             if extras:
                 console.print(f"{B}[dim]{' \u2502 '.join(extras)}[/dim]")
 
-        # ── Shell commands ──
         elif tool_name in ("shell", "shell_executor", "bash", "run", "run_command", "execute"):
             exit_code = parsed.get("exit_code", parsed.get("returncode", 0)) or 0
             if exit_code == 0:
@@ -418,7 +392,6 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
             else:
                 console.print(f"{B}{ic} [dim](no output)[/dim]")
 
-        # ── File edits ──
         elif tool_name in ("edit_file", "write_file"):
             added = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
             removed = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
@@ -427,7 +400,6 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
             elif line_count > 0:
                 console.print(f"{B}[dim]{line_count} lines written[/dim]")
 
-        # ── Directory listing ──
         elif tool_name in ("list_dir", "ls"):
             items = [l.strip() for l in lines if l.strip()]
             count = len(items)
@@ -437,7 +409,6 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
             if preview:
                 console.print(f"{B}[dim]{count} items: {preview}[/dim]")
 
-        # ── Generic fallback ──
         else:
             if line_count > 3:
                 console.print(f"{B}[dim]{line_count} lines[/dim]")
@@ -461,19 +432,19 @@ def _step_prefix(step: int, max_steps: int, colors: dict) -> str:
 def _get_status_dot(status: str, colors: dict) -> tuple[str, str]:
     """Return (character, style) for a tool status indicator."""
     if status == "success":
-        return "\u25cf", colors["tool_success"]      # ●
+        return "\u25cf", colors["tool_success"]
     elif status == "error":
-        return "\u25cf", colors["tool_error"]         # ●
+        return "\u25cf", colors["tool_error"]
     elif status == "running":
-        return "\u25cb", colors["tool_pending"]       # ○
+        return "\u25cb", colors["tool_pending"]
     elif status == "pending":
-        return "\u25cb", colors["text_muted"]         # ○
+        return "\u25cb", colors["text_muted"]
     else:
-        return "\u25cf", colors["tool_success"]       # ●
+        return "\u25cf", colors["tool_success"]
 
 
 # ─────────────────────────────────────────────────────────
-# Permission Prompt (styled, not raw input)
+# Permission Prompt
 # ─────────────────────────────────────────────────────────
 
 def show_permission_prompt(
@@ -481,10 +452,7 @@ def show_permission_prompt(
     detail: str = "",
     options: list[tuple[str, str]] | None = None,
 ) -> str:
-    """Show a styled permission prompt with numbered options.
-
-    Returns the selected option key, or "deny" if cancelled.
-    """
+    """Show a styled permission prompt with numbered options."""
     colors = _get_theme_colors()
 
     if options is None:
@@ -496,40 +464,34 @@ def show_permission_prompt(
 
     console.print()
 
-    # Header
     header = Text("  ")
     header.append("\u25b3 ", style=f"bold {colors['warning']}")
     header.append("Permission required", style=f"bold {colors['permission_accent']}")
     console.print(header)
 
-    # Action detail
     if action:
         console.print(f"    {action}", style=f"{colors['tool']}")
     if detail:
-        # Truncate very long details
         if len(detail) > 200:
             detail = detail[:200] + "\u2026"
         console.print(f"    {detail}", style="dim")
 
     console.print()
 
-    # Numbered options
     for i, (key, label) in enumerate(options, 1):
         if i == 1:
-            # First option highlighted
             console.print(f"    [{colors['permission_accent']}]> {i}. {label}[/{colors['permission_accent']}]")
         else:
             console.print(f"      {i}. {label}", style="dim")
 
     console.print()
 
-    # Get input
     try:
         choice = console.input(f"  [{colors['text_muted']}]Choose (1-{len(options)}), Enter for 1, Esc to deny: [/{colors['text_muted']}]")
         choice = choice.strip()
 
         if not choice or choice == "1":
-            return options[0][0]  # Default: first option
+            return options[0][0]
         elif choice == "y" or choice == "yes":
             return options[0][0]
         elif choice == "n" or choice == "no":
@@ -552,26 +514,23 @@ def show_permission_prompt(
 # ─────────────────────────────────────────────────────────
 
 def show_response(text: str, model: str = "", stream: bool = True) -> None:
-    """Render agent response as clean markdown.
+    """Render agent response as clean markdown."""
+    # Late import avoids circular dependency with the streaming submodule.
+    from .streaming import _split_for_streaming, _split_into_blocks
 
-    When stream=False (full text already available), renders immediately
-    with no artificial delays.
-    """
     code_theme = _get_code_theme()
 
-    console.print()  # breathing room
+    console.print()
 
     max_width = min(console.width - 4, 100)
 
     if not stream:
-        # Full text available — render immediately, no fake streaming
         try:
             md = Markdown(text, code_theme=code_theme)
         except (ValueError, TypeError):
             md = Text(text)
         console.print(Padding(md, (0, 2)), width=max_width)
     elif len(text) > 20:
-        # Real streaming playback for incrementally-arriving text
         import time
 
         chunks = _split_for_streaming(text)
@@ -583,7 +542,6 @@ def show_response(text: str, model: str = "", stream: bool = True) -> None:
                 accumulated += chunk
                 blocks = _split_into_blocks(accumulated)
 
-                # Print any newly finalized blocks permanently
                 while finalized_count < len(blocks) - 1:
                     block_text = blocks[finalized_count]
                     try:
@@ -594,7 +552,6 @@ def show_response(text: str, model: str = "", stream: bool = True) -> None:
                     console.print(Padding(block_md, (0, 2)), width=max_width)
                     finalized_count += 1
 
-                # Live-update only the active (last) block
                 if blocks:
                     active_block = blocks[-1]
                     try:
@@ -605,7 +562,6 @@ def show_response(text: str, model: str = "", stream: bool = True) -> None:
 
                 time.sleep(0.008)
 
-        # Print the final active block permanently
         blocks = _split_into_blocks(accumulated)
         if blocks and finalized_count < len(blocks):
             for i in range(finalized_count, len(blocks)):
@@ -615,27 +571,24 @@ def show_response(text: str, model: str = "", stream: bool = True) -> None:
                     block_md = Text(blocks[i])
                 console.print(Padding(block_md, (0, 2)), width=max_width)
     else:
-        # Short text — render directly
         try:
             md = Markdown(text, code_theme=code_theme)
         except (ValueError, TypeError):
             md = Text(text)
         console.print(Padding(md, (0, 2)), width=max_width)
 
-    # Model attribution in dim text
     if model:
         console.print(f"  [dim]{model}[/dim]")
 
-    console.print()  # breathing room
+    console.print()
 
 
 def show_response_attribution(model: str, elapsed: float, tokens: int = 0) -> None:
     """Show model + time + tokens after each response."""
-    from .spinner import _format_elapsed
+    from ..spinner import _format_elapsed
     _get_theme_colors()
 
     t = Text("  ")
-    # Model name — trim common suffixes
     model_short = model.replace(":cloud", "").replace(":latest", "")
     if len(model_short) > 30:
         model_short = model_short[:27] + "\u2026"
@@ -685,7 +638,7 @@ def show_context_summary(
 
 
 # ─────────────────────────────────────────────────────────
-# Errors, Info, Help
+# Errors / Info / Warnings
 # ─────────────────────────────────────────────────────────
 
 def show_error(message: str) -> None:
@@ -705,429 +658,35 @@ def show_warning(message: str) -> None:
     console.print(f"  [{colors['warning']}]\u25b3[/{colors['warning']}] {message}")
 
 
-def show_help() -> None:
-    """Display help with clean aligned text, no heavy borders."""
-    colors = _get_theme_colors()
-
-    console.print()
-    console.print("  [bold]Commands & Shortcuts[/bold]")
-    console.print()
-
-    sections = [
-        ("Keyboard", [
-            ("Alt+M", "Model picker"),
-            ("Ctrl+L", "Clear screen"),
-            ("Ctrl+N", "New session"),
-            ("Ctrl+K", "Command palette"),
-            ("Ctrl+G", "Open editor for long prompt"),
-            ("Shift+Tab", "Cycle permission mode"),
-            ("Ctrl+Z", "Rewind to checkpoint"),
-            ("Alt+Enter", "Insert newline"),
-            ("Ctrl+C / Ctrl+D", "Exit"),
-            ("?", "Show this help"),
-        ]),
-        ("Model & Session", [
-            ("/model [name]", "Pick or set model"),
-            ("/routing", "Show neural routing status"),
-            ("/sessions", "Manage sessions"),
-            ("/trace [count|last|runs|failures]", "Show session trace and run summaries"),
-            ("/compact", "Compress conversation"),
-            ("/clear", "Clear conversation"),
-        ]),
-        ("Code & Files", [
-            ("/grep <pattern>", "Search code content"),
-            ("/search <query>", "Search files and definitions"),
-            ("/edit <file>", "Read file with line numbers"),
-            ("/project [cmd]", "Project context, indexing, search"),
-        ]),
-        ("Execution", [
-            ("/shell <cmd>", "Execute shell command"),
-            ("/plan <task>", "Create and execute a plan"),
-            ("/agent <name> <task>", "Run specialist agent"),
-            ("/goal <objective>", "Run a goal"),
-        ]),
-        ("Parallel & Background", [
-            ("/fleet <task>", "Run parallel sub-agents"),
-            ("/chain step1 -> step2", "Run prompt pipeline"),
-            ("& <prompt>", "Run as background task"),
-            ("/tasks", "Show background tasks"),
-        ]),
-        ("Research", [
-            ("/research <topic>", "Start research mode"),
-            ("/sources", "Show collected sources"),
-            ("/export research", "Export to Markdown"),
-        ]),
-        ("Git", [
-            ("/pr", "Create pull request"),
-            ("/branch <name>", "Create and switch branch"),
-            ("/stash [desc]", "Smart stash"),
-            ("/blame file:N", "Explain line history"),
-            ("/diff [args]", "Show git diff"),
-            ("/git <command>", "Run read-only git commands"),
-        ]),
-        ("Testing & Watch", [
-            ("/test [cmd]", "Run tests"),
-            ("/watch", "Monitor files for AI comments"),
-        ]),
-        ("Utilities", [
-            ("/browse <url>", "Browse web pages"),
-            ("/speak <text>", "Text-to-speech"),
-            ("/recall <query>", "Search memories"),
-            ("/context", "Show context usage"),
-            ("/rewind", "Rewind to checkpoint"),
-            ("/theme [name]", "Switch color theme"),
-            ("/mood", "Show emotional state"),
-            ("/hook [cmd]", "Manage automation hooks"),
-        ]),
-        ("Multi-agent", [
-            ("/debate <topic>", "Multi-agent debate"),
-            ("/fork [name]", "Fork conversation"),
-            ("/branches", "List branches"),
-            ("/checkout <branch>", "Switch branch"),
-            ("/merge <branch>", "Merge branch"),
-            ("/undo", "Undo last file edit"),
-        ]),
-        ("MCP & Audit", [
-            ("/mcp [cmd]", "Manage MCP servers"),
-            ("/audit [cmd]", "Inspect audit chain"),
-        ]),
-        ("Autonomous", [
-            ("/hand [cmd]", "Manage autonomous Hands"),
-            ("/evolve [...]", "Evolve skills with GEPA"),
-        ]),
-        ("Other", [
-            ("/voice", "Start voice mode"),
-            ("/retry", "Re-run last prompt"),
-            ("/cost", "Show token usage and cost"),
-            ("/trust", "Toggle trust mode"),
-            ("/quit", "Exit AURA"),
-        ]),
-    ]
-
-    accent = colors["accent"]
-    for section_name, commands in sections:
-        console.print(f"  [dim]{section_name}[/dim]")
-        for key, action in commands:
-            padded_key = key.ljust(28)
-            console.print(f"    [{accent}]{padded_key}[/{accent}] [dim]{action}[/dim]")
-        console.print()
-
-
 # ─────────────────────────────────────────────────────────
-# Streaming Response Manager
+# Re-exports from submodules (preserves the original public API)
 # ─────────────────────────────────────────────────────────
+# Imported last so the submodules can freely `from aura.cli.display import ...`
+# the names defined above without hitting a partial-module state.
+from .help import show_help  # noqa: E402
+from .streaming import StreamingResponse, _split_for_streaming, _split_into_blocks  # noqa: E402
+from .checkpoint_picker import show_checkpoint_picker, show_rewind_result  # noqa: E402
 
-class StreamingResponse:
-    """Manages live token streaming to terminal via Rich.
-
-    Clean output — no panels, no borders. Just markdown flowing in.
-    When pause() is called (for tool-call display), accumulated text is
-    printed permanently. When resume() is called, a fresh Live starts.
-
-    Partial code blocks: if the stream is inside an unclosed code fence,
-    the block is temporarily closed for rendering so the user sees code
-    as it arrives instead of a blank gap.
-
-    Token stats: after finish(), shows (N tokens . X.X tok/s) dimmed.
-    """
-
-    def __init__(self, model: str = "") -> None:
-        self._accumulated: str = ""
-        self._live: Optional[Live] = None
-        self._model: str = model
-        self._displayed: bool = False
-        self._permanent_len: int = 0
-        self._spinner_active: bool = False
-        self._start_time: float = 0.0
-        self._first_chunk_time: float = 0.0
-        self._fade_frames_remaining: int = 0
-
-    def start(self) -> None:
-        """Begin live rendering context with a themed thinking spinner."""
-        import time as _t
-        console.print()  # breathing room
-        self._spinner_active = True
-        self._start_time = _t.monotonic()
-
-        # Use shimmer spinner instead of plain "thinking..."
-        from .spinner import AuraSpinner
-        spinner = AuraSpinner()
-        self._live = Live(
-            spinner,
-            console=console, refresh_per_second=12, transient=True,
-        )
-        self._live._aura_spinner = spinner
-        self._live.start()
-
-    @staticmethod
-    def _close_partial_fences(text: str) -> str:
-        """If text has an unclosed code fence, append a closing ``` so
-        Rich Markdown renders the partial block as a proper code block."""
-        fence_count = 0
-        for line in text.split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("```"):
-                fence_count += 1
-        if fence_count % 2 == 1:
-            # Odd number of fences = unclosed block
-            return text + "\n```"
-        return text
-
-    def chunk(self, text: str) -> None:
-        """Append a text chunk and re-render NEW content since last pause."""
-        if self._spinner_active:
-            self._spinner_active = False
-            self._fade_frames_remaining = 3  # 3 frames of fade-in
-            if not self._first_chunk_time:
-                import time as _t
-                self._first_chunk_time = _t.monotonic()
-        self._accumulated += text
-        if self._live:
-            new_content = self._accumulated[self._permanent_len:]
-            renderable = self._close_partial_fences(new_content)
-            try:
-                md = Markdown(renderable, code_theme=_get_code_theme())
-                if self._fade_frames_remaining > 0:
-                    self._fade_frames_remaining -= 1
-                    padded = Padding(md, (0, 2), style="dim")
-                else:
-                    padded = Padding(md, (0, 2))
-                self._live.update(padded)
-            except (ValueError, TypeError):
-                self._live.update(Padding(Text(new_content), (0, 2)))
-
-    def pause(self) -> None:
-        """Pause live rendering for tool call display."""
-        if self._live:
-            new_content = self._accumulated[self._permanent_len:]
-            if new_content.strip():
-                renderable = self._close_partial_fences(new_content)
-                try:
-                    md = Markdown(renderable, code_theme=_get_code_theme())
-                    self._live.update(Padding(md, (0, 2)))
-                except (ValueError, TypeError):
-                    self._live.update(Padding(Text(new_content), (0, 2)))
-                self._live.transient = False
-            self._live.stop()
-            self._live = None
-            self._permanent_len = len(self._accumulated)
-
-    def resume(self) -> None:
-        """Resume live rendering after tool call with a fresh spinner."""
-        # Subtle separator between tool output and resumed response
-        colors = _get_theme_colors()
-        console.print(f"  [{colors.get('text_muted', 'dim')}]\u00b7\u00b7\u00b7[/{colors.get('text_muted', 'dim')}]")
-        self._spinner_active = True
-        from .spinner import AuraSpinner
-        spinner = AuraSpinner()
-        self._live = Live(spinner, console=console, refresh_per_second=12, transient=True)
-        self._live._aura_spinner = spinner
-        self._live.start()
-
-    def finish(self) -> None:
-        """Finalize display — print remaining content, show attribution + token stats."""
-        import time as _t
-
-        if self._live:
-            new_content = self._accumulated[self._permanent_len:]
-            if new_content.strip():
-                try:
-                    md = Markdown(new_content, code_theme=_get_code_theme())
-                    final = Padding(md, (0, 2))
-                except (ValueError, TypeError):
-                    final = Padding(Text(new_content), (0, 2))
-                self._live.update(final)
-                self._live.transient = False
-                self._live.stop()
-                self._live = None
-                self._permanent_len = len(self._accumulated)
-                self._displayed = True
-            else:
-                self._live.stop()
-                self._live = None
-                self._displayed = bool(self._accumulated.strip())
-        else:
-            self._displayed = bool(self._accumulated.strip())
-
-        # Token speed + per-turn cost + context gauge (B3 live status hint).
-        # Rich's Live doesn't compose cleanly with a true bottom-sticky bar
-        # during streaming, so we condense the status info into the finish()
-        # summary line: tokens, tok/s, session cost delta, context usage %.
-        if self._displayed and self._accumulated and self._first_chunk_time:
-            elapsed = _t.monotonic() - self._first_chunk_time
-            token_estimate = int(len(self._accumulated) / 3.5)
-            if elapsed > 0.1 and token_estimate > 5:
-                tok_per_sec = token_estimate / elapsed
-                extras: list[str] = []
-                # Per-turn cost delta from the cached session stats
-                try:
-                    delta = float(getattr(self, "_last_turn_cost", 0.0) or 0.0)
-                    if delta > 0.0:
-                        extras.append(f"${delta:.4f}")
-                except (TypeError, ValueError):
-                    pass
-                # Context gauge (tokens used vs limit)
-                try:
-                    used = int(getattr(self, "_ctx_used", 0) or 0)
-                    limit = int(getattr(self, "_ctx_limit", 0) or 0)
-                    if used > 0 and limit > 0:
-                        pct = int(100 * used / max(limit, 1))
-                        extras.append(f"{pct}% ctx")
-                except (TypeError, ValueError):
-                    pass
-                suffix = (" \u00b7 " + " \u00b7 ".join(extras)) if extras else ""
-                console.print(
-                    f"  [dim]({token_estimate} tokens \u00b7 {tok_per_sec:.1f} tok/s{suffix})[/dim]"
-                )
-
-        # Model attribution below the response
-        if self._model and self._displayed:
-            console.print(f"  [dim]{self._model}[/dim]")
-
-        console.print()  # breathing room
-
-    def set_turn_stats(self, cost_delta: float = 0.0, ctx_used: int = 0, ctx_limit: int = 0) -> None:
-        """Attach per-turn stats so finish() can include them in the summary."""
-        self._last_turn_cost = cost_delta
-        self._ctx_used = ctx_used
-        self._ctx_limit = ctx_limit
-
-    @property
-    def displayed(self) -> bool:
-        return self._displayed
-
-    @property
-    def text(self) -> str:
-        return self._accumulated
-
-
-# ─────────────────────────────────────────────────────────
-# Utility: Block splitting for streaming
-# ─────────────────────────────────────────────────────────
-
-def _split_for_streaming(text: str) -> list[str]:
-    """Split text into word-based chunks for streaming display."""
-    words = text.split(" ")
-    chunks = []
-    chunk_size = 1 if len(text) < 200 else (3 if len(text) < 1000 else 5)
-    for i in range(0, len(words), chunk_size):
-        chunk_words = words[i : i + chunk_size]
-        chunk = " ".join(chunk_words)
-        if i + chunk_size < len(words):
-            chunk += " "
-        chunks.append(chunk)
-    return chunks
-
-
-def _split_into_blocks(text: str) -> list[str]:
-    """Split markdown text into top-level blocks by double-newlines.
-
-    Respects code fences (``` blocks stay together as a single block).
-    """
-    lines = text.split("\n")
-    blocks: list[str] = []
-    current_lines: list[str] = []
-    in_code_fence = False
-
-    for line in lines:
-        stripped = line.strip()
-
-        if stripped.startswith("```"):
-            in_code_fence = not in_code_fence
-            current_lines.append(line)
-            continue
-
-        if in_code_fence:
-            current_lines.append(line)
-            continue
-
-        if stripped == "":
-            if current_lines and any(l.strip() for l in current_lines):
-                while current_lines and current_lines[-1].strip() == "":
-                    current_lines.pop()
-                if current_lines:
-                    blocks.append("\n".join(current_lines))
-                current_lines = []
-            else:
-                current_lines.append(line)
-        else:
-            current_lines.append(line)
-
-    if current_lines:
-        remaining = "\n".join(current_lines).strip()
-        if remaining:
-            blocks.append(remaining)
-
-    if not blocks and text.strip():
-        blocks.append(text.strip())
-
-    return blocks
-
-
-# ─────────────────────────────────────────────────────────
-# Checkpoint Picker
-# ─────────────────────────────────────────────────────────
-
-def show_checkpoint_picker(checkpoints: list[dict[str, Any]]) -> Optional[str]:
-    """Display checkpoints in a styled numbered list."""
-    import time as _time
-    colors = _get_theme_colors()
-
-    if not checkpoints:
-        show_info("No checkpoints available.")
-        return None
-
-    display = checkpoints[:10]
-
-    console.print()
-    console.print("  [bold]Checkpoints[/bold]")
-    console.print()
-
-    now = _time.time()
-    for i, cp in enumerate(display, 1):
-        delta = now - cp.get("timestamp", now)
-        if delta < 60:
-            rel = f"{int(delta)}s ago"
-        elif delta < 3600:
-            rel = f"{int(delta / 60)}m ago"
-        elif delta < 86400:
-            rel = f"{int(delta / 3600)}h ago"
-        else:
-            rel = f"{int(delta / 86400)}d ago"
-
-        label = cp.get("label", "") or "-"
-        files = cp.get("files", [])
-        file_names = ", ".join(f.get("backup_name", "?") for f in files[:3])
-        if len(files) > 3:
-            file_names += f" +{len(files) - 3}"
-
-        num = str(i).rjust(2)
-        console.print(
-            f"  [{colors['accent']}]{num}[/{colors['accent']}]"
-            f"  [dim]{rel.ljust(10)}[/dim]  {label.ljust(24)}  [dim]{file_names}[/dim]"
-        )
-
-    console.print()
-
-    try:
-        raw = console.input("  [dim]Pick checkpoint # (or Enter to cancel): [/dim]")
-        raw = raw.strip()
-        if not raw:
-            return None
-        idx = int(raw) - 1
-        if 0 <= idx < len(display):
-            return display[idx]["id"]
-        else:
-            show_error(f"Invalid selection: {raw}")
-            return None
-    except (ValueError, EOFError, KeyboardInterrupt):
-        return None
-
-
-def show_rewind_result(success: bool, checkpoint_id: str) -> None:
-    """Display the result of a rewind operation."""
-    colors = _get_theme_colors()
-    if success:
-        console.print(f"  [{colors['success']}]\u2713 Rewound to checkpoint {checkpoint_id}[/{colors['success']}]")
-    else:
-        show_error("Failed to rewind")
+__all__ = [
+    "console",
+    "show_banner",
+    "show_welcome_info",
+    "show_status_bar",
+    "show_thinking",
+    "get_thinking_label",
+    "show_tool_call",
+    "show_tool_result_inline",
+    "show_permission_prompt",
+    "show_response",
+    "show_response_attribution",
+    "show_context_summary",
+    "show_error",
+    "show_info",
+    "show_warning",
+    "show_help",
+    "StreamingResponse",
+    "_split_for_streaming",
+    "_split_into_blocks",
+    "show_checkpoint_picker",
+    "show_rewind_result",
+]

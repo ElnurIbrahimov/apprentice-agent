@@ -347,10 +347,70 @@ class ModelRouterMixin:
                 has_attachment=has_attachment,
             )
             logger.info(f"[BRAIN] Neural router: {result.model} ({result.reason}) in {result.latency_ms:.1f}ms")
-            return result.model
+            return self._apply_budget_mode(result.model, task_type)
         except Exception as e:
             logger.warning(f"[BRAIN] Neural router failed, falling back to Config.MODEL_FAST: {e}")
-            return Config.MODEL_FAST
+            return self._apply_budget_mode(Config.MODEL_FAST, task_type)
+
+    def _apply_budget_mode(self, selected_model: str, task_type=None) -> str:
+        """Downgrade to a cheaper model when budget mode is active and we're over spend.
+
+        No-op unless Config.BUDGET_MODE is enabled. For SIMPLE tasks, always
+        prefer the cheapest viable model (cheap tasks don't deserve premium).
+        For everything else, downgrade only once session cost exceeds
+        BUDGET_MAX_USD_PER_SESSION.
+
+        Safe against any exception — budget mode must never block a request.
+        """
+        try:
+            if not getattr(Config, "BUDGET_MODE", False):
+                return selected_model
+            if self._model_override:
+                return selected_model
+
+            from aura.brain import TaskType
+            is_simple = task_type == TaskType.SIMPLE
+
+            # Read session cost without blocking on the token lock for long.
+            session_cost = 0.0
+            try:
+                stats = self.get_session_stats()
+                session_cost = float(stats.get("cost_usd", 0.0))
+            except Exception:
+                pass
+
+            over_budget = session_cost >= float(getattr(Config, "BUDGET_MAX_USD_PER_SESSION", 0.50))
+            if not (is_simple or over_budget):
+                return selected_model
+
+            cheap = self._cheapest_in_chain(selected_model)
+            if cheap and cheap != selected_model:
+                reason = "simple_task" if is_simple else f"over_budget({session_cost:.4f}USD)"
+                logger.info(
+                    "[BRAIN] BUDGET_MODE downgrade: %s -> %s (%s)",
+                    selected_model, cheap, reason,
+                )
+                return cheap
+            return selected_model
+        except Exception as e:
+            logger.debug(f"[BRAIN] budget-mode wrapper skipped: {e}")
+            return selected_model
+
+    def _cheapest_in_chain(self, current_model: str) -> Optional[str]:
+        """Return the cheapest model from the same fallback chain as current_model."""
+        try:
+            chain = self._get_fallback_chain(current_model) or [current_model]
+            costs = getattr(self, "_MODEL_COST_PER_1K", {}) or {}
+            default_cost = getattr(self, "_DEFAULT_COST_PER_1K", (0.003, 0.003))
+
+            def _combined_cost(model: str) -> float:
+                in_c, out_c = costs.get(model, default_cost)
+                return float(in_c) + float(out_c)
+
+            ranked = sorted(chain, key=_combined_cost)
+            return ranked[0] if ranked else None
+        except Exception:
+            return None
 
     def get_last_model_used(self) -> str:
         """Get the model used in the last think() call."""

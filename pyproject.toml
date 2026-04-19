@@ -31,7 +31,7 @@ memory = [
     "networkx>=3.0,<4.0",
     "numpy>=1.24.0,<3.0.0",
     "kuzu>=0.4.0,<1.0.0",
-    "faiss-cpu>=1.7.4",
+    "faiss-cpu>=1.7.4,<2.0.0",
 ]
 telegram = [
     "python-telegram-bot>=20.0,<22.0",
@@ -69,7 +69,7 @@ treesitter = [
 ]
 windows = [
     "comtypes>=1.2.0,<2.0.0",
-    "pycaw>=20230407",
+    "pycaw>=20230407,<20300101",
     "winotify>=1.1.0,<2.0.0",
     "screen-brightness-control>=0.22.0,<1.0.0",
 ]

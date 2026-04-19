@@ -80,11 +80,13 @@ if _log_dir.exists():
 else:
     LOG_FILE = Path.home() / ".aura_daemon.log"
 
+from logging.handlers import RotatingFileHandler
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [DAEMON] %(levelname)s %(name)s %(message)s",
     handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        RotatingFileHandler(LOG_FILE, maxBytes=10_000_000, backupCount=5, encoding="utf-8"),
         logging.StreamHandler(sys.stdout),
     ],
 )
@@ -105,7 +107,11 @@ class AuraDaemon:
     TICK_SCREEN   = 5     # seconds
     TICK_HOOKS    = 30
     TICK_IDLE     = 300   # 5 minutes
+    TICK_PROACTIVE = 1800 # 30 minutes — ProactiveAwarenessEngine full analysis
     DREAM_HOUR    = 3     # 3 AM
+    GEPA_HOUR     = 4     # 4 AM (after dream completes)
+    GEPA_INTERVAL_DAYS = 7  # run weekly
+    GEPA_MIN_SKILLS = 3   # skip if fewer than this many skills
 
     def __init__(self):
         self._running = False
@@ -133,7 +139,11 @@ class AuraDaemon:
         # Tick tracking (monotonic for interval measurement)
         self._last_hooks_tick = 0.0
         self._last_idle_tick = 0.0
+        self._last_proactive_tick = 0.0
+        self._proactive_running = False
         self._last_dream_date = None
+        self._last_gepa_date = None
+        self._gepa_running = False
 
         # Persist dream state across restarts
         self._state_file = Path(os.getenv("AURA_DATA_DIR", "data")) / "daemon_state.json"
@@ -217,8 +227,16 @@ class AuraDaemon:
                     self._tick_idle()
                     self._last_idle_tick = now
 
+                # 30min: proactive awareness full analysis
+                if now - self._last_proactive_tick >= self.TICK_PROACTIVE:
+                    self._tick_proactive()
+                    self._last_proactive_tick = now
+
                 # 3 AM: full dream
                 self._check_dream_time()
+
+                # 4 AM weekly: GEPA skill evolution
+                self._check_gepa_time()
 
             except Exception as e:
                 logger.error("Tick error (non-fatal): %s", e)
@@ -303,6 +321,107 @@ class AuraDaemon:
             logger.info("3 AM -- starting full dream cycle")
             self._event_bus.emit("daemon:dream_start", {})
             threading.Thread(target=self._run_full_dream, daemon=True).start()
+
+    def _tick_proactive(self):
+        """Trigger proactive awareness full analysis in background.
+
+        Cheap guardrails: skip if no agent, skip if already running, skip if the
+        world model hasn't accumulated at least 3 projects (noise floor).
+        """
+        if self._proactive_running or self._agent is None:
+            return
+        self._proactive_running = True
+        logger.debug("[ProactiveAwareness] tick -- dispatching full analysis")
+        threading.Thread(target=self._run_proactive_analysis, daemon=True).start()
+
+    def _run_proactive_analysis(self):
+        """Run ProactiveAwarenessEngine.run_full_analysis() off the main loop."""
+        try:
+            # Noise-floor guard: don't burn LLM calls on an empty world model.
+            try:
+                from aura.consciousness.world_model import get_world_model
+                wm = get_world_model()
+                projects = wm.get_all_projects() if hasattr(wm, "get_all_projects") else []
+                if len(projects) < 3:
+                    logger.debug(
+                        "[ProactiveAwareness] skipped -- only %d projects tracked",
+                        len(projects),
+                    )
+                    return
+            except Exception as e:
+                logger.debug("[ProactiveAwareness] noise-floor check failed: %s", e)
+
+            from aura.consciousness.proactive_awareness import (
+                get_proactive_awareness_engine,
+            )
+            engine = get_proactive_awareness_engine()
+            insights = engine.run_full_analysis()
+            logger.info(
+                "[ProactiveAwareness] generated %d insight(s)",
+                len(insights) if insights else 0,
+            )
+            self._event_bus.emit("daemon:proactive_insights", {
+                "count": len(insights) if insights else 0,
+                "titles": [getattr(i, "title", "?") for i in (insights or [])[:3]],
+            })
+        except ImportError as e:
+            logger.debug("[ProactiveAwareness] engine unavailable: %s", e)
+        except Exception as e:
+            logger.error("[ProactiveAwareness] analysis failed: %s", e)
+        finally:
+            self._proactive_running = False
+
+    def _check_gepa_time(self):
+        """Trigger GEPA skill evolution at GEPA_HOUR, at most once per GEPA_INTERVAL_DAYS."""
+        if self._gepa_running or self._agent is None:
+            return
+        now = datetime.now()
+        today = now.date()
+        if now.hour != self.GEPA_HOUR:
+            return
+        if self._last_gepa_date is not None:
+            days_since = (today - self._last_gepa_date).days
+            if days_since < self.GEPA_INTERVAL_DAYS:
+                return
+        # Mark immediately so re-entry within this hour is prevented
+        self._gepa_running = True
+        self._last_gepa_date = today
+        self._save_daemon_state()
+        logger.info("GEPA window reached -- starting weekly skill evolution")
+        self._event_bus.emit("daemon:gepa_start", {})
+        threading.Thread(target=self._run_gepa, daemon=True).start()
+
+    def _run_gepa(self):
+        """Run GEPA evolution in background. Guarded by _gepa_running flag."""
+        try:
+            # Preflight: skip if skill library is too small
+            try:
+                from aura_skill_library.skill_store import SkillStore
+                store = SkillStore(
+                    storage_path=str(Path(os.getenv("AURA_DATA_DIR", "data")).parent / "aura_data" / "skill_library")
+                )
+                skill_count = len(store.index) if store.index else 0
+                if skill_count < self.GEPA_MIN_SKILLS:
+                    logger.info(
+                        "GEPA skipped -- only %d skills in library (need >= %d)",
+                        skill_count, self.GEPA_MIN_SKILLS,
+                    )
+                    self._event_bus.emit("daemon:gepa_skipped", {"reason": "too_few_skills", "count": skill_count})
+                    return
+            except Exception as e:
+                logger.warning("GEPA skill-count preflight failed, proceeding anyway: %s", e)
+
+            from aura.evolution.runner import run_evolution
+            result = run_evolution(skill_ids=None, dry_run=False)
+            logger.info("GEPA complete: %s", json.dumps(result, default=str)[:500])
+            self._event_bus.emit("daemon:gepa_complete", result)
+        except ImportError as e:
+            logger.warning("GEPA module not available: %s", e)
+        except Exception as e:
+            logger.error("GEPA failed: %s\n%s", e, traceback.format_exc())
+            self._event_bus.emit("daemon:gepa_failed", {"error": str(e)})
+        finally:
+            self._gepa_running = False
 
     def _run_full_dream(self):
         """Run full dream + memory consolidation."""
@@ -436,14 +555,17 @@ class AuraDaemon:
     # -- Daemon state persistence --------------------------------------------
 
     def _load_daemon_state(self):
-        """Load persisted daemon state (e.g. last dream date)."""
+        """Load persisted daemon state (last dream/GEPA dates)."""
         try:
             if self._state_file.exists():
                 data = json.loads(self._state_file.read_text(encoding="utf-8"))
+                from datetime import date as date_cls
                 last_dream = data.get("last_dream_date")
                 if last_dream:
-                    from datetime import date as date_cls
                     self._last_dream_date = date_cls.fromisoformat(last_dream)
+                last_gepa = data.get("last_gepa_date")
+                if last_gepa:
+                    self._last_gepa_date = date_cls.fromisoformat(last_gepa)
         except Exception as e:
             logger.debug("Failed to load daemon state: %s", e)
 
@@ -453,6 +575,7 @@ class AuraDaemon:
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
             data = {
                 "last_dream_date": self._last_dream_date.isoformat() if self._last_dream_date else None,
+                "last_gepa_date": self._last_gepa_date.isoformat() if self._last_gepa_date else None,
             }
             self._state_file.write_text(json.dumps(data), encoding="utf-8")
         except Exception as e:
