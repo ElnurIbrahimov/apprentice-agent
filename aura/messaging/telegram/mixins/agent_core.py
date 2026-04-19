@@ -905,6 +905,23 @@ class AgentCoreMixin:
         except Exception as e:
             logger.debug(f"[Telegram] Could not save reaction feedback: {e}")
 
+        # Feed the reaction into the Strategy Bandit if we can find the original
+        # request. Neutral reactions are captured but not used as feedback — only
+        # clear positive/negative signal updates arm parameters.
+        if sentiment in ("positive", "negative"):
+            try:
+                from aura.consciousness.strategy_bandit import get_strategy_bandit
+                bandit = get_strategy_bandit()
+                request_id = bandit.get_request_id_for_message(message_id, surface="telegram")
+                if request_id:
+                    feedback = 1.0 if sentiment == "positive" else 0.0
+                    bandit.record_user_feedback(request_id, feedback)
+                    logger.info(
+                        f"[Telegram] Bandit feedback: {feedback} → request={request_id}"
+                    )
+            except Exception as e:
+                logger.debug(f"[Telegram] Bandit feedback wiring failed: {e}")
+
     async def _handle_error(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle errors with retry buttons."""
         logger.error(f"Telegram error: {context.error}")
@@ -980,6 +997,21 @@ class AgentCoreMixin:
                     logger.warning(f"Error sending chunk {i}: {e}")
             if not sent:
                 logger.warning(f"Failed to send chunk {i} in any format")
+
+        # Map the outgoing message to the bandit request_id from this execution
+        # context, so a later reaction on this message can close the feedback loop.
+        try:
+            from aura.consciousness.strategy_bandit import (
+                get_last_bandit_request_id,
+                get_strategy_bandit,
+            )
+            rid = get_last_bandit_request_id()
+            if rid and placeholder is not None:
+                msg_id = getattr(placeholder, "message_id", None)
+                if msg_id:
+                    get_strategy_bandit().map_message_to_request(msg_id, rid, surface="telegram")
+        except Exception as _map_exc:
+            logger.debug(f"[Telegram] bandit request mapping skipped: {_map_exc}")
 
     @staticmethod
     def _split_message(text: str, max_len: int = 4096) -> list:

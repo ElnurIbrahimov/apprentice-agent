@@ -163,6 +163,12 @@ class Config:
     # Auth (init-time default for middleware; runtime truth lives in api/auth.py::_auth_is_enabled)
     API_AUTH_ENABLED: bool = os.getenv("AURA_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
 
+    # Budget-aware routing: when on, prefer the cheapest model in the selected
+    # chain once session spend exceeds BUDGET_MAX_USD_PER_SESSION. SIMPLE tasks
+    # always prefer the cheapest regardless of spend.
+    BUDGET_MODE: bool = os.getenv("AURA_BUDGET_MODE", "false").lower() in ("true", "1", "yes")
+    BUDGET_MAX_USD_PER_SESSION: float = float(os.getenv("AURA_BUDGET_MAX_USD", "0.50"))
+
     # SearXNG search instance (configurable)
     SEARXNG_URL: str = os.getenv("SEARXNG_URL", "http://localhost:8888")
 

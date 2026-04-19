@@ -12,13 +12,13 @@ import logging
 import time
 from typing import Callable
 
-from ..base_agent import ToolUsingSpecialist
+from ..base_agent import SimpleSpecialist
 from ..protocol import AgentMessage, AgentResult
 
 logger = logging.getLogger(__name__)
 
 
-class CreativeAgent(ToolUsingSpecialist):
+class CreativeAgent(SimpleSpecialist):
     """Specialist for creative content generation and brainstorming."""
 
     name = "creative"
@@ -48,8 +48,6 @@ Guidelines:
 - Balance creativity with practicality when needed
 
 Explore scenarios and ideas creatively."""
-
-    tools = []
 
     triggers = [
         "create", "imagine", "brainstorm", "story",

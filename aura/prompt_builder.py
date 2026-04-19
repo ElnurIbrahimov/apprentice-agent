@@ -84,6 +84,12 @@ class SystemPromptBuilder:
         self._deferred_tools_ts: float = 0.0
         _DEFERRED_TOOLS_TTL = 600
 
+        # World model cache (60s TTL — state changes slowly, worth caching longer
+        # than the generic subsystem blob). Has its own 2000-char cap.
+        self._world_model_cache: Optional[str] = None
+        self._world_model_ts: float = 0.0
+        self._world_model_lock = threading.RLock()
+
     def build(
         self,
         prompt: str,
@@ -99,6 +105,9 @@ class SystemPromptBuilder:
 
         identity_prompt = get_identity_prompt()
         full = f"{identity_prompt}\n\n{system_prompt}" if system_prompt else identity_prompt
+
+        # === WORLD MODEL (dedicated, high-priority, slowly-changing) ===
+        full = self._inject_world_model(full)
 
         # === WEB SEARCH INSTRUCTION ===
         full = f"{full}\n\n{self._web_search_instruction()}"
@@ -283,15 +292,8 @@ class SystemPromptBuilder:
             except Exception as e:
                 logger.debug(f"[PromptBuilder] Motivation context failed: {e}")
 
-            # World model
-            try:
-                from aura.consciousness.world_model import get_world_model
-                wm = get_world_model()
-                world_ctx = wm.get_context_summary()
-                if world_ctx:
-                    additions.append(_cap(world_ctx, "WorldModel"))
-            except Exception as e:
-                logger.debug(f"[PromptBuilder] World model context failed: {e}")
+            # World model is now injected in its own layer via _inject_world_model()
+            # (dedicated 60s TTL, 2000-char cap) — no longer mixed into subsystem additions.
 
             result = "\n\n".join(additions)
             if len(result) > _TOTAL_CAP:
@@ -303,6 +305,50 @@ class SystemPromptBuilder:
             self._cached_system_additions = result
             self._system_additions_ts = time.time()
             return result
+
+    def _inject_world_model(self, full: str) -> str:
+        """Inject the world-model context as a first-class, dedicated layer.
+
+        World state changes slowly, so a 60s TTL is safe. The summary is cached
+        separately from the generic subsystem blob so it can have its own cap
+        (2000 chars, up from 1000) and sit earlier in the prompt where it
+        influences style, tone, and topic selection.
+        """
+        _WORLD_MODEL_TTL = 60.0
+        _WORLD_MODEL_CAP = 2000
+
+        with self._world_model_lock:
+            now = time.time()
+            cached = self._world_model_cache
+            cache_fresh = cached is not None and (now - self._world_model_ts) < _WORLD_MODEL_TTL
+
+            if not cache_fresh:
+                world_ctx = ""
+                try:
+                    from aura.consciousness.world_model import get_world_model
+                    wm = get_world_model()
+                    # Ask for more tokens than the default 500 so top-N lists
+                    # include enough depth per project/goal to be useful.
+                    world_ctx = wm.get_context_summary(max_tokens=800) or ""
+                except Exception as e:
+                    logger.debug(f"[PromptBuilder] World model injection failed: {e}")
+                    world_ctx = ""
+
+                if world_ctx and len(world_ctx) > _WORLD_MODEL_CAP:
+                    cut = world_ctx[:_WORLD_MODEL_CAP].rfind("\n")
+                    world_ctx = (
+                        world_ctx[:cut]
+                        if cut > _WORLD_MODEL_CAP // 2
+                        else world_ctx[:_WORLD_MODEL_CAP]
+                    )
+
+                self._world_model_cache = world_ctx
+                self._world_model_ts = now
+                cached = world_ctx
+
+            if cached:
+                return f"{full}\n\n{cached}"
+            return full
 
     def _inject_project_context(self, full: str, prompt: str) -> str:
         try:

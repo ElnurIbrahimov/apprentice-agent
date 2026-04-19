@@ -99,6 +99,10 @@ class MultiAgentOrchestrator:
         """
         start_time = time.time()
 
+        # Sanitize at the orchestrator boundary so every downstream path
+        # (single, parallel, sequential, debate) sees filtered input.
+        query = self.router.sanitize_for_prompt(query)
+
         # Create message
         message = AgentMessage(
             content=query,
@@ -168,6 +172,7 @@ class MultiAgentOrchestrator:
                 response=f"Agent '{agent_name}' not found. Available: {', '.join(self.specialists.keys())}",
                 agent=agent_name,
             )
+        query = self.router.sanitize_for_prompt(query)
         message = AgentMessage(
             content=query,
             sender="user",

@@ -29,11 +29,17 @@ if os.environ.get("AURA_ENV") == "production":
 # Add project to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Setup logging -- write to file on server, stdout always
+# Setup logging -- write to file on server (rotated), stdout always
 _log_handlers = [logging.StreamHandler(sys.stdout)]
 _log_dir = Path(os.getenv("AURA_DATA_DIR", "data")).parent / "logs"
 if _log_dir.exists():
-    _log_handlers.append(logging.FileHandler(_log_dir / "aura_telegram.log", encoding="utf-8"))
+    from logging.handlers import RotatingFileHandler
+    _log_handlers.append(RotatingFileHandler(
+        _log_dir / "aura_telegram.log",
+        maxBytes=10_000_000,  # 10 MB per file
+        backupCount=5,         # keep 5 rotated copies
+        encoding="utf-8",
+    ))
 
 logging.basicConfig(
     level=logging.INFO,

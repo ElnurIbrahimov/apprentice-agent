@@ -248,14 +248,53 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         # Screenshot path tracking (set by agent, read by brain for combined screenshot+vision tasks)
         self._last_screenshot_path: Optional[str] = None
 
-        # Episodic memory consolidated into UnifiedMemory (2026-03-22)
-        self._episodic_memory = None
+        # Circuit breaker state persistence — survives restarts so rapid-fail
+        # loops don't hammer the LLM on reboot within the cooldown window.
+        self._cb_state_file = _data_dir / "brain_state.json"
+        self._load_cb_state()
 
         if warmup:
             self._warmup_models()
 
         # Register cleanup on process exit
         atexit.register(self.close)
+
+    def _load_cb_state(self) -> None:
+        """Restore circuit breaker state from disk if still within cooldown."""
+        try:
+            if not self._cb_state_file.exists():
+                return
+            data = json.loads(self._cb_state_file.read_text(encoding="utf-8"))
+            failures = int(data.get("failures", 0))
+            open_at = float(data.get("open_at", 0.0))
+            if failures >= self._think_cb_threshold and (time.time() - open_at) < self._think_cb_cooldown:
+                self._consecutive_think_failures = failures
+                self._think_circuit_open_at = open_at
+                logger.warning(
+                    f"[BRAIN] Restored circuit breaker OPEN state from disk "
+                    f"({failures} failures, {int(time.time() - open_at)}s ago)"
+                )
+            else:
+                # Stale — clean it up
+                self._cb_state_file.unlink(missing_ok=True)
+        except Exception as e:
+            logger.debug(f"[BRAIN] Could not load circuit breaker state: {e}")
+
+    def _save_cb_state(self) -> None:
+        """Persist circuit breaker state atomically. Caller holds _cb_lock."""
+        try:
+            if self._consecutive_think_failures == 0:
+                self._cb_state_file.unlink(missing_ok=True)
+                return
+            payload = {
+                "failures": self._consecutive_think_failures,
+                "open_at": self._think_circuit_open_at,
+            }
+            tmp = self._cb_state_file.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            tmp.replace(self._cb_state_file)
+        except Exception as e:
+            logger.debug(f"[BRAIN] Could not save circuit breaker state: {e}")
 
     def close(self) -> None:
         """Close HTTP clients and free connection pools."""
@@ -816,7 +855,9 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
 
             # Reset circuit breaker on successful stream completion
             with self._cb_lock:
-                self._consecutive_think_failures = 0
+                if self._consecutive_think_failures:
+                    self._consecutive_think_failures = 0
+                    self._save_cb_state()
 
             yield ("done", {
                 "content": accumulated_content,
@@ -1552,6 +1593,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                             f"{self._consecutive_think_failures} consecutive failures — "
                             f"cooldown {self._think_cb_cooldown}s"
                         )
+                    self._save_cb_state()
                 _bg_submit(
                     self._record_routing_outcome, actual_model, task_type, False,
                     (time.time() - _llm_start_ts) * 1000
@@ -1564,7 +1606,9 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             _llm_elapsed = time.time() - _llm_start_ts
             self._record_latency(_llm_elapsed)
             with self._cb_lock:
-                self._consecutive_think_failures = 0
+                if self._consecutive_think_failures:
+                    self._consecutive_think_failures = 0
+                    self._save_cb_state()
 
             _bg_submit(
                 self._record_routing_outcome, actual_model, task_type, True,
@@ -1710,7 +1754,9 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             # Reset circuit breaker on successful stream completion
             if not _all_models_failed:
                 with self._cb_lock:
-                    self._consecutive_think_failures = 0
+                    if self._consecutive_think_failures:
+                        self._consecutive_think_failures = 0
+                        self._save_cb_state()
 
             # Update history (skip if all models failed to avoid polluting history)
             if not _all_models_failed:

@@ -31,9 +31,23 @@ def test_include_loaded_routers_raises_when_critical_router_missing_in_productio
 
 
 def test_configure_http_middleware_raises_when_auth_setup_fails_in_production(monkeypatch):
+    """The fail-closed wrapper still fires when the middleware itself blows up
+    (simulates any non-auth runtime failure during middleware construction).
+
+    Note: the production auth guard runs BEFORE middleware setup, so we give
+    it a valid key/flag first — this test is specifically for the inner
+    add_middleware failure path, not the guard.
+    """
     monkeypatch.setenv("AURA_ENV", "production")
     logger = MagicMock()
     app = MagicMock()
+
+    fake_config = SimpleNamespace(
+        API_KEY="a-strong-test-key-that-passes-the-guard",
+        API_AUTH_ENABLED=True,
+        API_RATE_LIMIT=300,
+        API_CORS_ORIGINS="*",
+    )
 
     def fake_add_middleware(middleware, *args, **kwargs):
         if middleware is http.APIKeyAuthMiddleware:
@@ -41,5 +55,6 @@ def test_configure_http_middleware_raises_when_auth_setup_fails_in_production(mo
 
     app.add_middleware.side_effect = fake_add_middleware
 
-    with pytest.raises(RuntimeError, match="auth/rate-limit middleware failed to initialize"):
-        http.configure_http_middleware(app, logger)
+    with patch.dict("sys.modules", {"aura.config": SimpleNamespace(Config=fake_config)}):
+        with pytest.raises(RuntimeError, match="auth/rate-limit middleware failed to initialize"):
+            http.configure_http_middleware(app, logger)

@@ -7,6 +7,7 @@ Beta-distributed Thompson Sampling with composite reward signals.
 Part of AURA's meta-cognitive self-improvement system.
 """
 
+import contextvars
 import json
 import logging
 import math
@@ -23,6 +24,19 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Set by select_strategy() so downstream surfaces (Telegram, web, CLI) can
+# correlate the outgoing message_id with the bandit arm that produced it,
+# without plumbing request_id through every call layer. contextvars propagate
+# correctly across asyncio tasks and threadpool handoffs.
+_current_request_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "aura_bandit_request_id", default=None
+)
+
+
+def get_last_bandit_request_id() -> Optional[str]:
+    """Return the request_id from the most recent select_strategy() in this context."""
+    return _current_request_id.get()
 
 
 # ============================================================================
@@ -435,6 +449,19 @@ class StrategyBandit:
                     ON strategy_outcomes(strategy, category);
                 CREATE INDEX IF NOT EXISTS idx_perf_logs_request
                     ON performance_logs(request_id);
+
+                -- Links a surface-level message (e.g., Telegram message_id) to a
+                -- bandit request_id so delayed user feedback (reactions, thumbs)
+                -- can be routed back to the right arm.
+                CREATE TABLE IF NOT EXISTS message_request_map (
+                    message_id INTEGER NOT NULL,
+                    surface TEXT NOT NULL DEFAULT 'telegram',
+                    request_id TEXT NOT NULL,
+                    timestamp REAL NOT NULL,
+                    PRIMARY KEY (message_id, surface)
+                );
+                CREATE INDEX IF NOT EXISTS idx_msg_map_request
+                    ON message_request_map(request_id);
             """)
 
             # Seed arms for all valid (category, strategy) pairs
@@ -493,6 +520,7 @@ class StrategyBandit:
             BanditSelection with chosen strategy and metadata.
         """
         request_id = str(uuid.uuid4())[:12]
+        _current_request_id.set(request_id)
 
         if not self.enabled:
             cat = category or self._classifier.classify(query)
@@ -703,6 +731,56 @@ class StrategyBandit:
             logger.debug("[StrategyBandit] push_bandit_pull skipped: %s", _push_exc)
 
         return composite_reward
+
+    def map_message_to_request(
+        self,
+        message_id: int,
+        request_id: str,
+        surface: str = "telegram",
+    ) -> None:
+        """Remember that a surface message carried a given bandit request_id.
+
+        Called after the bot sends a response so a later reaction on the same
+        message_id can be routed back to the right arm.
+        """
+        if not self.enabled:
+            return
+        if not message_id or not request_id:
+            return
+        with self._db_lock:
+            conn = sqlite3.connect(self._db_path)
+            conn.execute("PRAGMA busy_timeout = 5000")
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO message_request_map
+                       (message_id, surface, request_id, timestamp)
+                       VALUES (?, ?, ?, ?)""",
+                    (int(message_id), surface, request_id, time.time()),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_request_id_for_message(
+        self,
+        message_id: int,
+        surface: str = "telegram",
+    ) -> Optional[str]:
+        """Look up the bandit request_id for a surface message, if known."""
+        if not self.enabled or not message_id:
+            return None
+        with self._db_lock:
+            conn = sqlite3.connect(self._db_path)
+            conn.execute("PRAGMA busy_timeout = 5000")
+            try:
+                row = conn.execute(
+                    "SELECT request_id FROM message_request_map "
+                    "WHERE message_id = ? AND surface = ?",
+                    (int(message_id), surface),
+                ).fetchone()
+                return row[0] if row else None
+            finally:
+                conn.close()
 
     def record_user_feedback(
         self,

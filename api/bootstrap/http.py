@@ -68,11 +68,37 @@ def configure_http_middleware(app: "FastAPI", logger: "logging.Logger") -> None:
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestIDMiddleware)
 
+    # Read config + run the production guard OUTSIDE the middleware try/except
+    # so guard RuntimeErrors propagate cleanly instead of being re-wrapped by
+    # the fail-closed middleware handler below.
     try:
         from aura.config import Config as config
+    except Exception as cfg_exc:
+        logger.error("[API] CRITICAL: could not load aura.config: %s", cfg_exc, exc_info=True)
+        if _is_production():
+            raise RuntimeError(
+                "Production startup aborted because aura.config failed to load"
+            ) from cfg_exc
+        config = None  # type: ignore[assignment]
 
-        api_key = getattr(config, "API_KEY", "")
-        auth_enabled = getattr(config, "API_AUTH_ENABLED", bool(api_key))
+    api_key = getattr(config, "API_KEY", "") if config is not None else ""
+    auth_enabled = getattr(config, "API_AUTH_ENABLED", bool(api_key)) if config is not None else False
+
+    # Production hardening: refuse to start with auth off or a weak/missing key.
+    if _is_production():
+        _WEAK_KEYS = {"", "dev", "test", "changeme", "placeholder", "secret"}
+        if not auth_enabled:
+            raise RuntimeError(
+                "Production startup aborted: AURA_API_AUTH_ENABLED must be 'true' "
+                "when AURA_ENV=production. Set it in your .env on the server."
+            )
+        if not api_key or api_key.strip().lower() in _WEAK_KEYS or len(api_key) < 16:
+            raise RuntimeError(
+                "Production startup aborted: AURA_API_KEY must be set to a strong "
+                "secret (>= 16 chars, not a placeholder) when AURA_ENV=production."
+            )
+
+    try:
         app.add_middleware(
             APIKeyAuthMiddleware,
             api_key=api_key,
@@ -80,7 +106,7 @@ def configure_http_middleware(app: "FastAPI", logger: "logging.Logger") -> None:
         )
         app.add_middleware(
             RateLimitMiddleware,
-            requests_per_minute=getattr(config, "API_RATE_LIMIT", 300),
+            requests_per_minute=getattr(config, "API_RATE_LIMIT", 300) if config is not None else 300,
             enabled=True,
         )
     except Exception as exc:

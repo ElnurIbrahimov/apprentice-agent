@@ -261,6 +261,10 @@ class IntentRouter:
     ]
     _INJECTION_THRESHOLD = 0.5  # Block if cumulative score >= this
 
+    def sanitize_for_prompt(self, text: str) -> str:
+        """Public alias for _sanitize_for_prompt. Called at orchestrator boundary."""
+        return self._sanitize_for_prompt(text)
+
     def _sanitize_for_prompt(self, text: str) -> str:
         """Score-based sanitization to reduce prompt injection risk.
 
