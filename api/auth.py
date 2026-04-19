@@ -3,7 +3,7 @@ import logging
 import os
 import secrets
 
-from fastapi import Header, HTTPException, Request, status
+from fastapi import Cookie, Header, HTTPException, status
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +38,15 @@ _auth_is_enabled._warned = False
 
 
 async def require_api_key(
-    request: Request,
     x_api_key: str = Header(default=""),
+    aura_session: str = Cookie(default=""),
 ) -> str:
     """FastAPI dependency: accepts EITHER a valid X-API-Key header OR a
-    valid aura_session cookie from the web-login flow."""
+    valid aura_session cookie from the web-login flow.
+
+    Using Cookie() rather than a Request object keeps this compatible with
+    both HTTP and WebSocket dependency injection.
+    """
     if not _auth_is_enabled():
         return ""
 
@@ -61,12 +65,13 @@ async def require_api_key(
         return x_api_key
 
     # Path 2: session cookie (web UI login)
-    try:
-        from api.auth_session import extract_session_username
-        if extract_session_username(request.headers):
-            return "session"
-    except Exception as e:
-        logger.debug(f"session cookie check failed: {e}")
+    if aura_session:
+        try:
+            from api.auth_session import verify_session_token
+            if verify_session_token(aura_session):
+                return "session"
+        except Exception as e:
+            logger.debug(f"session cookie check failed: {e}")
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
