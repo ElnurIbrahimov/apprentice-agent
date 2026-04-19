@@ -236,11 +236,6 @@ def compress_history(
     # If we have an assistant message with tool_calls whose result was
     # pruned/summarized away, drop the orphan so the LLM doesn't choke.
     sanitized: List[dict] = []
-    kept_call_ids: set = {
-        m.get("tool_call_id")
-        for m in (new_middle + tail)
-        if m.get("tool_call_id")
-    }
     for msg in head + new_middle + tail:
         tool_calls = msg.get("tool_calls") or []
         if tool_calls and summary_msg is not None:
