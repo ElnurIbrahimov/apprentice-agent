@@ -154,11 +154,66 @@ def _extract_action_summary(msg: dict) -> str | None:
 
 
 def _compact_history(history: list[dict]) -> list[dict]:
-    """Summarize the oldest 2/3 of messages into a single summary message."""
+    """Summarize the oldest 2/3 of messages into a single summary message.
+
+    First tries the structured LLM-driven compressor from
+    aura.memory.context_compressor (five-phase: prune tool results,
+    protect head/tail, LLM summarize, anti-thrash, tool-pair sanitize).
+    Falls back to the legacy regex-based summary if the compressor is
+    unavailable or declines to compress.
+    """
 
     if len(history) < 6:
         return history
 
+    # Try the structured compressor first
+    try:
+        from aura.memory.context_compressor import compress_history
+
+        def _summarize(prompt: str) -> str:
+            try:
+                from aura.brain import get_brain
+                brain = get_brain()
+                if brain is None:
+                    return ""
+                result = brain.think(prompt, bypass_loop=True, budget=800)
+                if isinstance(result, dict):
+                    return result.get("response", "")
+                return str(result or "")
+            except Exception as exc:
+                logger.debug("[AgenticLoop] Summarizer LLM call failed: %s", exc)
+                return ""
+
+        try:
+            from aura.config import Config
+            threshold = getattr(Config, "CONTEXT_COMPRESSION_THRESHOLD", 80000)
+            keep_last = getattr(Config, "CONTEXT_COMPRESSION_KEEP_LAST", 10)
+        except Exception:
+            threshold, keep_last = 80000, 10
+
+        result = compress_history(
+            history,
+            keep_last=keep_last,
+            summarize_fn=_summarize,
+            threshold_tokens=threshold,
+        )
+
+        if result.was_compressed and result.compressed is not history:
+            n_compressed = len(history) - len(result.compressed)
+            try:
+                _ensure_console()
+                console.print(
+                    "  [dim italic]Context compressed: "
+                    f"{n_compressed} messages merged into structured summary "
+                    f"({result.reduction_pct:.0%} token reduction)[/]",
+                )
+            except Exception as exc:
+                logger.debug("[AgenticLoop] Compaction console print failed: %s", exc)
+            return result.compressed
+    except Exception as exc:
+        logger.debug("[AgenticLoop] Structured compressor unavailable: %s", exc)
+
+    # Fallback: legacy regex-based summary
     keep_count = max(4, len(history) // 3)
     old_msgs = history[:-keep_count]
     recent_msgs = history[-keep_count:]

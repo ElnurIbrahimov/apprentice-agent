@@ -263,6 +263,8 @@ class TestProviderStreamCleanup:
 
         provider = AnthropicProvider.__new__(AnthropicProvider)
         provider._session = MagicMock()
+        # Shim now calls session.request("POST", ...); mock both for safety.
+        provider._session.request.return_value = mock_resp
         provider._session.post.return_value = mock_resp
 
         gen = provider._stream_chat("http://test", {}, {})

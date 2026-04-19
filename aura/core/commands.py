@@ -440,13 +440,26 @@ def cmd_cost(args: argparse.Namespace) -> int:
     try:
         from aura.cli.activity_log import ActivityLog
         log = ActivityLog()
-        stats = log.get_stats()
     except (ImportError, OSError) as e:
         console.print(f"\n[red]Could not read activity log:[/] {e}")
         console.print("Cost data is tracked during interactive sessions.\n")
         return 1
 
-    console.print("\n[bold]Aura Cost Summary[/]\n")
+    session_id = getattr(args, "session", "") or ""
+    by_model = bool(getattr(args, "by_model", False))
+    by_provider = bool(getattr(args, "by_provider", False))
+
+    try:
+        stats = log.get_stats(session_id=session_id)
+    except Exception as e:
+        console.print(f"\n[red]Stats query failed:[/] {e}")
+        return 1
+
+    title = "Aura Cost Summary"
+    if session_id:
+        title += f" \u2014 session {session_id}"
+    console.print(f"\n[bold]{title}[/]\n")
+
     total_cost = stats.get("total_cost", 0.0)
     total_interactions = stats.get("total_interactions", 0)
     tokens_in = stats.get("total_tokens_in", 0)
@@ -462,6 +475,59 @@ def cmd_cost(args: argparse.Namespace) -> int:
     tbl.add_row("Tokens", f"{total_tokens:,} (in: {tokens_in:,} / out: {tokens_out:,})")
     tbl.add_row("Tool calls", str(total_tool_calls))
     console.print(tbl)
+
+    if by_model:
+        rows = log.get_stats_by_model(session_id=session_id)
+        if rows:
+            console.print("\n[bold]By Model[/]")
+            mt = Table(box=None, padding=(0, 2))
+            mt.add_column("Model", style="cyan")
+            mt.add_column("Calls", justify="right")
+            mt.add_column("Tokens in", justify="right")
+            mt.add_column("Tokens out", justify="right")
+            mt.add_column("Cost", justify="right", style="yellow")
+            for r in rows:
+                mt.add_row(
+                    r["model"], str(r["interactions"]),
+                    f"{r['tokens_in']:,}", f"{r['tokens_out']:,}",
+                    f"${r['cost']:.4f}",
+                )
+            console.print(mt)
+
+    if by_provider:
+        rows = log.get_stats_by_provider(session_id=session_id)
+        if rows:
+            console.print("\n[bold]By Provider[/]")
+            pt = Table(box=None, padding=(0, 2))
+            pt.add_column("Provider", style="cyan")
+            pt.add_column("Models", justify="right")
+            pt.add_column("Calls", justify="right")
+            pt.add_column("Tokens", justify="right")
+            pt.add_column("Cost", justify="right", style="yellow")
+            for r in rows:
+                pt.add_row(
+                    r["provider"], str(r["models"]), str(r["interactions"]),
+                    f"{(r['tokens_in'] + r['tokens_out']):,}",
+                    f"${r['cost']:.4f}",
+                )
+            console.print(pt)
+
+    try:
+        from aura.reliability import all_rate_limit_snapshots
+        snaps = all_rate_limit_snapshots()
+        if snaps:
+            console.print("\n[bold]Rate Limits (most recent observations)[/]")
+            rt = Table(box=None, padding=(0, 2))
+            rt.add_column("Provider", style="cyan")
+            rt.add_column("RPM", justify="right")
+            rt.add_column("TPM", justify="right")
+            for provider, state in snaps.items():
+                rpm = f"{state.requests_min.remaining}/{state.requests_min.limit}" if state.requests_min.limit else "-"
+                tpm = f"{state.tokens_min.remaining}/{state.tokens_min.limit}" if state.tokens_min.limit else "-"
+                rt.add_row(provider, rpm, tpm)
+            console.print(rt)
+    except Exception:
+        pass
 
     console.print()
     return 0

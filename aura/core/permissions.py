@@ -28,6 +28,72 @@ AUTO = PermissionTier.AUTO
 PROMPT = PermissionTier.PROMPT
 BLOCKED = PermissionTier.BLOCKED
 
+
+class SandboxTier(Enum):
+    """Global sandbox tier that clamps per-tool permissions at runtime.
+
+    Pattern adopted from OpenAI's Codex CLI (Apache-2.0).  READ_ONLY is safest,
+    UNRESTRICTED is the default (preserves existing behavior).
+    """
+
+    READ_ONLY = "read_only"
+    WORKSPACE_WRITE = "workspace_write"
+    UNRESTRICTED = "unrestricted"
+
+
+# Tools that remain callable in READ_ONLY mode.  Everything else → BLOCKED.
+_READ_ONLY_ALLOWED: set[str] = {
+    "read_file",
+    "grep",
+    "glob",
+    "list_dir",
+    "search_web",
+    "project_structure",
+    "git.status",
+    "git.log",
+    "git.diff",
+    "git.branch",
+}
+
+# Tools that must escalate from AUTO → PROMPT in WORKSPACE_WRITE mode
+# (writes to cwd are allowed, but shell/spawn/push still require approval).
+_WORKSPACE_WRITE_ESCALATE: set[str] = {
+    "shell",
+    "spawn_agent",
+    "git.push",
+    "git.pull",
+}
+
+
+_current_sandbox_tier: SandboxTier = SandboxTier.UNRESTRICTED
+
+
+def set_sandbox_tier(tier: SandboxTier) -> None:
+    """Set the process-wide sandbox tier.  Called once from CLI entrypoint."""
+    global _current_sandbox_tier
+    _current_sandbox_tier = tier
+    logger.info(f"[Permissions] Sandbox tier: {tier.value}")
+
+
+def get_sandbox_tier() -> SandboxTier:
+    return _current_sandbox_tier
+
+
+def _clamp_tier_for_sandbox(key: str, tier: PermissionTier) -> PermissionTier:
+    """Apply the active sandbox tier as a clamp on the per-tool tier."""
+    sandbox = _current_sandbox_tier
+    if sandbox == SandboxTier.UNRESTRICTED:
+        return tier
+    if sandbox == SandboxTier.READ_ONLY:
+        if key in _READ_ONLY_ALLOWED:
+            return tier
+        return BLOCKED
+    if sandbox == SandboxTier.WORKSPACE_WRITE:
+        if key in _WORKSPACE_WRITE_ESCALATE and tier == AUTO:
+            return PROMPT
+        return tier
+    return tier
+
 # Shell commands that are auto-approved (first word of command)
 SAFE_SHELL_COMMANDS = {
     "ls",
@@ -145,20 +211,34 @@ class PermissionManager:
         For PROMPT tier, calls the confirm_callback. If no callback is set,
         defaults to denied (safe default).
         """
-        if self._trust_mode:
-            return True
-
         key = self._resolve_key(tool_name, args)
+
+        # Sandbox tier is a hard clamp — READ_ONLY beats trust_mode/session approvals
+        # so `aura --sandboxed` stays safe even if the user previously granted trust.
+        if _current_sandbox_tier == SandboxTier.READ_ONLY and key not in _READ_ONLY_ALLOWED:
+            logger.warning(f"[Permissions] BLOCKED by READ_ONLY sandbox: {key}")
+            return False
+
+        if self._trust_mode and _current_sandbox_tier != SandboxTier.WORKSPACE_WRITE:
+            return True
 
         # Already permanently approved this session
         if key in self._always_approved:
-            return True
+            # Still enforce workspace-write escalation for dangerous tools
+            if _current_sandbox_tier == SandboxTier.WORKSPACE_WRITE and key in _WORKSPACE_WRITE_ESCALATE:
+                pass  # fall through to confirm_callback
+            else:
+                return True
 
         # Approved for the current session only
         if key in self._session_approved:
-            return True
+            if _current_sandbox_tier == SandboxTier.WORKSPACE_WRITE and key in _WORKSPACE_WRITE_ESCALATE:
+                pass
+            else:
+                return True
 
         tier = self._permissions.get(key, PROMPT)
+        tier = _clamp_tier_for_sandbox(key, tier)
 
         if tier == AUTO:
             return True

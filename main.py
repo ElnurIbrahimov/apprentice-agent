@@ -74,7 +74,7 @@ def _suppress_warnings() -> None:
 
 _SUBCOMMANDS = {
     "init", "setup", "doctor", "config", "models", "commit", "cost",
-    "mcp-serve", "exec", "ide", "log",
+    "mcp-serve", "acp-serve", "exec", "ide", "log",
 }
 _OPTS_WITH_VALUES = {
     "--max-iterations", "--dream-date", "-p", "--prompt", "--login", "--logout",
@@ -144,10 +144,29 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
         subparsers.add_parser("models", help="List available models with routing roles")
         sub_commit = subparsers.add_parser("commit", help="Smart commit with AI-generated message")
         sub_commit.add_argument("--all", "-a", action="store_true", help="Stage all changes")
-        subparsers.add_parser("cost", help="Show session cost breakdown")
+        sub_cost = subparsers.add_parser("cost", help="Show session cost breakdown")
+        sub_cost.add_argument("--by-model", dest="by_model", action="store_true",
+                              help="Show per-model cost breakdown")
+        sub_cost.add_argument("--by-provider", dest="by_provider", action="store_true",
+                              help="Show per-provider cost breakdown")
+        sub_cost.add_argument("--session", default="",
+                              help="Filter to a specific session ID")
         subparsers.add_parser("mcp-serve", help="Run as MCP server (JSON-RPC over stdio)")
+        subparsers.add_parser("acp-serve", help="Run as ACP server (agent-client protocol, stdio)")
         sub_exec = subparsers.add_parser("exec", help="Non-interactive agent execution")
         sub_exec.add_argument("exec_prompt", nargs="?", default=None, help="Prompt to execute")
+        sub_exec.add_argument(
+            "--timeout", dest="exec_timeout", type=int, default=0,
+            help="Hard wall-clock timeout in seconds; exits 124 if exceeded (0 = no timeout)",
+        )
+        sub_exec.add_argument(
+            "--quiet", action="store_true",
+            help="Suppress progress output; print only the final response",
+        )
+        sub_exec.add_argument(
+            "--output-failures", dest="output_failures", action="store_true",
+            help="Emit per-tool failure JSON to stderr (for CI consumption)",
+        )
         sub_ide = subparsers.add_parser("ide", help="IDE integration setup")
         sub_ide.add_argument("action", nargs="?", default="setup", choices=["setup"], help="Action (default: setup)")
         sub_log = subparsers.add_parser("log", help="Query interaction history")
@@ -250,6 +269,25 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
         "--trust",
         action="store_true",
         help="Trust mode: auto-approve all tool calls (no prompts)"
+    )
+    _sandbox_group = parser.add_mutually_exclusive_group()
+    _sandbox_group.add_argument(
+        "--sandboxed",
+        action="store_true",
+        help="Read-only sandbox: only read/search tools allowed; writes/shell/git "
+             "mutations are blocked. Overrides --trust for safety."
+    )
+    _sandbox_group.add_argument(
+        "--workspace-write",
+        dest="workspace_write",
+        action="store_true",
+        help="Workspace-write sandbox: file edits auto-approved in cwd; shell, "
+             "spawn_agent, git push/pull still require approval."
+    )
+    _sandbox_group.add_argument(
+        "--unrestricted",
+        action="store_true",
+        help="Unrestricted sandbox (default): per-tool permissions as configured."
     )
     parser.add_argument(
         "--preference",
@@ -366,6 +404,16 @@ def main() -> None:
     if not use_subparsers:
         args.command = None
 
+    # Apply sandbox tier as early as possible so any subsequent code path
+    # (subcommands, one-shot, chat loop) sees the clamp.
+    if getattr(args, "sandboxed", False):
+        from aura.core.permissions import SandboxTier, set_sandbox_tier
+        set_sandbox_tier(SandboxTier.READ_ONLY)
+    elif getattr(args, "workspace_write", False):
+        from aura.core.permissions import SandboxTier, set_sandbox_tier
+        set_sandbox_tier(SandboxTier.WORKSPACE_WRITE)
+    # --unrestricted is the default; no-op.
+
     # Routing trace: emit every router decision to stderr
     if getattr(args, "routing_trace", False):
         from aura.core.router import enable_routing_trace
@@ -397,6 +445,11 @@ def main() -> None:
     if args.command == "mcp-serve":
         from aura.core.mcp_server import main as mcp_main
         mcp_main()
+        sys.exit(0)
+
+    if args.command == "acp-serve":
+        from aura.acp.server import run_acp_server
+        run_acp_server()
         sys.exit(0)
 
     # Handle log subcommand (lightweight, no agent needed)
@@ -522,6 +575,9 @@ def main() -> None:
                 elif ch_name == 'extension':
                     from aura.channels.extension_channel import ExtensionChannel
                     bridge.add_channel(ExtensionChannel())
+                elif ch_name == 'slack':
+                    from aura.channels.slack_channel import SlackChannel
+                    bridge.add_channel(SlackChannel())
                 else:
                     _get_console().print(f"[red]Unknown channel: {ch_name}[/red]")
                     sys.exit(1)
