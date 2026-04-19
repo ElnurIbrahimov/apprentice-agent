@@ -1,4 +1,7 @@
-const CACHE_NAME = 'aura-shell-v2';
+// Bump this on every deploy to force browsers to drop old cached JS/CSS.
+// v3 (2026-04-19): web login gate — old bundles lack /api/auth/web/me probe
+//                  so they get stuck at "Connection lost" after auth is enabled.
+const CACHE_NAME = 'aura-shell-v3';
 const SHELL_ASSETS = ['/', '/index.html'];
 
 self.addEventListener('install', (e) => {
