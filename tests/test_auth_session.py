@@ -97,9 +97,13 @@ def test_session_token_expired_is_rejected(configured_env):
 def test_session_token_tampered_signature_is_rejected(configured_env):
     token = create_session_token("alice")
     assert token is not None
-    # Flip a character in the signature (last segment)
-    u, e, s = token.split(".")
-    tampered = f"{u}.{e}.{s[:-1]}{'A' if s[-1] != 'A' else 'B'}"
+    # Replace the entire signature with a known-different valid base64url string.
+    # Avoid flipping single chars — last-char tampering can land in base64 padding
+    # bits and decode to the same bytes, passing the HMAC check by accident.
+    import base64
+    u, e, _ = token.split(".")
+    bogus_sig = base64.urlsafe_b64encode(b"\x00" * 32).rstrip(b"=").decode()
+    tampered = f"{u}.{e}.{bogus_sig}"
     assert verify_session_token(tampered) is None
 
 
