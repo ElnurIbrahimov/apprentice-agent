@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+
+from aura.pools import llm_pool
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional
@@ -235,13 +237,13 @@ class FleetExecutor:
                 on_update(fleet)
             return task
 
-        with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
-            futures = {pool.submit(_run_task, task): task for task in fleet.tasks}
-            for future in as_completed(futures):
-                try:
-                    future.result()  # propagate any unhandled exception
-                except Exception:
-                    pass
+        pool = llm_pool()
+        futures = {pool.submit(_run_task, task): task for task in fleet.tasks}
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception:
+                pass
 
         fleet.end_time = time.time()
         return fleet

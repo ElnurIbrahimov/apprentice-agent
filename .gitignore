@@ -90,6 +90,10 @@ extension/sidebar-*.js.map
 dist-chrome/
 dist-firefox/
 
+# Test coverage output
+coverage/
+extension-src/coverage/
+
 # SQLite databases
 *.db
 *.db-wal

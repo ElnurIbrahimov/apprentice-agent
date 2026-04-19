@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store';
 import MessageBubble from '../components/MessageBubble';
 import HomeScreen from '../components/HomeScreen';
@@ -14,7 +15,20 @@ import { speak } from '../tts';
 import { ChevronDown, Brain, Pen, Square } from 'lucide-react';
 
 export default function ChatPanel() {
-  const { messages, addMessage, activeStream, setActiveStream, setPendingCtx, saveCurrentConversation, pageContextEnabled, pageContext, setPageContext } = useStore();
+  // Granular subscription — only re-render on changes to these 9 fields, not the whole store.
+  const { messages, addMessage, activeStream, setActiveStream, setPendingCtx, saveCurrentConversation, pageContextEnabled, pageContext, setPageContext } = useStore(
+    useShallow(s => ({
+      messages: s.messages,
+      addMessage: s.addMessage,
+      activeStream: s.activeStream,
+      setActiveStream: s.setActiveStream,
+      setPendingCtx: s.setPendingCtx,
+      saveCurrentConversation: s.saveCurrentConversation,
+      pageContextEnabled: s.pageContextEnabled,
+      pageContext: s.pageContext,
+      setPageContext: s.setPageContext,
+    })),
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const streamingMsgId = useRef<string | null>(null);

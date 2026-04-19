@@ -100,6 +100,9 @@ class SessionLoopGuard:
         self._total_actions = 0
         self._triggered     = False
         self._trigger_reason = ""
+        # Phase 6: per-file edit counter for "same file spam" detection
+        self._file_edits: Dict[str, int] = {}
+        self._files_edited: list[str] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -156,6 +159,25 @@ class SessionLoopGuard:
         self._total_actions = 0
         self._triggered = False
         self._trigger_reason = ""
+        self._file_edits = {}
+        self._files_edited = []
+
+    def record_file_edit(self, file_path: str) -> LoopGuardResult:
+        """Track per-file edit counts. >3 edits to the same file within a run
+        signals thrashing even if action fingerprints differ."""
+        if not self._enabled or not file_path:
+            return LoopGuardResult(triggered=False)
+        key = file_path.replace("\\", "/").lower()
+        n = self._file_edits.get(key, 0) + 1
+        self._file_edits[key] = n
+        if key not in self._files_edited:
+            self._files_edited.append(key)
+        if n > self._max_rep:
+            return self._trigger(
+                "same_file_spam",
+                f"File '{file_path}' edited {n}× in this run",
+            )
+        return LoopGuardResult(triggered=False)
 
     @property
     def actions_taken(self) -> int:

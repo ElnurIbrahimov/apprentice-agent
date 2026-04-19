@@ -22,7 +22,9 @@ import logging
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+
+from aura.pools import bg_pool
 from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -340,17 +342,17 @@ def _scrape_top_urls(results: List[dict], n: int = 3) -> List[dict]:
             logger.debug("[SearchFallback] scrape %s failed: %s", url, e)
             return idx, ""
 
-    with ThreadPoolExecutor(max_workers=min(len(needing_scrape), 3)) as pool:
-        futures = [pool.submit(_do_scrape, job) for job in needing_scrape]
-        for fut in as_completed(futures, timeout=25):
-            try:
-                idx, md = fut.result(timeout=0)
-            except Exception:
-                continue
-            if md and 0 <= idx < len(results):
-                results[idx]["content"] = md
-                results[idx]["snippet"] = md[:500]
-                results[idx]["scraped"] = True
+    pool = bg_pool()
+    futures = [pool.submit(_do_scrape, job) for job in needing_scrape]
+    for fut in as_completed(futures, timeout=25):
+        try:
+            idx, md = fut.result(timeout=0)
+        except Exception:
+            continue
+        if md and 0 <= idx < len(results):
+            results[idx]["content"] = md
+            results[idx]["snippet"] = md[:500]
+            results[idx]["scraped"] = True
     return results
 
 
@@ -440,23 +442,21 @@ def web_search_with_fallback(
     ]
 
     all_results: List[dict] = []
-    max_parallel = min(len(sub_queries) * len(provider_calls), 9)
+    pool = bg_pool()
+    future_map = {}
+    for sq in sub_queries:
+        for name, fn in provider_calls:
+            fut = pool.submit(fn, sq, per_query_results)
+            future_map[fut] = (name, sq)
 
-    with ThreadPoolExecutor(max_workers=max_parallel) as pool:
-        future_map = {}
-        for sq in sub_queries:
-            for name, fn in provider_calls:
-                fut = pool.submit(fn, sq, per_query_results)
-                future_map[fut] = (name, sq)
-
-        for fut in as_completed(future_map, timeout=25):
-            name, sq = future_map[fut]
-            try:
-                batch = fut.result(timeout=0)
-                if batch:
-                    all_results.extend(batch)
-            except Exception as e:
-                logger.debug("[SearchFallback] %s[%s] failed: %s", name, sq[:40], e)
+    for fut in as_completed(future_map, timeout=25):
+        name, sq = future_map[fut]
+        try:
+            batch = fut.result(timeout=0)
+            if batch:
+                all_results.extend(batch)
+        except Exception as e:
+            logger.debug("[SearchFallback] %s[%s] failed: %s", name, sq[:40], e)
 
     if not all_results:
         return {

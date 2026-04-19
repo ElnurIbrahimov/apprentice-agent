@@ -16,7 +16,9 @@ import json
 import logging
 import math
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+
+from aura.pools import bg_pool
 from typing import Any, Optional
 
 try:
@@ -103,14 +105,14 @@ def embed_chunks(chunks: list[str]) -> list[Optional[list[float]]]:
             return idx, None
 
     out: list[Optional[list[float]]] = [None] * len(chunks)
-    with ThreadPoolExecutor(max_workers=_EMBED_POOL_WORKERS) as pool:
-        futures = [pool.submit(_embed_one, i, c) for i, c in enumerate(chunks)]
-        for fut in as_completed(futures):
-            try:
-                idx, emb = fut.result(timeout=60)
-                out[idx] = emb
-            except Exception as exc:
-                logger.debug(f"[DocRAG] embed future error: {exc}")
+    pool = bg_pool()
+    futures = [pool.submit(_embed_one, i, c) for i, c in enumerate(chunks)]
+    for fut in as_completed(futures):
+        try:
+            idx, emb = fut.result(timeout=60)
+            out[idx] = emb
+        except Exception as exc:
+            logger.debug(f"[DocRAG] embed future error: {exc}")
     return out
 
 

@@ -152,6 +152,18 @@ def run_evolution(
         logger.info("No improvement found. Skills unchanged.")
         applied = 0
 
+    # Report real-vs-synthetic eval mix so we can see the echo chamber shrink
+    # over time as real episodes accumulate.
+    source_mix_report = []
+    if hasattr(adapter, "source_mix") and adapter.source_mix:
+        for m in adapter.source_mix:
+            source_mix_report.append({
+                "skill_id": m.skill_id,
+                "real": m.real_count,
+                "synthetic": m.synthetic_count,
+                "source": m.source,
+            })
+
     return {
         "success": True,
         "seed_score": result.best_candidate.avg_score - result.improvement,
@@ -163,7 +175,33 @@ def run_evolution(
         "duration_seconds": result.duration_seconds,
         "stop_reason": result.stop_reason,
         "run_dir": config.run_dir,
+        "source_mix": source_mix_report,
     }
+
+
+def _snapshot_skill_version(skill) -> Optional[Path]:
+    """Save a pre-mutation copy of the skill so GEPA can be rolled back.
+
+    Returns the path written, or None if snapshotting failed.
+    """
+    try:
+        from aura.paths import SKILL_LIBRARY_DIR
+        versions_dir = SKILL_LIBRARY_DIR / "versions"
+        versions_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        snap_path = versions_dir / f"{skill.id}_v{skill.metadata.version}_{ts}.json"
+        payload = {
+            "id": skill.id,
+            "name": skill.name,
+            "version": skill.metadata.version,
+            "procedure": skill.procedure,
+            "snapshotted_at": datetime.now(timezone.utc).isoformat(),
+        }
+        snap_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        return snap_path
+    except Exception:
+        logger.debug("skill_snapshot_failed", exc_info=True)
+        return None
 
 
 def _apply_to_store(store, candidate) -> int:
@@ -177,6 +215,10 @@ def _apply_to_store(store, candidate) -> int:
 
         if skill.procedure == new_procedure:
             continue  # No change
+
+        # Snapshot the pre-mutation version so users can roll back if GEPA
+        # overfits to the synthetic eval dataset.
+        _snapshot_skill_version(skill)
 
         # Bump version
         try:

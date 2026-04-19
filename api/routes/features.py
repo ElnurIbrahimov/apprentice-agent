@@ -413,16 +413,14 @@ def _trigger_sleep_sync() -> dict:
 async def trigger_sleep():
     """Trigger a sleep cycle."""
     import concurrent.futures
+    from aura.pools import bg_pool
     try:
-        # Use dedicated executor with timeout to avoid blocking
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_trigger_sleep_sync)
-            try:
-                result = future.result(timeout=10)  # 10 second timeout
-                return result
-            except concurrent.futures.TimeoutError:
-                logger.error("[NeuroDream] Sleep trigger timed out after 10s")
-                return {"success": False, "error": "Operation timed out - enter_sleep is blocking"}
+        future = bg_pool().submit(_trigger_sleep_sync)
+        try:
+            return future.result(timeout=10)
+        except concurrent.futures.TimeoutError:
+            logger.error("[NeuroDream] Sleep trigger timed out after 10s")
+            return {"success": False, "error": "Operation timed out - enter_sleep is blocking"}
     except Exception as e:
         logger.error(f"[NeuroDream] Sleep trigger exception: {e}")
         return {"success": False, "error": safe_error_detail(e)}

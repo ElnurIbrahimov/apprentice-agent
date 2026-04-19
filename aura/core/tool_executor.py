@@ -181,6 +181,17 @@ class ToolExecutor:
 
     def execute(self, tool_name: str, args: dict) -> str:
         """Execute a tool call and serialize the result for the LLM."""
+        # Cognitive heatmap: set active tool / file context so that any
+        # LLM calls downstream (e.g. edit preview prompts) attribute tokens.
+        loop = getattr(self, "_agentic_loop", None)
+        _prev_tool = None
+        _prev_file = None
+        if loop is not None:
+            _prev_tool = getattr(loop, "_active_tool_for_heatmap", None)
+            _prev_file = getattr(loop, "_active_file_for_heatmap", None)
+            loop._active_tool_for_heatmap = tool_name
+            _target = args.get("path") or args.get("file") or args.get("filename")
+            loop._active_file_for_heatmap = _target if isinstance(_target, str) else None
         try:
             result = self._dispatch(tool_name, args)
             # expand_observation intentionally returns full content — skip truncation
@@ -193,6 +204,10 @@ class ToolExecutor:
         except Exception as exc:
             logger.error("[ToolExecutor] %s failed: %s", tool_name, exc)
             return json.dumps({"error": str(exc)})
+        finally:
+            if loop is not None:
+                loop._active_tool_for_heatmap = _prev_tool
+                loop._active_file_for_heatmap = _prev_file
 
     def _dispatch(self, tool_name: str, args: dict) -> dict:
         tool_name = self._TOOL_ALIASES.get(tool_name, tool_name)
@@ -466,6 +481,8 @@ class ToolExecutor:
         )
         if result.get("success"):
             self._maybe_broadcast_artifact(path)
+            self._record_to_ledger(path, args.get("old_string", ""), args.get("new_string", ""), kind="edit")
+            self._notify_guard_file_edit(path)
         return result
 
     def _write_file(self, args: dict) -> dict:
@@ -480,7 +497,65 @@ class ToolExecutor:
         result = self.fs.write_file(path=path, content=args["content"], overwrite=True)
         if result.get("success"):
             self._maybe_broadcast_artifact(path, content=args.get("content"))
+            self._record_to_ledger(path, "", args.get("content", ""), kind="write")
+            self._notify_guard_file_edit(path)
         return result
+
+    def _notify_guard_file_edit(self, path: str) -> None:
+        """Tell the loop guard that a file was edited (for same-file spam detection)."""
+        try:
+            loop = getattr(self, "_agentic_loop", None)
+            if loop is None or getattr(loop, "session", None) is None:
+                return
+            from aura.reliability.loop_guard import get_guard
+            guard = get_guard(loop.session.session_id)
+            guard.record_file_edit(path)
+        except Exception:
+            logger.debug("loop_guard_file_notify_failed", exc_info=True)
+
+    def _record_to_ledger(self, path: str, before: str, after: str, kind: str = "edit") -> None:
+        """Append an Intent-to-Code Ledger entry for this edit. Non-fatal."""
+        try:
+            from aura import ledger
+            loop = getattr(self, "_agentic_loop", None)
+            intent = getattr(loop, "_current_run_prompt", "") if loop else ""
+            run_id = getattr(loop, "_current_run_id", "") if loop else ""
+            session_id = ""
+            if loop is not None and getattr(loop, "session", None) is not None:
+                session_id = getattr(loop.session, "session_id", "") or ""
+            model = ""
+            try:
+                brain = getattr(loop, "brain", None) if loop else None
+                if brain is not None:
+                    model = getattr(brain, "_last_used_model", "") or ""
+            except Exception:
+                pass
+
+            lines_touched: list[int] = []
+            try:
+                if kind == "edit" and before:
+                    content = Path(path).read_text(encoding="utf-8", errors="ignore")
+                    # Approximate line range: first and last line of new string
+                    idx = content.find(after)
+                    if idx >= 0:
+                        start_line = content.count("\n", 0, idx) + 1
+                        end_line = start_line + after.count("\n")
+                        lines_touched = [start_line, end_line]
+            except Exception:
+                pass
+
+            ledger.append_edit(
+                file_path=path,
+                intent=intent,
+                model=model,
+                session_id=session_id,
+                run_id=run_id,
+                lines_touched=lines_touched,
+                diff_hash=ledger.diff_hash_of(before, after),
+                kind=kind,
+            )
+        except Exception:
+            logger.debug("ledger_record_failed", exc_info=True)
 
     def _maybe_broadcast_artifact(self, path: str, content: str | None = None) -> None:
         try:

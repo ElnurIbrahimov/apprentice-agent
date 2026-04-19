@@ -586,6 +586,29 @@ export const hands = {
     apiFetch(url('/api/hands')),
 };
 
+// ─── chat utility endpoints (previously raw fetch in store.ts) ─────────────
+
+export const chat = {
+  /** Reset the server-side conversation state. Fire-and-forget in the UI. */
+  clear: (): Promise<{ success: boolean } | Record<string, unknown>> =>
+    apiFetch(url('/api/chat/clear'), { method: 'POST' }),
+};
+
+// ─── proactive messages (previously raw fetch in store.ts) ─────────────────
+
+export const proactive = {
+  dismiss: (id: string): Promise<{ success: boolean } | Record<string, unknown>> =>
+    apiFetch(url('/api/proactive/dismiss'), jsonBody({ id })),
+};
+
+// ─── models (previously raw fetch in store.ts) ─────────────────────────────
+
+export const models = {
+  /** List all models currently exposed by the backend. Short 3s timeout. */
+  listAvailable: (signal?: AbortSignal): Promise<unknown> =>
+    apiFetch(url('/api/models/available'), { signal: signal ?? AbortSignal.timeout(3000) }),
+};
+
 // ─── fetch headers helper (for places that can't use apiFetch, e.g. SSE) ──
 
 export { getAuthHeaders };

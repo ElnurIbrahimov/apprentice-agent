@@ -322,27 +322,49 @@ class ModelRouterMixin:
             logger.debug(f"[Brain] non-critical: {e}")
 
     def _select_model(self, prompt: str, task_type=None) -> str:
-        """Select model using the 3-layer neural router.
+        """Pick a model for this prompt.
 
-        Replaces the old System 1/System 2 heuristic routing with
-        profile-based matching that runs in <5ms.
+        Order:
+            1. Manual override — user's choice always wins.
+            2. Specialty dispatcher (`aura.routing.dispatcher.dispatch`) — coarse
+               but catalog-driven; if it returns a high-confidence pick the
+               neural router is skipped for speed.
+            3. Neural router (`aura.routing.router.get_router`) — continuous
+               feature scoring.
+            4. Emergency fallback → Config.MODEL_FAST.
         """
         from aura.brain import TaskType
 
-        # Manual override still wins
         if self._model_override:
             logger.info(f"[BRAIN] Using manual model override: {self._model_override}")
             return self._model_override
 
-        # Map legacy task_type to has_attachment
         has_attachment = (task_type == TaskType.VISION) if task_type else False
+        preference = getattr(self, '_routing_preference', 'balanced')
 
-        # Use new neural router
+        # ── Specialty dispatcher (fast path) ──
+        try:
+            from aura.routing.dispatcher import dispatch as _dispatch
+            _budget_map = {"quality": "free", "balanced": "balanced", "fast": "cheap",
+                           "free": "free", "cheap": "cheap"}
+            budget = _budget_map.get(preference, "balanced")
+            warm = list(getattr(self, "_warm_models", []) or [])
+            d = _dispatch(prompt, has_attachment=has_attachment,
+                          budget=budget, warm_models=warm)
+            logger.info(f"[BRAIN] Dispatcher: {d.model} ({d.reason}) conf={d.confidence:.2f}")
+            # Stash dispatch result for shadow-mode + warm-slot layers
+            self._last_dispatch = d
+            if d.confidence >= 0.8:
+                return self._apply_budget_mode(d.model, task_type)
+        except Exception as e:
+            logger.debug(f"[BRAIN] Dispatcher failed, trying neural router: {e}")
+
+        # ── Neural router (finer scoring when dispatcher is unsure) ──
         try:
             from aura.routing.router import get_router
             result = get_router().route(
                 prompt,
-                preference=getattr(self, '_routing_preference', 'balanced'),
+                preference=preference,
                 conversation_id=getattr(self, '_conversation_id', None),
                 has_attachment=has_attachment,
             )
@@ -350,6 +372,16 @@ class ModelRouterMixin:
             return self._apply_budget_mode(result.model, task_type)
         except Exception as e:
             logger.warning(f"[BRAIN] Neural router failed, falling back to Config.MODEL_FAST: {e}")
+            try:
+                from aura.reliability.routing_stats import get_routing_stats
+                get_routing_stats().record(
+                    category="router_fallback",
+                    model=Config.MODEL_FAST,
+                    success=False,
+                    latency_ms=0.0,
+                )
+            except Exception:
+                logger.debug("fallback_stats_record_failed", exc_info=True)
             return self._apply_budget_mode(Config.MODEL_FAST, task_type)
 
     def _apply_budget_mode(self, selected_model: str, task_type=None) -> str:

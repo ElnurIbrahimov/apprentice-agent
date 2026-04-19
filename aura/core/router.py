@@ -1,14 +1,19 @@
-"""Model router with tiers and budget enforcement for Aura Dev CLI.
+"""CLI-layer model router: tier resolution + budget + outcome bandit.
 
-Routes to optimal model based on tier (fast/balanced/max) and budget cap.
-Uses existing Config model chains and routing_stats for performance data.
-Learns from outcomes: tracks success/failure per (category, model) pair
-and consults the strategy bandit for category-level performance signals.
+Scope — this is NOT the same as `aura/routing/router.py`:
+  * This module (`ModelRouter`): session- and agentic-loop-level. Resolves
+    the tier-default model for a session (fast/balanced/max), tracks spend
+    against a budget cap, and consults the strategy bandit for category-
+    level performance signals. Used by the CLI bootstrap and the agentic
+    loop when it needs to pick a model for a new step.
+  * `aura/routing/router.py` (`Router`): per-LLM-call neural router. Scores
+    the prompt across feature dimensions and matches against the model
+    profile store for the single best model on this prompt. Used by the
+    brain inside `think()` / `think_with_tools()`.
 
-Ollama cloud ($20/mo) supports 3 concurrent model slots. The routing table
-is designed to maximize parallelism by using at most 3 distinct models per
-tier — an orchestrator, a coder, and a fast model — so all three slots
-stay warm and requests don't queue behind each other.
+The two layers compose: the CLI picks the tier's model chain up front;
+inside each LLM call the brain may still override via the neural router.
+Do not merge them — they answer different questions.
 """
 
 import logging
@@ -222,17 +227,43 @@ def _ensure_centroids() -> None:
             import numpy as np
             import ollama
 
+            # Batch all exemplars across all categories into one embed call.
+            # Old code was O(C×E) HTTP round-trips; new code is 1.
+            all_texts: list[str] = []
+            boundaries: list[tuple[str, int, int]] = []  # (cat, start, end)
             for cat, exemplars in _CATEGORY_EXEMPLARS.items():
-                embeddings = []
-                for ex in exemplars:
-                    try:
-                        resp = ollama.embed(model="nomic-embed-text:latest", input=ex)
-                        if resp and "embeddings" in resp and resp["embeddings"]:
-                            embeddings.append(resp["embeddings"][0])
-                    except Exception:
-                        continue
-                if embeddings:
-                    _category_centroids[cat] = np.mean(embeddings, axis=0).tolist()
+                start = len(all_texts)
+                all_texts.extend(exemplars)
+                boundaries.append((cat, start, len(all_texts)))
+
+            if not all_texts:
+                pass
+            else:
+                vectors: list[list[float]] = []
+                try:
+                    resp = ollama.embed(model="nomic-embed-text:latest", input=all_texts)
+                    if resp and resp.get("embeddings"):
+                        vectors = list(resp["embeddings"])
+                except Exception:
+                    vectors = []
+
+                if len(vectors) != len(all_texts):
+                    # Fallback: per-item (matches original behavior) when batch misbehaves
+                    vectors = []
+                    for ex in all_texts:
+                        try:
+                            r = ollama.embed(model="nomic-embed-text:latest", input=ex)
+                            if r and r.get("embeddings"):
+                                vectors.append(r["embeddings"][0])
+                            else:
+                                vectors.append(None)  # type: ignore
+                        except Exception:
+                            vectors.append(None)  # type: ignore
+
+                for cat, start, end in boundaries:
+                    slice_vecs = [v for v in vectors[start:end] if v]
+                    if slice_vecs:
+                        _category_centroids[cat] = np.mean(slice_vecs, axis=0).tolist()
         except ImportError:
             pass  # numpy or ollama not available
         except Exception:

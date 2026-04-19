@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
+
+from aura.pools import llm_pool
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -225,15 +226,12 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
 
     lock = threading.Lock()
 
-    # Shared timeout pool for all debaters (avoids per-debater executor leak)
-    timeout_pool = ThreadPoolExecutor(max_workers=len(positions))
-
     def _run_debater(pos: DebatePosition):
         cfg = ROLE_CONFIG[pos.role]
         prompt = f"Question: {question}"
         start = time.time()
         try:
-            fut = timeout_pool.submit(
+            fut = llm_pool().submit(
                 brain.think,
                 prompt,
                 system_prompt=cfg["system"],
@@ -269,15 +267,14 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
         refresh_per_second=2,
         transient=False,
     ) as live:
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            {pool.submit(_run_debater, p): p for p in positions}
-            while not all(p.done for p in positions):
-                time.sleep(0.5)
-                with lock:
-                    live.update(_build_debate_display(result, "debating"))
-            # Final update with all positions done
-            live.update(_build_debate_display(result, "synthesizing"))
-        timeout_pool.shutdown(wait=False)
+        pool = llm_pool()
+        for p in positions:
+            pool.submit(_run_debater, p)
+        while not all(p.done for p in positions):
+            time.sleep(0.5)
+            with lock:
+                live.update(_build_debate_display(result, "debating"))
+        live.update(_build_debate_display(result, "synthesizing"))
 
         # Phase 2: Judge synthesis
         from aura.config import Config

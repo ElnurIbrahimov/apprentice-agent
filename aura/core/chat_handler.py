@@ -288,6 +288,14 @@ class ChatMixin:
                 if _skill_context:
                     context_parts.append(f"SKILL CONTEXT:\n{_skill_context}")
                     logger.debug("[SkillLibrary] Injected skill context for: %s", message[:40])
+                # Capture which skills were injected so the evolution episode
+                # log (written in _finalize_chat) can attribute later outcome
+                # signals to the right skill IDs.
+                try:
+                    ctx["applicable_skill_ids"] = self.skill_library.get_applicable_skill_ids(message)
+                except (AttributeError, TypeError) as _sid_err:
+                    logger.debug("[SkillLibrary] applicable_skill_ids unavailable: %s", _sid_err)
+                    ctx["applicable_skill_ids"] = []
         except (AttributeError, KeyError, TypeError, ValueError, OSError) as e:
             logger.debug("[SkillLibrary] Skill lookup error: %s", e)
 
@@ -408,6 +416,35 @@ class ChatMixin:
                     user_input=_sl_msg, output=_sl_resp,
                     success=True, context={}
                 )
+
+                # ===== EVOLUTION EPISODE LOG =====
+                # Per-skill log so outcome signals (reactions, button clicks) can
+                # later be joined back to which skills contributed to a response.
+                _applicable = ctx.get("applicable_skill_ids") or []
+                _request_id = ctx.get("request_id") or ctx.get("bandit_request_id")
+                if _applicable and _request_id:
+                    try:
+                        from aura.evolution.episode_log import get_episode_log
+                        _procedures = {}
+                        for _sid in _applicable:
+                            try:
+                                _sk = _sl_ref.load(_sid) if hasattr(_sl_ref, 'load') else None
+                                if _sk is not None and hasattr(_sk, 'procedure'):
+                                    _procedures[_sid] = _sk.procedure or ""
+                            except (AttributeError, KeyError, OSError):
+                                pass
+                        _log_ref = get_episode_log()
+                        _AGENT_EXECUTOR.submit(
+                            _log_ref.log,
+                            request_id=str(_request_id),
+                            skill_ids=list(_applicable),
+                            user_input=_sl_msg,
+                            response=_sl_resp,
+                            procedures=_procedures,
+                            tools_called=ctx.get("tools_called", []),
+                        )
+                    except (ImportError, AttributeError, TypeError, OSError) as _ep_err:
+                        logger.debug("[Evolution] episode log submit failed: %s", _ep_err)
         except (AttributeError, TypeError, ValueError, OSError) as e:
             logger.debug("[SkillLibrary] Record interaction error: %s", e)
 
@@ -488,7 +525,28 @@ class ChatMixin:
                     bandit = get_strategy_bandit()
                     bandit_selection = bandit.select_strategy(message)
                     selected_strategy = bandit_selection.strategy
+                    # Expose request_id to _finalize_chat so the evolution episode
+                    # log can bind per-skill entries to the bandit / reaction chain.
+                    try:
+                        ctx["request_id"] = bandit_selection.request_id
+                    except (NameError, TypeError):
+                        pass
                     logger.debug(f"[StrategyBandit] selected: {selected_strategy.value} for {bandit_selection.category.value}")
+
+                # Budget guard: MCTS triggers 10-30 LLM calls. If budget mode is on
+                # and we're past the per-session cap, force CoT to avoid 15x spend.
+                if (selected_strategy == ReasoningStrategy.MCTS
+                        and getattr(Config, 'BUDGET_MODE', False)):
+                    try:
+                        spent = float(getattr(self.brain, '_session_cost_usd', 0.0))
+                        cap = float(getattr(Config, 'BUDGET_MAX_USD_PER_SESSION', 0.50))
+                        if spent >= cap:
+                            logger.info(
+                                f"[StrategyBandit] MCTS suppressed — session spend ${spent:.3f} >= cap ${cap:.2f}; using CoT"
+                            )
+                            selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT
+                    except Exception:
+                        logger.debug("mcts_budget_check_failed", exc_info=True)
             except (ImportError, AttributeError, KeyError, TypeError, ValueError) as e:
                 logger.debug(f"[StrategyBandit] Selection error, falling back to CoT: {e}")
                 selected_strategy = ReasoningStrategy.CHAIN_OF_THOUGHT if ReasoningStrategy else "chain_of_thought"

@@ -908,19 +908,44 @@ class AgentCoreMixin:
         # Feed the reaction into the Strategy Bandit if we can find the original
         # request. Neutral reactions are captured but not used as feedback — only
         # clear positive/negative signal updates arm parameters.
+        request_id_for_reaction = None
         if sentiment in ("positive", "negative"):
             try:
                 from aura.consciousness.strategy_bandit import get_strategy_bandit
                 bandit = get_strategy_bandit()
-                request_id = bandit.get_request_id_for_message(message_id, surface="telegram")
-                if request_id:
+                request_id_for_reaction = bandit.get_request_id_for_message(message_id, surface="telegram")
+                if request_id_for_reaction:
                     feedback = 1.0 if sentiment == "positive" else 0.0
-                    bandit.record_user_feedback(request_id, feedback)
+                    bandit.record_user_feedback(request_id_for_reaction, feedback)
                     logger.info(
-                        f"[Telegram] Bandit feedback: {feedback} → request={request_id}"
+                        f"[Telegram] Bandit feedback: {feedback} → request={request_id_for_reaction}"
                     )
             except Exception as e:
                 logger.debug(f"[Telegram] Bandit feedback wiring failed: {e}")
+
+        # Route reaction into the evolution outcome layer too. Uses the same
+        # request_id already resolved above so per-skill episodes get labeled.
+        # Emoji takes priority over sentiment string (higher resolution).
+        if request_id_for_reaction is None:
+            try:
+                from aura.consciousness.strategy_bandit import get_strategy_bandit
+                request_id_for_reaction = get_strategy_bandit().get_request_id_for_message(
+                    message_id, surface="telegram",
+                )
+            except Exception:
+                request_id_for_reaction = None
+        if request_id_for_reaction:
+            try:
+                from aura.evolution.outcome_scorer import get_outcome_scorer
+                scorer = get_outcome_scorer()
+                primary_emoji = new_reactions[0] if new_reactions else None
+                scorer.score_from_reaction(
+                    request_id=str(request_id_for_reaction),
+                    sentiment=sentiment,
+                    emoji=primary_emoji,
+                )
+            except Exception as e:
+                logger.debug(f"[Telegram] Evolution outcome scoring failed: {e}")
 
     async def _handle_error(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle errors with retry buttons."""

@@ -55,6 +55,9 @@ def _create_subcommand_permission_manager():
 
 def handle_subcommand(command: str, args: argparse.Namespace) -> int:
     """Dispatch subcommand. Returns exit code."""
+    from aura.cli.commands.daemon_commands import cmd_start as _cmd_start, cmd_stop as _cmd_stop
+    from aura.cli.commands.heatmap_commands import cmd_heatmap as _cmd_heatmap
+    from aura.cli.commands.worktree_commands import cmd_worktree as _cmd_worktree
     handlers = {
         "init": cmd_init,
         "setup": cmd_setup,
@@ -64,6 +67,13 @@ def handle_subcommand(command: str, args: argparse.Namespace) -> int:
         "commit": cmd_commit,
         "cost": cmd_cost,
         "ide": cmd_ide_setup,
+        "status": cmd_status,
+        "recall": cmd_recall,
+        "why": cmd_why,
+        "start": _cmd_start,
+        "stop": _cmd_stop,
+        "heatmap": _cmd_heatmap,
+        "worktree": _cmd_worktree,
     }
     handler = handlers.get(command)
     if handler:
@@ -533,6 +543,167 @@ def cmd_cost(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_status(args: argparse.Namespace) -> int:
+    """Show a quick overview of what Aura is doing right now."""
+    console.print("\n[bold]Aura Status[/]\n")
+
+    console.print("  [bold]Ollama:[/]")
+    try:
+        import ollama
+        ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+        models = ollama.list()
+        model_count = len(models.get("models", []))
+        console.print(f"    [green]reachable[/] @ {ollama_host}  ({model_count} models)")
+    except Exception as e:
+        console.print(f"    [red]unreachable[/]: {e}")
+
+    console.print("\n  [bold]Config:[/]")
+    try:
+        from aura.config import Config
+        console.print(f"    tier default: [cyan]{getattr(Config, 'MODEL_REASON', '?')}[/]")
+        console.print(f"    budget mode:  {getattr(Config, 'BUDGET_MODE', False)}")
+        if getattr(Config, 'BUDGET_MODE', False):
+            console.print(f"    budget cap:   ${getattr(Config, 'BUDGET_MAX_USD_PER_SESSION', 0):.2f}")
+    except Exception as e:
+        console.print(f"    [yellow]config load failed: {e}[/]")
+
+    console.print("\n  [bold]Routing stats:[/]")
+    try:
+        from aura.reliability.routing_stats import get_routing_stats
+        store = get_routing_stats()
+        stats = getattr(store, "_stats", {})
+        models_seen = sorted({m for (_, m) in stats.keys()})[:10]
+        console.print(f"    {len(stats)} (category, model) pairs tracked")
+        if models_seen:
+            console.print(f"    top models: [dim]{', '.join(models_seen)}[/]")
+    except Exception as e:
+        console.print(f"    [yellow]stats unavailable: {e}[/]")
+
+    console.print("\n  [bold]Strategy bandit:[/]")
+    try:
+        import sqlite3
+        from pathlib import Path as _P
+        data_dir = _P(os.getenv("AURA_DATA_DIR", "data"))
+        db_path = data_dir / "aura_meta.db"
+        if db_path.exists():
+            conn = sqlite3.connect(str(db_path))
+            rows = conn.execute(
+                "SELECT strategy, COUNT(*), COALESCE(SUM(total_pulls), 0) FROM strategy_arms GROUP BY strategy"
+            ).fetchall()
+            conn.close()
+            for strategy, arms, pulls in rows:
+                console.print(f"    {strategy}: {arms} arms, {pulls} pulls")
+        else:
+            console.print("    [dim]no bandit DB yet[/]")
+    except Exception as e:
+        console.print(f"    [yellow]bandit unavailable: {e}[/]")
+
+    console.print("\n  [bold]Daemon:[/]")
+    try:
+        from pathlib import Path as _P
+        pid_file = _P(os.getenv("AURA_DATA_DIR", "data")) / "daemon.pid"
+        if pid_file.exists():
+            pid = pid_file.read_text().strip()
+            console.print(f"    PID: [cyan]{pid}[/] (see {pid_file})")
+        else:
+            console.print("    [dim]not running[/]")
+    except Exception:
+        console.print("    [dim]unknown[/]")
+
+    console.print()
+    return 0
+
+
+def cmd_why(args: argparse.Namespace) -> int:
+    """Intent-to-Code Ledger query. Usage: aura why <file>[:line] [--limit N]"""
+    target = (getattr(args, "why_target", "") or "").strip()
+    if not target:
+        console.print("[yellow]Usage: aura why <file>[:<line>][/]")
+        return 1
+
+    file_part = target
+    line_part: Optional[int] = None
+    if ":" in target:
+        file_str, line_str = target.rsplit(":", 1)
+        try:
+            line_part = int(line_str)
+            file_part = file_str
+        except ValueError:
+            file_part = target
+
+    limit = int(getattr(args, "why_limit", 5) or 5)
+
+    try:
+        from aura import ledger
+        entries = ledger.why(file_part, line=line_part, limit=limit)
+    except Exception as e:
+        console.print(f"[red]Ledger query failed:[/] {e}")
+        return 1
+
+    if not entries:
+        console.print(f"  [dim]No ledger entries for {target}[/]")
+        return 0
+
+    import datetime as _dt
+    table = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
+    table.add_column("When", style="dim")
+    table.add_column("Kind")
+    table.add_column("Lines")
+    table.add_column("Model")
+    table.add_column("Intent")
+    for e in entries:
+        when = _dt.datetime.fromtimestamp(e.get("ts", 0)).strftime("%m-%d %H:%M")
+        kind = e.get("kind", "edit")
+        lines = e.get("lines_touched") or []
+        lines_str = f"{lines[0]}-{lines[-1]}" if len(lines) >= 2 else ""
+        model = (e.get("model") or "")[:28]
+        intent = (e.get("intent") or "").replace("\n", " ")[:80]
+        table.add_row(when, kind, lines_str, model, intent)
+    console.print()
+    console.print(f"  [bold]Why {target}?[/] (top {len(entries)})")
+    console.print(table)
+    console.print()
+    return 0
+
+
+def cmd_recall(args: argparse.Namespace) -> int:
+    """Query UnifiedMemory from the shell. Usage: aura recall "topic" [--limit 5]"""
+    query = " ".join(getattr(args, "recall_query", []) or []).strip()
+    if not query:
+        console.print("[yellow]Usage: aura recall \"your topic\"[/]")
+        return 1
+    limit = getattr(args, "recall_limit", 5) or 5
+
+    try:
+        from aura.memory.unified_memory import UnifiedMemory
+        mem = UnifiedMemory()
+    except Exception as e:
+        console.print(f"[red]UnifiedMemory unavailable:[/] {e}")
+        return 1
+
+    try:
+        results = mem.query(query, k=limit)
+    except Exception as e:
+        console.print(f"[red]Query failed:[/] {e}")
+        return 1
+
+    if not results:
+        console.print(f"  [dim]No matches for '[cyan]{query}[/]'[/]")
+        return 0
+
+    console.print(f"\n  [bold]Top {len(results)} matches for '[cyan]{query}[/]'[/]\n")
+    for i, r in enumerate(results, 1):
+        content = getattr(r, "content", None) or (r.get("content") if isinstance(r, dict) else str(r))
+        score = getattr(r, "score", None) or (r.get("score") if isinstance(r, dict) else None)
+        source = getattr(r, "source", None) or ""
+        snippet = (content or "")[:220].replace("\n", " ")
+        score_str = f"[dim]({score:.3f})[/]" if isinstance(score, (int, float)) else ""
+        src_str = f"[dim cyan][{source}][/]" if source else ""
+        console.print(f"  {i}. {score_str} {src_str} {snippet}")
+    console.print()
+    return 0
+
+
 def cmd_ide_setup(args: argparse.Namespace) -> int:
     """Generate VS Code tasks.json and print MCP config snippet."""
     import sys as _sys
@@ -733,9 +904,20 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     # Step 5: API keys
     console.print("\n  [bold]Step 5:[/] Checking API keys...")
-    for key_name in ["OLLAMA_API_KEY", "BRAVE_API_KEY", "TAVILY_API_KEY"]:
+    ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    is_ollama_cloud = "api.ollama.com" in ollama_host
+    key_checks = []
+    if is_ollama_cloud:
+        key_checks.append(("OLLAMA_API_KEY", "Ollama Cloud authentication"))
+    else:
+        console.print(f"    [dim]Ollama host: {ollama_host} (local — no API key required)[/]")
+    key_checks.extend([
+        ("BRAVE_API_KEY", "web search"),
+        ("TAVILY_API_KEY", "web search"),
+    ])
+    for key_name, purpose in key_checks:
         has = bool(os.environ.get(key_name))
-        status = "[green]found[/]" if has else "[yellow]not set[/]"
+        status = "[green]found[/]" if has else f"[yellow]not set[/] ({purpose})"
         console.print(f"    {key_name}: {status}")
 
     # Step 6: Generate AURA.md

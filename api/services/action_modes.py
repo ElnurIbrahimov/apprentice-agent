@@ -276,7 +276,7 @@ def detect_action_mode(message: str) -> Optional[str]:
         return _keyword_fallback(message)
 
     try:
-        import concurrent.futures
+        from aura.pools import llm_pool
 
         prompt = _CLASSIFICATION_PROMPT.format(message=message[:200])
 
@@ -287,8 +287,7 @@ def detect_action_mode(message: str) -> Optional[str]:
                 options={"temperature": 0, "num_predict": 10},
             )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            response = pool.submit(_classify).result(timeout=5)
+        response = llm_pool().submit(_classify).result(timeout=5)
 
         raw = response.get("message", {}).get("content", "").strip().lower()
         category = raw.split()[0].rstrip(".,;:") if raw else ""

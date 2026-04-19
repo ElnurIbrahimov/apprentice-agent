@@ -1197,6 +1197,72 @@ class GitTool:
             "hint": "Try: status, log, diff, diff_summary, branch, add, commit, smart_commit, push, pull, clone, stash, blame, cherry_pick"
         }
 
+    # ------------------------------------------------------------------
+    # git worktree (Phase 8)
+    # ------------------------------------------------------------------
+
+    def worktree_list(self, repo_path: str = ".") -> dict:
+        """List existing worktrees for the repo."""
+        r = self._run_git(["worktree", "list", "--porcelain"], repo_path)
+        if not r.get("success"):
+            return r
+        trees = []
+        current: dict = {}
+        for line in (r.get("output", "") or "").splitlines():
+            if not line.strip():
+                if current:
+                    trees.append(current)
+                    current = {}
+                continue
+            if line.startswith("worktree "):
+                current["path"] = line[len("worktree "):]
+            elif line.startswith("HEAD "):
+                current["head"] = line[len("HEAD "):]
+            elif line.startswith("branch "):
+                current["branch"] = line[len("branch "):]
+            elif line == "bare":
+                current["bare"] = True
+            elif line == "detached":
+                current["detached"] = True
+        if current:
+            trees.append(current)
+        return {"success": True, "worktrees": trees}
+
+    def worktree_add(self, path: str, branch: Optional[str] = None,
+                     base: Optional[str] = None, repo_path: str = ".") -> dict:
+        """Create a worktree at `path`.
+
+        If `branch` exists it's checked out; otherwise a new branch is created
+        off HEAD (or `base` if given).
+        """
+        if not path:
+            return {"success": False, "error": "path is required"}
+        args = ["worktree", "add"]
+        if branch:
+            # Detect existing vs new branch to pick -b or plain checkout
+            check = self._run_git(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], repo_path)
+            if check.get("success"):
+                args += [path, branch]
+            else:
+                args += ["-b", branch, path]
+                if base:
+                    args.append(base)
+        else:
+            args += [path]
+        r = self._run_git(args, repo_path)
+        if r.get("success"):
+            r["path"] = path
+            r["branch"] = branch
+        return r
+
+    def worktree_remove(self, path: str, repo_path: str = ".", force: bool = False) -> dict:
+        """Remove a worktree. `force=True` removes even with uncommitted changes."""
+        args = ["worktree", "remove"]
+        if force:
+            args.append("--force")
+        args.append(path)
+        return self._run_git(args, repo_path)
+
 
 # Singleton instance for easy import
 git_tool = GitTool()

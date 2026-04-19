@@ -33,7 +33,8 @@ def find_weak_skills(
     """
     try:
         from aura_skill_library.skill_store import SkillStore
-        store = SkillStore(storage_path="./aura_data/skill_library")
+        from aura.paths import SKILL_LIBRARY_DIR
+        store = SkillStore(storage_path=str(SKILL_LIBRARY_DIR))
     except Exception as e:
         logger.debug(f"[SkillHealth] Could not load SkillStore: {e}")
         return []

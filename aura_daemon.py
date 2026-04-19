@@ -22,7 +22,6 @@ import sys
 import threading
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -129,11 +128,8 @@ class AuraDaemon:
         self._headless = HEADLESS
         self._start_time = time.time()
 
-        # Screen monitoring — skip entirely on headless servers
-        if not self._headless:
-            self._screen_pool = ThreadPoolExecutor(max_workers=1)
-        else:
-            self._screen_pool = None
+        # Screen monitoring — skip entirely on headless servers (uses shared bg_pool)
+        self._screen_pool_enabled = not self._headless
         self._screen_tick_pending = False
 
         # Tick tracking (monotonic for interval measurement)
@@ -182,11 +178,6 @@ class AuraDaemon:
             self._event_bus.shutdown()
         except Exception:
             logger.debug("event_bus_shutdown_failed", exc_info=True)
-        if self._screen_pool:
-            try:
-                self._screen_pool.shutdown(wait=False)
-            except Exception:
-                logger.debug("screen_pool_shutdown_failed", exc_info=True)
         try:
             self._ipc.stop()
         except Exception:
@@ -213,9 +204,10 @@ class AuraDaemon:
 
                 # 5s: screen monitoring (non-blocking, skip if previous tick still running)
                 # Skipped entirely in headless mode (no display)
-                if not self._headless and not self._screen_tick_pending:
+                if self._screen_pool_enabled and not self._screen_tick_pending:
                     self._screen_tick_pending = True
-                    self._screen_pool.submit(self._tick_screen_wrapper)
+                    from aura.pools import bg_submit
+                    bg_submit(self._tick_screen_wrapper)
 
                 # 30s: hooks + system health
                 if now - self._last_hooks_tick >= self.TICK_HOOKS:

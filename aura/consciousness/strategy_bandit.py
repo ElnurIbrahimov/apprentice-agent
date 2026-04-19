@@ -464,6 +464,16 @@ class StrategyBandit:
                     ON message_request_map(request_id);
             """)
 
+            # Prune arms for strategies that no longer exist in the current enum
+            # (schema drift cleanup — prior versions had cognitive_theater, mirrormind,
+            # debate, reflexion which have been removed).
+            valid_strategies = {s.value for s in ReasoningStrategy}
+            placeholders = ",".join("?" * len(valid_strategies))
+            conn.execute(
+                f"DELETE FROM strategy_arms WHERE strategy NOT IN ({placeholders})",
+                tuple(valid_strategies),
+            )
+
             # Seed arms for all valid (category, strategy) pairs
             now = time.time()
             for category, strategies in CATEGORY_STRATEGIES.items():

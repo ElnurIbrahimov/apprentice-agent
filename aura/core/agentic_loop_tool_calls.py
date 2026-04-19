@@ -215,6 +215,28 @@ class ToolCallCoordinator:
             guard_result = guard.record(tool_name, str(args))
             if guard_result and guard_result.triggered:
                 self._loop._loop_error = True
+                # Surface a Rich panel so users see *why* the loop stopped,
+                # not just a terse fallback message in the assistant turn.
+                try:
+                    from rich.panel import Panel
+                    from aura.cli.display import console as _lg_console
+                    files_edited = getattr(guard, "_files_edited", [])[-5:]
+                    body_lines = [
+                        f"[bold]Reason:[/] {guard_result.reason}",
+                        f"[bold]Actions taken:[/] {guard_result.actions_taken}",
+                        f"[bold]Novelty:[/] {guard_result.novelty_score:.2f}",
+                    ]
+                    if files_edited:
+                        body_lines.append(f"[bold]Recent files:[/] {', '.join(files_edited)}")
+                    body_lines.append("")
+                    body_lines.append("[dim]Stopping to avoid looping. Give me a new instruction or /retry.[/]")
+                    _lg_console.print(Panel.fit(
+                        "\n".join(body_lines),
+                        title="[yellow]Loop detected — pausing[/]",
+                        border_style="yellow",
+                    ))
+                except Exception:
+                    logger.debug("loop_guard_panel_failed", exc_info=True)
                 return ToolBatchResult(
                     should_break=True,
                     outcome=LoopOutcome.guard_tripped(guard_result.fallback_message),

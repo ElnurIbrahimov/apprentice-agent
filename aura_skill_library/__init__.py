@@ -260,6 +260,27 @@ class SkillLibrary:
         skills = self.find_applicable(user_input)
         return self.executor.format_skill_context(skills)
 
+    def get_applicable_skill_ids(self, user_input: str) -> list:
+        """
+        Return the list of skill IDs whose procedures were injected into the
+        LLM context for this input. Used by the evolution episode log so
+        per-skill outcome signals can later be attributed correctly.
+
+        Returns an empty list if no skills matched.
+        """
+        try:
+            skills = self.find_applicable(user_input)
+        except Exception:
+            return []
+        ids = []
+        for entry in skills:
+            # find_applicable_skills returns (skill, score) tuples
+            if isinstance(entry, tuple) and entry and hasattr(entry[0], 'id'):
+                ids.append(entry[0].id)
+            elif hasattr(entry, 'id'):
+                ids.append(entry.id)
+        return ids
+
     def improve_skill(self, skill_id: str, apply: bool = False) -> dict:
         """
         Analyze and optionally improve a skill.

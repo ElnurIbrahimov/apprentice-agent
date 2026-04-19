@@ -79,6 +79,12 @@ class ActivityLog:
                 conn.execute("ALTER TABLE interactions ADD COLUMN embedding BLOB DEFAULT NULL")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+            # Migration: add `command` column so slash command usage can be tallied
+            # without scanning every prompt for a leading `/`.
+            try:
+                conn.execute("ALTER TABLE interactions ADD COLUMN command TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             conn.commit()
         finally:
             conn.close()
@@ -87,14 +93,20 @@ class ActivityLog:
             session_id: str = "", tokens_in: int = 0, tokens_out: int = 0,
             cost: float = 0.0, tool_calls: int = 0) -> int:
         """Log an interaction. Returns the row ID."""
+        # Extract slash command name for future usage stats (Phase 5)
+        command: Optional[str] = None
+        if prompt and prompt.lstrip().startswith("/"):
+            first = prompt.lstrip().split(None, 1)[0]
+            command = first.lstrip("/")[:40] or None
+
         conn = sqlite3.connect(str(self._db_path), timeout=10)
         try:
             cursor = conn.execute(
                 """INSERT INTO interactions
-                   (timestamp, session_id, prompt, response, model, tokens_in, tokens_out, cost, tool_calls)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (timestamp, session_id, prompt, response, model, tokens_in, tokens_out, cost, tool_calls, command)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (time.time(), session_id, prompt[:10000], response[:50000], model,
-                 tokens_in, tokens_out, cost, tool_calls),
+                 tokens_in, tokens_out, cost, tool_calls, command),
             )
             row_id = cursor.lastrowid
             conn.commit()
@@ -233,6 +245,38 @@ class ActivityLog:
         except Exception:
             logger.debug("Failed to compute activity log stats", exc_info=True)
             return {"total_interactions": 0}
+        finally:
+            conn.close()
+
+    def get_stats_by_command(self, session_id: str = "", limit: int = 25) -> list[dict]:
+        """Count slash command usage. Entries with NULL `command` (normal prompts) are excluded.
+
+        Used by `aura log stats` to decide which slash commands to prune or feature.
+        """
+        conn = sqlite3.connect(str(self._db_path), timeout=10)
+        try:
+            where = "WHERE command IS NOT NULL"
+            params: tuple = ()
+            if session_id:
+                where += " AND session_id = ?"
+                params = (session_id,)
+            rows = conn.execute(
+                f"""SELECT command, COUNT(*) AS n,
+                           AVG(tokens_in + tokens_out) AS avg_tokens
+                    FROM interactions
+                    {where}
+                    GROUP BY command
+                    ORDER BY n DESC
+                    LIMIT ?""",
+                (*params, limit),
+            ).fetchall()
+            return [
+                {"command": r[0], "count": r[1], "avg_tokens": round(r[2] or 0, 1)}
+                for r in rows
+            ]
+        except Exception:
+            logger.debug("Failed to compute command stats", exc_info=True)
+            return []
         finally:
             conn.close()
 

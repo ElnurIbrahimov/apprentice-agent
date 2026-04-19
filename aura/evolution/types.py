@@ -134,7 +134,9 @@ class GEPAConfig:
     score_threshold: float = 0.95
 
     # Storage
-    run_dir: str = "./aura_data/evolution_runs"
+    run_dir: str = field(
+        default_factory=lambda: str(__import__("aura.paths", fromlist=["EVOLUTION_RUNS_DIR"]).EVOLUTION_RUNS_DIR)
+    )
 
     # Ollama
     ollama_base_url: str = field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://localhost:11434"))

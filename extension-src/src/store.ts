@@ -16,12 +16,13 @@ import type {
   McpServerInfo,
   McpServerCreate,
 } from './types';
-import { HTTP, API_KEY, apiFetch } from './api';
+import { HTTP, apiFetch } from './api';
+import { chat as chatApi, proactive as proactiveApi, models as modelsApi, conversations as conversationsApi } from './api/client';
 import ext from './ext';
 import * as db from './utils/db';
 import { runAgentLoop } from './utils/agentLoop';
-
-const HAND_LIVE_TRACE_MAX = 20;
+import { createHandsActions } from './store/hands-actions';
+import { createMcpActions } from './store/mcp-actions';
 
 // --- Conversation history constants ---
 const MAX_CONVERSATIONS = 500;
@@ -216,15 +217,45 @@ interface AuraStore {
   pinConversation: (convId: string, pinned: boolean) => Promise<void>;
 }
 
+/**
+ * Promise that resolves once all chrome.storage-backed preferences have
+ * hydrated into the store. `main.tsx` awaits this before kicking off the
+ * WebSocket / status polling so first-frame behavior matches saved state.
+ *
+ * Before this existed, 7 separate chrome.storage.local.get() callbacks in the
+ * create() body fired in parallel with the first API call, producing flashes
+ * of default state (dark-mode flip, empty model dropdown, wrong backend URL).
+ */
+let resolveHydration: () => void = () => {};
+export const storeHydrated: Promise<void> = new Promise((resolve) => {
+  resolveHydration = resolve;
+});
+
+function storageGetP(keys: string[]): Promise<Record<string, any>> {
+  return new Promise((resolve) => {
+    if (!ext?.storage?.local?.get) return resolve({});
+    ext.storage.local.get(keys, (d: Record<string, any>) => resolve(d || {}));
+  });
+}
+
 export const useStore = create<AuraStore>((set, get) => {
-  // Load saved model prefs + cached model lists
-  ext?.storage?.local?.get(['featureModels', 'cachedModelLists'], (d: any) => {
-    const cached = d?.cachedModelLists;
-    const savedFeatureModels = d?.featureModels || {};
-    // If cached lists exist, pre-populate so UI doesn't flash empty
+  // Hydrate all chrome.storage-backed preferences in parallel, resolve
+  // `storeHydrated` when every source is merged into state.
+  (async () => {
+    const [modelData, prefData, routeData, instData, folderData, themeData] = await Promise.all([
+      storageGetP(['featureModels', 'cachedModelLists']),
+      storageGetP(['autoSpeak', 'thinkingMode', 'thinkingLevel', 'deepResearch', 'powerModeEnabled', 'lifelogEnabled']),
+      storageGetP(['routingPreference']),
+      storageGetP(['customInstructions', 'userName']),
+      storageGetP([CONV_FOLDERS_KEY]),
+      storageGetP(['theme']),
+    ]);
+
+    // Models + cached lists
+    const cached = modelData.cachedModelLists;
+    const savedFeatureModels = modelData.featureModels || {};
     if (cached) {
       const allAvailable = [...(cached.cloud || []), ...(cached.local || []), ...(cached.chatgpt || []), ...(cached.direct || [])];
-      // Prune stale feature assignments — remove models no longer available
       const pruned: Record<string, string> = {};
       for (const [k, v] of Object.entries(savedFeatureModels)) {
         if (allAvailable.includes(v as string)) pruned[k] = v as string;
@@ -237,51 +268,38 @@ export const useStore = create<AuraStore>((set, get) => {
         mdlDirectList: cached.direct || [],
         mdlListsLoaded: true,
       });
-      // Persist pruned if different
       if (Object.keys(pruned).length !== Object.keys(savedFeatureModels).length) {
         ext?.storage?.local?.set({ featureModels: pruned });
       }
     } else {
       set({ featureModels: savedFeatureModels });
     }
-  });
 
-  // Load saved autoSpeak + thinking/research + power-mode prefs
-  ext?.storage?.local?.get(['autoSpeak', 'thinkingMode', 'thinkingLevel', 'deepResearch', 'powerModeEnabled', 'lifelogEnabled'], (d: any) => {
+    // Thinking / research / power / lifelog prefs
     set({
-      autoSpeak: !!d?.autoSpeak,
-      thinkingMode: !!d?.thinkingMode,
-      thinkingLevel: d?.thinkingLevel || 'medium',
-      deepResearch: !!d?.deepResearch,
-      powerModeEnabled: !!d?.powerModeEnabled,
-      lifelogEnabled: !!d?.lifelogEnabled,
+      autoSpeak: !!prefData.autoSpeak,
+      thinkingMode: !!prefData.thinkingMode,
+      thinkingLevel: prefData.thinkingLevel || 'medium',
+      deepResearch: !!prefData.deepResearch,
+      powerModeEnabled: !!prefData.powerModeEnabled,
+      lifelogEnabled: !!prefData.lifelogEnabled,
     });
-  });
 
-  // Load saved routing preference
-  ext?.storage?.local?.get(['routingPreference'], (d: any) => {
-    if (d?.routingPreference) set({ routingPreference: d.routingPreference });
-  });
+    if (routeData.routingPreference) set({ routingPreference: routeData.routingPreference });
 
-  // Load saved custom instructions & user name
-  ext?.storage?.local?.get(['customInstructions', 'userName'], (d: any) => {
     set({
-      customInstructions: d?.customInstructions || '',
-      userName: d?.userName || '',
+      customInstructions: instData.customInstructions || '',
+      userName: instData.userName || '',
     });
-  });
 
-  // Load saved conversation folders
-  ext?.storage?.local?.get([CONV_FOLDERS_KEY], (d: any) => {
-    set({ folders: d?.[CONV_FOLDERS_KEY] || [] });
-  });
+    set({ folders: folderData[CONV_FOLDERS_KEY] || [] });
 
-  // Load saved theme
-  ext?.storage?.local?.get(['theme'], (d: any) => {
-    const saved = d?.theme === 'light' ? 'light' : 'dark';
-    set({ theme: saved });
-    document.documentElement.classList.toggle('light', saved === 'light');
-  });
+    const theme = themeData.theme === 'light' ? 'light' : 'dark';
+    set({ theme });
+    document.documentElement.classList.toggle('light', theme === 'light');
+
+    resolveHydration();
+  })();
 
   return {
     ws: null,
@@ -464,7 +482,7 @@ export const useStore = create<AuraStore>((set, get) => {
 
       // 2. Try backend for models (also gets ChatGPT + direct API lists)
       try {
-        const d = await fetch(`${HTTP}/api/models/available`, { signal: AbortSignal.timeout(3000), headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).then(r => r.json());
+        const d: any = await modelsApi.listAvailable();
         // Merge backend models with Ollama models (Ollama may have more)
         const backendCloud = (d.cloud || []).map((m: any) => m.name || m);
         const backendLocal = (d.local || []).map((m: any) => m.name || m);
@@ -506,7 +524,7 @@ export const useStore = create<AuraStore>((set, get) => {
       });
       // Tell backend to clear
       if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {
-        fetch(`${HTTP}/api/chat/clear`, { method: 'POST', headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).catch(() => {});
+        chatApi.clear().catch(() => {});
       }
     },
 
@@ -528,13 +546,7 @@ export const useStore = create<AuraStore>((set, get) => {
         ext?.runtime?.sendMessage?.({ type: 'PROACTIVE_COUNT_CHANGED', count: next.length }).catch(() => {});
         return { proactiveMessages: next };
       });
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (API_KEY) headers['X-API-Key'] = API_KEY;
-      fetch(`${HTTP}/api/proactive/dismiss`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ id }),
-      }).catch(() => {});
+      proactiveApi.dismiss(id).catch(() => {});
     },
 
     acceptProactive: (id, sendFn) => {
@@ -630,191 +642,10 @@ export const useStore = create<AuraStore>((set, get) => {
       ext?.storage?.local?.set({ lifelogEnabled: on });
     },
 
-    // ─── Hands actions ─────────────────────────────────────────────────────
-
-    loadHands: async () => {
-      try {
-        const data = await apiFetch(`${HTTP}/api/hands`);
-        set({ hands: (data?.hands || []) as HandStats[], handsLoaded: true, handsError: null });
-      } catch (err: any) {
-        set({ handsError: err?.message || 'Failed to load hands', handsLoaded: true });
-      }
-    },
-
-    loadHandApprovals: async () => {
-      try {
-        const data = await apiFetch(`${HTTP}/api/hands/approvals`);
-        set({ handApprovals: (data?.approvals || []) as HandApprovalRequest[] });
-      } catch { /* non-fatal */ }
-    },
-
-    loadHandHistory: async (limit = 30) => {
-      try {
-        const data = await apiFetch(`${HTTP}/api/hands/history?limit=${limit}`);
-        set({ handHistory: (data?.history || []) as HandHistoryEntry[] });
-      } catch { /* non-fatal */ }
-    },
-
-    loadHandTemplates: async () => {
-      try {
-        const data = await apiFetch(`${HTTP}/api/hands/templates`);
-        set({ handTemplates: (data?.templates || []) as HandTemplate[] });
-      } catch { /* non-fatal */ }
-    },
-
-    runHand: async (name: string) => {
-      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/run`, { method: 'POST' });
-      get().loadHands();
-    },
-
-    pauseHand: async (name: string) => {
-      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/pause`, { method: 'POST' });
-      get().loadHands();
-    },
-
-    activateHand: async (name: string) => {
-      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/activate`, { method: 'POST' });
-      get().loadHands();
-    },
-
-    deactivateHand: async (name: string) => {
-      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/deactivate`, { method: 'POST' });
-      get().loadHands();
-    },
-
-    deleteHand: async (name: string) => {
-      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}`, { method: 'DELETE' });
-      set(s => ({ hands: s.hands.filter(h => h.name !== name) }));
-    },
-
-    approveHand: async (name: string, _requestId: string, approved: boolean) => {
-      await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved }),
-      });
-      set(s => ({ handApprovals: s.handApprovals.filter(a => a.hand_name !== name) }));
-    },
-
-    createHand: async (description: string) => {
-      await apiFetch(`${HTTP}/api/hands/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description }),
-      });
-      get().loadHands();
-    },
-
-    createHandFromTemplate: async (templateName: string, variables?: Record<string, string>) => {
-      await apiFetch(`${HTTP}/api/hands/from-template`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ template_name: templateName, variables: variables || {} }),
-      });
-      get().loadHands();
-    },
-
-    applyHandEvent: (ev: any) => {
-      // Update the hand's stats optimistically + add to history
-      set(s => {
-        const handName = ev.hand || ev.hand_name;
-        const next = s.hands.map(h =>
-          h.name === handName
-            ? { ...h, total_runs: h.total_runs + 1, last_run_ts: Date.now() / 1000, state: ev.success === false ? 'error' : 'cooldown' }
-            : h,
-        );
-        const historyEntry: HandHistoryEntry = {
-          timestamp: new Date().toISOString(),
-          action_type: 'hand_complete',
-          action_data: {
-            success: ev.success !== false,
-            hand: handName,
-            summary: ev.summary || '',
-            duration_ms: Math.round((ev.duration_seconds || 0) * 1000),
-          },
-          agent_id: `hand:${handName}`,
-        };
-        return { hands: next, handHistory: [historyEntry, ...s.handHistory].slice(0, 50) };
-      });
-    },
-
-    applyHandApprovalRequest: (req: any) => {
-      const entry: HandApprovalRequest = {
-        request_id: String(req.request_id),
-        hand_name: String(req.hand_name),
-        tool_name: String(req.tool_name),
-        args: (req.args && typeof req.args === 'object') ? req.args : {},
-        timestamp: req.timestamp || Date.now(),
-        age_seconds: Number(req.age_seconds || 0),
-      };
-      set(s => {
-        if (s.handApprovals.some(a => a.request_id === entry.request_id)) return s;
-        return { handApprovals: [...s.handApprovals, entry] };
-      });
-    },
-
-    applyHandActionTrace: (trace: any) => {
-      const entry: HandLiveTrace = {
-        hand: String(trace.hand || ''),
-        step: Number(trace.step || 0),
-        description: String(trace.description || ''),
-        timestamp: Number(trace.timestamp || Date.now()),
-      };
-      set(s => ({
-        handLiveTrace: [...s.handLiveTrace, entry].slice(-HAND_LIVE_TRACE_MAX),
-      }));
-    },
-
-    // ─── MCP hub actions ───────────────────────────────────────────────────
-
-    loadMcpServers: async () => {
-      try {
-        const data = await apiFetch(`${HTTP}/api/mcp/servers`);
-        set({ mcpServers: (data?.servers || []) as McpServerInfo[], mcpLoaded: true, mcpError: null });
-      } catch (err: any) {
-        set({ mcpError: err?.message || 'Failed to load MCP servers', mcpLoaded: true });
-      }
-    },
-
-    addMcpServer: async (server) => {
-      await apiFetch(`${HTTP}/api/mcp/servers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(server),
-      });
-      await get().loadMcpServers();
-    },
-
-    removeMcpServer: async (name) => {
-      await apiFetch(`${HTTP}/api/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' });
-      set(s => ({ mcpServers: s.mcpServers.filter(srv => srv.name !== name) }));
-    },
-
-    setMcpServerEnabled: async (name, enabled) => {
-      const action = enabled ? 'enable' : 'disable';
-      await apiFetch(`${HTTP}/api/mcp/servers/${encodeURIComponent(name)}/${action}`, { method: 'POST' });
-      set(s => ({
-        mcpServers: s.mcpServers.map(srv =>
-          srv.name === name ? { ...srv, enabled } : srv,
-        ),
-      }));
-    },
-
-    testMcpServer: async (name) => {
-      try {
-        const data = await apiFetch(`${HTTP}/api/mcp/servers/${encodeURIComponent(name)}/test`, { method: 'POST' });
-        set(s => ({
-          mcpServers: s.mcpServers.map(srv =>
-            srv.name === name
-              ? { ...srv, connected: !!data?.ok, tool_count: Number(data?.tool_count || 0), tools: (data?.tools || []).map((t: any) => t.name || String(t)), error: data?.error }
-              : srv,
-          ),
-        }));
-        return { ok: !!data?.ok, tool_count: Number(data?.tool_count || 0), error: data?.error };
-      } catch (err: any) {
-        return { ok: false, tool_count: 0, error: err?.message || 'Test failed' };
-      }
-    },
+    // ─── Hands & MCP actions ───────────────────────────────────────────────
+    // Implementations moved to ./store/hands-actions.ts and ./store/mcp-actions.ts
+    ...createHandsActions(set, get),
+    ...createMcpActions(set, get),
 
     // --- Conversation History (IndexedDB with chrome.storage fallback) ---
 
@@ -932,7 +763,7 @@ export const useStore = create<AuraStore>((set, get) => {
       await storageSet({ [ACTIVE_CONV_KEY]: id });
       const s = get();
       if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {
-        fetch(`${HTTP}/api/chat/clear`, { method: 'POST', headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).catch(() => {});
+        chatApi.clear().catch(() => {});
       }
     },
 
@@ -970,20 +801,14 @@ export const useStore = create<AuraStore>((set, get) => {
       set({ messages: [], activeStream: null, conversationId: null, activeConversationId: null, pendingCtx: null });
       await storageRemove([ACTIVE_CONV_KEY]);
       if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {
-        fetch(`${HTTP}/api/chat/clear`, { method: 'POST', headers: API_KEY ? { 'X-API-Key': API_KEY } : {} }).catch(() => {});
+        chatApi.clear().catch(() => {});
       }
     },
 
     searchServerConversations: async (q: string, limit = 30) => {
       if (!q.trim()) return [];
       try {
-        const params = new URLSearchParams({ q: q.trim(), limit: String(limit) });
-        const r = await fetch(`${HTTP}/api/chat/conversations/search?${params}`, {
-          headers: API_KEY ? { 'X-API-Key': API_KEY } : {},
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!r.ok) return [];
-        const data = await r.json();
+        const data = await conversationsApi.search(q.trim(), limit);
         return data.results ?? [];
       } catch {
         return [];
