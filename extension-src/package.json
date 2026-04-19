@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "prebuild": "rimraf -g \"../extension/sidebar*.js\" \"../extension/sidebar*.js.map\" \"../extension/pyodide-worker.js\" \"../extension/pyodide-worker.js.map\" \"../extension/assets\"",
+    "prebuild": "node scripts/clean-extension.mjs",
     "build": "tsc --noEmit && vite build && vite build --config vite.config.background.ts && vite build --config vite.config.content.ts && vite build --config vite.config.youtube.ts && vite build --config vite.config.netflix.ts && vite build --config vite.config.newtab.ts && vite build --config vite.config.ai-worker.ts && vite build --config vite.config.offscreen.ts && cp newtab.html ../extension/newtab.html && cp offscreen.html ../extension/offscreen.html",
     "build:ai-worker": "vite build --config vite.config.ai-worker.ts",
     "build:netflix": "vite build --config vite.config.netflix.ts",

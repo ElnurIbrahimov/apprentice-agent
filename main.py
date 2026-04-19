@@ -74,7 +74,8 @@ def _suppress_warnings() -> None:
 
 _SUBCOMMANDS = {
     "init", "setup", "doctor", "config", "models", "commit", "cost",
-    "mcp-serve", "acp-serve", "exec", "ide", "log",
+    "mcp-serve", "acp-serve", "exec", "ide", "log", "status", "recall",
+    "start", "stop", "why", "heatmap", "worktree",
 }
 _OPTS_WITH_VALUES = {
     "--max-iterations", "--dream-date", "-p", "--prompt", "--login", "--logout",
@@ -151,6 +152,24 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
                               help="Show per-provider cost breakdown")
         sub_cost.add_argument("--session", default="",
                               help="Filter to a specific session ID")
+        subparsers.add_parser("status", help="Show current Aura state (Ollama, routing, bandit, daemon)")
+        subparsers.add_parser("start", help="Start the Aura background daemon")
+        subparsers.add_parser("stop", help="Stop the Aura background daemon")
+        sub_why = subparsers.add_parser("why", help="Intent-to-Code Ledger lookup")
+        sub_why.add_argument("why_target", nargs="?", default="", help="Path or path:line")
+        sub_why.add_argument("--limit", dest="why_limit", type=int, default=5)
+        sub_hm = subparsers.add_parser("heatmap", help="Show cognitive heatmap (tokens per tool/file)")
+        sub_hm.add_argument("--session", dest="heatmap_session", default=None, help="Session ID (default: latest)")
+        sub_wt = subparsers.add_parser("worktree", help="Manage git worktrees for isolated feature work")
+        sub_wt.add_argument("worktree_name", nargs="?", default="", help="Worktree name")
+        sub_wt.add_argument("--branch", dest="worktree_branch", default=None, help="Branch name (default: worktree name)")
+        sub_wt.add_argument("--remove", dest="worktree_remove", action="store_true", help="Remove a worktree")
+        sub_wt.add_argument("--force", dest="worktree_force", action="store_true", help="Force removal")
+        sub_wt.add_argument("--open", dest="worktree_open", action="store_true", help="Open a new terminal in the worktree")
+        sub_wt.add_argument("--list", dest="worktree_list", action="store_true", help="List existing worktrees")
+        sub_recall = subparsers.add_parser("recall", help="Query UnifiedMemory from the shell")
+        sub_recall.add_argument("recall_query", nargs="*", default=[], help="Topic to recall")
+        sub_recall.add_argument("--limit", dest="recall_limit", type=int, default=5, help="Max results (default 5)")
         subparsers.add_parser("mcp-serve", help="Run as MCP server (JSON-RPC over stdio)")
         subparsers.add_parser("acp-serve", help="Run as ACP server (agent-client protocol, stdio)")
         sub_exec = subparsers.add_parser("exec", help="Non-interactive agent execution")
@@ -524,8 +543,13 @@ def main() -> None:
         # "No logs found" is informational, not a failure.
         sys.exit(0 if err == "No logs found" else 1)
 
+    # Fast-init path for non-interactive flows — skips proactive, neurodream,
+    # visible thinking, soul, tool_rag, adaptive_planner, fast_path_handler,
+    # thinker, reasoning_tree. Cuts cold start ~3-5s for --prompt and exec.
+    _fast_init = bool(getattr(args, "prompt", None)) or args.command == "exec"
+
     try:
-        agent = ApprenticeAgent()
+        agent = ApprenticeAgent(fast_init=_fast_init)
     except ConnectionError as e:
         _get_console().print(f"\n[red][AURA] Cannot connect to Ollama: {e}[/red]")
         _get_console().print("[dim]Start it with: ollama serve[/dim]")

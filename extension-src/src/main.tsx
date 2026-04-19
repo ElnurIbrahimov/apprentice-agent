@@ -5,16 +5,19 @@ import './styles/globals.css';
 import { connectWS, fetchStatus, startProactivePoll } from './ws';
 import { initBackendUrl, API_KEY } from './api';
 import ext from './ext';
-import { useStore } from './store';
+import { useStore, storeHydrated } from './store';
 import { initShortcuts } from './shortcuts';
 
-// Init — load saved backend URL before connecting
+// Init — load saved backend URL + hydrate store prefs before connecting.
+// Awaiting storeHydrated prevents the first-frame mismatch (default theme /
+// default prefs / empty model list) that used to appear while chrome.storage
+// callbacks resolved in parallel with the first fetchStatus() call.
 async function init() {
   ext?.runtime?.sendMessage({ type: 'SIDEBAR_READY' });
   window.addEventListener('beforeunload', () => {
     ext?.runtime?.sendMessage({ type: 'SIDEBAR_CLOSED' });
   });
-  await initBackendUrl();
+  await Promise.all([initBackendUrl(), storeHydrated]);
   if (!API_KEY) {
     useStore.getState().addProactiveMessage({
       id: 'first-run-api-key',

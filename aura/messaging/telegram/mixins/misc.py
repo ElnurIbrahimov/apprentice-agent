@@ -304,6 +304,30 @@ class MiscMixin:
         action = parts[1]
         user_id = str(query.from_user.id)
 
+        # Route the action into the evolution outcome scorer. Save/export are
+        # strong positive signals (user valued the response enough to keep it);
+        # regenerate/shorter are negative (current response didn't satisfy).
+        try:
+            msg_id_str = parts[2]
+            msg_id_int = int(msg_id_str) if msg_id_str.isdigit() else None
+            if msg_id_int is not None:
+                from aura.consciousness.strategy_bandit import get_strategy_bandit
+                request_id = get_strategy_bandit().get_request_id_for_message(
+                    msg_id_int, surface="telegram",
+                )
+                if request_id:
+                    from aura.evolution.outcome_scorer import get_outcome_scorer
+                    get_outcome_scorer().score_from_action(
+                        request_id=str(request_id),
+                        action=action,
+                    )
+        except Exception as _act_score_err:
+            # Never block the user action on telemetry.
+            import logging as _lg
+            _lg.getLogger(__name__).debug(
+                "action outcome score failed: %s", _act_score_err,
+            )
+
         # Get last response text for context
         uid = query.from_user.id
         exchange = self.store.get_skill_state(str(uid)).get("last_exchange", {})

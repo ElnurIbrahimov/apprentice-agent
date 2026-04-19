@@ -1611,6 +1611,15 @@ class CodebaseIndex:
         if top_k is not None:
             limit = top_k
 
+        # Lazy-start the FS watcher so subsequent edits keep the index fresh.
+        if not getattr(self, "_watcher_started", False):
+            try:
+                from aura.tools.codebase_index_watcher import start_watcher
+                if start_watcher(self, str(self.project_path)):
+                    self._watcher_started = True
+            except Exception:
+                logger.debug("codebase_index: watcher start failed", exc_info=True)
+
         if scope == "workspace" and self._siblings:
             primary = self._search_single(query, limit * 2)
             for r in primary:

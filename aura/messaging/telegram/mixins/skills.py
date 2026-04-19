@@ -11,6 +11,8 @@ import logging
 import re
 import time as _time
 
+from aura.paths import EVOLUTION_RUNS_DIR
+
 try:
     from telegram import Update
     from telegram.ext import ContextTypes
@@ -382,7 +384,7 @@ class SkillsMixin:
                 max_metric_calls=30,
                 timeout_seconds=120,
                 no_improvement_patience=2,
-                run_dir=f"./aura_data/evolution_runs/telegram_{skill_id}",
+                run_dir=str(EVOLUTION_RUNS_DIR / f"telegram_{skill_id}"),
             )
 
             adapter = AuraSkillAdapter(config=config, llm_func=llm_func)

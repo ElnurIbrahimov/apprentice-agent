@@ -56,9 +56,12 @@ from .tool_commands import (
     handle_search,
     handle_shell,
     handle_test,
+    handle_redo,
     handle_undo,
     handle_watch,
 )
+from .heatmap_commands import handle_heatmap
+from .shadow_commands import handle_shadow
 from .ui_commands import (
     handle_help,
     handle_model,
@@ -126,6 +129,9 @@ COMMANDS: list[tuple[str, str, Callable[..., Any], list[str]]] = [
     ("/audit",    "Inspect Merkle audit chain",                      handle_audit,    []),
     ("/hand",     "Manage autonomous Hands",                         handle_hand,     []),
     ("/undo",     "Undo last file edit",                             handle_undo,     []),
+    ("/redo",     "Redo the last /undo",                             handle_redo,     []),
+    ("/heatmap",  "Show cognitive heatmap (tokens by tool/file)",    handle_heatmap,  []),
+    ("/shadow",   "Run prompt against 2 models in parallel (diff)",  handle_shadow,   []),
     ("/debate",   "Multi-model debate on a question",                handle_debate,   []),
     ("/fork",     "Fork conversation into a new branch",             handle_fork,     []),
     ("/branches", "List conversation branches",                      handle_branches, []),

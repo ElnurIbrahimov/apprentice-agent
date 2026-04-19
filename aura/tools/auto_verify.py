@@ -800,7 +800,7 @@ def _find_project_root(file_path: str) -> Optional[str]:
     return None
 
 
-def auto_verify(project_path: str, shell_tool) -> dict:
+def auto_verify(project_path: str, shell_tool, test_cmd_override: Optional[str] = None) -> dict:
     """Run project tests and return results.
 
     Backward-compatible entry point. For richer results, use detect_and_run_tests().
@@ -808,11 +808,16 @@ def auto_verify(project_path: str, shell_tool) -> dict:
     Args:
         project_path: Root directory of the project
         shell_tool: ShellExecutorTool instance with .run() method
+        test_cmd_override: If set (e.g. from AURA.md `test_cmd:`), skip framework
+            detection and run this command string verbatim.
 
     Returns:
         dict with keys: success, exit_code, output, test_command, skipped, reason
     """
-    cmd_list = detect_test_command(project_path)
+    if test_cmd_override:
+        cmd_list = test_cmd_override.strip().split() if isinstance(test_cmd_override, str) else list(test_cmd_override)
+    else:
+        cmd_list = detect_test_command(project_path)
 
     if not cmd_list:
         return {"success": True, "skipped": True, "reason": "No test runner detected"}
@@ -844,3 +849,90 @@ def auto_verify(project_path: str, shell_tool) -> dict:
             "skipped": True,
             "reason": f"Test execution error: {e}",
         }
+
+
+def _has_tool(name: str) -> bool:
+    """Return True if a CLI tool is on PATH."""
+    import shutil
+    return shutil.which(name) is not None
+
+
+def _pyproject_has_section(project_path: str, section: str) -> bool:
+    p = Path(project_path) / "pyproject.toml"
+    if not p.exists():
+        return False
+    try:
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        return f"[tool.{section}]" in text or f"[tool.{section}." in text
+    except Exception:
+        return False
+
+
+def lint_and_typecheck(project_path: str, shell_tool,
+                       lint_cmd_override: Optional[str] = None,
+                       typecheck_cmd_override: Optional[str] = None) -> dict:
+    """Run ruff + mypy if configured or detectable. Returns a uniform result.
+
+    Args:
+        project_path: Root of the project
+        shell_tool: ShellExecutorTool instance with .run()
+        lint_cmd_override: Explicit lint command (from AURA.md `lint_cmd:`). If set
+            and non-empty, runs verbatim instead of auto-detection.
+        typecheck_cmd_override: Explicit typecheck command (from AURA.md
+            `typecheck_cmd:`).
+
+    Returns:
+        dict with: success, skipped, lint (optional sub-result), typecheck
+        (optional sub-result), reason (if skipped).
+
+        Each sub-result has: success, exit_code, output, command.
+    """
+    if shell_tool is None:
+        return {"success": True, "skipped": True, "reason": "No shell tool available"}
+
+    results: dict = {"success": True, "skipped": False}
+
+    # Lint
+    lint_cmd = None
+    if lint_cmd_override and lint_cmd_override.strip():
+        lint_cmd = lint_cmd_override.strip()
+    elif _has_tool("ruff") and (_pyproject_has_section(project_path, "ruff")
+                                or (Path(project_path) / ".ruff.toml").exists()
+                                or any((Path(project_path) / f).exists() for f in ["pyproject.toml", "ruff.toml"])):
+        lint_cmd = "ruff check ."
+
+    if lint_cmd:
+        try:
+            r = shell_tool.run(command=lint_cmd, cwd=project_path, timeout=60)
+            out = (r.get("stdout", "") or "") + "\n" + (r.get("stderr", "") or "")
+            code = r.get("exit_code", 1)
+            results["lint"] = {"success": code == 0, "exit_code": code,
+                               "output": out.strip()[:3000], "command": lint_cmd}
+            if code != 0:
+                results["success"] = False
+        except Exception as e:
+            logger.debug(f"[LintCheck] Lint failed: {e}")
+
+    # Typecheck
+    typecheck_cmd = None
+    if typecheck_cmd_override and typecheck_cmd_override.strip():
+        typecheck_cmd = typecheck_cmd_override.strip()
+    elif _has_tool("mypy") and _pyproject_has_section(project_path, "mypy"):
+        typecheck_cmd = "mypy ."
+
+    if typecheck_cmd:
+        try:
+            r = shell_tool.run(command=typecheck_cmd, cwd=project_path, timeout=120)
+            out = (r.get("stdout", "") or "") + "\n" + (r.get("stderr", "") or "")
+            code = r.get("exit_code", 1)
+            results["typecheck"] = {"success": code == 0, "exit_code": code,
+                                    "output": out.strip()[:3000], "command": typecheck_cmd}
+            if code != 0:
+                results["success"] = False
+        except Exception as e:
+            logger.debug(f"[TypeCheck] mypy failed: {e}")
+
+    if "lint" not in results and "typecheck" not in results:
+        return {"success": True, "skipped": True, "reason": "No lint/typecheck tool configured or detected"}
+
+    return results

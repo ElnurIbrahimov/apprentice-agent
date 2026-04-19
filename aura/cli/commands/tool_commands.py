@@ -114,27 +114,89 @@ def handle_undo(agent, arg, context) -> Optional[str]:
     from ..context import get_ctx
     from ..display import console
     ctx = get_ctx()
-    if ctx and ctx.agentic_loop:
-        tool_exec = ctx.agentic_loop.executor
-        if arg:
-            result = tool_exec.code_edit.rollback(arg)
-            if result.get("success"):
-                console.print(f"  Rolled back: {result.get('restored', arg)}")
-            else:
-                console.print(f"  Error: {result.get('error', 'Unknown error')}")
-        else:
-            backups = tool_exec.code_edit._last_backups
-            if backups:
-                last_path = list(backups.keys())[-1]
-                result = tool_exec.code_edit.rollback(last_path)
-                if result.get("success"):
-                    console.print(f"  Rolled back: {last_path}")
-                else:
-                    console.print(f"  Error: {result.get('error', 'Unknown error')}")
-            else:
-                console.print("  No edits to undo (no .bak files)")
-    else:
+    if not (ctx and ctx.agentic_loop):
         console.print("  No active agentic loop.")
+        return None
+
+    tool_exec = ctx.agentic_loop.executor
+    cp_mgr = getattr(tool_exec, "_checkpoint_mgr", None)
+
+    # If user passed a checkpoint id (cp_...), restore that exact one
+    if arg and arg.startswith("cp_") and cp_mgr:
+        ok = cp_mgr.restore(arg)
+        console.print(f"  Restored checkpoint {arg}" if ok else f"  Checkpoint {arg} not found")
+        return None
+
+    # If user passed a path, use .bak rollback (file-specific)
+    if arg and not arg.startswith("cp_"):
+        result = tool_exec.code_edit.rollback(arg)
+        if result.get("success"):
+            console.print(f"  Rolled back: {result.get('restored', arg)}")
+            if cp_mgr:
+                cp_mgr.snapshot(arg, label=f"post-undo {Path(arg).name}")
+        else:
+            console.print(f"  Error: {result.get('error', 'Unknown error')}")
+        return None
+
+    # No arg: prefer CheckpointManager (persistent) over _last_backups
+    if cp_mgr:
+        checkpoints = cp_mgr.list_checkpoints()
+        if checkpoints:
+            latest = checkpoints[0]
+            # Snapshot current state to the redo stack before undoing
+            _redo_stack = getattr(tool_exec, "_redo_stack", None)
+            if _redo_stack is None:
+                _redo_stack = []
+                tool_exec._redo_stack = _redo_stack
+            current_files = [f["original_path"] for f in latest["files"] if f.get("original_exists")]
+            if current_files:
+                redo_cp = cp_mgr.snapshot_multi(current_files, label=f"pre-redo-of {latest['id']}")
+                _redo_stack.append(redo_cp)
+            ok = cp_mgr.restore(latest["id"])
+            if ok:
+                files_str = ", ".join(Path(f["original_path"]).name for f in latest["files"][:3])
+                suffix = f" (+{len(latest['files']) - 3} more)" if len(latest["files"]) > 3 else ""
+                console.print(f"  Restored checkpoint {latest['id']}: {files_str}{suffix}")
+            else:
+                console.print(f"  Restore failed for {latest['id']}")
+            return None
+
+    # Fallback: legacy .bak
+    backups = tool_exec.code_edit._last_backups
+    if backups:
+        last_path = list(backups.keys())[-1]
+        result = tool_exec.code_edit.rollback(last_path)
+        if result.get("success"):
+            console.print(f"  Rolled back: {last_path}")
+        else:
+            console.print(f"  Error: {result.get('error', 'Unknown error')}")
+    else:
+        console.print("  No edits to undo.")
+
+
+def handle_redo(agent, arg, context) -> Optional[str]:
+    """Reverse the last /undo by restoring the snapshot taken before the undo."""
+    from ..context import get_ctx
+    from ..display import console
+    ctx = get_ctx()
+    if not (ctx and ctx.agentic_loop):
+        console.print("  No active agentic loop.")
+        return None
+
+    tool_exec = ctx.agentic_loop.executor
+    cp_mgr = getattr(tool_exec, "_checkpoint_mgr", None)
+    if cp_mgr is None:
+        console.print("  /redo requires the checkpoint manager.")
+        return None
+
+    _redo_stack = getattr(tool_exec, "_redo_stack", None)
+    if not _redo_stack:
+        console.print("  Nothing to redo.")
+        return None
+
+    cp_id = _redo_stack.pop()
+    ok = cp_mgr.restore(cp_id)
+    console.print(f"  Redid: {cp_id}" if ok else f"  Redo failed ({cp_id} missing)")
 
 
 def _handle_shell_command(agent, arg: str):

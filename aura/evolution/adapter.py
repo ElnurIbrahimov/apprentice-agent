@@ -55,16 +55,50 @@ class AuraSkillAdapter:
         num_examples: int = 20,
     ) -> List[EvalExample]:
         """
-        Generate synthetic evaluation tasks by having an LLM read each skill
-        and produce (task_input, expected_behavior) pairs.
+        Generate an evaluation dataset for a candidate.
+
+        Policy:
+        1. For each skill, try to load labeled REAL episodes from the episode log
+           (captured during live use via chat_handler + telegram reaction hooks).
+        2. Only if a skill has < min_episodes labeled real episodes, fall back
+           to the old synthetic path (LLM invents tasks from the procedure).
+
+        This removes the LLM-vs-LLM echo chamber as soon as real signals
+        accumulate. The `source_mix` attribute is populated so the run's
+        result.json can show how many real vs synthetic examples were used.
         """
-        examples = []
-        example_id = 0
+        from .real_trace_dataset import load_mixed_dataset, DatasetMix
 
-        for skill_id, procedure in candidate.components.items():
-            per_skill = max(2, num_examples // max(len(candidate.components), 1))
+        per_skill = max(2, num_examples // max(len(candidate.components), 1))
 
-            prompt = f"""Given this skill procedure, generate {per_skill} diverse test tasks.
+        def _synthetic_for_skill(skill_id: str) -> List[EvalExample]:
+            procedure = candidate.components.get(skill_id, "")
+            return self._synthetic_examples_for_skill(skill_id, procedure, per_skill)
+
+        examples, mixes = load_mixed_dataset(
+            skill_ids=list(candidate.components.keys()),
+            synthetic_fallback=_synthetic_for_skill,
+            per_skill_limit=per_skill,
+        )
+
+        self.source_mix: List[DatasetMix] = mixes
+        real_total = sum(m.real_count for m in mixes)
+        synthetic_total = sum(m.synthetic_count for m in mixes)
+        logger.info(
+            "Eval dataset: %d examples (%d real, %d synthetic) across %d skills",
+            len(examples), real_total, synthetic_total, len(mixes),
+        )
+        return examples
+
+    def _synthetic_examples_for_skill(
+        self,
+        skill_id: str,
+        procedure: str,
+        per_skill: int,
+    ) -> List[EvalExample]:
+        """Legacy synthetic-eval path. Used as cold-start fallback only."""
+        examples: List[EvalExample] = []
+        prompt = f"""Given this skill procedure, generate {per_skill} diverse test tasks.
 Each task should test a different aspect of the skill.
 
 ## Skill Procedure
@@ -78,27 +112,24 @@ Generate tasks as a JSON array:
 
 Respond with ONLY the JSON array."""
 
-            try:
-                response = self.llm_func(
-                    "You generate evaluation datasets for AI skills.",
-                    prompt,
-                )
-                # Extract JSON
-                json_match = re.search(r'\[[\s\S]*\]', response)
-                if json_match:
-                    tasks = json.loads(json_match.group())
-                    for task in tasks[:per_skill]:
-                        examples.append(EvalExample(
-                            id=f"eval_{example_id}",
-                            task_input=task.get("task", ""),
-                            expected_behavior=task.get("expected", ""),
-                            source="synthetic",
-                        ))
-                        example_id += 1
-            except Exception as e:
-                logger.warning(f"Failed to generate eval for {skill_id}: {e}")
+        try:
+            response = self.llm_func(
+                "You generate evaluation datasets for AI skills.",
+                prompt,
+            )
+            json_match = re.search(r'\[[\s\S]*\]', response)
+            if json_match:
+                tasks = json.loads(json_match.group())
+                for idx, task in enumerate(tasks[:per_skill]):
+                    examples.append(EvalExample(
+                        id=f"syn_{skill_id}_{idx}",
+                        task_input=task.get("task", ""),
+                        expected_behavior=task.get("expected", ""),
+                        source="synthetic",
+                    ))
+        except Exception as e:
+            logger.warning(f"Synthetic eval generation failed for {skill_id}: {e}")
 
-        logger.info(f"Generated {len(examples)} evaluation examples")
         return examples
 
     def evaluate(

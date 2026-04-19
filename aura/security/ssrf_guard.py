@@ -11,7 +11,6 @@ Fixes the vulnerability flagged in ENGINEERING_REVIEW_2026-03-20.md:
 import ipaddress
 import logging
 import socket
-import threading
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
@@ -84,23 +83,14 @@ def is_private_ip(ip_str: str) -> bool:
     return False
 
 
-_dns_executor = None
-_dns_executor_lock = threading.Lock()
-
-
 def _get_dns_executor():
-    """Lazily create a shared thread pool for DNS resolution.
+    """Return the shared bg_pool for DNS resolution with timeout.
 
-    Avoids creating a new ThreadPoolExecutor per call, which would exhaust
-    OS thread limits under load.
+    DNS lookups are short (5s timeout) and low-volume, so they share the
+    process-wide bg_pool rather than owning a dedicated executor.
     """
-    global _dns_executor
-    if _dns_executor is None:
-        with _dns_executor_lock:
-            if _dns_executor is None:
-                from concurrent.futures import ThreadPoolExecutor
-                _dns_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ssrf-dns")
-    return _dns_executor
+    from aura.pools import bg_pool
+    return bg_pool()
 
 
 def _resolve_hostname(hostname: str, timeout: float = 5.0) -> list[str]:

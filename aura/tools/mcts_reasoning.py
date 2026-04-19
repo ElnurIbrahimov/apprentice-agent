@@ -32,7 +32,9 @@ import threading
 import time
 import uuid
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+
+from aura.pools import tool_pool
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -410,8 +412,7 @@ class MCTSReasoning:
         self._value_history: List[float] = []
         self._stagnation_boost: float = 0.0
 
-        # Thread pool for parallel node evaluation
-        self._eval_pool = ThreadPoolExecutor(max_workers=4)
+        # Parallel node evaluation uses the shared tool_pool (no per-instance pool = no leak)
 
         # Learned value predictor (lazy — loads pickle on first predict call)
         self._value_predictor = None
@@ -484,9 +485,10 @@ class MCTSReasoning:
                 if not node.is_terminal and node.depth < self.config.max_depth:
                     expanded = self._expand(node)
                     # Parallel evaluation of expanded children
-                    if len(expanded) > 1 and self._eval_pool:
+                    if len(expanded) > 1:
+                        pool = tool_pool()
                         futures = {
-                            self._eval_pool.submit(self._evaluate_and_backprop, child): child
+                            pool.submit(self._evaluate_and_backprop, child): child
                             for child in expanded
                         }
                         for future in as_completed(futures):

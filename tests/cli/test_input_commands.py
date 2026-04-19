@@ -50,8 +50,9 @@ def test_aliases_in_registry_not_completer():
 
 
 def test_slash_commands_count():
-    # 54 canonical + 2 runtime-only (/retry, /channels) = 56 in completer.
-    assert len(SLASH_COMMANDS) == 56
+    # 57 canonical (54 original + /redo + /heatmap + /shadow) + 2 runtime-only
+    # (/retry, /channels) = 59 in completer.
+    assert len(SLASH_COMMANDS) == 59
 
 
 def test_every_command_has_description():

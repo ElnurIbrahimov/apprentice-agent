@@ -87,13 +87,16 @@ class AURAKnowledgeGraph:
     4. Cypher queries — standard graph query language
     """
 
-    def __init__(self, db_path: str = "./aura_data/knowledge_graph"):
+    def __init__(self, db_path: Optional[str] = None):
         """Initialize the knowledge graph database."""
         if not KUZU_AVAILABLE:
             raise ImportError(
                 "Kùzu is not installed. Install with: pip install kuzu"
             )
 
+        if db_path is None:
+            from aura.paths import KNOWLEDGE_GRAPH_DIR
+            db_path = str(KNOWLEDGE_GRAPH_DIR)
         self.db_path = Path(db_path)
         # Ensure parent directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

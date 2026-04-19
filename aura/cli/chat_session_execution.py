@@ -1,12 +1,44 @@
 """Execution and post-response handling for the interactive chat session."""
 from __future__ import annotations
 
+import base64
 import logging
+import re
+from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 from ._constants import ERROR_SENTINELS as _ERROR_SENTINELS
+
+_IMAGE_TOKEN_RE = re.compile(r"\[image:\s*([^\]\n]+?)\s*\]")
+
+
+def _extract_images_from_prompt(text: str) -> tuple[str, list[str]]:
+    """Pull [image: <path>] tokens out of the prompt.
+
+    Returns (cleaned_text, base64_images). Tokens pointing at missing files
+    are silently dropped. Uses data uri-friendly raw b64 for Ollama's `images`
+    message field.
+    """
+    if not text or "[image:" not in text:
+        return text, []
+
+    imgs: list[str] = []
+    def _sub(m: re.Match) -> str:
+        raw = m.group(1).strip().strip('"').strip("'")
+        try:
+            p = Path(raw).expanduser()
+            if p.is_file():
+                data = p.read_bytes()
+                imgs.append(base64.b64encode(data).decode("ascii"))
+                return ""
+        except Exception:
+            logger.debug("image_token_parse_failed", exc_info=True)
+        return m.group(0)  # leave token in place if unreadable
+
+    cleaned = _IMAGE_TOKEN_RE.sub(_sub, text).strip()
+    return cleaned, imgs
 
 
 class SessionExecutionController:
@@ -53,10 +85,21 @@ class SessionExecutionController:
                     )
                     streamer.resume()
 
+            # Extract [image: path] tokens and convert to base64 for vision models
+            cleaned_input, _images = _extract_images_from_prompt(user_input)
+            _run_kwargs: dict = {
+                "on_event": _on_event,
+                "steering_queue": self._session.steering,
+            }
+            if _images:
+                streamer.pause()
+                from .display import console as _img_console
+                _img_console.print(f"  [dim cyan]attached {len(_images)} image(s) for vision routing[/]")
+                streamer.resume()
+                _run_kwargs["images"] = _images
             result = self._session.agentic.run(
-                user_input,
-                on_event=_on_event,
-                steering_queue=self._session.steering,
+                cleaned_input or user_input,
+                **_run_kwargs,
             )
         except KeyboardInterrupt:
             self._session._handle_ctrl_c_abort(streamer)

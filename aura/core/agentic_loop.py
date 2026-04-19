@@ -141,17 +141,14 @@ class AgenticLoop:
         self._show_cost_estimates_enabled = False
         if aura_config:
             self._show_cost_estimates_enabled = aura_config.get("cost_estimate", False)
+        # Store for later consumers (auto-verify, lint/typecheck)
+        self._aura_config = aura_config or {}
 
         # H2: Diff preview accept/reject toggle
         self._trust_all_edits = False
 
-        # H5: Response cache
-        self._response_cache = None
-        try:
-            from .response_cache import ResponseCache
-            self._response_cache = ResponseCache()
-        except Exception:
-            logger.debug("ResponseCache unavailable", exc_info=True)
+        # Response cache is now owned by brain.py (module-level singleton)
+        # so multiple sessions share hits. See aura.brain._get_response_cache.
 
     def __del__(self):
         """Clean up MCP connections to prevent process leaks."""
@@ -191,7 +188,6 @@ class AgenticLoop:
         clone._mcp_client = self._mcp_client
         clone._owns_mcp = False
         clone._planner = getattr(self, "_planner", None)
-        clone._response_cache = getattr(self, "_response_cache", None)
         clone.context_mgr = self.context_mgr
 
         # Fresh mutable state.
@@ -436,6 +432,11 @@ class AgenticLoop:
         "function", "class", "method", "file", "import", "error", "bug",
         "code", "script", "module", "variable", "loop", "api", "endpoint",
     })
+    # Obvious non-code conversational openers — never trigger smart context
+    _NON_CODE_OPENERS = frozenset({
+        "hi", "hello", "hey", "yo", "sup", "thanks", "thank", "ok", "okay",
+        "cool", "nice", "great", "lol", "lmao", "gg", "good", "bad", "wow",
+    })
 
     def _inject_smart_context(self, prompt: str, system_prompt: str) -> str:
         """Embed prompt and find the most relevant project files to inject.
@@ -443,9 +444,13 @@ class AgenticLoop:
         Skipped for short conversational prompts to avoid 30+ blocking embed
         calls that add 5-20s of latency per message with no benefit.
         """
-        # Skip for conversational prompts — embedding 30 files for "hey aura"
-        # wastes 4-20 seconds and adds irrelevant code to context.
         words = prompt.lower().split()
+
+        # Hard-skip conversational openers ("hey aura what's up") even when
+        # they happen to contain a code keyword like "update".
+        if words and words[0].rstrip("?!.,") in self._NON_CODE_OPENERS:
+            return system_prompt
+
         is_code_task = len(words) >= 5 and any(w in self._CODE_TASK_KEYWORDS for w in words)
         if not is_code_task:
             return system_prompt
@@ -478,17 +483,35 @@ class AgenticLoop:
             if not candidates:
                 return system_prompt
 
+            # Batch all candidate paths into one embed call (vs N sequential HTTP round-trips)
+            rels = [os.path.relpath(fpath, self.project_root) for fpath in candidates]
             scored = []
-            for fpath in candidates:
-                rel = os.path.relpath(fpath, self.project_root)
-                try:
-                    file_resp = ollama.embed(model="nomic-embed-text:latest", input=rel)
-                    if file_resp and file_resp.get("embeddings"):
-                        file_vec = np.array(file_resp["embeddings"][0])
-                        sim = float(np.dot(prompt_vec, file_vec) / (np.linalg.norm(prompt_vec) * np.linalg.norm(file_vec) + 1e-8))
+            try:
+                batch_resp = ollama.embed(model="nomic-embed-text:latest", input=rels)
+                batch_vecs = batch_resp.get("embeddings") if batch_resp else None
+            except Exception:
+                batch_vecs = None
+
+            if batch_vecs and len(batch_vecs) == len(candidates):
+                prompt_norm = np.linalg.norm(prompt_vec) + 1e-8
+                for fpath, vec in zip(candidates, batch_vecs):
+                    try:
+                        file_vec = np.array(vec)
+                        sim = float(np.dot(prompt_vec, file_vec) / (prompt_norm * (np.linalg.norm(file_vec) + 1e-8)))
                         scored.append((fpath, sim))
-                except Exception:
-                    continue
+                    except Exception:
+                        continue
+            else:
+                # Fallback: serial per-path (original behavior) if batch response was short/missing
+                for fpath, rel in zip(candidates, rels):
+                    try:
+                        file_resp = ollama.embed(model="nomic-embed-text:latest", input=rel)
+                        if file_resp and file_resp.get("embeddings"):
+                            file_vec = np.array(file_resp["embeddings"][0])
+                            sim = float(np.dot(prompt_vec, file_vec) / (np.linalg.norm(prompt_vec) * np.linalg.norm(file_vec) + 1e-8))
+                            scored.append((fpath, sim))
+                    except Exception:
+                        continue
 
             scored.sort(key=lambda x: -x[1])
             top = scored[:3]
@@ -553,6 +576,7 @@ class AgenticLoop:
         on_chunk=None,
         on_tool_start=None,
         on_event=None,
+        images: Optional[list] = None,
     ) -> dict:
         """Run the agentic loop until completion.
 
@@ -583,6 +607,24 @@ class AgenticLoop:
         self._empty_response_count = 0
         self._thinking_nudge_count = 0
         self._current_run_id = f"run_{uuid.uuid4().hex[:8]}"
+        self._current_run_prompt = prompt  # used by Intent-to-Code Ledger
+        # Cognitive heatmap accumulators (Phase 9)
+        if not hasattr(self, "_tokens_by_tool") or self._tokens_by_tool is None:
+            self._tokens_by_tool = {}
+        if not hasattr(self, "_tokens_by_file") or self._tokens_by_file is None:
+            self._tokens_by_file = {}
+        self._active_tool_for_heatmap = None
+        self._active_file_for_heatmap = None
+        # Let ToolExecutor read back-refs (for ledger, heatmap, etc.)
+        try:
+            self.executor._agentic_loop = self
+        except Exception:
+            pass
+        # Let brain find the active loop so _record_tokens can update heatmap
+        try:
+            self.brain._active_agentic_loop = self
+        except Exception:
+            pass
 
         # Capture baseline cost for per-turn cost tracking (C2)
         _prev_cost = 0.0
@@ -694,7 +736,10 @@ class AgenticLoop:
             history = self._conversation_history[-40:]
             messages.extend(history)
 
-        messages.append({"role": "user", "content": prompt})
+        _user_msg = {"role": "user", "content": prompt}
+        if images:
+            _user_msg["images"] = list(images)
+        messages.append(_user_msg)
 
         final_response = ""
         model_used = ""
@@ -918,9 +963,12 @@ class AgenticLoop:
         final_response = outcome.response
 
         # Save user message and final assistant response to conversation history and session
-        self._conversation_history.append({"role": "user", "content": prompt})
+        _hist_user = {"role": "user", "content": prompt}
+        if images:
+            _hist_user["images"] = list(images)
+        self._conversation_history.append(_hist_user)
         if self.session is not None:
-            self.session.append({"role": "user", "content": prompt})
+            self.session.append(_hist_user)
         if final_response:
             self._conversation_history.append({"role": "assistant", "content": final_response})
             if self.session is not None:
@@ -1133,29 +1181,58 @@ class AgenticLoop:
             return None
 
     def _run_auto_test(self) -> Optional[str]:
-        """Run project tests after edits. Returns test output for LLM or None."""
+        """Run project tests + lint/typecheck after edits. Returns output for LLM or None."""
         try:
-            from aura.tools.auto_verify import auto_verify
+            from aura.tools.auto_verify import auto_verify, lint_and_typecheck
             _ensure_console()
+            test_cmd = (self._aura_config or {}).get("test_cmd")
+            lint_cmd = (self._aura_config or {}).get("lint_cmd")
+            typecheck_cmd = (self._aura_config or {}).get("typecheck_cmd")
+
             _loop_support.console.print("  [dim cyan]auto[/dim cyan] running tests...", highlight=False)
-            result = auto_verify(self.project_root, self.executor.shell)
+            result = auto_verify(self.project_root, self.executor.shell, test_cmd_override=test_cmd)
+
+            # Tests first — if they fail, return immediately
+            if not result.get("skipped") and not result.get("success"):
+                output = result.get("output", "Tests failed")
+                cmd = result.get("test_command", "tests")
+                _loop_support.console.print(f"  [red]tests failed[/red] ({cmd})", highlight=False)
+                return json.dumps({
+                    "auto_test_result": "FAILED",
+                    "test_command": cmd,
+                    "output": output[:3000],
+                    "instruction": "Tests failed after your edit. Please read the error output and fix the issue.",
+                })
 
             if result.get("skipped"):
-                return None  # No test runner — don't inject anything
-
-            if result.get("success"):
+                pass  # fall through to lint/typecheck
+            else:
                 _loop_support.console.print("  [green]tests passed[/green]", highlight=False)
-                return None  # Tests passed — no need to tell LLM
 
-            # Tests failed — feed output back to LLM so it can fix
-            output = result.get("output", "Tests failed")
-            cmd = result.get("test_command", "tests")
-            _loop_support.console.print(f"  [red]tests failed[/red] ({cmd})", highlight=False)
+            # Tests passed (or no runner) — run lint + typecheck
+            _loop_support.console.print("  [dim cyan]auto[/dim cyan] lint + typecheck...", highlight=False)
+            lr = lint_and_typecheck(
+                self.project_root, self.executor.shell,
+                lint_cmd_override=lint_cmd, typecheck_cmd_override=typecheck_cmd,
+            )
+
+            if lr.get("skipped") or lr.get("success"):
+                if not lr.get("skipped"):
+                    _loop_support.console.print("  [green]lint/typecheck passed[/green]", highlight=False)
+                return None
+
+            # Lint or typecheck failed
+            fail_blocks = []
+            for key in ("lint", "typecheck"):
+                sub = lr.get(key)
+                if sub and not sub.get("success"):
+                    fail_blocks.append(f"[{key}] {sub.get('command')}\n{sub.get('output', '')[:2000]}")
+            _loop_support.console.print("  [red]lint/typecheck failed[/red]", highlight=False)
             return json.dumps({
                 "auto_test_result": "FAILED",
-                "test_command": cmd,
-                "output": output[:3000],
-                "instruction": "Tests failed after your edit. Please read the error output and fix the issue.",
+                "test_command": "lint/typecheck",
+                "output": "\n\n".join(fail_blocks)[:3000],
+                "instruction": "Lint or type errors after your edit. Please fix them.",
             })
         except Exception as e:
             logger.debug(f"[AgenticLoop] Auto-test error (non-fatal): {e}")

@@ -284,7 +284,7 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
 
         # Initialize Thinker — MIRROR dual-process background reasoning (roadmap 3.6)
         self.thinker = None
-        if THINKER_AVAILABLE:
+        if THINKER_AVAILABLE and not fast_init:
             try:
                 self.thinker = get_thinker(brain=self.brain)
                 logger.info("[LOADED] Thinker — MIRROR dual-process background reasoning")
@@ -293,54 +293,57 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
 
         # Initialize MCTS Reasoning Tree — used by Strategy Bandit for MCTS strategy
         self.reasoning_tree = None
-        try:
-            from aura.tools.reasoning_tree_tool import ReasoningTreeTool
-            # Create LLM function adapter: MCTSReasoning expects (prompt, system_prompt) -> str
-            def _mcts_llm_func(prompt: str, system_prompt: str | None = None) -> str:
-                return self.brain.think(prompt, system_prompt=system_prompt, use_history=False)
+        if not fast_init:
+            try:
+                from aura.tools.reasoning_tree_tool import ReasoningTreeTool
+                # Create LLM function adapter: MCTSReasoning expects (prompt, system_prompt) -> str
+                def _mcts_llm_func(prompt: str, system_prompt: str | None = None) -> str:
+                    return self.brain.think(prompt, system_prompt=system_prompt, use_history=False)
 
-            # Create tool executor adapter for LATS pattern:
-            # MCTS nodes can invoke tools (search, code exec, file read) during expansion
-            def _mcts_tool_executor(tool_name: str, tool_args: dict):
-                return self._execute_tool_call(tool_name, tool_args)
+                # Create tool executor adapter for LATS pattern:
+                # MCTS nodes can invoke tools (search, code exec, file read) during expansion
+                def _mcts_tool_executor(tool_name: str, tool_args: dict):
+                    return self._execute_tool_call(tool_name, tool_args)
 
-            self.reasoning_tree = ReasoningTreeTool(
-                llm_func=_mcts_llm_func,
-                tool_executor=_mcts_tool_executor,
-            )
-            logger.info("[LOADED] ReasoningTreeTool — MCTS + LATS tool integration for Strategy Bandit")
-        except (ImportError, AttributeError, TypeError, ValueError) as e:
-            logger.warning(f"[ReasoningTreeTool] Init failed: {e}")
+                self.reasoning_tree = ReasoningTreeTool(
+                    llm_func=_mcts_llm_func,
+                    tool_executor=_mcts_tool_executor,
+                )
+                logger.info("[LOADED] ReasoningTreeTool — MCTS + LATS tool integration for Strategy Bandit")
+            except (ImportError, AttributeError, TypeError, ValueError) as e:
+                logger.warning(f"[ReasoningTreeTool] Init failed: {e}")
 
         # Initialize NeuroDream (Tool #24) - Sleep/Dream Memory Consolidation
         self._neurodream_stop_event = threading.Event()
         self._nd_poll_thread = None
-        try:
-            self.neurodream = NeuroDreamEngine(
-                knowledge_graph=self.tools.get("knowledge_graph"),
-                evoemo=self.tools.get("evoemo"),
-                inner_monologue=self.monologue,
-                idle_threshold_minutes=30,
-            )
-            self.tools['neurodream'] = self.neurodream
-            logger.debug("[LOADED] NeuroDream - Sleep/dream memory consolidation")
+        self.neurodream = None
+        if not fast_init:
+            try:
+                self.neurodream = NeuroDreamEngine(
+                    knowledge_graph=self.tools.get("knowledge_graph"),
+                    evoemo=self.tools.get("evoemo"),
+                    inner_monologue=self.monologue,
+                    idle_threshold_minutes=30,
+                )
+                self.tools['neurodream'] = self.neurodream
+                logger.debug("[LOADED] NeuroDream - Sleep/dream memory consolidation")
 
-            # Idle polling thread — only start AFTER successful NeuroDream init
-            def _neurodream_idle_poll():
-                while not self._neurodream_stop_event.wait(timeout=60):
-                    try:
-                        if self.neurodream and self.neurodream.current_phase.value == "awake":
-                            self.neurodream.check_idle_trigger()
-                    except Exception as e:
-                        logger.debug(f"[NeuroDream] Idle poll error: {e}")
-            self._nd_poll_thread = threading.Thread(
-                target=_neurodream_idle_poll, daemon=True, name="NeuroDream-IdlePoll"
-            )
-            self._nd_poll_thread.start()
-            logger.debug("[NeuroDream] Idle polling thread started (60s interval)")
-        except Exception as e:
-            self.neurodream = None
-            logger.warning(f"[NeuroDream] Init failed: {e}")
+                # Idle polling thread — only start AFTER successful NeuroDream init
+                def _neurodream_idle_poll():
+                    while not self._neurodream_stop_event.wait(timeout=60):
+                        try:
+                            if self.neurodream and self.neurodream.current_phase.value == "awake":
+                                self.neurodream.check_idle_trigger()
+                        except Exception as e:
+                            logger.debug(f"[NeuroDream] Idle poll error: {e}")
+                self._nd_poll_thread = threading.Thread(
+                    target=_neurodream_idle_poll, daemon=True, name="NeuroDream-IdlePoll"
+                )
+                self._nd_poll_thread.start()
+                logger.debug("[NeuroDream] Idle polling thread started (60s interval)")
+            except Exception as e:
+                self.neurodream = None
+                logger.warning(f"[NeuroDream] Init failed: {e}")
 
         # AURA v3.0 ALIVE — AURAEngine removed; context/humanization via ALMA helpers.
         # self.aura_enabled controls whether _build_aura_context runs.
@@ -349,28 +352,30 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
         # Soul — personality/identity config from soul files
         self._soul = None
         self._soul_loader = None
-        try:
-            from aura.soul.soul_loader import SoulLoader
-            self._soul_loader = SoulLoader()
-            self._soul = self._soul_loader.load("SOUL_PERSONAL")
-            logger.info(f"[LOADED] Soul: {self._soul.get('name', 'AURA')}")
-        except (ImportError, AttributeError, OSError, ValueError) as e:
-            self._soul = None
-            logger.debug(f"[SKIP] Soul: {e}")
+        if not fast_init:
+            try:
+                from aura.soul.soul_loader import SoulLoader
+                self._soul_loader = SoulLoader()
+                self._soul = self._soul_loader.load("SOUL_PERSONAL")
+                logger.info(f"[LOADED] Soul: {self._soul.get('name', 'AURA')}")
+            except (ImportError, AttributeError, OSError, ValueError) as e:
+                self._soul = None
+                logger.debug(f"[SKIP] Soul: {e}")
 
         # VisibleThinking — transparent reasoning for ThoughtStream UI
         self._visible_thinking = None
-        try:
-            from aura.thinking.visible_thinking import VisibleThinking
-            self._visible_thinking = VisibleThinking()
-            logger.info("[LOADED] VisibleThinking")
-        except (ImportError, AttributeError, OSError, ValueError) as e:
-            logger.debug(f"[SKIP] VisibleThinking: {e}")
+        if not fast_init:
+            try:
+                from aura.thinking.visible_thinking import VisibleThinking
+                self._visible_thinking = VisibleThinking()
+                logger.info("[LOADED] VisibleThinking")
+            except (ImportError, AttributeError, OSError, ValueError) as e:
+                logger.debug(f"[SKIP] VisibleThinking: {e}")
 
         self._humanizer = None
 
         # Initialize AURA Fast Path - Instant responses
-        if FAST_PATH_AVAILABLE:
+        if FAST_PATH_AVAILABLE and not fast_init:
             try:
                 self.fast_path_handler = FastPathHandler(
                     memory_store=self.memory if hasattr(self, 'memory') else None,
@@ -390,37 +395,39 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
         # the instance exists and wire a notification callback so the agent can
         # receive proactive messages even when running without the API server.
         self.gateway_daemon = None
-        try:
-            from aura.proactive.gateway_daemon import get_gateway_daemon
-            self.gateway_daemon = get_gateway_daemon()
+        if not fast_init:
+            try:
+                from aura.proactive.gateway_daemon import get_gateway_daemon
+                self.gateway_daemon = get_gateway_daemon()
 
-            def _on_proactive_agent(msg):
-                """Delivery callback: log proactive messages; API wires WebSocket push separately."""
-                try:
-                    logger.info(f"[GatewayDaemon] Proactive: {getattr(msg, 'content', str(msg))[:120]}")
-                except (AttributeError, TypeError) as e:
-                    logger.debug(f"[GatewayDaemon] Callback format error: {e}")
-            # Only set fallback callback if none wired yet (api/main.py sets a richer one)
-            if getattr(self.gateway_daemon, '_notification_callback', None) is None:
-                self.gateway_daemon.set_notification_callback(_on_proactive_agent)
-            logger.info("[LOADED] GatewayDaemon - Proactive intelligence system (singleton)")
-        except (ImportError, AttributeError, TypeError, OSError) as e:
-            logger.warning(f"[GatewayDaemon] Initialization failed: {e}")
-            self.gateway_daemon = None
+                def _on_proactive_agent(msg):
+                    """Delivery callback: log proactive messages; API wires WebSocket push separately."""
+                    try:
+                        logger.info(f"[GatewayDaemon] Proactive: {getattr(msg, 'content', str(msg))[:120]}")
+                    except (AttributeError, TypeError) as e:
+                        logger.debug(f"[GatewayDaemon] Callback format error: {e}")
+                # Only set fallback callback if none wired yet (api/main.py sets a richer one)
+                if getattr(self.gateway_daemon, '_notification_callback', None) is None:
+                    self.gateway_daemon.set_notification_callback(_on_proactive_agent)
+                logger.info("[LOADED] GatewayDaemon - Proactive intelligence system (singleton)")
+            except (ImportError, AttributeError, TypeError, OSError) as e:
+                logger.warning(f"[GatewayDaemon] Initialization failed: {e}")
+                self.gateway_daemon = None
 
         # Initialize Tool RAG for dynamic tool selection
         self.tool_rag = None
-        try:
-            from aura.core.tool_schemas import AGENTIC_TOOLS
-            from aura.tools.tool_rag import ToolRAG
-            self.tool_rag = ToolRAG()
-            self.tool_rag.initialize(self.tools, AGENTIC_TOOLS)
-        except (ImportError, AttributeError, TypeError, ValueError, OSError) as e:
-            logger.debug(f"[ToolRAG] Init failed (will use fallback): {e}")
+        if not fast_init:
+            try:
+                from aura.core.tool_schemas import AGENTIC_TOOLS
+                from aura.tools.tool_rag import ToolRAG
+                self.tool_rag = ToolRAG()
+                self.tool_rag.initialize(self.tools, AGENTIC_TOOLS)
+            except (ImportError, AttributeError, TypeError, ValueError, OSError) as e:
+                logger.debug(f"[ToolRAG] Init failed (will use fallback): {e}")
 
         # Initialize Adaptive Planner (Roadmap 5.4)
         self.adaptive_planner = None
-        if ADAPTIVE_PLANNER_AVAILABLE:
+        if ADAPTIVE_PLANNER_AVAILABLE and not fast_init:
             try:
                 self.adaptive_planner = AdaptivePlanner(
                     brain=self.brain, planning_interval=3

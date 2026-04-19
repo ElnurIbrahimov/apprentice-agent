@@ -134,7 +134,8 @@ def _handle_evolve_command(agent, arg: str):
 
     before_procedures = {}
     try:
-        store = SkillStore(storage_path="./aura_data/skill_library")
+        from aura.paths import SKILL_LIBRARY_DIR
+        store = SkillStore(storage_path=str(SKILL_LIBRARY_DIR))
         target_ids = skill_ids if skill_ids else list(store.index.keys())
         for sid in target_ids:
             skill = store.load(sid)
@@ -192,7 +193,8 @@ def _handle_evolve_command(agent, arg: str):
             console.print("\n  [bold]--- Procedure diffs ---[/bold]")
             import difflib
             try:
-                store_after = SkillStore(storage_path="./aura_data/skill_library")
+                from aura.paths import SKILL_LIBRARY_DIR
+                store_after = SkillStore(storage_path=str(SKILL_LIBRARY_DIR))
                 for sid, old_proc in before_procedures.items():
                     skill_after = store_after.load(sid)
                     if not skill_after:

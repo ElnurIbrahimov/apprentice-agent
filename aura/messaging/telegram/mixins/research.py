@@ -7,7 +7,7 @@ import asyncio
 import logging
 import re
 import time as _time
-from concurrent.futures import ThreadPoolExecutor
+from aura.pools import llm_pool
 
 try:
     from telegram import Update
@@ -524,12 +524,12 @@ class ResearchMixin:
             return label, text, elapsed
 
         loop = asyncio.get_running_loop()
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = [
-                loop.run_in_executor(pool, _call_model, label, model_name)
-                for label, model_name in models
-            ]
-            results = await asyncio.gather(*futures, return_exceptions=True)
+        pool = llm_pool()
+        futures = [
+            loop.run_in_executor(pool, _call_model, label, model_name)
+            for label, model_name in models
+        ]
+        results = await asyncio.gather(*futures, return_exceptions=True)
 
         for result in results:
             if isinstance(result, Exception):

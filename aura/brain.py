@@ -59,6 +59,28 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+# Module-level response cache — shared across all OllamaBrain instances so
+# multiple sessions benefit from cache hits. Lazily created on first access.
+_response_cache_singleton = None
+_response_cache_lock = threading.Lock()
+
+
+def _get_response_cache():
+    """Return the process-wide ResponseCache, or None if init fails."""
+    global _response_cache_singleton
+    if _response_cache_singleton is not None:
+        return _response_cache_singleton
+    with _response_cache_lock:
+        if _response_cache_singleton is None:
+            try:
+                from aura.core.response_cache import ResponseCache
+                _response_cache_singleton = ResponseCache()
+            except Exception:
+                logger.debug("response_cache_init_failed", exc_info=True)
+                return None
+    return _response_cache_singleton
+
 # ALMA Emotional Intelligence System
 try:
     from .emotion.alma_engine import alma_engine, trigger_emotion
@@ -187,6 +209,10 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         self.conversation_history: list[dict] = []
         self._history_lock = threading.RLock()
         self._last_model_used: str = self.model  # Track for metacognition
+        # Warm-slot tracker — Ollama Pro sweet spot is 2 concurrent models warm.
+        # LRU of most-recently-used models; dispatcher prefers these when scores tie.
+        from collections import deque as _deque
+        self._warm_models: _deque[str] = _deque(maxlen=2)
         self._query_count: int = 0  # Track queries for auto-reset (resets every 15)
         self._total_query_count: int = 0  # Total queries (never resets)
         self._model_override: Optional[str] = None  # Manual model override (bypasses auto-selection)
@@ -220,19 +246,11 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         self._session_output_tokens: int = 0
         self._session_cost_usd: float = 0.0
         self._token_lock = threading.Lock()
-        # Rough USD cost per 1K tokens (input/output) for cloud models
+        # Model costs derive from the catalog — single source of truth.
+        from aura.models_catalog import MODELS as _CATALOG
         self._MODEL_COST_PER_1K: dict = {
-            "nemotron-3-super:cloud":      (0.0004, 0.0004),
-            "kimi-k2.5:cloud":             (0.003,  0.003),
-            "qwen3.5:397b-cloud":          (0.004,  0.004),
-            "qwen3.5:cloud":              (0.004,  0.004),
-            "deepseek-v3.2:cloud":         (0.003,  0.003),
-            "glm-5:cloud":                (0.003,  0.003),
-            "qwen3-coder:480b-cloud":      (0.004,  0.004),
-            "qwen3-coder-next:cloud":      (0.003,  0.003),
-            "minimax-m2.7:cloud":          (0.004,  0.004),
-            "minimax-m2.5:cloud":          (0.004,  0.004),
-            "gpt-oss:120b-cloud":          (0.003,  0.003),
+            name: (p.cost_in_per_1k, p.cost_out_per_1k)
+            for name, p in _CATALOG.items()
         }
         # ChatGPT subscription models (cost is $0 — covered by subscription)
         if CHATGPT_AVAILABLE:
@@ -352,6 +370,37 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             self._session_input_tokens += input_tokens
             self._session_output_tokens += output_tokens
             self._session_cost_usd += cost
+        # Cognitive heatmap: if an agentic loop is active and has set a tool
+        # context, bump per-tool / per-file counters on it.
+        try:
+            loop = getattr(self, "_active_agentic_loop", None)
+            if loop is not None:
+                tool = getattr(loop, "_active_tool_for_heatmap", None)
+                f = getattr(loop, "_active_file_for_heatmap", None)
+                total = int(input_tokens) + int(output_tokens)
+                if total > 0:
+                    if tool:
+                        loop._tokens_by_tool[tool] = loop._tokens_by_tool.get(tool, 0) + total
+                    if f:
+                        loop._tokens_by_file[f] = loop._tokens_by_file.get(f, 0) + total
+        except Exception:
+            pass
+
+    def _touch_warm_slot(self, model: str) -> None:
+        """Mark `model` as recently used. Keeps warm-set bounded to 2 (Ollama Pro sweet spot)."""
+        if not model:
+            return
+        try:
+            if model in self._warm_models:
+                # Move to the right (most-recent end) by removing + re-appending
+                self._warm_models.remove(model)
+            self._warm_models.append(model)
+        except Exception:
+            pass
+
+    def get_warm_models(self) -> list[str]:
+        """Return currently-warm models (order: oldest -> newest)."""
+        return list(self._warm_models)
 
     def get_session_stats(self) -> dict:
         """Return per-session token usage and estimated cost (Phase 4)."""
@@ -1395,6 +1444,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             model = self._select_model(prompt, task_type)
             model = self._routing_stats_override(model, task_type)
         self._last_model_used = model
+        self._touch_warm_slot(model)
 
         full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
 
@@ -1573,6 +1623,21 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             except Exception as e:
                 logger.debug(f"[Brain] non-critical: {e}")
 
+            # Response cache — skip the LLM entirely on a hit. Only safe when
+            # history is OFF (cache keyed on prompt+system+model only) and no
+            # neuromodulator temperature variability is in play.
+            _cache = _get_response_cache()
+            _cache_key_ok = (
+                _cache is not None
+                and not use_history
+                and not tone_modifier
+            )
+            if _cache_key_ok:
+                _cached = _cache.get(prompt, full_system_prompt or "", actual_model)
+                if _cached is not None:
+                    logger.info(f"[BRAIN] Response cache HIT for {actual_model}")
+                    return _cached
+
             # Phase 2: LLM call (NO lock held — allows parallel think/fleet/debate)
             adjusted_timeout = self._get_adaptive_timeout()
             _llm_start_ts = time.time()
@@ -1657,6 +1722,13 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
 
             # Phase 3: Update history (uses _history_lock internally)
             self._update_history_and_cleanup(prompt, assistant_message, actual_model, use_history)
+
+            # Response cache write — only for cache-eligible calls
+            if _cache_key_ok and assistant_message and _cache is not None:
+                try:
+                    _cache.put(prompt, full_system_prompt or "", actual_model, assistant_message)
+                except Exception:
+                    logger.debug("response_cache_put_failed", exc_info=True)
 
             return assistant_message
         finally:
