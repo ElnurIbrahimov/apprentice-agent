@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { LoginPage } from './components/LoginPage';
 import { ChatContainer } from './components/ChatContainer';
 import { Sidebar } from './components/Sidebar';
 import { ToastContainer, useToastStore } from './components/Toast';
@@ -671,8 +672,55 @@ function MainApp() {
   );
 }
 
+type AuthState =
+  | { status: 'checking' }
+  | { status: 'anonymous'; configured: boolean }
+  | { status: 'authenticated'; username: string };
+
 function App() {
   const { settings, updateSettings } = useSettingsStore();
+  const [auth, setAuth] = useState<AuthState>({ status: 'checking' });
+
+  // Probe current session on mount. If the server doesn't have cookie-auth
+  // configured (`configured === false`), treat as authenticated so behavior
+  // matches the pre-login world — useful for local dev / older deployments.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/web/me', { credentials: 'same-origin' });
+        if (!res.ok) throw new Error(`status=${res.status}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.authenticated) {
+          setAuth({ status: 'authenticated', username: data.username || '' });
+        } else if (data.configured === false) {
+          // Server isn't set up for cookie auth — let the app through.
+          setAuth({ status: 'authenticated', username: '' });
+        } else {
+          setAuth({ status: 'anonymous', configured: true });
+        }
+      } catch {
+        // /me endpoint unreachable (old server build). Fall back to anonymous
+        // *only if* the app would also 401 — but since we can't easily know,
+        // let the app through and surface errors organically.
+        if (!cancelled) setAuth({ status: 'authenticated', username: '' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (auth.status === 'checking') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-400">
+        <div className="animate-pulse">Loading…</div>
+      </div>
+    );
+  }
+
+  if (auth.status === 'anonymous') {
+    return <LoginPage onLoggedIn={(u) => setAuth({ status: 'authenticated', username: u })} />;
+  }
 
   if (!settings.onboardingDone) {
     return (

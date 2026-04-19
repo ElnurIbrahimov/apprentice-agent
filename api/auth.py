@@ -75,3 +75,30 @@ def verify_api_key_ws(key: str) -> bool:
     if configured is None:
         return False  # Auth enabled but no key configured — fail closed
     return secrets.compare_digest(key or "", configured)
+
+
+def verify_websocket_auth(websocket) -> bool:
+    """Accept EITHER a valid X-API-Key header, a ?token= query param, OR a
+    valid aura_session cookie. Used by WebSocket handlers that can't rely on
+    the HTTP middleware.
+
+    The web UI's browser automatically sends the session cookie on the WS
+    upgrade (same-origin), so logged-in users need no extra setup.
+    The extension continues to pass X-API-Key / ?token=.
+    """
+    if not _auth_is_enabled():
+        return True
+
+    # Header path — works for desktop clients that can set headers
+    header_key = websocket.headers.get("X-API-Key") or websocket.query_params.get("token")
+    if header_key and verify_api_key_ws(header_key):
+        return True
+
+    # Cookie path — browsers send this automatically on same-origin WS
+    try:
+        from api.auth_session import extract_session_username
+        if extract_session_username(websocket.headers):
+            return True
+    except Exception as e:
+        logger.debug(f"WebSocket cookie check failed: {e}")
+    return False
