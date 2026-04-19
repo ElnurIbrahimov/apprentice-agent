@@ -3,7 +3,7 @@ import logging
 import os
 import secrets
 
-from fastapi import Header, HTTPException, status
+from fastapi import Header, HTTPException, Request, status
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,12 @@ def _auth_is_enabled() -> bool:
 _auth_is_enabled._warned = False
 
 
-async def require_api_key(x_api_key: str = Header(default="")) -> str:
-    """FastAPI dependency: validates X-API-Key header."""
+async def require_api_key(
+    request: Request,
+    x_api_key: str = Header(default=""),
+) -> str:
+    """FastAPI dependency: accepts EITHER a valid X-API-Key header OR a
+    valid aura_session cookie from the web-login flow."""
     if not _auth_is_enabled():
         return ""
 
@@ -46,20 +50,29 @@ async def require_api_key(x_api_key: str = Header(default="")) -> str:
 
     if configured is None:
         # SECURITY: Fail CLOSED — auth is enabled but no key is configured.
-        # Reject all requests instead of silently disabling auth.
         logger.error("Auth enabled but no AURA_API_KEY set — blocking all requests")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Auth is enabled but AURA_API_KEY is not configured. Set it or disable auth.",
         )
 
-    if not secrets.compare_digest(x_api_key or "", configured):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key",
-            headers={"WWW-Authenticate": "ApiKey"},
-        )
-    return x_api_key
+    # Path 1: header
+    if x_api_key and secrets.compare_digest(x_api_key, configured):
+        return x_api_key
+
+    # Path 2: session cookie (web UI login)
+    try:
+        from api.auth_session import extract_session_username
+        if extract_session_username(request.headers):
+            return "session"
+    except Exception as e:
+        logger.debug(f"session cookie check failed: {e}")
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or missing API key",
+        headers={"WWW-Authenticate": "ApiKey"},
+    )
 
 
 def verify_api_key_ws(key: str) -> bool:
