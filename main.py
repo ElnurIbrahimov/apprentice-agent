@@ -12,9 +12,12 @@ if '_wmi' not in _sys.modules:
     _sys.modules['_wmi'] = _wmi_stub
 
 import argparse
+import logging
 import os
 import sys
 from typing import Any, NoReturn, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _get_console():
@@ -77,14 +80,34 @@ _SUBCOMMANDS = {
     "mcp-serve", "acp-serve", "exec", "ide", "log", "status", "recall",
     "start", "stop", "why", "heatmap", "worktree",
 }
-_OPTS_WITH_VALUES = {
-    "--max-iterations", "--dream-date", "-p", "--prompt", "--login", "--logout",
-    "--tier", "--budget", "--preference", "--model", "--format",
-    "--channels", "-ch",
-}
+def _collect_valued_flags(parser: argparse.ArgumentParser) -> set[str]:
+    """Derive option strings that consume a separate value token from a parser.
+
+    Used by _argv_has_subcommand to know which tokens to skip-past when
+    scanning for the first positional. Deriving this from the parser instead
+    of a hardcoded set means adding a new `--flag value` arg can never silently
+    break subcommand detection — a common source of drift in the old code.
+    """
+    flags: set[str] = set()
+    _value_free = (
+        argparse._StoreTrueAction,
+        argparse._StoreFalseAction,
+        argparse._CountAction,
+        argparse._HelpAction,
+        argparse._VersionAction,
+    )
+    for action in parser._actions:
+        if not action.option_strings:
+            continue
+        if action.nargs == 0:
+            continue
+        if isinstance(action, _value_free):
+            continue
+        flags.update(action.option_strings)
+    return flags
 
 
-def _argv_has_subcommand(argv: list[str]) -> bool:
+def _argv_has_subcommand(argv: list[str], valued_flags: set[str]) -> bool:
     """Return True if the first positional token in argv is a known subcommand.
 
     Needed because argparse subparsers are greedy: if we always register them,
@@ -100,7 +123,7 @@ def _argv_has_subcommand(argv: list[str]) -> bool:
             if "=" in tok:
                 i += 1
                 continue
-            if tok in _OPTS_WITH_VALUES:
+            if tok in valued_flags:
                 i += 2
                 continue
             i += 1
@@ -130,12 +153,14 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
-    # Only register subparsers if a known subcommand is present in argv.
-    # Otherwise argparse would greedily consume the first positional of a
-    # goal-mode invocation (e.g. `aura "fix the login bug"`) and crash.
-    # Also register when -h/--help is requested so the help text is complete.
+    # Register top-level args BEFORE deciding on subparsers so
+    # _collect_valued_flags can see every `--flag value` pair. Subparsers get
+    # added at the end only if the pre-scan says a subcommand was requested.
+    _add_top_level_arguments(parser)
+
     _wants_help = any(a in ("-h", "--help") for a in sys.argv[1:])
-    use_subparsers = _argv_has_subcommand(sys.argv[1:]) or _wants_help
+    valued_flags = _collect_valued_flags(parser)
+    use_subparsers = _argv_has_subcommand(sys.argv[1:], valued_flags) or _wants_help
     if use_subparsers:
         subparsers = parser.add_subparsers(dest="command")
         subparsers.add_parser("init", help="Create AURA.md in current project")
@@ -186,8 +211,12 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
             "--output-failures", dest="output_failures", action="store_true",
             help="Emit per-tool failure JSON to stderr (for CI consumption)",
         )
-        sub_ide = subparsers.add_parser("ide", help="IDE integration setup")
-        sub_ide.add_argument("action", nargs="?", default="setup", choices=["setup"], help="Action (default: setup)")
+        sub_ide = subparsers.add_parser("ide", help="IDE integration: setup, reset, or validate")
+        sub_ide.add_argument(
+            "action", nargs="?", default="setup",
+            choices=["setup", "reset", "validate"],
+            help="setup (default): install VS Code tasks; reset: remove Aura tasks; validate: check for drift",
+        )
         sub_log = subparsers.add_parser("log", help="Query interaction history")
         sub_log.add_argument("action", choices=["search", "export", "stats", "recent"], nargs="?", default="recent")
         sub_log.add_argument("query", nargs="*", default=[])
@@ -195,6 +224,16 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
         sub_log.add_argument("--format", dest="log_format", choices=["markdown", "json"], default="markdown")
         sub_log.add_argument("--limit", type=int, default=20)
 
+    return parser, use_subparsers
+
+
+def _add_top_level_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register every non-subparser argument.
+
+    Called BEFORE the subparser decision so _collect_valued_flags can scan the
+    parser's actions and know which `--flag value` pairs to skip when looking
+    for the first positional.
+    """
     # Positional prompt for one-shot agentic mode
     parser.add_argument(
         "goal",
@@ -226,9 +265,8 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="Skip the agentic loop: call agent.run() directly. No tool calls, "
-             "no permissions, no session. Use for cheap scripted queries where "
-             "you only want a raw answer."
+        help="Skip the agentic loop: call agent.run() directly. Scripts that "
+             "want a raw answer with minimal tool use. Permissions still apply."
     )
     parser.add_argument(
         "--voice",
@@ -318,7 +356,7 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
         "--model",
         type=str,
         default=None,
-        help="Use a specific model (e.g., --model kimi-k2.5:cloud)"
+        help="Use a specific model (e.g., --model kimi-k2.6:cloud)"
     )
     parser.add_argument(
         "--format",
@@ -354,7 +392,12 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
         help="Log every ModelRouter decision (category, confidence, tier, model) "
              "to stderr so scripts can audit which model handled a prompt."
     )
-    return parser, use_subparsers
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress the startup banner, welcome info, and diagnostics. "
+             "Also honors AURA_QUIET=1 in the environment."
+    )
 
 
 def _handle_resume(agent: Any, args: argparse.Namespace) -> Optional[str]:
@@ -425,13 +468,41 @@ def main() -> None:
 
     # Apply sandbox tier as early as possible so any subsequent code path
     # (subcommands, one-shot, chat loop) sees the clamp.
+    _sandbox_label = "unrestricted"
     if getattr(args, "sandboxed", False):
         from aura.core.permissions import SandboxTier, set_sandbox_tier
         set_sandbox_tier(SandboxTier.READ_ONLY)
+        _sandbox_label = "sandboxed (read-only)"
     elif getattr(args, "workspace_write", False):
         from aura.core.permissions import SandboxTier, set_sandbox_tier
         set_sandbox_tier(SandboxTier.WORKSPACE_WRITE)
-    # --unrestricted is the default; no-op.
+        _sandbox_label = "workspace-write"
+    # --unrestricted is the default; no-op beyond labelling.
+
+    # Surface the chosen tier + trust mode at startup so the audit trail is
+    # visible. Previously users could pass --sandboxed and see no confirmation
+    # that it actually took effect. Suppressed for JSON output and --fast
+    # where stdout is parsed by scripts.
+    _trust_label = "on" if getattr(args, "trust", False) else "off"
+    _quiet = bool(getattr(args, "quiet", False)) or os.environ.get("AURA_QUIET") == "1"
+    if getattr(args, "quiet", False):
+        # Propagate the flag to ChatSession + downstream via env so we don't
+        # have to thread a new kwarg through run_chat_mode → ChatSession →
+        # every show_* call.
+        os.environ["AURA_QUIET"] = "1"
+    _emit_boot_banner = (
+        not getattr(args, "fast", False)
+        and getattr(args, "format", "text") != "json"
+        and not getattr(args, "command", None)  # subcommands print their own output
+        and not _quiet
+    )
+    if _emit_boot_banner:
+        try:
+            _get_console().print(
+                f"  [dim]mode: {_sandbox_label} | trust: {_trust_label}[/dim]"
+            )
+        except Exception:
+            pass
 
     # Routing trace: emit every router decision to stderr
     if getattr(args, "routing_trace", False):
@@ -471,31 +542,8 @@ def main() -> None:
         run_acp_server()
         sys.exit(0)
 
-    # Handle log subcommand (lightweight, no agent needed)
-    if args.command == "log":
-        from aura.cli.activity_log import ActivityLog
-        _log_console = _get_console()
-        log = ActivityLog()
-        if args.action == "search":
-            query = " ".join(args.query)
-            results = log.search(query, limit=args.limit)
-            for r in results:
-                _log_console.print(f"[cyan][{r['model']}][/cyan] {r['prompt'][:80]}")
-                _log_console.print(f"  [dim]-> {r['response'][:120]}[/dim]")
-        elif args.action == "stats":
-            stats = log.get_stats()
-            for k, v in stats.items():
-                _log_console.print(f"  [bold]{k}[/bold]: {v}")
-        elif args.action == "export":
-            if not args.session:
-                _log_console.print("[yellow]Usage: aura log export --session <session_id>[/yellow]")
-                sys.exit(1)
-            md = log.export_session(args.session, format=args.log_format)
-            print(md)  # raw output for export (may be piped)
-        else:  # recent
-            for r in log.get_recent(args.limit):
-                _log_console.print(f"  [dim]{r['prompt'][:80]}[/dim]")
-        sys.exit(0)
+    # `log` subcommand dispatches through handle_subcommand() like every other
+    # cmd_* handler — its implementation lives in aura/cli/commands/log_commands.py.
 
     # Handle exec subcommand — convert to non-interactive --prompt path
     if args.command == "exec":
@@ -604,11 +652,25 @@ def main() -> None:
                     bridge.add_channel(SlackChannel())
                 else:
                     _get_console().print(f"[red]Unknown channel: {ch_name}[/red]")
+                    # Don't orphan a partially-configured bridge on bad arg.
+                    if bridge is not None:
+                        try:
+                            bridge.stop()
+                        except Exception:
+                            pass
                     sys.exit(1)
 
             bridge.start()
         except Exception as e:
             _get_console().print(f"[red][AURA] Channel bridge failed to start: {e}[/red]")
+            # A partial start() may have spawned threads/connections. Attempt
+            # an idempotent stop() before dropping the reference so we don't
+            # leak resources for the remainder of the process.
+            if bridge is not None:
+                try:
+                    bridge.stop()
+                except Exception:
+                    pass
             bridge = None
 
     # Unified non-interactive dispatch: -p/--prompt, `exec` subcommand (which
@@ -620,9 +682,32 @@ def main() -> None:
         noninteractive_prompt = " ".join(args.goal)
 
     if noninteractive_prompt and not args.voice:
+        # --fast + --resume (agentic session id) has no clean execution path:
+        # agent.run() uses a brain-level ReAct loop and cannot load an
+        # AgenticSession's message history. Downgrade to oneshot so the
+        # resume actually takes effect.
+        if args.fast and getattr(agent, "_resume_session_id", None):
+            _get_console().print("[dim yellow]Note: --resume forces full agentic path (ignoring --fast)[/dim yellow]")
+            args.fast = False
+
         if args.fast:
+            from aura.cli.session_bootstrap import build_permission_manager, build_session_bootstrap
+
+            _boot = build_session_bootstrap(args, brain=getattr(agent, "brain", None))
+            # Non-interactive: deny any tool the LLM tries to call that isn't
+            # auto-approved. `--trust` flips the whole PM to full_auto up front.
+            def _fast_deny(tool_name: str, description: str) -> str:
+                return "deny"
+
+            _fast_pm = build_permission_manager(
+                aura_config=_boot.aura_config,
+                trust=bool(getattr(args, "trust", False)),
+                default_mode="careful",
+                confirm_callback=_fast_deny,
+            )
+
             pipe = PipeOutput(format=args.format)
-            result = agent.run(noninteractive_prompt)
+            result = agent.run(noninteractive_prompt, permissions=_fast_pm)
             response = result.get("response", "")
             model_used = result.get("model", "")
             if response:
@@ -654,7 +739,10 @@ def main() -> None:
                     _console.print(f"[dim]    {i}. {str(_ins)[:100]}[/dim]")
                 _console.print()
         except Exception:
-            pass
+            # Dream report is a nice-to-have surface; don't let a corrupted
+            # dream.json block chat start, but leave a debug trail so issues
+            # are recoverable via `aura log search dream_report_failed`.
+            logger.debug("dream_report_load_failed", exc_info=True)
         from aura.cli.chat_loop import run_chat_mode
         run_chat_mode(agent, speak=args.speak, trust=args.trust, model=args.model, verbose=args.verbose, tier=args.tier, bridge=bridge, preference=args.preference)
 

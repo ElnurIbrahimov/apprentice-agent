@@ -111,18 +111,13 @@ class SessionSignalController:
         if user_input == SIGNAL_MODEL_PICK:
             from .model_picker import pick_model
 
-            self._session.current_model = self._session.agent.brain._model_override or "auto"
-            choice = pick_model(self._session.console, self._session.current_model)
+            # current_model is authoritative (maintained by apply_model_override).
+            choice = pick_model(self._session.console, self._session.current_model or "auto")
             if choice:
+                self._session.apply_model_override(choice)
                 if choice == "auto":
-                    self._session.agent.brain.set_model_override(None)
-                    self._session.current_model = "auto"
-                    self._session.agentic.model_override = None
                     show_info("Model set to auto-routing")
                 else:
-                    self._session.agent.brain.set_model_override(choice)
-                    self._session.current_model = choice
-                    self._session.agentic.model_override = choice
                     show_info(f"Model set to {choice}")
             self._session.token_limit = get_context_limit(self._session.current_model)
             self._refresh_bar()

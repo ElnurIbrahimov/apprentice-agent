@@ -42,6 +42,13 @@ class StreamingResponse:
         self._start_time: float = 0.0
         self._first_chunk_time: float = 0.0
         self._fade_frames_remaining: int = 0
+        # Fence-state machine: tracks whether we're currently inside an
+        # unclosed ``` block. Carried across pause/resume so a tool call in
+        # the middle of a code block doesn't break the render when the block
+        # continues after resume. A pure fence-count parity over `new_content`
+        # would drop this context as soon as `_permanent_len` advanced past
+        # the opener.
+        self._in_fence: bool = False
 
     def start(self) -> None:
         """Begin live rendering context with a themed thinking spinner."""
@@ -61,16 +68,52 @@ class StreamingResponse:
 
     @staticmethod
     def _close_partial_fences(text: str) -> str:
-        """If text has an unclosed code fence, append a closing ``` so
-        Rich Markdown renders the partial block as a proper code block."""
-        fence_count = 0
-        for line in text.split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("```"):
-                fence_count += 1
+        """Legacy parity-based helper. Kept for callers that don't carry fence
+        state (e.g. `finish()` — stream is ending anyway). Prefer
+        `_wrap_for_render` which accounts for state carried across pause/resume."""
+        fence_count = sum(
+            1 for line in text.split("\n") if line.lstrip().startswith("```")
+        )
         if fence_count % 2 == 1:
             return text + "\n```"
         return text
+
+    def _wrap_for_render(self, new_content: str) -> str:
+        """Return *new_content* wrapped with synthetic fences so Rich
+        renders it correctly even when permanent_len is mid-block.
+
+        - If we started this render INSIDE a fence, prepend an opener so
+          Rich recognizes the content as code.
+        - Walk new_content toggling fence parity.
+        - If we end INSIDE a fence, append a closer so the final render
+          has a balanced block.
+
+        The synthetic fences affect only the rendered string — they are
+        NOT persisted back into `self._accumulated`.
+        """
+        # Update the instance flag AFTER the render so concurrent Rich
+        # re-renders of overlapping slices stay consistent. Use local
+        # variables here; commit once at the end.
+        entering_fence = self._in_fence
+        exiting_fence = entering_fence
+        for line in new_content.split("\n"):
+            if line.lstrip().startswith("```"):
+                exiting_fence = not exiting_fence
+
+        rendered = new_content
+        if entering_fence:
+            # Open a bare fence so Rich treats this as code from the top.
+            rendered = "```\n" + rendered
+        if exiting_fence:
+            rendered = rendered + "\n```"
+        return rendered
+
+    def _advance_fence_state(self, text: str) -> None:
+        """Toggle `self._in_fence` for each fence line in *text*. Called
+        from chunk() AFTER render so the state reflects accumulated text."""
+        for line in text.split("\n"):
+            if line.lstrip().startswith("```"):
+                self._in_fence = not self._in_fence
 
     def chunk(self, text: str) -> None:
         """Append a text chunk and re-render NEW content since last pause."""
@@ -83,7 +126,7 @@ class StreamingResponse:
         self._accumulated += text
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
-            renderable = self._close_partial_fences(new_content)
+            renderable = self._wrap_for_render(new_content)
             try:
                 md = Markdown(renderable, code_theme=_display._get_code_theme())
                 if self._fade_frames_remaining > 0:
@@ -100,13 +143,16 @@ class StreamingResponse:
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
             if new_content.strip():
-                renderable = self._close_partial_fences(new_content)
+                renderable = self._wrap_for_render(new_content)
                 try:
                     md = Markdown(renderable, code_theme=_display._get_code_theme())
                     self._live.update(Padding(md, (0, 2)))
                 except (ValueError, TypeError):
                     self._live.update(Padding(Text(new_content), (0, 2)))
                 self._live.transient = False
+            # permanent_len is about to advance — capture the fence state at
+            # the new boundary so the next resume() starts with correct context.
+            self._advance_fence_state(new_content)
             self._live.stop()
             self._live = None
             self._permanent_len = len(self._accumulated)
@@ -129,8 +175,12 @@ class StreamingResponse:
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
             if new_content.strip():
+                # Use the state-aware wrapper in case the stream ends mid-fence
+                # (e.g. LLM truncated mid-block) — otherwise Rich renders the
+                # partial block as prose.
+                renderable = self._wrap_for_render(new_content)
                 try:
-                    md = Markdown(new_content, code_theme=_display._get_code_theme())
+                    md = Markdown(renderable, code_theme=_display._get_code_theme())
                     final = Padding(md, (0, 2))
                 except (ValueError, TypeError):
                     final = Padding(Text(new_content), (0, 2))

@@ -1,15 +1,38 @@
 """The /? help screen — extracted from the old monolithic display.py."""
 from __future__ import annotations
 
+import re as _re
+
 from aura.cli import display as _display
 
 
-def show_help() -> None:
-    """Display help with clean aligned text, no heavy borders."""
+def _extract_cmd_name(key: str) -> str:
+    """Pull the slash command name out of a help entry like '/model [name]'."""
+    m = _re.match(r"(/[a-z]+)", key)
+    return m.group(1) if m else ""
+
+
+def show_help(show_experimental: bool = False) -> None:
+    """Display help with clean aligned text, no heavy borders.
+
+    Experimental commands (GEPA `/evolve`, `/hand`, `/debate`, conversation-fork
+    family) are hidden unless *show_experimental* is True (invoked via
+    `/help all`). This prevents new users from treating exploratory features
+    as supported.
+    """
+    try:
+        from aura.cli.commands import EXPERIMENTAL_COMMANDS
+    except ImportError:
+        EXPERIMENTAL_COMMANDS = set()
+
     colors = _display._get_theme_colors()
 
     _display.console.print()
     _display.console.print("  [bold]Commands & Shortcuts[/bold]")
+    if not show_experimental and EXPERIMENTAL_COMMANDS:
+        _display.console.print(
+            "  [dim]type[/dim] [cyan]/help all[/cyan] [dim]to show experimental commands[/dim]"
+        )
     _display.console.print()
 
     sections = [
@@ -105,8 +128,22 @@ def show_help() -> None:
 
     accent = colors["accent"]
     for section_name, commands in sections:
+        # Filter out experimental commands when not requested, and skip entire
+        # sections that would become empty (e.g. the "Autonomous" block is all
+        # experimental: /hand, /evolve).
+        if not show_experimental:
+            commands = [
+                (k, a) for k, a in commands
+                if _extract_cmd_name(k) not in EXPERIMENTAL_COMMANDS
+            ]
+        if not commands:
+            continue
         _display.console.print(f"  [dim]{section_name}[/dim]")
         for key, action in commands:
             padded_key = key.ljust(28)
-            _display.console.print(f"    [{accent}]{padded_key}[/{accent}] [dim]{action}[/dim]")
+            cmd_name = _extract_cmd_name(key)
+            tag = " [yellow dim][exp][/yellow dim]" if cmd_name in EXPERIMENTAL_COMMANDS else ""
+            _display.console.print(
+                f"    [{accent}]{padded_key}[/{accent}] [dim]{action}[/dim]{tag}"
+            )
         _display.console.print()

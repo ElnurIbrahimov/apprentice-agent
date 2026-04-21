@@ -35,7 +35,6 @@ class ChatSession:
         preference: Optional[str] = None,
     ) -> None:
         from aura.core.agentic_loop import AgenticLoop
-        from aura.core.permissions import PermissionManager
         from aura.core.session import AgenticSession
 
         from .checkpoint import CheckpointManager
@@ -48,7 +47,7 @@ class ChatSession:
         )
         from .input import create_session
         from .model_picker import update_model_roles_from_config
-        from .session_bootstrap import build_session_bootstrap
+        from .session_bootstrap import build_permission_manager, build_session_bootstrap
 
         # ── Store references to display helpers for use elsewhere ──
         self.agent = agent
@@ -62,11 +61,24 @@ class ChatSession:
         saved_theme = load_theme_preference()
         set_theme(saved_theme)
 
-        show_banner()
-        show_welcome_info(agent)
+        _quiet = os.environ.get("AURA_QUIET") == "1"
+        if _quiet:
+            # One-line confirmation that launch succeeded; skip banner,
+            # welcome info, and the Ollama probe.
+            try:
+                from aura import __version__ as _v
+                _m = agent.brain._model_override or "auto"
+                console.print(
+                    f"  [dim]aura v{_v} · {_m} · {os.getcwd()}[/dim]"
+                )
+            except Exception:
+                logger.debug("quiet_banner_failed", exc_info=True)
+        else:
+            show_banner()
+            show_welcome_info(agent)
 
-        # ── Quick startup diagnostics (non-blocking, <2s) ──
-        show_startup_diagnostics(console)
+            # ── Quick startup diagnostics (non-blocking, <2s) ──
+            show_startup_diagnostics(console)
 
         # ── Project detection ──
         self._project_type = ""
@@ -89,12 +101,13 @@ class ChatSession:
         aura_config = boot.aura_config
 
         # ── Permissions ──
-        self.permissions = PermissionManager()
-        self.perm_mode = "auto_edit"
-        if trust:
-            self.perm_mode = "full_auto"
-
-        self._build_permissions(trust, aura_config)
+        self.perm_mode = "full_auto" if trust else "auto_edit"
+        self.permissions = build_permission_manager(
+            aura_config=aura_config,
+            trust=trust,
+            default_mode="auto_edit",
+            confirm_callback=self._cli_confirm,
+        )
 
         # ── Session ──
         self.agentic_session = AgenticSession()
@@ -136,6 +149,10 @@ class ChatSession:
         # ── Steering ──
         from .steering import SteeringQueue
         self.steering = SteeringQueue()
+        # Wire preempt → agentic.cancel() so a steering push(preempt=True)
+        # aborts the currently running iteration; the queued message is then
+        # consumed at the next turn's pop_all() like a normal steering msg.
+        self.steering.set_preempt_callback(self.agentic.cancel)
 
         # ── Activity log ──
         try:
@@ -162,7 +179,11 @@ class ChatSession:
         self._last_ipc_heartbeat = 0.0
         # After a connection failure the heartbeat is skipped until this
         # timestamp passes — avoids reconnect storms against a dead daemon.
+        # Backoff doubles on consecutive failures, capped at _IPC_BACKOFF_MAX,
+        # and resets to initial on the next successful send so a restarted
+        # daemon reconnects immediately instead of waiting out a stale mute.
         self._daemon_unreachable_until = 0.0
+        self._ipc_backoff_seconds = 5.0
         self._injected_input: Optional[str] = None
 
         import threading
@@ -273,8 +294,11 @@ class ChatSession:
 
         self.hook_mgr = self._HookManager() if self._HookManager else None
         if self.hook_mgr and aura_config:
-            self.hook_mgr.load_from_config(aura_config)
+            # Built-in hooks (shipped with Aura) load unconditionally.
             self.hook_mgr.load_builtin_hooks(aura_config)
+            # User-defined hooks from AURA.md require project trust to prevent a
+            # cloned repo from auto-executing arbitrary shell commands.
+            self._maybe_load_project_hooks(aura_config, project_root)
 
         # Always install a DisclosureManager so tool output gets wrapped in
         # collapsible sections. --verbose flips default_expanded=True so the
@@ -288,6 +312,57 @@ class ChatSession:
 
         if self.hook_mgr:
             self.hook_mgr.fire(self._HookEvent.SESSION_START, {"project_root": project_root})
+
+    def _maybe_load_project_hooks(self, aura_config: dict, project_root: str) -> None:
+        """Load AURA.md hooks after a first-run per-project trust prompt.
+
+        Trust is keyed by (project_root, sha256(AURA.md)) — changing AURA.md
+        re-prompts, matching the VSCode tasks.json trust model.
+        """
+        import os as _os
+
+        hooks = aura_config.get("hooks") if aura_config else None
+        if not hooks:
+            return  # No hooks to load — nothing to gate.
+
+        # AURA.md lives at project_root/AURA.md by convention (see
+        # aura/core/context.py:_load_aura_md). If the file isn't where we
+        # expect, fall through and load the hooks anyway; the trust check
+        # can't prove the source.
+        aura_md_path = _os.path.join(project_root, "AURA.md")
+        if not _os.path.isfile(aura_md_path):
+            try:
+                self.hook_mgr.load_from_config(aura_config)
+            except Exception:
+                logger.debug("hook_load_failed_no_aura_md", exc_info=True)
+            return
+
+        try:
+            from .project_trust import is_trusted, mark_trusted
+        except ImportError:
+            # Fail closed: if the trust store module is missing, skip hooks
+            # rather than loading unreviewed ones.
+            logger.warning("project_trust unavailable — skipping AURA.md hooks")
+            return
+
+        if is_trusted(project_root, aura_md_path):
+            self.hook_mgr.load_from_config(aura_config)
+            return
+
+        # Untrusted — ask the user.
+        from .permissions_dialog import request_project_trust
+        choice = request_project_trust(self.console, project_root, aura_md_path, hooks)
+        if choice == "trust":
+            mark_trusted(project_root, aura_md_path)
+            self.hook_mgr.load_from_config(aura_config)
+        elif choice == "skip_hooks":
+            self.console.print(
+                "  [dim yellow]Skipping AURA.md hooks for this session.[/dim yellow]"
+            )
+        else:  # "abort"
+            self.console.print("  [red]Aborted by user.[/red]")
+            import sys as _sys
+            _sys.exit(1)
 
     # ── Context setup ─────────────────────────────────────────────────────
 
@@ -305,9 +380,11 @@ class ChatSession:
             bg_manager=self.bg_manager,
             research_ctx=self.research_ctx,
             hook_manager=self.hook_mgr,
+            steering=self.steering,
             speak=speak,
             verbose=verbose,
             resume_session_id=getattr(agent, '_resume_session_id', None),
+            chat_session=self,
         )
         set_ctx(cli_ctx)
         self._cli_ctx = cli_ctx
@@ -336,12 +413,42 @@ class ChatSession:
 
     # ── Permission setup ──────────────────────────────────────────────────
 
-    def _build_permissions(self, trust: bool, aura_config: dict[str, Any]) -> None:
-        """Configure the PermissionManager with CLI confirm callback and overrides."""
-        self.permissions.set_confirm_callback(self._cli_confirm)
-        self.permissions.set_mode(self.perm_mode)
-        if aura_config:
-            self.permissions.apply_aura_md_overrides(aura_config)
+    def apply_model_override(self, model: Optional[str]) -> None:
+        """Set the active model across every surface that tracks it.
+
+        Three mirrors of 'current model' used to live in the codebase:
+          - session.current_model (display / status bar)
+          - agent.brain._model_override (routing)
+          - agentic.model_override (per-loop override)
+        Updating only one of them silently desynced the others — most
+        commonly seen after `/model` when the status bar showed one model
+        while the brain routed to another. This is now the single helper
+        that updates all three at once; callers (signal handlers, /model
+        command, --model flag apply) should use it instead of touching the
+        mirrors directly.
+        """
+        resolved = None if (model is None or model == "auto") else model
+        from_model = self.current_model
+        try:
+            self.agent.brain.set_model_override(resolved)
+        except Exception:
+            logger.debug("set_model_override_failed", exc_info=True)
+        self.agentic.model_override = resolved
+        self.current_model = resolved or "auto"
+
+        # Log to JSONL so a future learned-routing classifier has training
+        # data. Best-effort, non-blocking — never blocks the UI.
+        try:
+            from aura.core.event_log import log_model_override
+            session_id = getattr(self.agentic_session, "session_id", "") or ""
+            log_model_override(
+                session_id=session_id,
+                from_model=from_model or "",
+                to_model=self.current_model or "auto",
+                prompt_context=(self.last_user_input or "")[:500],
+            )
+        except Exception:
+            logger.debug("log_model_override_failed", exc_info=True)
 
     def _cli_confirm(self, tool_name: str, description: str) -> str:
         """Interactive permission prompt — delegates to the shared Rich dialog.
@@ -391,7 +498,12 @@ class ChatSession:
             handle_command(self.agent, user_input, speak=self.speak)
         except Exception as exc:
             show_error(f"Command failed: {exc}")
-        self.current_model = self.agent.brain._model_override or "auto"
+        # current_model is kept authoritative by apply_model_override; only
+        # re-sync from brain if something bypassed the helper (legacy guard).
+        if not self.current_model or self.current_model == "auto":
+            brain_override = getattr(self.agent.brain, "_model_override", None)
+            if brain_override:
+                self.current_model = brain_override
         self.token_used = estimate_messages_tokens(self.agentic._conversation_history)
         self.token_limit = get_context_limit(self.current_model)
         self._show_bar(

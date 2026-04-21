@@ -13,6 +13,41 @@ from ._constants import ERROR_SENTINELS as _ERROR_SENTINELS
 
 _IMAGE_TOKEN_RE = re.compile(r"\[image:\s*([^\]\n]+?)\s*\]")
 
+# Tool names that mutate files — snapshot before execution so /rewind works.
+_EDIT_TOOL_NAMES = {"edit_file", "write_file", "patch_file", "apply_diff", "str_replace_editor"}
+
+
+def _extract_edit_paths(tool_name: str, args: dict[str, Any]) -> list[str]:
+    """Pull file paths out of an edit-tool's argument dict.
+
+    Different edit tools use different arg keys; try the usual suspects and
+    return a de-duplicated list. Empty list means "no snapshot, nothing to
+    back up" (e.g. write_file creating a brand-new file — checkpoint records
+    the non-existence and /rewind will delete it on restore).
+    """
+    paths: list[str] = []
+    for key in ("path", "file_path", "target", "filename", "file"):
+        val = args.get(key)
+        if isinstance(val, str) and val:
+            paths.append(val)
+    files_arg = args.get("files")
+    if isinstance(files_arg, list):
+        for item in files_arg:
+            if isinstance(item, str):
+                paths.append(item)
+            elif isinstance(item, dict):
+                for key in ("path", "file_path"):
+                    v = item.get(key)
+                    if isinstance(v, str) and v:
+                        paths.append(v)
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for p in paths:
+        if p not in seen:
+            seen.add(p)
+            ordered.append(p)
+    return ordered
+
 
 def _extract_images_from_prompt(text: str) -> tuple[str, list[str]]:
     """Pull [image: <path>] tokens out of the prompt.
@@ -58,6 +93,7 @@ class SessionExecutionController:
         streamer.start()
         tool_call_count = 0
         exec_start = _exec_time.monotonic()
+        result: Optional[dict] = None
 
         # Start a background Escape listener so users can cancel in-flight
         # streaming with a single keystroke. Falls back silently on POSIX
@@ -65,92 +101,161 @@ class SessionExecutionController:
         # prompt_toolkit's tty.
         cancel_watch_stop = self._start_escape_watchdog()
 
+        # Outer try/finally guarantees streamer.finish() and the escape watchdog
+        # release no matter how we leave — including exceptions thrown mid-stream
+        # from agentic.run(). Previously finish() sat outside the try block and
+        # never ran on error, leaving the Rich Live display orphaned and
+        # corrupting the next turn's render.
         try:
-            def _on_event(event: LoopEvent) -> None:
-                nonlocal tool_call_count
-                if event.type == "chunk":
-                    streamer.chunk(str(event.payload.get("text", "")))
-                elif event.type == "tool_start":
-                    tool_call_count += 1
-                    streamer.pause()
-                    self._handle_tool_start(
-                        str(event.payload.get("tool_name", "")),
-                        dict(event.payload.get("tool_args", {})),
-                    )
-                elif event.type == "tool_result":
-                    self._handle_tool_result(
-                        str(event.payload.get("tool_name", "")),
-                        dict(event.payload.get("tool_args", {})),
-                        event.payload.get("tool_result"),
-                    )
-                    streamer.resume()
+            try:
+                def _on_event(event: LoopEvent) -> None:
+                    nonlocal tool_call_count
+                    if event.type == "chunk":
+                        streamer.chunk(str(event.payload.get("text", "")))
+                    elif event.type == "tool_start":
+                        tool_call_count += 1
+                        streamer.pause()
+                        self._handle_tool_start(
+                            str(event.payload.get("tool_name", "")),
+                            dict(event.payload.get("tool_args", {})),
+                        )
+                    elif event.type == "tool_result":
+                        self._handle_tool_result(
+                            str(event.payload.get("tool_name", "")),
+                            dict(event.payload.get("tool_args", {})),
+                            event.payload.get("tool_result"),
+                        )
+                        streamer.resume()
+                    elif event.type == "verification_start":
+                        streamer.pause()
+                        mode = event.payload.get("mode", "?")
+                        n = len(event.payload.get("changed_files", []) or [])
+                        self._session.console.print(
+                            f"  [dim cyan]verify[/dim cyan] {mode} · {n} file(s)"
+                        )
+                        streamer.resume()
+                    elif event.type == "verification_passed":
+                        streamer.pause()
+                        dur = float(event.payload.get("duration_s", 0.0) or 0.0)
+                        self._session.console.print(
+                            f"  [green]✓ verification passed[/green] [dim]({dur:.1f}s)[/dim]"
+                        )
+                        streamer.resume()
+                    elif event.type == "verification_failed":
+                        streamer.pause()
+                        dur = float(event.payload.get("duration_s", 0.0) or 0.0)
+                        stages = event.payload.get("stages", []) or []
+                        n_fail = sum(
+                            len(s.get("failures", [])) for s in stages
+                            if not s.get("success")
+                        )
+                        self._session.console.print(
+                            f"  [red]✗ verification failed[/red] "
+                            f"[dim]({dur:.1f}s, {n_fail} issue(s))[/dim]"
+                        )
+                        streamer.resume()
+                    elif event.type == "stuck":
+                        streamer.pause()
+                        reason = event.payload.get("reason", "?")
+                        detail = event.payload.get("details", "")
+                        self._session.console.print(
+                            f"  [yellow]⚠ aura thinks it's stuck[/yellow] "
+                            f"[dim]({reason})[/dim]  {detail}"
+                        )
+                        streamer.resume()
+                    elif event.type == "turn_rolled_back":
+                        streamer.pause()
+                        restored = int(event.payload.get("restored", 0) or 0)
+                        attempted = int(event.payload.get("attempted", 0) or 0)
+                        paths = event.payload.get("paths", []) or []
+                        partial = bool(event.payload.get("partial", False))
+                        status = (
+                            "[red]partial[/red]" if partial else "[green]ok[/green]"
+                        )
+                        self._session.console.print(
+                            f"  [yellow]↺ rolled back[/yellow] {restored}/{attempted} "
+                            f"checkpoint(s) · {len(paths)} file(s) · {status}"
+                        )
+                        for p in paths[:5]:
+                            self._session.console.print(f"      [dim]- {p}[/dim]")
+                        if len(paths) > 5:
+                            self._session.console.print(
+                                f"      [dim]… and {len(paths) - 5} more[/dim]"
+                            )
+                        streamer.resume()
 
-            # Extract [image: path] tokens and convert to base64 for vision models
-            cleaned_input, _images = _extract_images_from_prompt(user_input)
-            _run_kwargs: dict = {
-                "on_event": _on_event,
-                "steering_queue": self._session.steering,
-            }
-            if _images:
+                # Extract [image: path] tokens and convert to base64 for vision models
+                cleaned_input, _images = _extract_images_from_prompt(user_input)
+                _run_kwargs: dict = {
+                    "on_event": _on_event,
+                    "steering_queue": self._session.steering,
+                }
+                if _images:
+                    streamer.pause()
+                    from .display import console as _img_console
+                    _img_console.print(f"  [dim cyan]attached {len(_images)} image(s) for vision routing[/]")
+                    streamer.resume()
+                    _run_kwargs["images"] = _images
+                result = self._session.agentic.run(
+                    cleaned_input or user_input,
+                    **_run_kwargs,
+                )
+            except KeyboardInterrupt:
+                self._session._handle_ctrl_c_abort(streamer)
+                return None
+            except Exception as exc:
                 streamer.pause()
-                from .display import console as _img_console
-                _img_console.print(f"  [dim cyan]attached {len(_images)} image(s) for vision routing[/]")
-                streamer.resume()
-                _run_kwargs["images"] = _images
-            result = self._session.agentic.run(
-                cleaned_input or user_input,
-                **_run_kwargs,
-            )
-        except KeyboardInterrupt:
-            self._session._handle_ctrl_c_abort(streamer)
-            return None
-        except Exception as exc:
-            streamer.pause()
-            show_error(str(exc))
-            return None
+                show_error(str(exc))
+                return None
+
+            # Feed per-turn stats into the streamer before finishing so the
+            # summary line shows $cost and ctx% in addition to token counts.
+            try:
+                from .context_bar import estimate_messages_tokens, get_context_limit
+                cost_delta = 0.0
+                try:
+                    stats = self._session.agent.brain.get_session_stats()
+                    cur_cost = float(stats.get("cost_usd", 0.0) or 0.0)
+                    prev_cost = float(getattr(self._session, "_last_session_cost", 0.0) or 0.0)
+                    cost_delta = max(0.0, cur_cost - prev_cost)
+                    self._session._last_session_cost = cur_cost
+                except Exception:
+                    logger.debug("Failed to compute cost delta for turn stats", exc_info=True)
+                ctx_used = estimate_messages_tokens(self._session.agentic._conversation_history)
+                ctx_limit = get_context_limit(self._session.current_model)
+                streamer.set_turn_stats(cost_delta=cost_delta, ctx_used=ctx_used, ctx_limit=ctx_limit)
+            except Exception:
+                logger.debug("Failed to set turn stats on streamer", exc_info=True)
+
+            self._session._streamer_displayed = True
+
+            elapsed = _exec_time.monotonic() - exec_start
+            if tool_call_count > 0 or elapsed > 2.0:
+                iter_count = getattr(self._session.agentic, "iteration", 0)
+                summary_parts = []
+                if iter_count > 1:
+                    summary_parts.append(f"{iter_count} steps")
+                if tool_call_count > 0:
+                    summary_parts.append(f"{tool_call_count} tool calls")
+                show_response_attribution(
+                    model=self._session.current_model,
+                    elapsed=elapsed,
+                    tokens=result.get("tokens", 0) if result else 0,
+                )
+                if summary_parts:
+                    self._print_execution_summary(summary_parts)
+
+            return result
         finally:
             if cancel_watch_stop is not None:
-                cancel_watch_stop()
-
-        # Feed per-turn stats into the streamer before finishing so the
-        # summary line shows $cost and ctx% in addition to token counts.
-        try:
-            from .context_bar import estimate_messages_tokens, get_context_limit
-            cost_delta = 0.0
+                try:
+                    cancel_watch_stop()
+                except Exception:
+                    logger.debug("cancel_watch_stop_failed", exc_info=True)
             try:
-                stats = self._session.agent.brain.get_session_stats()
-                cur_cost = float(stats.get("cost_usd", 0.0) or 0.0)
-                prev_cost = float(getattr(self._session, "_last_session_cost", 0.0) or 0.0)
-                cost_delta = max(0.0, cur_cost - prev_cost)
-                self._session._last_session_cost = cur_cost
+                streamer.finish()
             except Exception:
-                logger.debug("Failed to compute cost delta for turn stats", exc_info=True)
-            ctx_used = estimate_messages_tokens(self._session.agentic._conversation_history)
-            ctx_limit = get_context_limit(self._session.current_model)
-            streamer.set_turn_stats(cost_delta=cost_delta, ctx_used=ctx_used, ctx_limit=ctx_limit)
-        except Exception:
-            logger.debug("Failed to set turn stats on streamer", exc_info=True)
-
-        streamer.finish()
-        self._session._streamer_displayed = True
-
-        elapsed = _exec_time.monotonic() - exec_start
-        if tool_call_count > 0 or elapsed > 2.0:
-            iter_count = getattr(self._session.agentic, "iteration", 0)
-            summary_parts = []
-            if iter_count > 1:
-                summary_parts.append(f"{iter_count} steps")
-            if tool_call_count > 0:
-                summary_parts.append(f"{tool_call_count} tool calls")
-            show_response_attribution(
-                model=self._session.current_model,
-                elapsed=elapsed,
-                tokens=result.get("tokens", 0) if result else 0,
-            )
-            if summary_parts:
-                self._print_execution_summary(summary_parts)
-
-        return result
+                logger.debug("streamer_finish_failed", exc_info=True)
 
     def _start_escape_watchdog(self):
         """Start a background keyboard watcher that cancels the agentic loop on Escape.
@@ -195,7 +300,16 @@ class SessionExecutionController:
 
         thread = threading.Thread(target=_watch, name="aura-esc-watchdog", daemon=True)
         thread.start()
-        return stop_evt.set
+
+        # Return a stopper that both signals the thread AND waits briefly for
+        # it to exit. Without the join() there is a <=100ms race where the
+        # thread can still be inside msvcrt.getwch() when streamer.finish()
+        # tears down the Live display, leading to cancel-on-done or
+        # console.print-on-closed-stream.
+        def _stop() -> None:
+            stop_evt.set()
+            thread.join(timeout=0.2)
+        return _stop
 
     def process_normal_result(self, user_input: str, result: Optional[dict]) -> bool:
         """Render and track a normal execution result. Returns True when handled successfully."""
@@ -239,7 +353,7 @@ class SessionExecutionController:
         self._session.msg_count += 1
         if self._session.msg_count == 1 and user_input:
             self._session.session_title = user_input[:50].strip()
-        self._session.current_model = self._session.agent.brain._model_override or "auto"
+        # current_model is maintained by apply_model_override; no re-read needed.
         self._session.token_used = estimate_messages_tokens(
             self._session.agentic._conversation_history
         )
@@ -285,6 +399,26 @@ class SessionExecutionController:
 
         step = getattr(self._session.agentic, "iteration", 0)
         max_iter = getattr(self._session.agentic, "max_iterations", 0)
+
+        # Snapshot files before edit tools run so /rewind has something to
+        # restore. Without this the CheckpointManager exists but its index
+        # stays empty — rewind UI would show no entries.
+        if name in _EDIT_TOOL_NAMES:
+            cp_mgr = getattr(self._session, "checkpoint_mgr", None)
+            paths = _extract_edit_paths(name, args)
+            if cp_mgr is not None and paths:
+                try:
+                    cp_mgr.snapshot_multi(paths, label=name)
+                except Exception:
+                    logger.debug("checkpoint_snapshot_failed", exc_info=True)
+            # Feed the turn-scoped rollback checkpoint too. Paths already
+            # captured this turn are no-ops. Cheap on repeat calls.
+            agentic = getattr(self._session, "agentic", None)
+            if agentic is not None and paths:
+                try:
+                    agentic._ensure_turn_checkpoint(paths)
+                except Exception:
+                    logger.debug("turn_checkpoint_snapshot_failed", exc_info=True)
 
         if self._session.hook_mgr:
             self._session.hook_mgr.fire(

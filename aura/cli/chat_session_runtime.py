@@ -185,7 +185,7 @@ class SessionRuntimeController:
             if not self._session._session_initialized:
                 self._session.agentic_session.new(
                     project_root=self._session._project_root,
-                    model=self._session.agent.brain._model_override or "auto",
+                    model=self._session.current_model or "auto",
                 )
                 self._session._session_initialized = True
 
@@ -226,7 +226,13 @@ class SessionRuntimeController:
     # listens on $AURA_DAEMON_PORT (default 19733) or the Windows named pipe
     # \\.\pipe\aura_daemon.
     _IPC_HEARTBEAT_INTERVAL = 30.0
-    _IPC_BACKOFF_SECONDS = 300.0  # skip heartbeats for 5 min after a failure
+    # Exponential backoff: start short, double on each consecutive failure,
+    # cap at 60s. Previously a single failure muted heartbeats for 5 minutes
+    # with no reconnect — if the daemon restarted during that window the CLI
+    # never picked it back up. 60s keeps the reconnect window tight while
+    # still avoiding a per-30s socket storm against a dead daemon.
+    _IPC_BACKOFF_INITIAL = 5.0
+    _IPC_BACKOFF_MAX = 60.0
     _IPC_PIPE_NAME = r"\\.\pipe\aura_daemon"
 
     def _send_ipc_heartbeat_if_due(self) -> None:
@@ -242,12 +248,18 @@ class SessionRuntimeController:
             return
         self._session._last_ipc_heartbeat = now
 
-        if not self._try_ipc_send():
-            # Back off so a missing daemon doesn't cost a socket per 30s.
-            self._session._daemon_unreachable_until = now + self._IPC_BACKOFF_SECONDS
-            logger.debug(
-                "IPC heartbeat failed; backing off for %.0fs", self._IPC_BACKOFF_SECONDS
-            )
+        if self._try_ipc_send():
+            # Success clears the backoff immediately — restores heartbeats on
+            # a daemon that just came back up, without waiting for the old
+            # 5-minute mute to expire.
+            self._session._daemon_unreachable_until = 0.0
+            self._session._ipc_backoff_seconds = self._IPC_BACKOFF_INITIAL
+        else:
+            prev = getattr(self._session, "_ipc_backoff_seconds", self._IPC_BACKOFF_INITIAL)
+            backoff = min(self._IPC_BACKOFF_MAX, max(self._IPC_BACKOFF_INITIAL, prev * 2))
+            self._session._ipc_backoff_seconds = backoff
+            self._session._daemon_unreachable_until = now + backoff
+            logger.debug("IPC heartbeat failed; backing off for %.0fs", backoff)
 
     def _try_ipc_send(self) -> bool:
         """Attempt to deliver one activity ping. Returns True on success."""
@@ -356,7 +368,7 @@ class SessionRuntimeController:
         self._session.msg_count += 1
         if self._session.msg_count == 1 and user_input:
             self._session.session_title = user_input[:50].strip()
-        self._session.current_model = self._session.agent.brain._model_override or "auto"
+        # current_model is maintained by apply_model_override; no re-read needed.
         self._session.token_used = estimate_messages_tokens(
             self._session.agentic._conversation_history
         )

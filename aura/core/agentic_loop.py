@@ -15,7 +15,7 @@ import os
 import sys
 import threading
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from . import agentic_loop_support as _loop_support
 from .agentic_loop_events import LoopEventEmitter
@@ -608,6 +608,11 @@ class AgenticLoop:
         self._thinking_nudge_count = 0
         self._current_run_id = f"run_{uuid.uuid4().hex[:8]}"
         self._current_run_prompt = prompt  # used by Intent-to-Code Ledger
+        # Turn-scoped atomic rollback. Populated lazily on the first edit of
+        # the turn so runs with no edits pay no cost. Reset at the top of every
+        # run(); restored if verification fails and AURA.md allows it.
+        self._turn_checkpoint_ids: list[str] = []
+        self._turn_snapshotted_paths: set[str] = set()
         # Cognitive heatmap accumulators (Phase 9)
         if not hasattr(self, "_tokens_by_tool") or self._tokens_by_tool is None:
             self._tokens_by_tool = {}
@@ -940,16 +945,29 @@ class AgenticLoop:
                 outcome = batch_result.outcome
                 break
 
-            # Auto-test: after processing all tool calls in this iteration,
-            # if any edits were made, run tests and feed results back to LLM
+            # Verification stage: after processing all tool calls in this iteration,
+            # if any edits were made, run typecheck/tests scoped to changed files
+            # and feed failures back so the agent self-corrects on the next turn.
+            # This replaces the legacy _run_auto_test callback.
             if self._edits_this_turn > 0:
-                test_result = self._run_auto_test()
-                if test_result:
+                verification_msg = self._run_verification_stage(
+                    event_emitter=event_emitter,
+                )
+                if verification_msg:
                     self._has_test_failure = True
                     messages.append({
                         "role": "user",
-                        "content": f"[Auto-test result] {test_result}",
+                        "content": verification_msg,
                     })
+                else:
+                    # Successful edit + green verification is forward progress.
+                    try:
+                        from aura.reliability.loop_guard import get_guard
+                        sid = getattr(self.session, "session_id", "") if self.session else ""
+                        if sid:
+                            get_guard(sid).note_progress()
+                    except Exception:
+                        logger.debug("loop_guard note_progress failed", exc_info=True)
 
         else:
             # Max iterations reached
@@ -1180,6 +1198,175 @@ class AgenticLoop:
             logger.debug(f"[AgenticLoop] Completion verification failed (non-fatal): {e}")
             return None
 
+    def _ensure_turn_checkpoint(self, paths: list[str]) -> None:
+        """Snapshot *paths* into the turn-scoped checkpoint chain, skipping any
+        already captured this turn. Called BEFORE each edit tool so the stored
+        content reflects the pre-edit state. Cheap on repeated calls because
+        already-snapshotted paths are tracked in `_turn_snapshotted_paths`.
+        """
+        cp_mgr = getattr(self, "_checkpoint_mgr", None)
+        if cp_mgr is None or not paths:
+            return
+        new_paths = [p for p in paths if p and p not in self._turn_snapshotted_paths]
+        if not new_paths:
+            return
+        try:
+            cp_id = cp_mgr.snapshot_multi(new_paths, label=f"turn:{self._current_run_id}")
+            self._turn_checkpoint_ids.append(cp_id)
+            for p in new_paths:
+                self._turn_snapshotted_paths.add(p)
+        except Exception:
+            logger.debug("_ensure_turn_checkpoint failed", exc_info=True)
+
+    def _rollback_turn(self, event_emitter: Any = None) -> dict:
+        """Restore every turn-scope checkpoint taken this run.
+
+        Restores in REVERSE order so paths first touched (captured in the
+        earliest checkpoint) win — that's the pre-turn truth. Returns a dict
+        describing what happened so the caller can surface it to the agent
+        and render a UI event.
+        """
+        cp_mgr = getattr(self, "_checkpoint_mgr", None)
+        ids = list(self._turn_checkpoint_ids)
+        result = {
+            "attempted": len(ids),
+            "restored": 0,
+            "failed": 0,
+            "paths": sorted(self._turn_snapshotted_paths),
+            "partial": False,
+        }
+        if cp_mgr is None or not ids:
+            return result
+        # Reverse: later checkpoints first. A file that was first snapshotted
+        # in the first checkpoint (the pre-turn state) will be restored last,
+        # overwriting any later-checkpoint content with the original.
+        for cp_id in reversed(ids):
+            try:
+                if cp_mgr.restore(cp_id):
+                    result["restored"] += 1
+                else:
+                    result["failed"] += 1
+            except Exception:
+                logger.debug("_rollback_turn restore failed for %s", cp_id, exc_info=True)
+                result["failed"] += 1
+        result["partial"] = result["failed"] > 0
+        # Clear turn state so subsequent runs start fresh. The individual
+        # per-edit checkpoints remain in the CheckpointManager index, so
+        # /rewind can still reach them if the user wants to inspect.
+        self._turn_checkpoint_ids.clear()
+        self._turn_snapshotted_paths.clear()
+        if event_emitter is not None:
+            try:
+                event_emitter.emit(
+                    "turn_rolled_back",
+                    attempted=result["attempted"],
+                    restored=result["restored"],
+                    failed=result["failed"],
+                    paths=result["paths"],
+                    partial=result["partial"],
+                )
+            except Exception:
+                logger.debug("turn_rolled_back emit failed", exc_info=True)
+        return result
+
+    def _clear_turn_checkpoint(self) -> None:
+        """Discard the turn checkpoint bookkeeping without restoring. Called on
+        successful verification so we don't accidentally roll back on a later
+        unrelated failure."""
+        self._turn_checkpoint_ids.clear()
+        self._turn_snapshotted_paths.clear()
+
+    def _run_verification_stage(self, event_emitter: Any = None) -> Optional[str]:
+        """Run the VerificationStage for this turn's edits.
+
+        Returns a conversation-injectable message on failure (so the next
+        iteration sees the errors), or None on success/skipped.
+        """
+        try:
+            # Lazy init — the first edit-bearing iteration builds the stage from
+            # the loop's aura_config so later iterations reuse it.
+            if getattr(self, "_verification_stage", None) is None:
+                from aura.core.verification_stage import VerificationStage
+                self._verification_stage = VerificationStage(
+                    project_root=self.project_root,
+                    aura_config=self._aura_config,
+                    shell_tool=self.executor.shell if getattr(self, "executor", None) else None,
+                )
+
+            stage = self._verification_stage
+            # Scope: files touched this turn. Fall back to _hot_files (recent
+            # LRU) so multi-edit turns get a complete picture.
+            changed = list(getattr(self, "_edited_files_this_turn", [])) or list(
+                getattr(self, "_hot_files", [])
+            )
+            if not changed:
+                return None
+
+            sid = getattr(self.session, "session_id", "") if self.session else ""
+            outcome = stage.run(changed, emitter=event_emitter, session_id=sid)
+
+            # Surface a line in the console so the user sees it even if the
+            # UI layer isn't rendering verification events yet.
+            try:
+                _ensure_console()
+                dur = f"{outcome.duration_s:.1f}s"
+                if outcome.success:
+                    if outcome.mode != "none" and outcome.stages:
+                        _loop_support.console.print(
+                            f"  [green]verification[/green] passed · {outcome.mode} · {dur}",
+                            highlight=False,
+                        )
+                else:
+                    _loop_support.console.print(
+                        f"  [red]verification[/red] failed · {outcome.mode} · {dur}",
+                        highlight=False,
+                    )
+            except Exception:
+                logger.debug("verification console print failed", exc_info=True)
+
+            if outcome.success:
+                # Discard the turn checkpoint — no rollback needed and we don't
+                # want a later unrelated failure to trigger it.
+                self._clear_turn_checkpoint()
+                return None
+
+            # Verification failed. If the config allows, roll back all edits
+            # in this turn to pre-turn state so the agent re-plans from a
+            # clean slate instead of trying to patch broken code.
+            msg = outcome.to_conversation_message()
+            rollback_enabled = True
+            try:
+                rollback_enabled = bool(
+                    (self._aura_config or {})
+                    .get("verification", {})
+                    .get("rollback_on_failure", True)
+                )
+            except Exception:
+                pass
+            if rollback_enabled and self._turn_checkpoint_ids:
+                rb = self._rollback_turn(event_emitter=event_emitter)
+                suffix_lines = [
+                    "",
+                    f"[Rollback] Restored {rb['restored']}/{rb['attempted']} "
+                    f"checkpoint(s). {len(rb['paths'])} file(s) reverted to "
+                    f"pre-turn state.",
+                ]
+                if rb["partial"]:
+                    suffix_lines.append(
+                        "[Rollback] WARNING: partial restore — some files "
+                        "may be in an inconsistent state. Inspect before "
+                        "continuing."
+                    )
+                suffix_lines.append(
+                    "[Rollback] Your previous edits are discarded. Re-plan "
+                    "from current state before attempting the fix."
+                )
+                msg = msg + "\n" + "\n".join(suffix_lines)
+            return msg
+        except Exception as e:
+            logger.debug(f"[AgenticLoop] Verification stage error (non-fatal): {e}")
+            return None
+
     def _run_auto_test(self) -> Optional[str]:
         """Run project tests + lint/typecheck after edits. Returns output for LLM or None."""
         try:
@@ -1360,6 +1547,7 @@ def run_agentic(
     trust_mode: bool = False,
     aura_config: dict | None = None,
     router=None,
+    resume_session_id: Optional[str] = None,
     on_response=None,
     on_chunk=None,
     on_tool_start=None,
@@ -1372,6 +1560,10 @@ def run_agentic(
     on_tool_call, on_event, on_response) to subscribe to the loop's event
     stream. If on_response is None, the default prints the response to the
     shared console.
+
+    When resume_session_id is provided, the loop loads that prior session's
+    message history before executing the prompt — matching what ChatSession
+    does for --resume in interactive mode.
     """
     if permissions is None:
         permissions = PermissionManager()
@@ -1389,6 +1581,12 @@ def run_agentic(
         aura_config=aura_config,
         router=router,
     )
+
+    if resume_session_id:
+        try:
+            loop.load_session(resume_session_id)
+        except Exception:
+            logger.debug("resume_session_load_failed", exc_info=True)
 
     if on_response is None:
         def on_response(text, iteration):

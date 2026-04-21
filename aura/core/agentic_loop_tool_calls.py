@@ -155,6 +155,40 @@ class ToolCallCoordinator:
                 self._loop._edits_this_turn += 1
                 self._loop._has_edits = True
                 self._loop._last_tools_were_reads = False
+                # Intent-to-Code Ledger: persist (session, prompt, model,
+                # iteration, path) so `/why` can answer "what prompt caused
+                # this edit". Best-effort, non-blocking; never breaks the turn.
+                try:
+                    from aura.core.event_log import log_edit
+                    path_arg = (
+                        args.get("path")
+                        or args.get("file_path")
+                        or args.get("target")
+                        or args.get("filename")
+                        or args.get("file")
+                        or ""
+                    )
+                    if path_arg:
+                        sid = ""
+                        try:
+                            sid = getattr(self._loop.session, "session_id", "") or ""
+                        except Exception:
+                            pass
+                        model = (
+                            self._loop.model_override
+                            or getattr(self._loop.brain, "_model_override", None)
+                            or "auto"
+                        )
+                        log_edit(
+                            session_id=sid,
+                            tool=tool_name,
+                            path=path_arg,
+                            prompt=getattr(self._loop, "_current_run_prompt", "") or "",
+                            model=str(model),
+                            iteration=getattr(self._loop, "iteration", 0),
+                        )
+                except Exception:
+                    logger.debug("log_edit_failed", exc_info=True)
             elif tool_name in ("read_file", "grep", "glob", "list_dir", "project_structure"):
                 self._loop._last_tools_were_reads = True
             else:

@@ -22,6 +22,13 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from .test_detection import (
+    FRAMEWORK_MARKERS,
+    detect_framework as _detect_framework,
+    parse_individual_tests as _parse_individual_tests,
+    parse_test_output as _parse_test_output,
+)
+
 logger = logging.getLogger(__name__)
 
 # Maps project type to default test commands
@@ -31,112 +38,6 @@ TEST_RUNNER_MAP = {
     "rust": ["cargo", "test"],
     "go": ["go", "test", "./..."],
 }
-
-# Framework detection markers (file -> framework)
-FRAMEWORK_MARKERS = {
-    "pytest.ini": "pytest",
-    "setup.cfg": "pytest",
-    "conftest.py": "pytest",
-    "Cargo.toml": "cargo",
-    "go.mod": "go",
-    "package.json": "node",
-    ".mocharc.yml": "mocha",
-    ".mocharc.json": "mocha",
-    ".mocharc.js": "mocha",
-    "jest.config.js": "jest",
-    "jest.config.ts": "jest",
-    "jest.config.mjs": "jest",
-    "vitest.config.ts": "vitest",
-    "vitest.config.js": "vitest",
-    "vitest.config.mts": "vitest",
-}
-
-
-def _detect_node_test_runner(project_path: str) -> Optional[List[str]]:
-    """Check package.json devDeps for vitest vs jest vs mocha, fallback to npm test."""
-    pkg_json = Path(project_path) / "package.json"
-    if not pkg_json.exists():
-        return None
-    try:
-        data = json.loads(pkg_json.read_text(encoding="utf-8"))
-        dev_deps = data.get("devDependencies", {})
-        deps = data.get("dependencies", {})
-        all_deps = {**deps, **dev_deps}
-
-        if "vitest" in all_deps:
-            return ["npx", "vitest", "run", "--reporter=verbose"]
-        if "jest" in all_deps:
-            return ["npx", "jest", "--verbose"]
-        if "mocha" in all_deps:
-            return ["npx", "mocha", "--reporter", "spec"]
-
-        # Check if "test" script exists
-        scripts = data.get("scripts", {})
-        if "test" in scripts and scripts["test"] != 'echo "Error: no test specified" && exit 1':
-            return ["npm", "test"]
-    except (json.JSONDecodeError, OSError):
-        pass
-    return None
-
-
-def _detect_framework(project_path: str) -> Optional[str]:
-    """Detect test framework from project files.
-
-    Returns framework name: 'pytest', 'unittest', 'jest', 'vitest', 'mocha',
-    'cargo', 'go', or None.
-    """
-    root = Path(project_path)
-
-    # Check for specific config files first (highest confidence)
-    for marker_file, framework in FRAMEWORK_MARKERS.items():
-        if (root / marker_file).exists():
-            # For package.json, need to check further
-            if marker_file == "package.json":
-                runner = _detect_node_test_runner(project_path)
-                if runner:
-                    # Derive framework name from command
-                    cmd_str = " ".join(runner)
-                    if "vitest" in cmd_str:
-                        return "vitest"
-                    elif "jest" in cmd_str:
-                        return "jest"
-                    elif "mocha" in cmd_str:
-                        return "mocha"
-                    return "node"
-                continue
-            return framework
-
-    # Check pyproject.toml for pytest config
-    pyproject = root / "pyproject.toml"
-    if pyproject.exists():
-        try:
-            content = pyproject.read_text(encoding="utf-8")
-            if "[tool.pytest" in content or "pytest" in content:
-                return "pytest"
-        except OSError:
-            pass
-
-    # Check for unittest-style tests (test files using unittest.TestCase)
-    test_dirs = [root / "tests", root / "test"]
-    for test_dir in test_dirs:
-        if test_dir.is_dir():
-            for py_file in test_dir.glob("test_*.py"):
-                try:
-                    content = py_file.read_text(encoding="utf-8")
-                    if "unittest.TestCase" in content:
-                        return "unittest"
-                    if "import pytest" in content or "@pytest" in content:
-                        return "pytest"
-                except OSError:
-                    pass
-                break  # Only check first test file
-
-    # If we find any Python test files, default to pytest
-    for test_dir in test_dirs:
-        if test_dir.is_dir() and any(test_dir.glob("test_*.py")):
-            return "pytest"
-
-    return None
 
 
 def _build_test_command(framework: str, project_root: str,
@@ -265,81 +166,8 @@ def _find_tests_for_files(changed_files: List[str],
     return test_files
 
 
-def _parse_test_output(framework: str, output: str) -> Dict:
-    """Parse test output to extract pass/fail/skip counts.
-
-    Returns dict with: passed, failed, skipped, errors, total, summary
-    """
-    result = {
-        "passed": 0,
-        "failed": 0,
-        "skipped": 0,
-        "errors": 0,
-        "total": 0,
-        "summary": "",
-    }
-
-    if not output:
-        return result
-
-    if framework in ("pytest", "unittest"):
-        # pytest summary order varies: "5 passed, 2 failed" OR "1 failed, 2 passed".
-        # Parse each counter independently.
-        for key, label in [("passed", "passed"), ("failed", "failed"),
-                           ("skipped", "skipped"), ("errors", "error")]:
-            m = re.search(rf'(\d+)\s+{label}', output)
-            if m:
-                result[key] = int(m.group(1))
-
-    elif framework in ("jest", "vitest"):
-        # Jest/Vitest: "Tests:  3 passed, 1 failed, 4 total"
-        match = re.search(
-            r'Tests:\s+(?:(\d+) passed)?(?:.*?(\d+) failed)?(?:.*?(\d+) skipped)?'
-            r'(?:.*?(\d+) total)?',
-            output,
-        )
-        if match:
-            result["passed"] = int(match.group(1) or 0)
-            result["failed"] = int(match.group(2) or 0)
-            result["skipped"] = int(match.group(3) or 0)
-            result["total"] = int(match.group(4) or 0)
-
-    elif framework == "mocha":
-        # Mocha: "3 passing (1s)" / "1 failing"
-        passing = re.search(r'(\d+) passing', output)
-        failing = re.search(r'(\d+) failing', output)
-        pending = re.search(r'(\d+) pending', output)
-        if passing:
-            result["passed"] = int(passing.group(1))
-        if failing:
-            result["failed"] = int(failing.group(1))
-        if pending:
-            result["skipped"] = int(pending.group(1))
-
-    elif framework == "cargo":
-        # Cargo: "test result: ok. 5 passed; 0 failed; 0 ignored"
-        match = re.search(
-            r'test result:.*?(\d+) passed.*?(\d+) failed.*?(\d+) ignored',
-            output,
-        )
-        if match:
-            result["passed"] = int(match.group(1))
-            result["failed"] = int(match.group(2))
-            result["skipped"] = int(match.group(3))
-
-    elif framework == "go":
-        # Go: "ok  ./pkg  0.5s" for pass, "FAIL ./pkg" for fail
-        result["passed"] = len(re.findall(r'^ok\s+', output, re.MULTILINE))
-        result["failed"] = len(re.findall(r'^FAIL\s+', output, re.MULTILINE))
-
-    result["total"] = result["passed"] + result["failed"] + result["skipped"] + result["errors"]
-    result["summary"] = (
-        f"{result['passed']} passed, {result['failed']} failed"
-        + (f", {result['skipped']} skipped" if result["skipped"] else "")
-        + (f", {result['errors']} errors" if result["errors"] else "")
-    )
-
-    return result
+# _parse_test_output moved to aura/tools/test_detection.py — re-imported above
+# so existing call sites keep working unchanged.
 
 
 def _find_affected_test_names(changed_files: List[str]) -> List[str]:
@@ -368,83 +196,7 @@ def _find_affected_test_names(changed_files: List[str]) -> List[str]:
     return function_names
 
 
-def _parse_individual_tests(framework: str, output: str) -> List[Dict[str, str]]:
-    """Extract per-test results from test runner output.
-
-    Returns a list of {test_name, status, error} dicts. Used by the differential
-    runner to compute regressions vs the git baseline.
-    """
-    tests: List[Dict[str, str]] = []
-    if not output:
-        return tests
-
-    if framework in ("pytest", "unittest"):
-        # pytest -v: "path/to/test_foo.py::test_bar PASSED" / "FAILED" / "SKIPPED"
-        pattern = re.compile(
-            r"^([^\s]+?::[^\s]+?)\s+(PASSED|FAILED|SKIPPED|ERROR|XFAIL|XPASS)",
-            re.MULTILINE,
-        )
-        for m in pattern.finditer(output):
-            status = m.group(2).lower()
-            if status in ("xfail", "xpass"):
-                status = "passed"
-            tests.append({"name": m.group(1), "status": status, "error": ""})
-        # Also capture FAILED lines from the short summary at the bottom
-        for m in re.finditer(r"^FAILED\s+([^\s]+?::[^\s]+?)(?:\s+-\s+(.*))?$", output, re.MULTILINE):
-            name = m.group(1)
-            err = (m.group(2) or "").strip()
-            # De-dup against earlier parse; update error text
-            found = False
-            for t in tests:
-                if t["name"] == name:
-                    t["status"] = "failed"
-                    if err:
-                        t["error"] = err
-                    found = True
-                    break
-            if not found:
-                tests.append({"name": name, "status": "failed", "error": err})
-
-    elif framework in ("jest", "vitest"):
-        # "  ✓ test name (5 ms)"  /  "  ✗ test name" / "  × test name"
-        for line in output.splitlines():
-            ls = line.strip()
-            m = re.match(r"^(✓|✗|×|✘|PASS|FAIL)\s+(.+?)(?:\s+\(\d+\s*ms\))?$", ls)
-            if m:
-                tok = m.group(1)
-                name = m.group(2).strip()
-                status = "passed" if tok in ("✓", "PASS") else "failed"
-                tests.append({"name": name, "status": status, "error": ""})
-
-    elif framework == "mocha":
-        # "    ✓ test name"  /  "    1) test name"  /  "    - test name" (pending)
-        for line in output.splitlines():
-            ls = line.strip()
-            if ls.startswith("✓ "):
-                tests.append({"name": ls[2:].strip(), "status": "passed", "error": ""})
-            elif re.match(r"^\d+\)\s+", ls):
-                name = re.sub(r"^\d+\)\s+", "", ls)
-                tests.append({"name": name, "status": "failed", "error": ""})
-            elif ls.startswith("- "):
-                tests.append({"name": ls[2:].strip(), "status": "skipped", "error": ""})
-
-    elif framework == "go":
-        # "--- PASS: TestFoo (0.00s)" / "--- FAIL: TestBar (0.00s)"
-        pattern = re.compile(r"^---\s+(PASS|FAIL|SKIP):\s+(\S+)", re.MULTILINE)
-        for m in pattern.finditer(output):
-            status = {"PASS": "passed", "FAIL": "failed", "SKIP": "skipped"}[m.group(1)]
-            tests.append({"name": m.group(2), "status": status, "error": ""})
-
-    elif framework == "cargo":
-        # "test tests::foo ... ok"  /  "test tests::bar ... FAILED"
-        pattern = re.compile(r"^test\s+(\S+)\s+\.\.\.\s+(ok|FAILED|ignored)", re.MULTILINE)
-        for m in pattern.finditer(output):
-            name = m.group(1)
-            raw = m.group(2)
-            status = {"ok": "passed", "FAILED": "failed", "ignored": "skipped"}[raw]
-            tests.append({"name": name, "status": status, "error": ""})
-
-    return tests
+# _parse_individual_tests moved to aura/tools/test_detection.py — re-imported above.
 
 
 def _git_file_at_head(project_path: str, rel_file: str) -> Optional[str]:
@@ -798,6 +550,112 @@ def _find_project_root(file_path: str) -> Optional[str]:
             break
         current = parent
     return None
+
+
+def run_changed_tests(
+    project_root: str,
+    changed_files: List[str],
+    shell_tool=None,
+    timeout: int = 60,
+    override_cmd: Optional[str] = None,
+) -> dict:
+    """Run only the tests that cover the given changed files.
+
+    Uses the existing source→test mapping (`_find_tests_for_files`) plus
+    framework-specific targeted flags (pytest filename, vitest related,
+    jest --findRelatedTests, go test <pkg>, cargo test). If no tests map
+    to the changes, returns success=True with skipped=True — "no tests to
+    run" is not the same as "tests failed."
+
+    *override_cmd* lets AURA.md specify a custom command. The placeholder
+    `{files}` (if present) is replaced with the test file list; otherwise
+    the files are appended.
+
+    Returns: {success, skipped, output, duration_s, failures, framework, reason}.
+    """
+    import time as _t
+    import shlex as _shlex
+
+    start = _t.monotonic()
+
+    if not changed_files:
+        return {
+            "success": True, "skipped": True, "reason": "no changed files",
+            "duration_s": 0.0, "failures": [], "output": "", "framework": "",
+        }
+
+    framework = _detect_framework(project_root)
+    if not framework:
+        return {
+            "success": True, "skipped": True, "reason": "no framework detected",
+            "duration_s": 0.0, "failures": [], "output": "", "framework": "",
+        }
+
+    # Build command: override wins, otherwise fall back to targeted default.
+    cmd_list: List[str]
+    if override_cmd and override_cmd.strip():
+        targeted = _find_tests_for_files(changed_files, project_root)
+        tokens = _shlex.split(override_cmd.strip())
+        if "{files}" in tokens:
+            idx = tokens.index("{files}")
+            cmd_list = tokens[:idx] + targeted + tokens[idx + 1:]
+        else:
+            cmd_list = tokens + targeted
+    else:
+        cmd_list = _build_test_command(framework, project_root, changed_files)
+
+    if not cmd_list:
+        return {
+            "success": True, "skipped": True, "reason": "no runnable command",
+            "duration_s": _t.monotonic() - start, "failures": [],
+            "output": "", "framework": framework,
+        }
+
+    if shell_tool is None:
+        return {
+            "success": True, "skipped": True, "reason": "no shell tool available",
+            "duration_s": _t.monotonic() - start, "failures": [],
+            "output": "", "framework": framework,
+        }
+
+    cmd_str = " ".join(cmd_list)
+    logger.info(f"[ChangedTests] Running: {cmd_str}")
+
+    try:
+        r = shell_tool.run(command=cmd_str, cwd=project_root, timeout=timeout)
+        out = r.get("stdout", "") or r.get("output", "") or ""
+        err = r.get("stderr", "") or ""
+        full = (out + "\n" + err).strip()
+        exit_code = r.get("exit_code", 1)
+
+        # Leverage existing parsers: aggregate counts + per-test failure detail.
+        parsed = _parse_test_output(framework, full)
+        individual = _parse_individual_tests(framework, full)
+        failures = [
+            {"file": "", "line": 0, "message": f"{t.get('name', '?')} — {t.get('error', '')}".strip(" —")}
+            for t in individual if t.get("status") == "failed"
+        ]
+
+        return {
+            "success": exit_code == 0,
+            "skipped": False,
+            "exit_code": exit_code,
+            "output": full[:5000],
+            "duration_s": _t.monotonic() - start,
+            "failures": failures,
+            "passed": parsed.get("passed", 0),
+            "failed": parsed.get("failed", 0),
+            "framework": framework,
+            "command": cmd_str,
+        }
+    except Exception as e:
+        logger.warning(f"[ChangedTests] execution failed: {e}")
+        return {
+            "success": False, "skipped": False,
+            "reason": f"execution error: {e}",
+            "duration_s": _t.monotonic() - start,
+            "failures": [], "output": "", "framework": framework,
+        }
 
 
 def auto_verify(project_path: str, shell_tool, test_cmd_override: Optional[str] = None) -> dict:
