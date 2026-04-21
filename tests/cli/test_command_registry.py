@@ -25,7 +25,8 @@ EXPECTED_COMMANDS = [
     "/agent", "/evolve", "/fleet", "/tasks", "/research", "/sources",
     "/export", "/mood", "/hook", "/sessions", "/theme", "/trust", "/context",
     "/trace", "/rewind", "/cost", "/undo", "/diff", "/git", "/pr", "/branch",
-    "/stash", "/blame", "/test", "/watch", "/mcp",
+    "/stash", "/blame", "/test", "/verify", "/why", "/watch", "/mcp",
+    "/interrupt", "/stop",
 ]
 
 
@@ -35,7 +36,9 @@ def test_registry_has_all_expected_commands():
 
 
 def test_registry_count():
-    assert len(COMMAND_REGISTRY) == 63
+    # Count grows when new slash commands or aliases land. Update this number
+    # + EXPECTED_COMMANDS above together when adding a command.
+    assert len(COMMAND_REGISTRY) == 67
 
 
 def test_every_registry_value_is_callable():

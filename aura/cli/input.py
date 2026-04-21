@@ -164,11 +164,9 @@ SUBCOMMANDS: dict[str, "SubcommandList | Callable[[], SubcommandList]"] = {
         ("run", "Run a hand immediately"),
         ("status", "Show detailed hand status"),
     ],
-    "/evolve": [
-        ("--skill-ids", "Comma-separated skill IDs to evolve"),
-        ("--dry-run", "Preview without running"),
-        ("--max-iterations", "Max evolution iterations (default 5)"),
-    ],
+    # /evolve accepts flags (--skill-ids, --dry-run, --max-iterations), not
+    # subcommands. Listing them here would pollute the subcommand completer
+    # with leading `--` tokens. Users can `/evolve --help` for the flag list.
     "/checkout": [
         ("main", "Switch to main branch"),
         ("1", "Switch to fork-1"),
@@ -411,7 +409,7 @@ def create_session():
             multiline=True,
             style=_style,
             key_bindings=kb,
-            placeholder=HTML('<style fg="#555555"><i>Message, / commands, ? help, Alt+M model</i></style>'),
+            placeholder=HTML('<style fg="#555555"><i>Message, / commands, ? help, Alt+M model, Alt+Enter newline</i></style>'),
             bottom_toolbar=_get_bottom_toolbar,
         )
         _session_ok = True

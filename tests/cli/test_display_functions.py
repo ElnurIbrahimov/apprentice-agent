@@ -356,3 +356,72 @@ def test_streaming_response_finish_no_start():
     from aura.cli.display import StreamingResponse
     sr = StreamingResponse()
     sr.finish()  # No live, no accumulated text — safe
+
+
+# ── Fence state across pause/resume ──────────────────────────────────────
+
+def test_fence_state_initial_is_false():
+    from aura.cli.display import StreamingResponse
+    sr = StreamingResponse()
+    assert sr._in_fence is False
+
+
+def test_wrap_for_render_appends_close_when_ending_mid_fence():
+    from aura.cli.display import StreamingResponse
+    sr = StreamingResponse()
+    # Entering not in fence, opens but doesn't close → append close only
+    rendered = sr._wrap_for_render("```python\nx = 1")
+    assert rendered.endswith("\n```")
+    assert rendered.startswith("```python")
+
+
+def test_wrap_for_render_prepends_open_when_starting_mid_fence():
+    from aura.cli.display import StreamingResponse
+    sr = StreamingResponse()
+    sr._in_fence = True  # Simulate: we're mid-block, prior chunks opened a fence
+    # Nothing in new_content closes — wrap must open AND close
+    rendered = sr._wrap_for_render("y = 2")
+    assert rendered.startswith("```\n")
+    assert rendered.endswith("\n```")
+
+
+def test_wrap_for_render_inside_fence_that_closes():
+    from aura.cli.display import StreamingResponse
+    sr = StreamingResponse()
+    sr._in_fence = True
+    # new_content contains the closing fence — prepend open, no synthetic close
+    rendered = sr._wrap_for_render("more code\n```")
+    assert rendered.startswith("```\n")
+    assert not rendered.endswith("\n```\n```")
+
+
+def test_advance_fence_state_toggles_on_fence_line():
+    from aura.cli.display import StreamingResponse
+    sr = StreamingResponse()
+    assert sr._in_fence is False
+    sr._advance_fence_state("```python\ncode")
+    assert sr._in_fence is True
+    sr._advance_fence_state("more\n```")
+    assert sr._in_fence is False
+
+
+def test_pause_advances_fence_state_so_resume_knows_it_is_mid_block():
+    """The scenario the fix targets: chunk opens a fence, pause fires for a
+    tool call, resume+chunk continues the block. Without state tracking,
+    the post-resume chunk would render as prose, not code."""
+    from aura.cli.display import StreamingResponse
+
+    sr = StreamingResponse()
+    sr._accumulated = "```python\nx = 1"
+    sr._permanent_len = 0
+    # Pause without a live context skips the render path but still needs to
+    # advance fence state so resume starts correctly. Call the helper
+    # directly to mirror what pause() does.
+    sr._advance_fence_state(sr._accumulated[sr._permanent_len:])
+    assert sr._in_fence is True, "pause should leave us flagged mid-fence"
+
+    # Next render (after resume) gets only the continuation — _wrap_for_render
+    # must prepend an opener so Rich sees the code block.
+    continuation = "\ny = 2\n```"
+    rendered = sr._wrap_for_render(continuation)
+    assert rendered.startswith("```\n"), "continuation needs a synthetic opener"

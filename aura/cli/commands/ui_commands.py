@@ -8,33 +8,39 @@ from ..display import console
 logger = logging.getLogger(__name__)
 
 
+def _set_model(ctx, agent, choice: Optional[str]) -> None:
+    """Route the model override through ChatSession.apply_model_override when available,
+    falling back to the two-mirror write for non-interactive entry points (ACP, MCP)
+    that build a CLIContext without a ChatSession."""
+    if ctx and getattr(ctx, "chat_session", None):
+        ctx.chat_session.apply_model_override(choice)
+        return
+    agent.brain.set_model_override(choice)
+    if ctx and ctx.agentic_loop:
+        ctx.agentic_loop.model_override = choice
+
+
 def handle_model(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if not arg:
         from ..display import show_info
         from ..model_picker import pick_model
-        current = agent.brain._model_override or "auto"
+        current = (ctx.chat_session.current_model
+                   if ctx and getattr(ctx, "chat_session", None)
+                   else (agent.brain._model_override or "auto"))
         choice = pick_model(console, current)
         if choice is not None:
             if choice == "auto":
-                agent.brain.set_model_override(None)
-                if ctx and ctx.agentic_loop:
-                    ctx.agentic_loop.model_override = None
+                _set_model(ctx, agent, None)
                 show_info("Model override cleared. Using auto-selection.")
             else:
-                agent.brain.set_model_override(choice)
-                if ctx and ctx.agentic_loop:
-                    ctx.agentic_loop.model_override = choice
+                _set_model(ctx, agent, choice)
                 show_info(f"Model locked to: {choice}")
     elif arg.lower() == "auto":
-        agent.brain.set_model_override(None)
-        if ctx and ctx.agentic_loop:
-            ctx.agentic_loop.model_override = None
+        _set_model(ctx, agent, None)
         console.print("[green]Model override cleared. Using auto-selection.[/green]")
     else:
-        agent.brain.set_model_override(arg)
-        if ctx and ctx.agentic_loop:
-            ctx.agentic_loop.model_override = arg
+        _set_model(ctx, agent, arg)
         console.print(f"[green]Model locked to: [cyan]{arg}[/cyan][/green]")
 
 
@@ -97,11 +103,16 @@ def handle_trust(agent, arg, context) -> Optional[str]:
 
 
 def handle_help(agent, arg, context) -> Optional[str]:
-    """Show help. Use /help <command> for detailed help on a specific command."""
+    """Show help. Use /help <command> for detailed help on a specific command.
+    `/help all` also shows experimental commands."""
     from ..display import console, show_help
 
-    if not arg or not arg.strip():
+    arg_stripped = (arg or "").strip().lower()
+    if not arg_stripped:
         show_help()
+        return None
+    if arg_stripped in ("all", "--all", "-a"):
+        show_help(show_experimental=True)
         return None
 
     # Show help for specific command

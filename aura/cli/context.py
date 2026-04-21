@@ -11,8 +11,10 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from aura.agent import ApprenticeAgent
     from aura.cli.background import BackgroundManager
+    from aura.cli.chat_session import ChatSession
     from aura.cli.hooks import HookManager
     from aura.cli.research_mode import ResearchContext
+    from aura.cli.steering import SteeringQueue
     from aura.cli.watch_mode import FileWatcher
     from aura.core.agentic_loop import AgenticLoop
     from aura.core.permissions import PermissionManager
@@ -31,9 +33,13 @@ class CLIContext:
     research_ctx: Optional[ResearchContext] = None
     hook_manager: Optional[HookManager] = None
     file_watcher: Optional[FileWatcher] = None
+    steering: Optional[SteeringQueue] = None
     speak: bool = False
     verbose: bool = False
     resume_session_id: Optional[str] = None
+    # Set by ChatSession.__init__ after set_ctx. Optional because non-interactive
+    # entry points (ACP, MCP, oneshot) build a CLIContext without a ChatSession.
+    chat_session: Optional[ChatSession] = None
 
 
 # Module-level reference so handlers can access the context without

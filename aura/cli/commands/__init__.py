@@ -10,6 +10,7 @@ from .agent_commands import (
     handle_fleet,
     handle_goal,
     handle_hand,
+    handle_interrupt,
     handle_plan,
 )
 from .copy_command import handle_copy
@@ -49,6 +50,8 @@ from .system_commands import (
     handle_hook,
     handle_mcp,
 )
+from .verify_commands import handle_verify
+from .why_commands import handle_why
 from .tool_commands import (
     handle_edit,
     handle_grep,
@@ -82,67 +85,76 @@ def _handle_voice(agent, args, context=None, **kwargs):
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Single source of truth for slash commands.
-# (name, description, handler, aliases) — aliases route to the same handler
-# but are excluded from the completer list to keep autocomplete uncluttered.
+# (name, description, handler, aliases, tier)
+#   - aliases route to the same handler but are excluded from the completer.
+#   - tier ∈ {"stable", "beta", "experimental"}. Used by /help and the palette
+#     to flag maturity so users know what to trust.
 # ─────────────────────────────────────────────────────────────────────────────
-COMMANDS: list[tuple[str, str, Callable[..., Any], list[str]]] = [
-    ("/quit",     "Exit AURA",                                       handle_quit,     ["/exit"]),
-    ("/help",     "Show help",                                       handle_help,     []),
-    ("/clear",    "Clear conversation history",                      handle_clear,    []),
-    ("/model",    "View/set model (auto, <name>)",                   handle_model,    []),
-    ("/compact",  "Compact conversation history",                    handle_compact,  []),
-    ("/plan",     "Create and execute a plan",                       handle_plan,     []),
-    ("/shell",    "Execute shell command",                           handle_shell,    ["/bash", "/run"]),
-    ("/grep",     "Search code content",                             handle_grep,     []),
-    ("/search",   "Search files by pattern",                         handle_search,   ["/find"]),
-    ("/edit",     "View file contents with line numbers",            handle_edit,     []),
-    ("/project",  "Project info/context/index",                      handle_project,  []),
-    ("/agent",    "Run specialist agent",                            handle_agent,    []),
-    ("/sessions", "Manage sessions",                                 handle_sessions, []),
-    ("/browse",   "Browse web pages",                                handle_browse,   []),
-    ("/hook",     "Manage hooks",                                    handle_hook,     []),
-    ("/speak",    "Text-to-speech",                                  handle_speak,    ["/say"]),
-    ("/recall",   "Search memories",                                 handle_recall,   ["/memory"]),
-    ("/goal",     "Run a goal",                                      handle_goal,     []),
-    ("/trust",    "Enable trust mode (auto-approve all tools)",      handle_trust,    []),
-    ("/cost",     "Show session cost breakdown",                     handle_cost,     []),
-    ("/context",  "Show context window usage",                       handle_context,  []),
-    ("/trace",    "Show structured session trace and run summaries", handle_trace,    []),
-    ("/rewind",   "Rewind file changes to a checkpoint",             handle_rewind,   []),
-    ("/theme",    "Switch color theme",                              handle_theme,    []),
-    ("/fleet",    "Run parallel sub-agents",                         handle_fleet,    []),
-    ("/tasks",    "Show background tasks",                           handle_tasks,    []),
-    ("/research", "Start research mode",                             handle_research, []),
-    ("/sources",  "Show research sources",                           handle_sources,  []),
-    ("/export",   "Export research to Markdown",                     handle_export,   []),
-    ("/mood",     "Show emotional state",                            handle_mood,     []),
-    ("/pr",       "Create pull request",                             handle_pr,       []),
-    ("/branch",   "Create git branch",                               handle_branch,   []),
-    ("/stash",    "Smart git stash",                                 handle_stash,    []),
-    ("/blame",    "Git blame with context",                          handle_blame,    []),
-    ("/test",     "Run tests",                                       handle_test,     []),
-    ("/watch",    "Watch files for AI comments",                     handle_watch,    []),
-    ("/evolve",   "Evolve skills with GEPA",                         handle_evolve,   []),
-    ("/diff",     "Show git diff with syntax highlighting",          handle_diff,     []),
-    ("/git",      "Run read-only git commands",                      handle_git,      []),
-    ("/mcp",      "Manage MCP server connections",                   handle_mcp,      []),
-    ("/audit",    "Inspect Merkle audit chain",                      handle_audit,    []),
-    ("/hand",     "Manage autonomous Hands",                         handle_hand,     []),
-    ("/undo",     "Undo last file edit",                             handle_undo,     []),
-    ("/redo",     "Redo the last /undo",                             handle_redo,     []),
-    ("/heatmap",  "Show cognitive heatmap (tokens by tool/file)",    handle_heatmap,  []),
-    ("/shadow",   "Run prompt against 2 models in parallel (diff)",  handle_shadow,   []),
-    ("/debate",   "Multi-model debate on a question",                handle_debate,   []),
-    ("/fork",     "Fork conversation into a new branch",             handle_fork,     []),
-    ("/branches", "List conversation branches",                      handle_branches, []),
-    ("/checkout", "Switch to a conversation branch",                 handle_checkout, []),
-    ("/merge",    "Merge branch back to parent",                     handle_merge,    []),
-    ("/chain",    "Run prompt pipelines (step1 -> step2 -> ...)",    handle_chain,    []),
-    ("/changes",  "Show files modified in this session",             handle_changes,  []),
-    ("/routing",  "Show/set routing preference",                     handle_routing,  []),
-    ("/copy",     "Copy last response or code block to clipboard",   handle_copy,     []),
-    ("/voice",    "Voice mode (speech input/output)",                _handle_voice,   []),
-    ("/snippet",  "Manage prompt templates/snippets",                handle_snippet,  []),
+TIER_STABLE = "stable"
+TIER_BETA = "beta"
+TIER_EXPERIMENTAL = "experimental"
+
+COMMANDS: list[tuple[str, str, Callable[..., Any], list[str], str]] = [
+    ("/quit",     "Exit AURA",                                       handle_quit,     ["/exit"],         TIER_STABLE),
+    ("/help",     "Show help",                                       handle_help,     [],                TIER_STABLE),
+    ("/clear",    "Clear conversation history",                      handle_clear,    [],                TIER_STABLE),
+    ("/model",    "View/set model (auto, <name>)",                   handle_model,    [],                TIER_STABLE),
+    ("/compact",  "Compact conversation history",                    handle_compact,  [],                TIER_STABLE),
+    ("/plan",     "Create and execute a plan",                       handle_plan,     [],                TIER_STABLE),
+    ("/shell",    "Execute shell command",                           handle_shell,    ["/bash", "/run"], TIER_STABLE),
+    ("/grep",     "Search code content",                             handle_grep,     [],                TIER_STABLE),
+    ("/search",   "Search files by pattern",                         handle_search,   ["/find"],         TIER_STABLE),
+    ("/edit",     "View file contents with line numbers",            handle_edit,     [],                TIER_STABLE),
+    ("/project",  "Project info/context/index",                      handle_project,  [],                TIER_STABLE),
+    ("/agent",    "Run specialist agent",                            handle_agent,    [],                TIER_BETA),
+    ("/sessions", "Manage sessions",                                 handle_sessions, [],                TIER_STABLE),
+    ("/browse",   "Browse web pages",                                handle_browse,   [],                TIER_BETA),
+    ("/hook",     "Manage hooks",                                    handle_hook,     [],                TIER_BETA),
+    ("/speak",    "Text-to-speech",                                  handle_speak,    ["/say"],          TIER_BETA),
+    ("/recall",   "Search memories",                                 handle_recall,   ["/memory"],       TIER_BETA),
+    ("/goal",     "Run a goal",                                      handle_goal,     [],                TIER_BETA),
+    ("/trust",    "Enable trust mode (auto-approve all tools)",      handle_trust,    [],                TIER_STABLE),
+    ("/cost",     "Show session cost breakdown",                     handle_cost,     [],                TIER_STABLE),
+    ("/context",  "Show context window usage",                       handle_context,  [],                TIER_STABLE),
+    ("/trace",    "Show structured session trace and run summaries", handle_trace,    [],                TIER_BETA),
+    ("/rewind",   "Rewind file changes to a checkpoint",             handle_rewind,   [],                TIER_STABLE),
+    ("/theme",    "Switch color theme",                              handle_theme,    [],                TIER_STABLE),
+    ("/fleet",    "Run parallel sub-agents",                         handle_fleet,    [],                TIER_BETA),
+    ("/tasks",    "Show background tasks",                           handle_tasks,    [],                TIER_BETA),
+    ("/research", "Start research mode",                             handle_research, [],                TIER_BETA),
+    ("/sources",  "Show research sources",                           handle_sources,  [],                TIER_BETA),
+    ("/export",   "Export research to Markdown",                     handle_export,   [],                TIER_BETA),
+    ("/mood",     "Show emotional state",                            handle_mood,     [],                TIER_BETA),
+    ("/pr",       "Create pull request",                             handle_pr,       [],                TIER_BETA),
+    ("/branch",   "Create git branch",                               handle_branch,   [],                TIER_BETA),
+    ("/stash",    "Smart git stash",                                 handle_stash,    [],                TIER_BETA),
+    ("/blame",    "Git blame with context",                          handle_blame,    [],                TIER_BETA),
+    ("/test",     "Run tests",                                       handle_test,     [],                TIER_STABLE),
+    ("/verify",   "Verify this session's edits (typecheck/tests)",   handle_verify,   [],                TIER_STABLE),
+    ("/why",      "Show edit history + triggering prompts for a file", handle_why,     [],                TIER_EXPERIMENTAL),
+    ("/watch",    "Watch files for AI comments",                     handle_watch,    [],                TIER_BETA),
+    ("/evolve",   "Evolve skills with GEPA",                         handle_evolve,   [],                TIER_EXPERIMENTAL),
+    ("/diff",     "Show git diff with syntax highlighting",          handle_diff,     [],                TIER_STABLE),
+    ("/git",      "Run read-only git commands",                      handle_git,      [],                TIER_STABLE),
+    ("/mcp",      "Manage MCP server connections",                   handle_mcp,      [],                TIER_BETA),
+    ("/audit",    "Inspect Merkle audit chain",                      handle_audit,    [],                TIER_BETA),
+    ("/hand",     "Manage autonomous Hands",                         handle_hand,     [],                TIER_EXPERIMENTAL),
+    ("/undo",     "Undo last file edit",                             handle_undo,     [],                TIER_STABLE),
+    ("/redo",     "Redo the last /undo",                             handle_redo,     [],                TIER_STABLE),
+    ("/heatmap",  "Show cognitive heatmap (tokens by tool/file)",    handle_heatmap,  [],                TIER_BETA),
+    ("/shadow",   "Run prompt against 2 models in parallel (diff)",  handle_shadow,   [],                TIER_BETA),
+    ("/debate",   "Multi-model debate on a question",                handle_debate,   [],                TIER_EXPERIMENTAL),
+    ("/fork",     "Fork conversation into a new branch",             handle_fork,     [],                TIER_EXPERIMENTAL),
+    ("/branches", "List conversation branches",                      handle_branches, [],                TIER_EXPERIMENTAL),
+    ("/checkout", "Switch to a conversation branch",                 handle_checkout, [],                TIER_EXPERIMENTAL),
+    ("/merge",    "Merge branch back to parent",                     handle_merge,    [],                TIER_EXPERIMENTAL),
+    ("/chain",    "Run prompt pipelines (step1 -> step2 -> ...)",    handle_chain,    [],                TIER_BETA),
+    ("/changes",  "Show files modified in this session",             handle_changes,  [],                TIER_BETA),
+    ("/routing",  "Show/set routing preference",                     handle_routing,  [],                TIER_BETA),
+    ("/copy",     "Copy last response or code block to clipboard",   handle_copy,     [],                TIER_STABLE),
+    ("/voice",    "Voice mode (speech input/output)",                _handle_voice,   [],                TIER_BETA),
+    ("/snippet",  "Manage prompt templates/snippets",                handle_snippet,  [],                TIER_BETA),
+    ("/interrupt","Abort running iteration with optional correction",handle_interrupt,["/stop"],         TIER_STABLE),
 ]
 
 # Pseudo-commands handled inline in chat_session_runtime.py — no registry entry,
@@ -154,15 +166,21 @@ RUNTIME_ONLY_COMMANDS: list[tuple[str, str]] = [
 
 # Derived dispatch map: canonical names + aliases → handler.
 COMMAND_REGISTRY: dict[str, Callable[..., Any]] = {}
-for _name, _desc, _handler, _aliases in COMMANDS:
+for _name, _desc, _handler, _aliases, _tier in COMMANDS:
     COMMAND_REGISTRY[_name] = _handler
     for _alias in _aliases:
         COMMAND_REGISTRY[_alias] = _handler
 
+# Derived tier lookup: command_name → tier. Used by /help and the palette.
+COMMAND_TIERS: dict[str, str] = {name: tier for name, _d, _h, _a, tier in COMMANDS}
+EXPERIMENTAL_COMMANDS: set[str] = {
+    name for name, _d, _h, _a, tier in COMMANDS if tier == TIER_EXPERIMENTAL
+}
+
 # Completer list: canonical commands + runtime-only. Aliases excluded to avoid
 # showing /bash, /run, /say, /find, /memory, /exit as separate entries.
 SLASH_COMMANDS: list[tuple[str, str]] = [
-    (name, desc) for name, desc, _h, _a in COMMANDS
+    (name, desc) for name, desc, _h, _a, _t in COMMANDS
 ] + RUNTIME_ONLY_COMMANDS
 
 

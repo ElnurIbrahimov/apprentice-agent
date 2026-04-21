@@ -103,6 +103,15 @@ class SessionLoopGuard:
         # Phase 6: per-file edit counter for "same file spam" detection
         self._file_edits: Dict[str, int] = {}
         self._files_edited: list[str] = []
+        # Progress tracking — "no progress" means no successful edit within
+        # N iterations or T seconds. Signals a stuck agent even when it's
+        # doing varied work (different tools, different queries) with no
+        # forward motion.
+        self._iterations_without_progress: int = 0
+        self._last_progress_time: float = time.monotonic()
+        # Thresholds are overridable via AURA.md lost_detection block.
+        self._no_progress_iter_limit: int = 4
+        self._max_seconds_without_progress: float = 60.0
 
     # ------------------------------------------------------------------
     # Public API
@@ -161,6 +170,46 @@ class SessionLoopGuard:
         self._trigger_reason = ""
         self._file_edits = {}
         self._files_edited = []
+        self._iterations_without_progress = 0
+        self._last_progress_time = time.monotonic()
+
+    def configure(self, *, no_progress_iter_limit: int = None,
+                  max_seconds_without_progress: float = None) -> None:
+        """Override thresholds from AURA.md `lost_detection:` block."""
+        if no_progress_iter_limit is not None and no_progress_iter_limit > 0:
+            self._no_progress_iter_limit = int(no_progress_iter_limit)
+        if max_seconds_without_progress is not None and max_seconds_without_progress > 0:
+            self._max_seconds_without_progress = float(max_seconds_without_progress)
+
+    def note_progress(self) -> None:
+        """Call when a real forward step happens — a successful edit, a test
+        that flipped red→green, a tool that materially advanced state.
+        Resets the "no progress" counters."""
+        self._iterations_without_progress = 0
+        self._last_progress_time = time.monotonic()
+
+    def note_iteration(self) -> LoopGuardResult:
+        """Call once per agent iteration. Trips a 'stuck' LoopGuardResult when
+        too many iterations pass without a note_progress() call, or the
+        wall-clock time since last progress exceeds max_seconds_without_progress."""
+        if not self._enabled:
+            return LoopGuardResult(triggered=False)
+
+        self._iterations_without_progress += 1
+        now = time.monotonic()
+        elapsed_since_progress = now - self._last_progress_time
+
+        if self._iterations_without_progress >= self._no_progress_iter_limit:
+            return self._trigger(
+                "no_progress_iterations",
+                f"{self._iterations_without_progress} iterations without forward progress",
+            )
+        if elapsed_since_progress >= self._max_seconds_without_progress:
+            return self._trigger(
+                "no_progress_timeout",
+                f"{elapsed_since_progress:.0f}s elapsed without forward progress",
+            )
+        return LoopGuardResult(triggered=False, actions_taken=self._total_actions)
 
     def record_file_edit(self, file_path: str) -> LoopGuardResult:
         """Track per-file edit counts. >3 edits to the same file within a run

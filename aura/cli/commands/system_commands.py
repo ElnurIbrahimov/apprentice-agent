@@ -40,20 +40,72 @@ def handle_hook(agent, arg, context) -> Optional[str]:
 
 
 def handle_mcp(agent, arg, context) -> Optional[str]:
+    """Dispatch /mcp subcommands. Supports: list (default), status, reconnect <name>."""
     ctx = get_ctx()
+    mgr = None
     if ctx and ctx.agentic_loop and hasattr(ctx.agentic_loop, '_mcp_client'):
         mgr = ctx.agentic_loop._mcp_client
-        if not mgr.connections:
-            console.print("  [dim]No MCP servers connected. Configure in AURA.md under mcp_servers:[/dim]")
-        else:
-            for name, conn in mgr.connections.items():
-                console.print(f"  [cyan]{name}[/cyan]: {len(conn.tools)} tools")
-                for t in conn.tools[:5]:
-                    console.print(f"    [dim]- {t['name']}: {t.get('description', '')[:60]}[/dim]")
-                if len(conn.tools) > 5:
-                    console.print(f"    [dim]... and {len(conn.tools) - 5} more[/dim]")
-    else:
-        console.print("  [dim]No MCP servers connected. Configure in AURA.md under mcp_servers:[/dim]")
+
+    if mgr is None or not getattr(mgr, "connections", None):
+        console.print(
+            "  [dim]No MCP servers connected. Configure in AURA.md under mcp_servers:[/dim]"
+        )
+        return None
+
+    parts = (arg or "").strip().split(None, 1)
+    sub = parts[0].lower() if parts else "list"
+    sub_arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if sub in ("", "list"):
+        for name, conn in mgr.connections.items():
+            console.print(f"  [cyan]{name}[/cyan]: {len(conn.tools)} tools")
+            for t in conn.tools[:5]:
+                console.print(
+                    f"    [dim]- {t['name']}: {t.get('description', '')[:60]}[/dim]"
+                )
+            if len(conn.tools) > 5:
+                console.print(f"    [dim]... and {len(conn.tools) - 5} more[/dim]")
+        return None
+
+    if sub == "status":
+        for name, conn in mgr.connections.items():
+            ok = bool(getattr(conn, "tools", None))
+            dot = "[green]●[/green]" if ok else "[red]●[/red]"
+            tool_count = len(conn.tools) if ok else 0
+            console.print(
+                f"  {dot} [cyan]{name}[/cyan]  {tool_count} tools"
+            )
+        return None
+
+    if sub == "reconnect":
+        if not sub_arg:
+            console.print("  [dim]Usage: /mcp reconnect <server-name>[/dim]")
+            return None
+        if sub_arg not in mgr.connections:
+            console.print(f"  [red]Unknown MCP server:[/red] {sub_arg}")
+            return None
+        try:
+            # Reconnect pattern: call the manager's reconnect if present,
+            # else fall back to disconnect+connect. Keep this best-effort —
+            # MCP client API may vary across versions.
+            if hasattr(mgr, "reconnect"):
+                mgr.reconnect(sub_arg)
+            elif hasattr(mgr, "disconnect") and hasattr(mgr, "connect"):
+                mgr.disconnect(sub_arg)
+                mgr.connect(sub_arg)
+            else:
+                console.print(
+                    "  [yellow]Reconnect not supported by this MCP client.[/yellow]"
+                )
+                return None
+            console.print(f"  [green]Reconnected:[/green] {sub_arg}")
+        except Exception as e:
+            console.print(f"  [red]Reconnect failed:[/red] {e}")
+        return None
+
+    console.print(
+        "  [dim]Usage: /mcp [list|status|reconnect <name>][/dim]"
+    )
 
 
 def handle_audit(agent, arg, context) -> Optional[str]:

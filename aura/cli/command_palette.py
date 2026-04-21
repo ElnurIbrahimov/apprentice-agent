@@ -87,7 +87,16 @@ def _sort_items(items: List[PaletteItem], query: str = "") -> List[PaletteItem]:
     return sorted(items, key=lambda it: (-_frecency_score(it.action), it.category, it.label.lower()))
 
 def build_items_from_commands(slash_commands: list[tuple[str, str]]) -> List[PaletteItem]:
-    return [PaletteItem(label=c, description=d, category="command") for c, d in slash_commands]
+    # Tag experimental commands so users can see they're not fully supported.
+    try:
+        from aura.cli.commands import EXPERIMENTAL_COMMANDS
+    except ImportError:
+        EXPERIMENTAL_COMMANDS = set()
+    items: List[PaletteItem] = []
+    for c, d in slash_commands:
+        desc = f"[exp] {d}" if c in EXPERIMENTAL_COMMANDS else d
+        items.append(PaletteItem(label=c, description=desc, category="command"))
+    return items
 
 def build_palette(slash_commands: list[tuple[str, str]], recent_files: Optional[List[str]] = None,
                   sessions: Optional[List[Dict[str, Any]]] = None) -> List[PaletteItem]:

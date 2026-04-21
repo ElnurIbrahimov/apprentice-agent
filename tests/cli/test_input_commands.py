@@ -50,9 +50,11 @@ def test_aliases_in_registry_not_completer():
 
 
 def test_slash_commands_count():
-    # 57 canonical (54 original + /redo + /heatmap + /shadow) + 2 runtime-only
-    # (/retry, /channels) = 59 in completer.
-    assert len(SLASH_COMMANDS) == 59
+    # 60 canonical (54 original + /redo + /heatmap + /shadow + /interrupt +
+    # /verify + /why) + 2 runtime-only (/retry, /channels) = 62 in completer.
+    # Aliases (/stop, /exit, /bash, /run, /say, /find) live in the dispatch
+    # registry but are intentionally excluded from the completer list.
+    assert len(SLASH_COMMANDS) == 62
 
 
 def test_every_command_has_description():
