@@ -6,6 +6,8 @@ from typing import Dict, List, Optional
 
 import requests
 
+from aura.security.ssrf_guard import validate_url_safe
+
 logger = logging.getLogger(__name__)
 
 FIRECRAWL_BASE = "https://api.firecrawl.dev/v1"
@@ -29,6 +31,16 @@ class FirecrawlTool:
         """Scrape a single URL and return clean markdown."""
         if not self._api_key:
             return {"error": "FIRECRAWL_API_KEY not set"}
+
+        # SSRF guard — refuse private IPs, loopback, link-local, DNS-rebinding,
+        # and non-http(s) schemes before we hand the URL to Firecrawl. Even
+        # though Firecrawl fetches server-side, a redirect bug on their side
+        # could otherwise become our SSRF.
+        try:
+            validate_url_safe(url)
+        except ValueError as e:
+            logger.warning(f"[Firecrawl] scrape refused for {url}: {e}")
+            return {"error": f"URL rejected by SSRF guard: {e}"}
 
         payload = {
             "url": url,
