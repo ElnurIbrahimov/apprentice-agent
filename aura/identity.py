@@ -11,13 +11,13 @@ ARCHITECTURE NOTE — Identity layer hierarchy:
 """
 
 import json
-import os
 import re
-import tempfile
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+from aura.paths import atomic_write_json
 
 # Module-level lock for identity file read/modify/save operations
 _identity_lock = threading.Lock()
@@ -58,28 +58,9 @@ def load_identity() -> dict:
 
 
 def save_identity(data: dict) -> bool:
-    """Save identity to JSON file.
-
-    Args:
-        data: Identity dict to save
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Save identity to JSON file (crash-safe: fsync before rename)."""
     try:
-        dir_ = IDENTITY_FILE.parent
-        dir_.mkdir(parents=True, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(dir=dir_, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4)
-            os.replace(tmp_path, IDENTITY_FILE)
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
-            raise
+        atomic_write_json(IDENTITY_FILE, data, indent=4)
         return True
     except (IOError, OSError):
         return False

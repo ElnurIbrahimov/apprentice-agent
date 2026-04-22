@@ -334,9 +334,8 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 "failures": self._consecutive_think_failures,
                 "open_at": self._think_circuit_open_at,
             }
-            tmp = self._cb_state_file.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(payload), encoding="utf-8")
-            tmp.replace(self._cb_state_file)
+            from aura.paths import atomic_write_json
+            atomic_write_json(self._cb_state_file, payload, indent=0)
         except Exception as e:
             logger.debug(f"[BRAIN] Could not save circuit breaker state: {e}")
 

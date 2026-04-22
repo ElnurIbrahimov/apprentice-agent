@@ -184,13 +184,20 @@ class AuraDaemon:
         self._last_idle_tick = 0.0
         self._last_proactive_tick = 0.0
         self._proactive_running = False
-        self._last_dream_date = None
-        self._last_gepa_date = None
+        # Dream + GEPA dedup: unix timestamps of the last run. We use hysteresis
+        # (>= 23h since last run) instead of date comparison so NTP backward
+        # jumps or VM snapshots can't cause same-day double-fires.
+        self._last_dream_run_at: float = 0.0
+        self._last_gepa_run_at: float = 0.0
         self._gepa_running = False
 
-        # Persist dream state across restarts
+        # Persist dream/GEPA state across restarts
         self._state_file = Path(os.getenv("AURA_DATA_DIR", "data")) / "daemon_state.json"
         self._load_daemon_state()
+
+        # Background threads we want to join cleanly on stop().
+        self._bg_threads: list[threading.Thread] = []
+        self._bg_threads_lock = threading.Lock()
 
     def start(self):
         """Start the daemon."""
@@ -222,6 +229,20 @@ class AuraDaemon:
         finally:
             self.stop()
 
+    def _spawn_bg(self, target, name: str) -> threading.Thread:
+        """Start a long-running background thread and track it for clean shutdown.
+
+        Threads are spawned as daemons so a hard exit still reaps them, but
+        stop() will attempt a bounded join first.
+        """
+        t = threading.Thread(target=target, name=name, daemon=True)
+        with self._bg_threads_lock:
+            # Drop any already-dead refs so the list doesn't grow forever.
+            self._bg_threads = [x for x in self._bg_threads if x.is_alive()]
+            self._bg_threads.append(t)
+        t.start()
+        return t
+
     def stop(self):
         self._running = False
         try:
@@ -232,6 +253,20 @@ class AuraDaemon:
             self._ipc.stop()
         except Exception:
             logger.debug("ipc_stop_failed", exc_info=True)
+
+        # Join tracked background threads with a bounded per-thread timeout so
+        # we don't hang on a stuck GEPA/dream call. Anything still running
+        # after this will be reaped by the daemon=True safety net.
+        with self._bg_threads_lock:
+            pending = [t for t in self._bg_threads if t.is_alive()]
+        for t in pending:
+            try:
+                t.join(timeout=30.0)
+                if t.is_alive():
+                    logger.warning("bg thread %s did not exit within 30s", t.name)
+            except Exception:
+                logger.debug("bg_thread_join_failed name=%s", t.name, exc_info=True)
+
         self._remove_pid()
         logger.info("AURA daemon stopped.")
 
@@ -352,17 +387,17 @@ class AuraDaemon:
             logger.error("Light sleep failed: %s", e)
 
     def _check_dream_time(self):
-        """Trigger full dream at 3 AM (once per day)."""
+        """Trigger full dream at 3 AM with >=23h hysteresis (resilient to NTP jumps)."""
         now = datetime.now()
-        today = now.date()
-        if (now.hour == self.DREAM_HOUR and
-                self._last_dream_date != today and
-                self._agent is not None):
-            self._last_dream_date = today
+        now_ts = now.timestamp()
+        if (now.hour == self.DREAM_HOUR
+                and self._agent is not None
+                and (now_ts - self._last_dream_run_at) >= 23 * 3600):
+            self._last_dream_run_at = now_ts
             self._save_daemon_state()
             logger.info("3 AM -- starting full dream cycle")
             self._event_bus.emit("daemon:dream_start", {})
-            threading.Thread(target=self._run_full_dream, daemon=True).start()
+            self._spawn_bg(self._run_full_dream, name="aura-dream")
 
     def _tick_proactive(self):
         """Trigger proactive awareness full analysis in background.
@@ -414,24 +449,29 @@ class AuraDaemon:
             self._proactive_running = False
 
     def _check_gepa_time(self):
-        """Trigger GEPA skill evolution at GEPA_HOUR, at most once per GEPA_INTERVAL_DAYS."""
+        """Trigger GEPA skill evolution at GEPA_HOUR, at most once per GEPA_INTERVAL_DAYS.
+
+        Uses a timestamp-based hysteresis (>= GEPA_INTERVAL_DAYS * 24h - 1h) so
+        a wall-clock backward jump (NTP correction, VM snapshot restore) cannot
+        trigger a second run within the intended interval.
+        """
         if self._gepa_running or self._agent is None:
             return
         now = datetime.now()
-        today = now.date()
         if now.hour != self.GEPA_HOUR:
             return
-        if self._last_gepa_date is not None:
-            days_since = (today - self._last_gepa_date).days
-            if days_since < self.GEPA_INTERVAL_DAYS:
-                return
+        now_ts = now.timestamp()
+        # Hysteresis: interval minus 1h to tolerate DST transitions.
+        min_gap = max(0, self.GEPA_INTERVAL_DAYS * 24 * 3600 - 3600)
+        if (now_ts - self._last_gepa_run_at) < min_gap:
+            return
         # Mark immediately so re-entry within this hour is prevented
         self._gepa_running = True
-        self._last_gepa_date = today
+        self._last_gepa_run_at = now_ts
         self._save_daemon_state()
         logger.info("GEPA window reached -- starting weekly skill evolution")
         self._event_bus.emit("daemon:gepa_start", {})
-        threading.Thread(target=self._run_gepa, daemon=True).start()
+        self._spawn_bg(self._run_gepa, name="aura-gepa")
 
     def _run_gepa(self):
         """Run GEPA evolution in background. Guarded by _gepa_running flag."""
@@ -597,29 +637,59 @@ class AuraDaemon:
     # -- Daemon state persistence --------------------------------------------
 
     def _load_daemon_state(self):
-        """Load persisted daemon state (last dream/GEPA dates)."""
+        """Load persisted daemon state (last dream/GEPA run timestamps).
+
+        Accepts legacy `last_dream_date` / `last_gepa_date` ISO-date fields for
+        upgrade compatibility — we convert them to a midnight timestamp.
+        """
         try:
-            if self._state_file.exists():
-                data = json.loads(self._state_file.read_text(encoding="utf-8"))
-                from datetime import date as date_cls
-                last_dream = data.get("last_dream_date")
-                if last_dream:
-                    self._last_dream_date = date_cls.fromisoformat(last_dream)
-                last_gepa = data.get("last_gepa_date")
-                if last_gepa:
-                    self._last_gepa_date = date_cls.fromisoformat(last_gepa)
+            if not self._state_file.exists():
+                return
+            data = json.loads(self._state_file.read_text(encoding="utf-8"))
+
+            dream_ts = data.get("last_dream_run_at")
+            if dream_ts is not None:
+                try:
+                    self._last_dream_run_at = float(dream_ts)
+                except (TypeError, ValueError):
+                    pass
+            else:
+                # Legacy field (pre-hysteresis) — treat as midnight of that date.
+                legacy = data.get("last_dream_date")
+                if legacy:
+                    try:
+                        from datetime import date as date_cls, datetime as dt_cls
+                        d = date_cls.fromisoformat(legacy)
+                        self._last_dream_run_at = dt_cls(d.year, d.month, d.day).timestamp()
+                    except Exception:
+                        pass
+
+            gepa_ts = data.get("last_gepa_run_at")
+            if gepa_ts is not None:
+                try:
+                    self._last_gepa_run_at = float(gepa_ts)
+                except (TypeError, ValueError):
+                    pass
+            else:
+                legacy = data.get("last_gepa_date")
+                if legacy:
+                    try:
+                        from datetime import date as date_cls, datetime as dt_cls
+                        d = date_cls.fromisoformat(legacy)
+                        self._last_gepa_run_at = dt_cls(d.year, d.month, d.day).timestamp()
+                    except Exception:
+                        pass
         except Exception as e:
             logger.debug("Failed to load daemon state: %s", e)
 
     def _save_daemon_state(self):
-        """Persist daemon state to disk."""
+        """Persist daemon state to disk (crash-safe via atomic_write_json)."""
         try:
-            self._state_file.parent.mkdir(parents=True, exist_ok=True)
-            data = {
-                "last_dream_date": self._last_dream_date.isoformat() if self._last_dream_date else None,
-                "last_gepa_date": self._last_gepa_date.isoformat() if self._last_gepa_date else None,
-            }
-            self._state_file.write_text(json.dumps(data), encoding="utf-8")
+            from aura.paths import atomic_write_json
+            atomic_write_json(self._state_file, {
+                "last_dream_run_at": self._last_dream_run_at,
+                "last_gepa_run_at": self._last_gepa_run_at,
+            }, indent=0)
         except Exception as e:
             logger.debug("Failed to save daemon state: %s", e)
 
@@ -777,28 +847,64 @@ class IPCServer:
         self._auth_token = self._generate_auth_token()
 
     def _generate_auth_token(self) -> str:
-        """Generate a random auth token and write it to a restricted file."""
+        """Generate a random auth token and write it to a restricted file.
+
+        If the OS refuses to lock down the file to the current user, we refuse
+        to start — a world-readable token file is worse than no IPC at all.
+        Set AURA_IPC_ALLOW_OPEN_TOKEN=1 to bypass (test-only).
+        """
         import secrets
         import stat
         token = secrets.token_hex(32)
         token_path = Path(os.getenv("AURA_DATA_DIR", "data")) / "ipc_token"
         token_path.parent.mkdir(parents=True, exist_ok=True)
         token_path.write_text(token, encoding="utf-8")
+
+        locked_down = False
         try:
             token_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
-        except OSError:
-            # Windows: POSIX permissions not supported — use icacls to restrict
-            if sys.platform == "win32":
-                try:
-                    import subprocess
-                    # Remove inherited permissions, grant only current user
-                    subprocess.run(
-                        ["icacls", str(token_path), "/inheritance:r",
-                         "/grant:r", f"{os.getenv('USERNAME', 'OWNER')}:(R,W)"],
-                        capture_output=True, timeout=5,
+            locked_down = sys.platform != "win32"  # chmod is a no-op on Windows
+        except OSError as e:
+            logger.warning("IPC token chmod failed: %s", e)
+
+        if not locked_down and sys.platform == "win32":
+            try:
+                import subprocess
+                user = os.environ.get("USERNAME") or os.environ.get("USER")
+                if not user:
+                    raise RuntimeError("no USERNAME env var; cannot grant ACL")
+                # Remove inherited permissions, grant only the current user R/W.
+                result = subprocess.run(
+                    ["icacls", str(token_path), "/inheritance:r",
+                     "/grant:r", f"{user}:(R,W)"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"icacls returned {result.returncode}: {result.stderr.strip()[:200]}"
                     )
-                except Exception as e:
-                    logger.warning("IPC token file permissions could not be restricted: %s", e)
+                locked_down = True
+            except Exception as e:
+                logger.error("IPC token ACL could not be restricted: %s", e)
+
+        if not locked_down:
+            if os.environ.get("AURA_IPC_ALLOW_OPEN_TOKEN") == "1":
+                logger.warning(
+                    "IPC token file is NOT permission-locked — continuing because "
+                    "AURA_IPC_ALLOW_OPEN_TOKEN=1 is set (test-only)."
+                )
+            else:
+                try:
+                    token_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise RuntimeError(
+                    "IPC token file could not be restricted to current user. "
+                    "Refusing to start — a world-readable token would let any "
+                    "local process control the daemon. Set "
+                    "AURA_IPC_ALLOW_OPEN_TOKEN=1 to override (tests only)."
+                )
+
         logger.info("IPC auth token written to %s", token_path)
         return token
 

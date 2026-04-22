@@ -23,6 +23,7 @@ import hmac
 import logging
 import os
 import secrets
+import threading
 import time
 from typing import Optional
 
@@ -31,6 +32,11 @@ logger = logging.getLogger(__name__)
 SESSION_COOKIE_NAME = "aura_session"
 SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 _PBKDF2_ITERS = 200_000
+
+# Revocation table: signature hex -> expiry unix ts. In-memory only (single-process
+# web server). On multi-process deploys this needs a shared store.
+_REVOKED_SIGS: dict[str, int] = {}
+_REVOKED_LOCK = threading.Lock()
 
 
 # ---- Password hashing ------------------------------------------------------
@@ -88,7 +94,7 @@ def create_session_token(username: str, ttl_seconds: int = SESSION_TTL_SECONDS) 
 
 
 def verify_session_token(token: str) -> Optional[str]:
-    """Return the username if the token is valid and unexpired, else None."""
+    """Return the username if the token is valid, unexpired, and not revoked."""
     if not token:
         return None
     secret = _get_session_secret()
@@ -107,7 +113,44 @@ def verify_session_token(token: str) -> Optional[str]:
     expected = hmac.new(secret, payload, hashlib.sha256).digest()
     if not hmac.compare_digest(sig, expected):
         return None
+    if _is_revoked(s_part):
+        return None
     return username
+
+
+def _prune_revoked(now_ts: int) -> None:
+    """Drop revocation entries whose embedded expiry already passed. Called
+    under _REVOKED_LOCK."""
+    stale = [sig for sig, exp in _REVOKED_SIGS.items() if exp <= now_ts]
+    for sig in stale:
+        _REVOKED_SIGS.pop(sig, None)
+
+
+def _is_revoked(sig_b64url: str) -> bool:
+    with _REVOKED_LOCK:
+        return sig_b64url in _REVOKED_SIGS
+
+
+def revoke_session_token(token: str) -> bool:
+    """Mark a session token as revoked. Idempotent. Returns True if the token
+    parsed cleanly and was added to the revocation table (whether or not
+    the HMAC is valid — we don't want to leak validity here). Returns False
+    only on structurally malformed input."""
+    if not token:
+        return False
+    try:
+        _u, e_part, s_part = token.split(".")
+        expiry = int(_b64url_decode(e_part))
+    except (ValueError, UnicodeDecodeError):
+        return False
+    now_ts = int(time.time())
+    if expiry <= now_ts:
+        # Already expired — no need to revoke, but claim success.
+        return True
+    with _REVOKED_LOCK:
+        _prune_revoked(now_ts)
+        _REVOKED_SIGS[s_part] = expiry
+    return True
 
 
 # ---- Configured-credentials lookup -----------------------------------------
