@@ -275,15 +275,15 @@ class AURAKnowledgeGraph:
                         self.conn.execute(
                             "MATCH (e:Entity {id: $id}) "
                             "WHERE e.description = '' OR e.description IS NULL "
-                            "SET e.description = $desc",
-                            parameters={"id": entity.id, "desc": entity.description}
+                            "SET e.description = $descr",
+                            parameters={"id": entity.id, "descr": entity.description}
                         )
                 else:
                     # Create new entity
                     self.conn.execute(
                         "CREATE (e:Entity {"
                         "    id: $id, name: $name, entity_type: $entity_type,"
-                        "    description: $desc, importance: $importance,"
+                        "    description: $descr, importance: $importance,"
                         "    access_count: 1, created_at: $now,"
                         "    last_accessed: $now, properties: $props"
                         "})",
@@ -291,7 +291,7 @@ class AURAKnowledgeGraph:
                             "id": entity.id,
                             "name": entity.name,
                             "entity_type": entity.entity_type.value,
-                            "desc": entity.description,
+                            "descr": entity.description,
                             "importance": entity.importance,
                             "now": now,
                             "props": props_json,
