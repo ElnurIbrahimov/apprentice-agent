@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import type { HandStats, HandHistoryEntry, ApprovalRequest, HandTemplate } from '../types';
+import { apiFetch } from '../utils/apiFetch';
 
 // ── State config ─────────────────────────────────────────────────────────────
 
@@ -301,7 +302,7 @@ function HandCard({ hand, onAction, onDeleteHand }: {
 
   useEffect(() => {
     if (!expanded) return;
-    fetch(`/api/hands/history?limit=10&hand=${encodeURIComponent(hand.name)}`)
+    apiFetch(`/api/hands/history?limit=10&hand=${encodeURIComponent(hand.name)}`)
       .then(r => r.json())
       .then(data => setHandHistory(data.history || []))
       .catch(() => {});
@@ -458,9 +459,9 @@ export default function HandsDashboard() {
   const fetchAll = useCallback(async () => {
     try {
       const [handsRes, approvalsRes, historyRes] = await Promise.all([
-        fetch('/api/hands').then(r => r.json()).catch(() => ({ hands: [] })),
-        fetch('/api/hands/approvals').then(r => r.json()).catch(() => ({ approvals: [] })),
-        fetch('/api/hands/history?limit=30').then(r => r.json()).catch(() => ({ history: [] })),
+        apiFetch('/api/hands').then(r => r.json()).catch(() => ({ hands: [] })),
+        apiFetch('/api/hands/approvals').then(r => r.json()).catch(() => ({ approvals: [] })),
+        apiFetch('/api/hands/history?limit=30').then(r => r.json()).catch(() => ({ history: [] })),
       ]);
       setHands(handsRes.hands || []);
       setApprovals(approvalsRes.approvals || []);
@@ -485,7 +486,7 @@ export default function HandsDashboard() {
 
   const handleAction = useCallback(async (name: string, action: string) => {
     try {
-      const res = await fetch(`/api/hands/${name}/${action}`, { method: 'POST' });
+      const res = await apiFetch(`/api/hands/${name}/${action}`, { method: 'POST' });
       if (!res.ok) {
         const d = await res.json().catch(() => ({ detail: `Failed (${res.status})` }));
         setError(`${name}/${action}: ${d.detail || `HTTP ${res.status}`}`);
@@ -498,7 +499,7 @@ export default function HandsDashboard() {
 
   const handleApproval = useCallback(async (name: string, approved: boolean) => {
     try {
-      const res = await fetch(`/api/hands/${name}/approve`, {
+      const res = await apiFetch(`/api/hands/${name}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved }),
@@ -516,7 +517,7 @@ export default function HandsDashboard() {
   const handleCreate = async () => {
     setCreating(true); setCreateError(null);
     try {
-      const res = await fetch('/api/hands/create', {
+      const res = await apiFetch('/api/hands/create', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: createDesc }),
       });
@@ -528,7 +529,7 @@ export default function HandsDashboard() {
 
   const handleFromTemplate = async (name: string) => {
     try {
-      const res = await fetch('/api/hands/from-template', {
+      const res = await apiFetch('/api/hands/from-template', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ template_name: name, variables: templateVars }),
       });
@@ -539,7 +540,7 @@ export default function HandsDashboard() {
   const handleDeleteHand = async (name: string) => {
     if (!confirm(`Delete hand "${name}"?`)) return;
     try {
-      const res = await fetch(`/api/hands/${name}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/hands/${name}`, { method: 'DELETE' });
       if (!res.ok) {
         const d = await res.json().catch(() => ({ detail: `Failed (${res.status})` }));
         setError(`Delete ${name}: ${d.detail || `HTTP ${res.status}`}`);
@@ -552,7 +553,7 @@ export default function HandsDashboard() {
 
   const fetchTemplates = async () => {
     try {
-      const res = await fetch('/api/hands/templates');
+      const res = await apiFetch('/api/hands/templates');
       if (res.ok) { const d = await res.json(); setTemplates(d.templates || []); }
     } catch {}
   };
@@ -560,7 +561,7 @@ export default function HandsDashboard() {
   const handlePauseAll = async () => {
     setGlobalPausing(true);
     const active = hands.filter(h => ['active', 'running'].includes(h.state));
-    await Promise.all(active.map(h => fetch(`/api/hands/${h.name}/pause`, { method: 'POST' }).catch(() => {})));
+    await Promise.all(active.map(h => apiFetch(`/api/hands/${h.name}/pause`, { method: 'POST' }).catch(() => {})));
     await fetchAll();
     setGlobalPausing(false);
   };
@@ -568,7 +569,7 @@ export default function HandsDashboard() {
   const handleResumeAll = async () => {
     setGlobalPausing(true);
     const paused = hands.filter(h => h.state === 'paused');
-    await Promise.all(paused.map(h => fetch(`/api/hands/${h.name}/activate`, { method: 'POST' }).catch(() => {})));
+    await Promise.all(paused.map(h => apiFetch(`/api/hands/${h.name}/activate`, { method: 'POST' }).catch(() => {})));
     await fetchAll();
     setGlobalPausing(false);
   };

@@ -15,6 +15,7 @@ import {
   BookmarkIcon,
   MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 const API_BASE = '/api/chat';
 
@@ -106,7 +107,7 @@ export function ConversationList() {
   // Fetch conversations list
   const fetchConversations = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/conversations`);
+      const res = await apiFetch(`${API_BASE}/conversations`);
       if (res.ok) {
         const data: Conversation[] = await res.json();
         setConversations(data);
@@ -125,7 +126,7 @@ export function ConversationList() {
   const loadConversationMessages = useCallback(async (id: string) => {
     setIsSwitchingConversation(true);
     try {
-      const res = await fetch(`${API_BASE}/conversations/${id}/switch`, { method: 'POST' });
+      const res = await apiFetch(`${API_BASE}/conversations/${id}/switch`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         setCurrentConversationId(data.id);
@@ -185,7 +186,7 @@ export function ConversationList() {
       searchDebounceRef.current = setTimeout(async () => {
         setIsSearching(true);
         try {
-          const res = await fetch(`${API_BASE}/conversations/search?q=${encodeURIComponent(searchQuery)}`);
+          const res = await apiFetch(`${API_BASE}/conversations/search?q=${encodeURIComponent(searchQuery)}`);
           if (res.ok) {
             const data = await res.json();
             setMsgSearchResults(data.results || []);
@@ -263,7 +264,7 @@ export function ConversationList() {
   // New Chat — also update ref so the event listener always sees the latest version
   const handleNewChat = async () => {
     try {
-      const res = await fetch(`${API_BASE}/conversations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const res = await apiFetch(`${API_BASE}/conversations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       if (res.ok) {
         const data = await res.json();
         setCurrentConversationId(data.id);
@@ -301,7 +302,7 @@ export function ConversationList() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/conversations/${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`${API_BASE}/conversations/${id}`, { method: 'DELETE' });
       if (res.ok) {
         const data = await res.json();
         if (id === currentConversationId) {
@@ -335,7 +336,7 @@ export function ConversationList() {
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/conversations/${editingId}`, {
+      const res = await apiFetch(`${API_BASE}/conversations/${editingId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: editTitle.trim() }),
@@ -353,7 +354,7 @@ export function ConversationList() {
     setSavingToMemory(id);
     setContextMenuId(null);
     try {
-      const res = await fetch(`${API_BASE}/conversations/${id}/save-to-memory`, { method: 'POST' });
+      const res = await apiFetch(`${API_BASE}/conversations/${id}/save-to-memory`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {

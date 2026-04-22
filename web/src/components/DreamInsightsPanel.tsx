@@ -17,6 +17,7 @@ import {
   BeakerIcon,
   ChartBarIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface DreamEntry {
   phase: string;
@@ -98,7 +99,7 @@ export function DreamInsightsPanel() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/neurodream');
+      const res = await apiFetch('/api/neurodream');
       if (res.ok) setStatus(await res.json());
     } catch { /* silent */ }
     setLoading(false);
@@ -110,7 +111,7 @@ export function DreamInsightsPanel() {
     haptics.medium();
     setActionLoading(true);
     try {
-      await fetch('/api/neurodream/sleep', { method: 'POST' });
+      await apiFetch('/api/neurodream/sleep', { method: 'POST' });
       setTimeout(fetchStatus, 2000);
     } catch { /* silent */ }
     setActionLoading(false);
@@ -120,7 +121,7 @@ export function DreamInsightsPanel() {
     haptics.light();
     setActionLoading(true);
     try {
-      await fetch('/api/neurodream/wake', { method: 'POST' });
+      await apiFetch('/api/neurodream/wake', { method: 'POST' });
       setTimeout(fetchStatus, 2000);
     } catch { /* silent */ }
     setActionLoading(false);

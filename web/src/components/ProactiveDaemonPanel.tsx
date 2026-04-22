@@ -8,6 +8,7 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface DaemonStatus {
   running: boolean;
@@ -65,7 +66,7 @@ export function ProactiveDaemonPanel() {
   // Fetch daemon status
   const fetchStatus = useCallback(async () => {
     try {
-      const response = await fetch('/api/proactive/status');
+      const response = await apiFetch('/api/proactive/status');
       if (response.ok) {
         const data = await response.json();
         setStatus(data);
@@ -83,7 +84,7 @@ export function ProactiveDaemonPanel() {
   const fetchMessages = useCallback(async () => {
     if (!status?.running) return;
     try {
-      const response = await fetch('/api/proactive/messages');
+      const response = await apiFetch('/api/proactive/messages');
       if (response.ok) {
         const data = await response.json();
         if (data.messages?.length > 0) {
@@ -114,7 +115,7 @@ export function ProactiveDaemonPanel() {
   const daemonAction = async (action: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/proactive/${action}`, { method: 'POST' });
+      const res = await apiFetch(`/api/proactive/${action}`, { method: 'POST' });
       if (!res.ok) setError(`${action} failed: HTTP ${res.status}`);
       else setError(null);
       await fetchStatus();
@@ -133,7 +134,7 @@ export function ProactiveDaemonPanel() {
   const triggerDecision = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/proactive/decide', { method: 'POST' });
+      const response = await apiFetch('/api/proactive/decide', { method: 'POST' });
       if (response.ok) {
         const decision = await response.json();
         // Add to messages for visibility
@@ -156,7 +157,7 @@ export function ProactiveDaemonPanel() {
       const actions = ['notify', 'suggest', 'remind', 'ask'];
       const randomAction = actions[Math.floor(Math.random() * actions.length)];
 
-      const response = await fetch('/api/proactive/test-message', {
+      const response = await apiFetch('/api/proactive/test-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: randomAction }),
