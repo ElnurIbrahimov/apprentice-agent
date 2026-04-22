@@ -18,6 +18,42 @@ def print_result(result, is_fastpath: bool = False):
         console.print(f"[dim]Completed ({mode})[/dim]")
 
 
+def handle_interrupt(agent, arg, context) -> Optional[str]:
+    """`/interrupt [correction]` — abort the running iteration and queue a note.
+
+    Without an argument, just cancels the in-flight agentic loop. With an
+    argument, pushes the text as a preempt-flagged steering message so the
+    next iteration picks up the correction immediately after the abort.
+    """
+    from ..context import get_ctx
+    from ..display import console as _int_console
+
+    ctx = get_ctx()
+    if ctx is None:
+        _int_console.print("[dim]No active session.[/dim]")
+        return None
+
+    steering = getattr(ctx, "steering", None)
+    if steering is None:
+        # Fallback: still try to cancel the loop directly.
+        agentic = getattr(ctx, "agentic_loop", None)
+        if agentic is not None and hasattr(agentic, "cancel"):
+            agentic.cancel()
+            _int_console.print("[yellow]Interrupted (no steering queue available).[/yellow]")
+            return None
+        _int_console.print("[dim]Nothing to interrupt.[/dim]")
+        return None
+
+    note = (arg or "").strip()
+    if note:
+        steering.push(note, preempt=True)
+        _int_console.print(f"[yellow]Interrupting — correction queued: {note[:80]}[/yellow]")
+    else:
+        steering.push("(user interrupted without a correction)", preempt=True)
+        _int_console.print("[yellow]Interrupting current iteration.[/yellow]")
+    return None
+
+
 def handle_goal(agent, arg, context) -> Optional[str]:
     if arg:
         from ..display import show_error as _goal_err

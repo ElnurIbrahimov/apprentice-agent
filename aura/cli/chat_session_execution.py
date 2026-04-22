@@ -49,28 +49,62 @@ def _extract_edit_paths(tool_name: str, args: dict[str, Any]) -> list[str]:
     return ordered
 
 
+_IMAGE_MAX_BYTES = 20 * 1024 * 1024  # 20 MB — vision models reject larger anyway
+_IMAGE_ALLOWED_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+
+
 def _extract_images_from_prompt(text: str) -> tuple[str, list[str]]:
     """Pull [image: <path>] tokens out of the prompt.
 
-    Returns (cleaned_text, base64_images). Tokens pointing at missing files
-    are silently dropped. Uses data uri-friendly raw b64 for Ollama's `images`
-    message field.
+    Returns (cleaned_text, base64_images). Size-capped at 20 MB per image and
+    extension-validated. Invalid tokens are removed from the prompt with a
+    visible warning printed to the console so the user knows why the image
+    didn't attach — previously they silently stayed in the prompt as literal
+    text, confusing the LLM. Uses data uri-friendly raw b64 for Ollama's
+    `images` message field.
     """
     if not text or "[image:" not in text:
         return text, []
 
     imgs: list[str] = []
+    from .display import console as _img_warn_console
+
+    def _warn(reason: str, path: str) -> None:
+        try:
+            _img_warn_console.print(
+                f"  [dim yellow]⚠ image skipped ({reason}): {path}[/dim yellow]"
+            )
+        except Exception:
+            logger.debug("image_warn_print_failed", exc_info=True)
+
     def _sub(m: re.Match) -> str:
         raw = m.group(1).strip().strip('"').strip("'")
         try:
             p = Path(raw).expanduser()
-            if p.is_file():
-                data = p.read_bytes()
-                imgs.append(base64.b64encode(data).decode("ascii"))
-                return ""
         except Exception:
-            logger.debug("image_token_parse_failed", exc_info=True)
-        return m.group(0)  # leave token in place if unreadable
+            _warn("invalid path", raw)
+            return ""
+        if not p.is_file():
+            _warn("file not found", str(p))
+            return ""
+        if p.suffix.lower() not in _IMAGE_ALLOWED_SUFFIXES:
+            _warn(f"unsupported type {p.suffix}", str(p))
+            return ""
+        try:
+            size = p.stat().st_size
+        except OSError:
+            _warn("stat failed", str(p))
+            return ""
+        if size > _IMAGE_MAX_BYTES:
+            _warn(f"{size // (1024*1024)} MB exceeds 20 MB limit", str(p))
+            return ""
+        try:
+            data = p.read_bytes()
+        except (OSError, PermissionError):
+            _warn("unreadable", str(p))
+            return ""
+        imgs.append(base64.b64encode(data).decode("ascii"))
+        return ""
 
     cleaned = _IMAGE_TOKEN_RE.sub(_sub, text).strip()
     return cleaned, imgs
@@ -99,7 +133,7 @@ class SessionExecutionController:
         # streaming with a single keystroke. Falls back silently on POSIX
         # where the raw-mode approach isn't available without stealing
         # prompt_toolkit's tty.
-        cancel_watch_stop = self._start_escape_watchdog()
+        cancel_watch_stop, esc_event = self._start_escape_watchdog()
 
         # Outer try/finally guarantees streamer.finish() and the escape watchdog
         # release no matter how we leave — including exceptions thrown mid-stream
@@ -205,7 +239,8 @@ class SessionExecutionController:
                 return None
             except Exception as exc:
                 streamer.pause()
-                show_error(str(exc))
+                logger.exception("agentic_run_failed")  # full traceback to log
+                show_error(exc)  # classified user-facing message
                 return None
 
             # Feed per-turn stats into the streamer before finishing so the
@@ -256,25 +291,41 @@ class SessionExecutionController:
                 streamer.finish()
             except Exception:
                 logger.debug("streamer_finish_failed", exc_info=True)
+            # Print the "Aborted (Esc)" message ONLY after Rich's Live slot
+            # has been released by streamer.finish(). Printing from the
+            # watchdog thread races Live and raises LiveError.
+            if esc_event is not None and esc_event.is_set():
+                try:
+                    self._session.console.print("  [red]Aborted (Esc).[/red]")
+                except Exception:
+                    logger.debug("esc_abort_print_failed", exc_info=True)
 
     def _start_escape_watchdog(self):
         """Start a background keyboard watcher that cancels the agentic loop on Escape.
 
-        Windows only (msvcrt). On POSIX, returns None and the user falls back
-        to Ctrl+C. Returns a stop() callable that the caller must invoke in a
-        finally block, or None if no watcher was started.
+        Windows only (msvcrt). On POSIX, returns (None, None).
+
+        Returns a tuple ``(stop_fn, esc_event)``:
+
+        - ``stop_fn`` — callable the caller must invoke in a finally block.
+        - ``esc_event`` — ``threading.Event`` that is set when ESC was
+          pressed. The main thread checks this AFTER ``streamer.finish()``
+          has released Rich's Live slot, then prints the "Aborted (Esc)"
+          message. Printing from the watchdog thread races Rich and
+          causes ``LiveError: Only one live display may be active at once``.
         """
         import os
         if os.name != "nt":
-            return None
+            return None, None
         try:
             import msvcrt  # type: ignore[import]
         except ImportError:
-            return None
+            return None, None
 
         import threading
 
         stop_evt = threading.Event()
+        esc_evt = threading.Event()
         session = self._session
 
         def _watch():
@@ -286,11 +337,12 @@ class SessionExecutionController:
                         # swallow keys that belong to prompt_toolkit's next
                         # input cycle.
                         if ch == "\x1b":
+                            esc_evt.set()
                             try:
+                                # cancel() just sets a threading.Event —
+                                # thread-safe. The ABORT MESSAGE is printed
+                                # by the main thread after Live is released.
                                 session.agentic.cancel()
-                                session.console.print(
-                                    "\n  [red]Aborted (Esc).[/red]"
-                                )
                             except Exception:
                                 logger.debug("Failed to cancel agentic loop on Esc", exc_info=True)
                             return
@@ -301,15 +353,10 @@ class SessionExecutionController:
         thread = threading.Thread(target=_watch, name="aura-esc-watchdog", daemon=True)
         thread.start()
 
-        # Return a stopper that both signals the thread AND waits briefly for
-        # it to exit. Without the join() there is a <=100ms race where the
-        # thread can still be inside msvcrt.getwch() when streamer.finish()
-        # tears down the Live display, leading to cancel-on-done or
-        # console.print-on-closed-stream.
         def _stop() -> None:
             stop_evt.set()
             thread.join(timeout=0.2)
-        return _stop
+        return _stop, esc_evt
 
     def process_normal_result(self, user_input: str, result: Optional[dict]) -> bool:
         """Render and track a normal execution result. Returns True when handled successfully."""
@@ -460,17 +507,65 @@ class SessionExecutionController:
         if name in ("edit_file", "write_file") and getattr(
             self._session, "_auto_test_enabled", False
         ):
+            self._run_auto_test_async()
+
+    def _run_auto_test_async(self) -> None:
+        """Kick off auto-test on the bg_pool and wait cancellably.
+
+        Running ``_run_auto_test`` inline inside the streaming event
+        callback freezes the spinner for the duration of the test subprocess
+        (can be minutes) and makes Ctrl+C / Esc cancellation unreliable on
+        Windows. Moving the subprocess onto ``bg_pool`` and polling its
+        future in short ticks lets the user abort the turn while pytest is
+        still running.
+        """
+        try:
+            from aura.pools import bg_pool
+        except Exception:
+            # Fallback to old sync behavior if pool infra is missing.
+            logger.debug("auto_test_bg_pool_unavailable", exc_info=True)
             try:
                 test_result = self._session.agentic._run_auto_test()
                 if test_result:
                     self._session.agentic._conversation_history.append(
-                        {
-                            "role": "user",
-                            "content": f"[Auto-test failed after editing] {test_result}",
-                        }
+                        {"role": "user",
+                         "content": f"[Auto-test failed after editing] {test_result}"}
                     )
             except Exception:
                 logger.debug("Failed to run auto-test after file edit", exc_info=True)
+            return
+
+        future = bg_pool().submit(self._session.agentic._run_auto_test)
+        cancel_event = getattr(self._session.agentic, "_cancel_event", None)
+
+        import time as _t
+        # Hard upper bound so a hung test doesn't stall the turn forever.
+        # 180s matches the average project test-suite budget; beyond that
+        # we surface "auto-test still running" and let the agent move on.
+        deadline = _t.monotonic() + 180.0
+        while _t.monotonic() < deadline:
+            try:
+                test_result = future.result(timeout=0.5)
+                if test_result:
+                    self._session.agentic._conversation_history.append(
+                        {"role": "user",
+                         "content": f"[Auto-test failed after editing] {test_result}"}
+                    )
+                return
+            except Exception as exc:
+                # concurrent.futures.TimeoutError → keep polling; other
+                # exceptions propagate as logged failures.
+                if type(exc).__name__ == "TimeoutError":
+                    if cancel_event is not None and cancel_event.is_set():
+                        # Test still going but the user aborted — let the
+                        # future run to completion in the background; its
+                        # result just won't be injected.
+                        return
+                    continue
+                logger.debug("auto_test_failed", exc_info=True)
+                return
+        # Timed out. Future keeps running in bg_pool; result is abandoned.
+        logger.info("auto_test_exceeded_180s_abandoning_result")
 
     def _print_execution_summary(self, summary_parts: list[str]) -> None:
         try:

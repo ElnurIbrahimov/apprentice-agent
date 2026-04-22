@@ -75,16 +75,34 @@ def parse_key_to_pt(key_str: str) -> tuple:
         "alt+m"      -> ("escape", "m")
         "shift+tab"  -> ("s-tab",)
         "ctrl+z"     -> ("c-z",)
+
+    Unsupported combos (e.g. ``ctrl+shift+k``) log a warning so users
+    know their custom binding in ``~/.aura/keybindings.json`` didn't take
+    effect, instead of silently handing prompt_toolkit a literal string
+    it can't match.
     """
+    import logging
+    _log = logging.getLogger(__name__)
+
     parts = key_str.lower().strip().split("+")
     if len(parts) == 1:
         return (parts[0],)
-    modifier = parts[0]
-    key = parts[1]
+    if len(parts) > 2:
+        _log.warning(
+            "keybinding '%s' uses an unsupported modifier combo; "
+            "only single-modifier bindings are supported (ctrl+X, alt+X, shift+X)",
+            key_str,
+        )
+        return (key_str,)  # prompt_toolkit will reject this, but we've warned
+    modifier, key = parts
     if modifier == "ctrl":
         return (f"c-{key}",)
     elif modifier == "alt":
         return ("escape", key)
     elif modifier == "shift":
         return (f"s-{key}",)
+    _log.warning(
+        "keybinding '%s' has unrecognized modifier '%s'; "
+        "expected ctrl/alt/shift", key_str, modifier,
+    )
     return (key_str,)

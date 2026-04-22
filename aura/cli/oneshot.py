@@ -11,9 +11,14 @@ logger = logging.getLogger(__name__)
 
 
 def _install_wallclock_timeout(seconds: int) -> None:
-    """Install a hard wall-clock timeout that sys.exit(124) if exceeded.
+    """Install a hard wall-clock timeout that signals the main thread.
 
-    Uses threading.Timer so it works cross-platform (signal.SIGALRM is Unix-only).
+    Uses threading.Timer so it works cross-platform (signal.SIGALRM is
+    Unix-only). On fire, we signal the main thread with SIGINT so atexit
+    handlers, session saves, and finally blocks all get to run — unlike
+    ``os._exit(124)`` which skipped them and lost in-flight conversation
+    history. The main thread's top-level handler treats SIGINT during
+    oneshot as "cancel the run and exit 124".
     """
     if seconds <= 0:
         return
@@ -22,6 +27,18 @@ def _install_wallclock_timeout(seconds: int) -> None:
         try:
             sys.stderr.write(f"\n[aura exec] hard timeout after {seconds}s — aborting\n")
             sys.stderr.flush()
+        except Exception:
+            pass
+        # Graceful path: raise KeyboardInterrupt on the main thread so
+        # finally blocks run. Fall back to os._exit only if the interrupt
+        # fails (shouldn't normally).
+        try:
+            import _thread
+            _thread.interrupt_main()
+            # Give the main thread a moment to unwind; os._exit as belt-and-
+            # suspenders if it doesn't.
+            import time as _t
+            _t.sleep(2.0)
         except Exception:
             pass
         os._exit(124)
@@ -33,11 +50,10 @@ def _install_wallclock_timeout(seconds: int) -> None:
 
 def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) -> NoReturn:
     from aura.core.agentic_loop import run_agentic
-    from aura.core.permissions import PermissionManager
 
     from .display import console, show_banner
     from .pipe_mode import StreamingJSONEmitter
-    from .session_bootstrap import build_session_bootstrap
+    from .session_bootstrap import build_permission_manager, build_session_bootstrap
 
     # When caller asked for JSON output, suppress the banner and rich prompts
     # so stdout stays valid JSONL for scripted consumers.
@@ -97,11 +113,6 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
 
     boot = build_session_bootstrap(args, brain=getattr(agent, "brain", None))
 
-    permissions = PermissionManager()
-    permissions.set_mode("careful")
-    if boot.aura_config:
-        permissions.apply_aura_md_overrides(boot.aura_config)
-
     # Emitter is created up front so _confirm can reach it without a forward ref.
     emitter: StreamingJSONEmitter | None = StreamingJSONEmitter() if json_mode else None
 
@@ -117,9 +128,12 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
         from .permissions_dialog import request_permission
         return request_permission(console, tool_name, description)
 
-    permissions.set_confirm_callback(_confirm)
-    if args.trust:
-        permissions.set_mode("full_auto")
+    permissions = build_permission_manager(
+        aura_config=boot.aura_config,
+        trust=bool(getattr(args, "trust", False)),
+        default_mode="careful",
+        confirm_callback=_confirm,
+    )
 
     # Wire event callbacks for JSONL streaming output.
     on_chunk = on_tool_start = on_tool_call = on_response = None
@@ -151,6 +165,11 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
             logger.debug(f"[Oneshot] Memory preview recall failed: {e}")
         console.print()
 
+    # --resume sets agent._resume_session_id in main._handle_resume(). Consume
+    # it here so the prior session's message history is loaded before the
+    # prompt runs — previously this attribute was silently discarded in the
+    # non-interactive path.
+    _resume_id = getattr(agent, "_resume_session_id", None)
     try:
         result = run_agentic(
             brain=agent.brain,
@@ -164,6 +183,7 @@ def run_agentic_oneshot(agent: Any, prompt: str, args: Any, bridge: Any = None) 
             trust_mode=args.trust,
             aura_config=boot.aura_config,
             router=boot.router,
+            resume_session_id=_resume_id,
             on_chunk=on_chunk,
             on_tool_start=on_tool_start,
             on_tool_call=on_tool_call,

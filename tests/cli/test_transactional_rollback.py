@@ -65,8 +65,10 @@ def test_ensure_turn_checkpoint_deduplicates(tmp_path):
 def test_ensure_turn_checkpoint_adds_new_paths_across_iterations(tmp_path):
     from aura.cli.checkpoint import CheckpointManager
 
-    a = tmp_path / "a.py"; a.write_text("a", encoding="utf-8")
-    b = tmp_path / "b.py"; b.write_text("b", encoding="utf-8")
+    a = tmp_path / "a.py"
+    a.write_text("a", encoding="utf-8")
+    b = tmp_path / "b.py"
+    b.write_text("b", encoding="utf-8")
 
     loop = _make_loop_stub()
     loop._checkpoint_mgr = CheckpointManager(checkpoint_dir=tmp_path / ".cp")
@@ -123,9 +125,12 @@ def test_rollback_restores_multiple_files_across_checkpoints(tmp_path):
     """Turn touches 3 files across 2 iterations; one rollback restores all."""
     from aura.cli.checkpoint import CheckpointManager
 
-    a = tmp_path / "a.py"; a.write_text("A", encoding="utf-8")
-    b = tmp_path / "b.py"; b.write_text("B", encoding="utf-8")
-    c = tmp_path / "c.py"; c.write_text("C", encoding="utf-8")
+    a = tmp_path / "a.py"
+    a.write_text("A", encoding="utf-8")
+    b = tmp_path / "b.py"
+    b.write_text("B", encoding="utf-8")
+    c = tmp_path / "c.py"
+    c.write_text("C", encoding="utf-8")
 
     loop = _make_loop_stub()
     loop._checkpoint_mgr = CheckpointManager(checkpoint_dir=tmp_path / ".cp")

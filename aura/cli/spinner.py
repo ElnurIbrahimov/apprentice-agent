@@ -34,6 +34,16 @@ def _get_accent_colors() -> tuple[str, str]:
         return "#D777AF", "#B0578F"
 
 
+def _get_stall_colors() -> tuple[str, str]:
+    """Get error colors for the stall state."""
+    try:
+        from aura.cli.themes import get_theme
+        theme = get_theme()
+        return theme.error, theme.error
+    except (ImportError, AttributeError):
+        return "#FF6B80", "#FF6B80"
+
+
 def _shimmer_text(text: str, elapsed: float, base_color: str, shimmer_color: str) -> Text:
     """Apply a sweeping cosine-band shimmer highlight across text.
 
@@ -82,6 +92,10 @@ class AuraSpinner:
         self._stall_threshold = 30.0  # seconds before color shifts to warn
         self._tokens = 0
         self._fade_steps: int = 0
+        # Parallel-tool counter. When >1, verb is replaced with "N tools running"
+        # so the user sees that multiple tools are executing concurrently rather
+        # than the spinner appearing stuck on a single label.
+        self._parallel_count: int = 0
 
     def __rich__(self) -> Text:
         """Called by Rich Live on each refresh — returns fresh frame."""
@@ -98,11 +112,14 @@ class AuraSpinner:
         frame = _BOUNCE[frame_idx]
         accent, accent_dim = _get_accent_colors()
 
-        # Color shifts toward red when stalling
+        # Color shifts toward the theme's error color when stalling — honors
+        # user-selected themes instead of hardcoding a pink that clashes
+        # outside the default look.
         if elapsed > self._stall_threshold:
-            frame_style = "bold red"
-            verb_base = "red"
-            verb_shimmer = "#FF6B80"
+            err, err_shimmer = _get_stall_colors()
+            frame_style = f"bold {err}"
+            verb_base = err
+            verb_shimmer = err_shimmer
         else:
             frame_style = f"bold {accent}"
             verb_base = accent
@@ -121,8 +138,12 @@ class AuraSpinner:
         if self._step is not None:
             t.append(f"Step {self._step} \u00b7 ", style="dim")
 
-        # Shimmer effect on verb text
-        verb_text = f"{self._verb}..."
+        # Shimmer effect on verb text. When running parallel tools, replace
+        # the single verb with a count so users see that N tools are in flight.
+        if self._parallel_count > 1:
+            verb_text = f"{self._parallel_count} tools running..."
+        else:
+            verb_text = f"{self._verb}..."
         t.append_text(_shimmer_text(verb_text, elapsed, verb_base, verb_shimmer))
 
         # Elapsed timer
@@ -152,6 +173,11 @@ class AuraSpinner:
     def update_tokens(self, tokens: int) -> None:
         """Update the token count display."""
         self._tokens = tokens
+
+    def set_parallel_count(self, n: int) -> None:
+        """Set how many tools are running in parallel (0 or 1 = single label,
+        >1 swaps the verb for "N tools running")."""
+        self._parallel_count = max(0, int(n))
 
 
 def _format_elapsed(seconds: float) -> str:

@@ -71,22 +71,72 @@ def handle_project(agent, arg, context) -> Optional[str]:
 
 
 def handle_watch(agent, arg, context) -> Optional[str]:
+    """`/watch [start|stop|status|clear]` — file watcher for AURA:/AI: comments.
+
+    Subcommands:
+      /watch start [path]   Begin monitoring (default path: cwd)
+      /watch stop           Stop the active watcher
+      /watch status         Show running state and unresolved hits
+      /watch clear          Mark all current hits as resolved
+      /watch                Shortcut — start if stopped, status if running
+    """
     from ..context import get_ctx
     from ..display import console as _watch_console
     from ..watch_mode import FileWatcher
+
     ctx = get_ctx()
     watcher = ctx.file_watcher if ctx else None
-    if not watcher:
-        watcher = FileWatcher()
-        if ctx:
-            ctx.file_watcher = watcher
 
-    if arg.strip() == "stop":
+    tokens = (arg or "").strip().split(maxsplit=1)
+    sub = tokens[0].lower() if tokens else ""
+    rest = tokens[1] if len(tokens) > 1 else ""
+
+    def _ensure_watcher():
+        nonlocal watcher
+        if watcher is None:
+            watcher = FileWatcher()
+            if ctx:
+                ctx.file_watcher = watcher
+        return watcher
+
+    def _do_start(path_arg: str):
+        w = _ensure_watcher()
+        if w.is_running:
+            _watch_console.print("[dim]Watch already running. Use /watch stop first.[/dim]")
+            return
+
+        def _on_watch_hit(hit):
+            _watch_console.print(
+                f"[magenta]Detected:[/magenta] "
+                f"[cyan]{Path(hit.file_path).name}:{hit.line_number}[/cyan] {hit.instruction}"
+            )
+
+        w.set_callback(_on_watch_hit)
+        if path_arg:
+            from ._util import resolve_user_path
+            try:
+                w.root = str(resolve_user_path(path_arg))  # FileWatcher supports attribute reassignment
+            except AttributeError:
+                pass
+        hits = w.scan_all()
+        if hits:
+            _watch_console.print(f"[magenta]Found {len(hits)} AI comments:[/magenta]")
+            for h in hits[:5]:
+                _watch_console.print(f"  [cyan]{Path(h.file_path).name}:{h.line_number}[/cyan] {h.instruction}")
+        w.start()
+        _watch_console.print("[dim]Watch mode started. Monitoring for AURA: and AI: comments.[/dim]")
+
+    def _do_stop():
+        if watcher is None or not watcher.is_running:
+            _watch_console.print("[dim]Watch mode is not running.[/dim]")
+            return
         watcher.stop()
         _watch_console.print("[dim]Watch mode stopped.[/dim]")
-        return
 
-    if watcher.is_running:
+    def _do_status():
+        if watcher is None or not watcher.is_running:
+            _watch_console.print("[dim]Watch mode stopped. Start with /watch start[/dim]")
+            return
         hits = watcher.get_unresolved()
         if hits:
             _watch_console.print(f"[magenta]Watching -- {len(hits)} unresolved comments:[/magenta]")
@@ -95,19 +145,37 @@ def handle_watch(agent, arg, context) -> Optional[str]:
                 _watch_console.print(f"  [cyan]{fname}:{h.line_number}[/cyan] {h.instruction}")
         else:
             _watch_console.print("[dim]Watching -- no AI comments detected.[/dim]")
-        return
 
-    def _on_watch_hit(hit):
-        _watch_console.print(f"[magenta]Detected:[/magenta] [cyan]{Path(hit.file_path).name}:{hit.line_number}[/cyan] {hit.instruction}")
+    def _do_clear():
+        if watcher is None:
+            _watch_console.print("[dim]No watcher to clear.[/dim]")
+            return
+        # mark_resolved takes a specific hit; iterate all outstanding ones.
+        for h in watcher.get_unresolved():
+            try:
+                watcher.mark_resolved(h)
+            except Exception:
+                logger.debug("watch_mark_resolved_failed", exc_info=True)
+        _watch_console.print("[dim]Cleared unresolved hits.[/dim]")
 
-    watcher.set_callback(_on_watch_hit)
-    hits = watcher.scan_all()
-    if hits:
-        _watch_console.print(f"[magenta]Found {len(hits)} AI comments:[/magenta]")
-        for h in hits[:5]:
-            _watch_console.print(f"  [cyan]{Path(h.file_path).name}:{h.line_number}[/cyan] {h.instruction}")
-    watcher.start()
-    _watch_console.print("[dim]Watch mode started. Monitoring for AURA: and AI: comments.[/dim]")
+    if sub == "start":
+        _do_start(rest)
+    elif sub == "stop":
+        _do_stop()
+    elif sub == "status":
+        _do_status()
+    elif sub == "clear":
+        _do_clear()
+    elif sub == "":
+        # Bare /watch toggles: start if stopped, status if running
+        if watcher is None or not watcher.is_running:
+            _do_start("")
+        else:
+            _do_status()
+    else:
+        _watch_console.print(
+            "[yellow]Usage: /watch [start|stop|status|clear] [path][/yellow]"
+        )
 
 
 def handle_undo(agent, arg, context) -> Optional[str]:
@@ -253,7 +321,16 @@ def _handle_grep_command(agent, arg: str):
         tool = CodeSearchTool()
         agent.tools["code_search"] = tool
 
-    parts = arg.split()
+    import shlex as _shlex
+    try:
+        parts = _shlex.split(arg, posix=True)
+    except ValueError:
+        # Unbalanced quotes: fall back to whitespace split rather than
+        # crashing on the user. They'll see the broken pattern and retry.
+        parts = arg.split()
+    if not parts:
+        _grep_console.print("Usage: /grep <pattern> \\[path]")
+        return
     pattern = parts[0]
     path = "."
 
@@ -272,7 +349,8 @@ def _handle_grep_command(agent, arg: str):
             context = int(parts[i + 1])
             i += 2
         else:
-            path = parts[i]
+            from ._util import resolve_user_path
+            path = str(resolve_user_path(parts[i]))
             i += 1
 
     result = tool.grep(
@@ -345,7 +423,9 @@ def _handle_search_command(agent, arg: str):
             _search_console.print(f"  Error: {result.get('error')}")
 
     elif subcmd == "structure" or subcmd == "tree":
-        path = parts[1] if len(parts) > 1 else "."
+        from ._util import resolve_user_path
+        raw_path = parts[1] if len(parts) > 1 else "."
+        path = str(resolve_user_path(raw_path))
         result = tool.project_structure(path=path)
         if result.get("success"):
             _search_console.print(f"\n{result['tree']}")
@@ -383,8 +463,9 @@ def _handle_edit_command(agent, arg: str):
         tool = CodeEditTool()
         agent.tools["code_edit"] = tool
 
+    from ._util import resolve_user_path
     parts = arg.split()
-    path = parts[0]
+    path = str(resolve_user_path(parts[0]))
     offset = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
     limit = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 100
 

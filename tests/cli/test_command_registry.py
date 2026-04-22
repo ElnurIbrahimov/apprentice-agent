@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from aura.cli.commands import COMMAND_REGISTRY, handle_command
-from aura.cli.commands.handlers import (
+from aura.cli.commands import (
     handle_quit, handle_help, handle_goal, handle_recall, handle_clear,
     handle_speak, handle_model, handle_compact, handle_plan, handle_hand,
     handle_audit, handle_browse, handle_grep, handle_search, handle_edit,
@@ -78,7 +78,7 @@ def test_find_aliases_to_search():
 def test_handle_command_dispatches_to_correct_handler():
     """handle_command should call the right handler with (agent, arg, context)."""
     agent = MagicMock()
-    with patch("aura.cli.commands.handlers.handle_recall") as mock_recall:
+    with patch("aura.cli.commands.handle_recall") as mock_recall:
         # We need to patch it in the registry too
         original = COMMAND_REGISTRY["/recall"]
         COMMAND_REGISTRY["/recall"] = mock_recall

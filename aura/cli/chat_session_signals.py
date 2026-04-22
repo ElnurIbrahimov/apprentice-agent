@@ -83,7 +83,26 @@ class SessionSignalController:
                 self._session.console.print(f"[red]Editor failed: {exc}[/red]")
                 edited = ""
             finally:
-                Path(tmp_path).unlink(missing_ok=True)
+                # Windows: editor may still hold the file → PermissionError.
+                # Don't crash the session; log for cleanup at next startup.
+                try:
+                    Path(tmp_path).unlink(missing_ok=True)
+                except (PermissionError, OSError):
+                    try:
+                        from aura.cli.hooks import logger as _log
+                    except Exception:
+                        import logging as _l
+                        _log = _l.getLogger("aura.cli.chat_session_signals")
+                    _log.debug("editor_tmp_unlink_failed path=%s", tmp_path, exc_info=True)
+                    # Best-effort registry for next startup to sweep
+                    try:
+                        from pathlib import Path as _P
+                        cleanup_log = _P.home() / ".aura" / "tmp_cleanup.txt"
+                        cleanup_log.parent.mkdir(parents=True, exist_ok=True)
+                        with cleanup_log.open("a", encoding="utf-8") as _f:
+                            _f.write(tmp_path + "\n")
+                    except Exception:
+                        pass
             if not edited:
                 return SignalHandlingResult(should_continue_loop=True)
             return SignalHandlingResult(

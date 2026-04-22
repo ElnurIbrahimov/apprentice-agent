@@ -46,11 +46,16 @@ class ToolOutputRenderer:
             self._console.print("    [dim](no output)[/dim]")
             return
 
-        # Status icon with color
+        # Status icon with theme color (was hardcoded #4EBA65 / #FF6B80,
+        # which bypassed theme switching and always rendered pink/green).
+        from aura.cli.display import _get_theme_colors as _tc
+        _c = _tc()
+        success_c = _c.get("success", "#4EBA65")
+        error_c = _c.get("error", "#FF6B80")
         if exit_code == 0:
-            icon = "[#4EBA65]\u2713[/#4EBA65]"
+            icon = f"[{success_c}]\u2713[/{success_c}]"
         else:
-            icon = "[#FF6B80]\u2717 exit {0}[/#FF6B80]".format(exit_code)
+            icon = f"[{error_c}]\u2717 exit {exit_code}[/{error_c}]"
         elapsed_str = f" {format_elapsed(elapsed)}" if elapsed > 0.5 else ""
         if command:
             self._console.print(f"    {icon} [dim]{command}{elapsed_str}[/dim]")
@@ -107,7 +112,14 @@ class ToolOutputRenderer:
     def render_web_result(self, content: str, url: str = "",
                           status_code: int = 200) -> None:
         """Show web result, compact."""
-        sc = "green" if 200 <= status_code < 300 else "yellow" if 300 <= status_code < 400 else "red"
+        from aura.cli.display import _get_theme_colors as _tc_web
+        _wc = _tc_web()
+        if 200 <= status_code < 300:
+            sc = _wc.get("success", "green")
+        elif 300 <= status_code < 400:
+            sc = _wc.get("warning", "yellow")
+        else:
+            sc = _wc.get("error", "red")
         header = f"[{sc}]{status_code}[/{sc}]"
         if url:
             header += f" [dim]{url}[/dim]"

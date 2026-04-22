@@ -49,9 +49,19 @@ class StreamingResponse:
         # would drop this context as soon as `_permanent_len` advanced past
         # the opener.
         self._in_fence: bool = False
+        # Parallel tool tracking: each resume() before the next pause()
+        # means another tool is running concurrently. The spinner swaps
+        # to "N tools running" when >1 so the user isn't staring at a
+        # single label while several tools chug.
+        self._parallel_active: int = 0
 
     def start(self) -> None:
         """Begin live rendering context with a themed thinking spinner."""
+        # Mirror the resume() re-entrancy guard. If an outer try/finally
+        # failed to release the previous Live (exception in chunk/pause
+        # before stop()), starting a second Live would raise LiveError.
+        if self._live is not None:
+            return
         import time as _t
         _display.console.print()
         self._spinner_active = True
@@ -135,35 +145,78 @@ class StreamingResponse:
                 else:
                     padded = Padding(md, (0, 2))
                 self._live.update(padded)
-            except (ValueError, TypeError):
-                self._live.update(Padding(Text(new_content), (0, 2)))
+            except Exception:
+                # Any Rich render error (MarkupError, LiveError, etc.) must
+                # NOT kill the stream callback. Fall back to plain text and
+                # swallow failures in the fallback too.
+                try:
+                    self._live.update(Padding(Text(new_content), (0, 2)))
+                except Exception:
+                    pass
 
     def pause(self) -> None:
         """Pause live rendering for tool call display."""
-        if self._live:
-            new_content = self._accumulated[self._permanent_len:]
+        if not self._live:
+            return
+        new_content = self._accumulated[self._permanent_len:]
+        try:
             if new_content.strip():
                 renderable = self._wrap_for_render(new_content)
                 try:
                     md = Markdown(renderable, code_theme=_display._get_code_theme())
                     self._live.update(Padding(md, (0, 2)))
-                except (ValueError, TypeError):
-                    self._live.update(Padding(Text(new_content), (0, 2)))
-                self._live.transient = False
+                except Exception:
+                    try:
+                        self._live.update(Padding(Text(new_content), (0, 2)))
+                    except Exception:
+                        pass
+                try:
+                    self._live.transient = False
+                except Exception:
+                    pass
             # permanent_len is about to advance — capture the fence state at
             # the new boundary so the next resume() starts with correct context.
             self._advance_fence_state(new_content)
-            self._live.stop()
+        finally:
+            # Always release Rich Live slot — otherwise a Rich error above
+            # would leave it taken and the next turn crashes.
+            try:
+                self._live.stop()
+            except Exception:
+                pass
             self._live = None
             self._permanent_len = len(self._accumulated)
+            # Reset parallel counter — the next resume() starts a fresh
+            # spinner for the next batch of tool calls.
+            self._parallel_active = 0
 
     def resume(self) -> None:
-        """Resume live rendering after tool call with a fresh spinner."""
+        """Resume live rendering after tool call with a fresh spinner.
+
+        Parallel tool batches emit one tool_result (and therefore one
+        resume()) per tool. Rich only permits one active Live, so when a
+        spinner is already running we bump the parallel-tool counter on it
+        instead of starting a second Live.
+        """
+        self._parallel_active += 1
+        if self._live is not None:
+            spinner = getattr(self._live, "_aura_spinner", None)
+            if spinner is not None:
+                try:
+                    spinner.set_parallel_count(self._parallel_active)
+                except Exception:
+                    pass
+            return
         colors = _display._get_theme_colors()
         _display.console.print(f"  [{colors.get('text_muted', 'dim')}]\u00b7\u00b7\u00b7[/{colors.get('text_muted', 'dim')}]")
         self._spinner_active = True
         from ..spinner import AuraSpinner
         spinner = AuraSpinner()
+        if self._parallel_active > 1:
+            try:
+                spinner.set_parallel_count(self._parallel_active)
+            except Exception:
+                pass
         self._live = Live(spinner, console=_display.console, refresh_per_second=12, transient=True)
         self._live._aura_spinner = spinner
         self._live.start()
@@ -174,32 +227,46 @@ class StreamingResponse:
 
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
-            if new_content.strip():
-                # Use the state-aware wrapper in case the stream ends mid-fence
-                # (e.g. LLM truncated mid-block) — otherwise Rich renders the
-                # partial block as prose.
-                renderable = self._wrap_for_render(new_content)
+            try:
+                if new_content.strip():
+                    # Use the state-aware wrapper in case the stream ends mid-fence
+                    # (e.g. LLM truncated mid-block) — otherwise Rich renders the
+                    # partial block as prose.
+                    renderable = self._wrap_for_render(new_content)
+                    try:
+                        md = Markdown(renderable, code_theme=_display._get_code_theme())
+                        final = Padding(md, (0, 2))
+                    except Exception:
+                        final = Padding(Text(new_content), (0, 2))
+                    try:
+                        self._live.update(final)
+                        self._live.transient = False
+                    except Exception:
+                        pass
+                    self._displayed = True
+                else:
+                    self._displayed = bool(self._accumulated.strip())
+            finally:
+                # Always release Rich Live slot — otherwise next turn crashes.
                 try:
-                    md = Markdown(renderable, code_theme=_display._get_code_theme())
-                    final = Padding(md, (0, 2))
-                except (ValueError, TypeError):
-                    final = Padding(Text(new_content), (0, 2))
-                self._live.update(final)
-                self._live.transient = False
-                self._live.stop()
+                    self._live.stop()
+                except Exception:
+                    pass
                 self._live = None
                 self._permanent_len = len(self._accumulated)
-                self._displayed = True
-            else:
-                self._live.stop()
-                self._live = None
-                self._displayed = bool(self._accumulated.strip())
         else:
             self._displayed = bool(self._accumulated.strip())
 
         if self._displayed and self._accumulated and self._first_chunk_time:
             elapsed = _t.monotonic() - self._first_chunk_time
-            token_estimate = int(len(self._accumulated) / 3.5)
+            # Delegate to token_manager which handles CJK / code-heavy
+            # content differently — the old len/3.5 heuristic under-counted
+            # by ~30% on code-heavy responses.
+            try:
+                from aura.core.token_manager import estimate_tokens as _est_tok
+                token_estimate = _est_tok(self._accumulated)
+            except Exception:
+                token_estimate = int(len(self._accumulated) / 3.5)
             if elapsed > 0.1 and token_estimate > 5:
                 tok_per_sec = token_estimate / elapsed
                 extras: list[str] = []
