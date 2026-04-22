@@ -13,6 +13,7 @@ Created: 2026-03-16
 """
 
 import atexit
+import json
 import logging
 import math
 import re
@@ -456,13 +457,95 @@ class MemoryStore:
     # FAISS vector index
     # ------------------------------------------------------------------
 
-    def _build_faiss_index(self) -> bool:
-        """Build (or rebuild) the FAISS index from all embeddings in the DB.
+    @property
+    def _faiss_checkpoint_path(self) -> Path:
+        return self._db_path.parent / "faiss.index"
 
-        Returns True if FAISS is available and the index was built.
+    @property
+    def _faiss_checkpoint_meta_path(self) -> Path:
+        return self._db_path.parent / "faiss.index.meta.json"
+
+    def _row_count_with_embedding(self) -> int:
+        """Count memories that have an embedding — used as a checkpoint freshness key."""
+        with self._lock:
+            row = self._get_conn().execute(
+                "SELECT COUNT(*) FROM memories WHERE embedding IS NOT NULL"
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def _save_faiss_checkpoint(self) -> None:
+        """Persist the in-memory FAISS index so the next startup can skip the
+        O(N) DB scan. Safe to call after a successful build — failures here
+        are logged but not raised (the in-memory index is authoritative)."""
+        if self._faiss_index is None:
+            return
+        try:
+            from aura.paths import atomic_write_json
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            faiss.write_index(self._faiss_index, str(self._faiss_checkpoint_path))
+            meta = {
+                "row_count": self._row_count_with_embedding(),
+                "dim": int(self._faiss_index.d),
+                "next_id": self._faiss_next_id,
+                # id maps are required to rebuild the str<->int64 mapping
+                "id_map": {str(k): v for k, v in self._faiss_id_map.items()},
+            }
+            atomic_write_json(self._faiss_checkpoint_meta_path, meta, indent=0)
+            logger.debug("[MemoryStore] FAISS checkpoint saved (%d vectors)", meta["row_count"])
+        except Exception as e:
+            logger.debug(f"[MemoryStore] FAISS checkpoint save failed (non-fatal): {e}")
+
+    def _load_faiss_checkpoint(self) -> bool:
+        """Try to restore the FAISS index from disk. Returns True on success.
+
+        The checkpoint is accepted only if the embedded-row count matches the
+        current DB; otherwise the caller must rebuild to pick up
+        insertions/deletions that happened while the process was down.
         """
         if not _FAISS_AVAILABLE or np is None:
             return False
+        if not (self._faiss_checkpoint_path.exists() and self._faiss_checkpoint_meta_path.exists()):
+            return False
+        try:
+            meta = json.loads(self._faiss_checkpoint_meta_path.read_text(encoding="utf-8"))
+            expected_rows = int(meta.get("row_count", -1))
+            actual_rows = self._row_count_with_embedding()
+            if expected_rows != actual_rows:
+                logger.info(
+                    "[MemoryStore] FAISS checkpoint stale (%d saved vs %d current) — rebuilding",
+                    expected_rows, actual_rows,
+                )
+                return False
+            index = faiss.read_index(str(self._faiss_checkpoint_path))
+            id_map = {int(k): v for k, v in meta.get("id_map", {}).items()}
+            str_map = {v: k for k, v in id_map.items()}
+            with self._faiss_lock:
+                self._faiss_index = index
+                self._faiss_id_map = id_map
+                self._faiss_str_map = str_map
+                self._faiss_next_id = int(meta.get("next_id", max(id_map.keys(), default=-1) + 1))
+                self._faiss_built = True
+            logger.info(
+                "[MemoryStore] FAISS checkpoint loaded: %d vectors, dim=%d",
+                actual_rows, int(meta.get("dim", 0)),
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"[MemoryStore] FAISS checkpoint load failed, will rebuild: {e}")
+            return False
+
+    def _build_faiss_index(self) -> bool:
+        """Build (or rebuild) the FAISS index from all embeddings in the DB.
+
+        Tries to load a persisted checkpoint first (avoids the O(N) DB scan on
+        every restart). Returns True if FAISS is available and the index was built.
+        """
+        if not _FAISS_AVAILABLE or np is None:
+            return False
+
+        # Fast path: restore from disk if fresh.
+        if self._load_faiss_checkpoint():
+            return True
 
         emb_idx = _COLUMNS.index("embedding")
         id_idx = _COLUMNS.index("id")
@@ -524,6 +607,9 @@ class MemoryStore:
             self._faiss_next_id = next_id
             self._faiss_built = True
         logger.info(f"[MemoryStore] FAISS index built: {len(vectors)} vectors, dim={dim}")
+        # Persist so the next startup skips this O(N) scan. Failures are logged
+        # and swallowed inside _save_faiss_checkpoint; don't leak them here.
+        self._save_faiss_checkpoint()
         return True
 
     def _faiss_add(self, memory_id: str, embedding: np.ndarray) -> None:

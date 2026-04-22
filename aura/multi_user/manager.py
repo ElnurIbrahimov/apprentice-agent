@@ -145,6 +145,12 @@ class MultiUserManager:
 
         Identifies the user, gets/creates their session and model,
         observes the message, and returns enriched context.
+
+        Lock scope is minimised: we hold ``_lock`` only for the fast state
+        mutations (identify/get-or-create session/observe/switch). The
+        expensive identity-prompt and cross-user-insight lookups run
+        outside the lock so a slow I/O call from one user can't serialise
+        every other user's messages behind it.
         """
         with self._lock:
             user_id = self.identifier.identify(context)
@@ -157,25 +163,37 @@ class MultiUserManager:
             if user_id != self._active_user_id:
                 self._switch_context(user_id)
 
-            enriched = {
-                **context,
-                "user_id": user_id,
-                "session_id": session.session_id,
-                "user_model_context": model.get_context_for_prompt(),
-                "identity_prompt": (
-                    self.identity_core.get_identity_prompt(user_id)
-                    if self.identity_core else ""
-                ),
-                "trust_level": model.relationship.trust_level.value,
-                "session_duration_min": session.duration_minutes,
-                "session_message_count": session.message_count,
-                "cross_user_insights": (
-                    [i.recommendation for i in
-                     self.knowledge_abstractor.get_applicable_insights(model)]
-                    if self.knowledge_abstractor else []
-                ),
-            }
-            return enriched
+            # Snapshot the fast fields we need outside the lock. `model`,
+            # `session`, and the abstractor/identity helpers are all
+            # thread-safe independently (each has its own internal locks).
+            session_id = session.session_id
+            trust_level = model.relationship.trust_level.value
+            session_duration_min = session.duration_minutes
+            session_message_count = session.message_count
+
+        # Expensive calls outside the lock — these may hit disk or an LLM.
+        user_model_context = model.get_context_for_prompt()
+        identity_prompt = (
+            self.identity_core.get_identity_prompt(user_id)
+            if self.identity_core else ""
+        )
+        cross_user_insights = (
+            [i.recommendation for i in
+             self.knowledge_abstractor.get_applicable_insights(model)]
+            if self.knowledge_abstractor else []
+        )
+
+        return {
+            **context,
+            "user_id": user_id,
+            "session_id": session_id,
+            "user_model_context": user_model_context,
+            "identity_prompt": identity_prompt,
+            "trust_level": trust_level,
+            "session_duration_min": session_duration_min,
+            "session_message_count": session_message_count,
+            "cross_user_insights": cross_user_insights,
+        }
 
     # ====================================================================
     # User Model Access

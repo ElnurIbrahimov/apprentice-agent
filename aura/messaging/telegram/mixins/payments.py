@@ -83,10 +83,46 @@ class PaymentsMixin:
         await query.answer(ok=True)
 
     async def _handle_successful_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Record successful payment and grant premium status."""
+        """Record successful payment and grant premium status.
+
+        Payload shapes we accept:
+          premium_<tier_id>_<user_id>   -> premium grant (tier MUST be in PREMIUM_TIERS)
+          donate_<user_id>_<amount>     -> one-off donation, no tier grant
+          stars_<amount>_<user_id>      -> Stars donation, no tier grant
+
+        Anything else — or an unknown tier_id — gets logged and skipped rather
+        than silently persisted as a malformed premium grant.
+        """
         payment = update.message.successful_payment
         user_id = str(update.effective_user.id)
-        tier_id = payment.invoice_payload.split("_")[1] if "_" in payment.invoice_payload else "supporter"
+        payload = payment.invoice_payload or ""
+        parts = payload.split("_")
+
+        tier_id = None
+        if len(parts) >= 3 and parts[0] == "premium":
+            candidate = parts[1]
+            if candidate in PREMIUM_TIERS:
+                tier_id = candidate
+            else:
+                logger.warning(
+                    "[payments] unknown tier_id in payload: payload=%r candidate=%r user=%s",
+                    payload, candidate, user_id,
+                )
+        elif parts and parts[0] in ("donate", "stars"):
+            # Donations/Stars contribute no tier — thank the user, no grant.
+            await update.message.reply_text(
+                "Thank you for your support!"
+            )
+            return
+        else:
+            logger.warning("[payments] unrecognized payload: payload=%r user=%s", payload, user_id)
+
+        if tier_id is None:
+            await update.message.reply_text(
+                "Payment received, but we couldn't identify the tier. "
+                "Please contact support with your transaction ID."
+            )
+            return
 
         self._premium_users[user_id] = {
             "tier": tier_id,
@@ -101,7 +137,7 @@ class PaymentsMixin:
             metadata={"currency": payment.currency, "paid_at": _time.time()},
         )
 
-        tier = PREMIUM_TIERS.get(tier_id, {})
+        tier = PREMIUM_TIERS[tier_id]
         await update.message.reply_text(
             f"Thank you for your support!\n\n"
             f"You now have {tier.get('title', 'Premium')} access.\n"

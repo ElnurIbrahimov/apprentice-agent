@@ -205,7 +205,12 @@ def _snapshot_skill_version(skill) -> Optional[Path]:
 
 
 def _apply_to_store(store, candidate) -> int:
-    """Apply evolved skill procedures back to the SkillStore."""
+    """Apply evolved skill procedures back to the SkillStore.
+
+    On save failure we restore the in-memory skill to its pre-mutation state
+    so a later successful write (e.g. after transient disk issue) doesn't
+    carry a half-applied mutation.
+    """
     applied = 0
 
     for skill_id, new_procedure in candidate.components.items():
@@ -216,8 +221,13 @@ def _apply_to_store(store, candidate) -> int:
         if skill.procedure == new_procedure:
             continue  # No change
 
-        # Snapshot the pre-mutation version so users can roll back if GEPA
-        # overfits to the synthetic eval dataset.
+        # Snapshot pre-mutation fields for in-memory rollback on save failure,
+        # and write a versioned snapshot to disk for manual rollback later.
+        old_version = skill.metadata.version
+        old_procedure = skill.procedure
+        old_last_modified = skill.metadata.last_modified
+        old_parent_skill_id = skill.metadata.parent_skill_id
+        old_updated_at = skill.updated_at
         _snapshot_skill_version(skill)
 
         # Bump version
@@ -232,7 +242,20 @@ def _apply_to_store(store, candidate) -> int:
         skill.metadata.parent_skill_id = skill.id  # Track lineage
         skill.updated_at = datetime.now(timezone.utc)
 
-        store.save(skill)
+        try:
+            store.save(skill)
+        except Exception as e:
+            # Restore in-memory skill so a retry starts from a clean slate.
+            skill.metadata.version = old_version
+            skill.procedure = old_procedure
+            skill.metadata.last_modified = old_last_modified
+            skill.metadata.parent_skill_id = old_parent_skill_id
+            skill.updated_at = old_updated_at
+            logger.error(
+                "GEPA save failed for skill %s (v%s): %s — in-memory state rolled back",
+                skill.name, old_version, e,
+            )
+            raise
         applied += 1
         logger.info(f"Updated skill: {skill.name} (v{skill.metadata.version})")
 
