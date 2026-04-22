@@ -30,8 +30,12 @@ def test_install_wallclock_timeout_fires(monkeypatch):
     monkeypatch.setattr("_thread.interrupt_main", _fake_interrupt)
     monkeypatch.setattr("os._exit", _fake_exit)
     _install_wallclock_timeout(1)  # 1 second
-    time.sleep(1.3)
+    # _kill() does interrupt_main(), sleeps 2s, then unconditionally calls
+    # os._exit(124). Sleep past the full drain so the mocked os._exit runs
+    # while still mocked — otherwise the real os._exit kills pytest later.
+    time.sleep(3.5)
     assert called["interrupt"] is True
+    assert called["exit_code"] == 124
 
 
 def test_main_argparse_registers_exec_flags():
