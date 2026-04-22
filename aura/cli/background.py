@@ -103,7 +103,10 @@ class BackgroundManager:
                 task.state = TaskState.FAILED
                 task.error = str(e)[:500]
 
-            if self._on_complete:
+            # Cancelled tasks must NOT fire on_complete — the user already
+            # saw the cancel notification and should not get a second
+            # completion popup for the same task.
+            if self._on_complete and not task._cancelled:
                 try:
                     self._on_complete(task)
                 except Exception as e:

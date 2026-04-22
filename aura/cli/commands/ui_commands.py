@@ -172,7 +172,9 @@ def handle_quit(agent, arg, context) -> Optional[str]:
     hook_mgr = ctx.hook_manager if ctx else None
     if hook_mgr:
         from ..hooks import HookEvent as _HE
-        hook_mgr.fire(_HE.SESSION_END, {"reason": "quit_command"})
+        # wait=True: process is about to exit, async hooks would get killed
+        # mid-run when sys.exit tears down the bg pool.
+        hook_mgr.fire(_HE.SESSION_END, {"reason": "quit_command"}, wait=True)
     console.print("[dim]Goodbye![/dim]")
     sys.exit(0)
 

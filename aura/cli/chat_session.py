@@ -517,33 +517,54 @@ class ChatSession:
 
     def _handle_ctrl_c_abort(self, streamer: Any) -> bool:
         """Handle double Ctrl+C abort pattern. Returns True if aborted."""
+        import os
         import time as _time
         now = _time.time()
-        if now - self._last_ctrl_c_time < 5.0:
+
+        def _do_abort():
             streamer.pause()
             self.steering.clear()
             self.agentic.cancel()
             self.console.print("\n  [red]Aborted.[/red]")
             self._last_ctrl_c_time = 0.0
-            self.agentic._cancel_event.clear()
+
+        if now - self._last_ctrl_c_time < 5.0:
+            _do_abort()
             return True
-        else:
-            self._last_ctrl_c_time = now
-            self.console.print("\n  [dim yellow]Press Ctrl+C again within 5s to abort[/dim yellow]")
+
+        self._last_ctrl_c_time = now
+        self.console.print("\n  [dim yellow]Press Ctrl+C again within 5s to abort[/dim yellow]")
+
+        _deadline = _time.time() + 5.0
+        if os.name == "nt":
+            # On Windows, time.sleep() does not deliver KeyboardInterrupt
+            # reliably while a background thread (esc watchdog) is also
+            # reading from the console. Poll msvcrt for the Ctrl+C byte
+            # (\x03) directly — short cadence + explicit check beats
+            # relying on SIGINT to punch through sleep.
             try:
-                _deadline = _time.time() + 5.0
-                while _time.time() < _deadline:
-                    _time.sleep(0.1)
+                import msvcrt  # type: ignore[import]
+            except ImportError:
+                msvcrt = None  # type: ignore[assignment]
+            while _time.time() < _deadline:
+                if msvcrt is not None and msvcrt.kbhit():
+                    ch = msvcrt.getwch()
+                    if ch == "\x03":
+                        _do_abort()
+                        return True
+                _time.sleep(0.05)
+        else:
+            # POSIX: SIGINT reliably interrupts time.sleep. Use a single
+            # sleep call so the second Ctrl+C raises KeyboardInterrupt
+            # instead of landing between 100ms wake cycles.
+            try:
+                _time.sleep(max(0.0, _deadline - _time.time()))
             except KeyboardInterrupt:
-                streamer.pause()
-                self.steering.clear()
-                self.agentic.cancel()
-                self.console.print("\n  [red]Aborted.[/red]")
-                self._last_ctrl_c_time = 0.0
-                self.agentic._cancel_event.clear()
+                _do_abort()
                 return True
-            self._last_ctrl_c_time = 0.0
-            return True  # Interrupted but not aborted — still cancel this run
+
+        self._last_ctrl_c_time = 0.0
+        return True  # Single Ctrl+C — cancel this run but leave session alive
 
     # ── Normal agentic execution ──────────────────────────────────────────
 
@@ -620,7 +641,8 @@ class ChatSession:
                     result = None
                 except Exception as exc:
                     streamer.pause()
-                    show_error(str(exc))
+                    logger.exception("plan_run_failed")
+                    show_error(exc)
                     result = None
                 finally:
                     self.permissions.set_trust_mode(_prev_trust)

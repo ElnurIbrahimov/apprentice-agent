@@ -1,6 +1,6 @@
 """Tests for test runner integration."""
 import pytest
-from aura.cli.test_runner import TestResult, run_tests, _parse_output, TestHistory, render_test_results
+from aura.cli.test_runner import TestResult, run_tests, _parse_output, render_test_results
 from rich.console import Console
 from io import StringIO
 
@@ -33,19 +33,6 @@ def test_parse_jest_output():
 def test_run_tests_command_not_found():
     result = run_tests("nonexistent_test_command_xyz")
     assert result.errors > 0
-
-def test_history():
-    h = TestHistory()
-    h.add(TestResult(passed=5))
-    h.add(TestResult(passed=3, failed=1))
-    assert h.total_runs == 2
-    assert h.pass_rate == 0.5
-
-def test_history_summary():
-    h = TestHistory()
-    assert "No test runs" in h.summary()
-    h.add(TestResult(passed=1))
-    assert "1 runs" in h.summary()
 
 def test_render_results():
     console = Console(file=StringIO(), force_terminal=True, width=80)

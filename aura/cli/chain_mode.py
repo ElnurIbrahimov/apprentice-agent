@@ -40,22 +40,28 @@ def parse_chain(raw: str) -> list[ChainStep]:
     """Parse '/chain step1 -> step2 -> step3' syntax.
 
     Also supports per-step model override with @model suffix:
-        'research X @kimi-k2.5:cloud -> summarize @nemotron-3-super:cloud'
+        'research X @kimi-k2.6:cloud -> summarize @nemotron-3-super:cloud'
+
+    The @model marker must be at the END of a step (last non-space token
+    prefixed with ``@``) so that addresses like ``bob@corp.com`` or
+    Python decorators in the middle of a prompt don't get misread as model
+    overrides.
     """
+    import re as _re
+    # Match exactly one trailing `@token` (no spaces inside the token, so
+    # `@kimi-k2.6:cloud` matches but `bob@corp.com` in the middle does not).
+    _MODEL_SUFFIX_RE = _re.compile(r"\s@([^\s@]+)\s*$")
+
     parts = [p.strip().strip('"').strip("'") for p in raw.split("->")]
     steps = []
     for p in parts:
         if not p:
             continue
-        # Check for @model suffix
         model = None
-        if " @" in p:
-            idx = p.rfind(" @")
-            candidate = p[idx + 2:].strip()
-            # Only treat as model if it looks like one (no spaces)
-            if candidate and " " not in candidate:
-                model = candidate
-                p = p[:idx].strip()
+        m = _MODEL_SUFFIX_RE.search(p)
+        if m:
+            model = m.group(1)
+            p = p[:m.start()].rstrip()
         steps.append(ChainStep(prompt_template=p, model=model))
     return steps
 

@@ -13,58 +13,51 @@ from aura.cli import display as _display
 
 
 def show_checkpoint_picker(checkpoints: list[dict[str, Any]]) -> Optional[str]:
-    """Display checkpoints in a styled numbered list."""
+    """Display checkpoints in an arrow-key picker.
+
+    Previously used ``console.input("Pick #")`` — slow, inconsistent with
+    every other picker in the CLI (model, session, command palette all use
+    prompt_toolkit's arrow-key picker). Now uses the shared ``run_picker``
+    from ``aura.cli.picker``.
+    """
     import time as _time
-    colors = _display._get_theme_colors()
 
     if not checkpoints:
         _display.show_info("No checkpoints available.")
         return None
 
     display = checkpoints[:10]
-
-    _display.console.print()
-    _display.console.print("  [bold]Checkpoints[/bold]")
-    _display.console.print()
-
     now = _time.time()
-    for i, cp in enumerate(display, 1):
-        delta = now - cp.get("timestamp", now)
-        if delta < 60:
-            rel = f"{int(delta)}s ago"
-        elif delta < 3600:
-            rel = f"{int(delta / 60)}m ago"
-        elif delta < 86400:
-            rel = f"{int(delta / 3600)}h ago"
-        else:
-            rel = f"{int(delta / 86400)}d ago"
 
+    def _rel(t: float) -> str:
+        delta = now - t
+        if delta < 60:
+            return f"{int(delta)}s ago"
+        if delta < 3600:
+            return f"{int(delta / 60)}m ago"
+        if delta < 86400:
+            return f"{int(delta / 3600)}h ago"
+        return f"{int(delta / 86400)}d ago"
+
+    from aura.cli.picker import PickerItem, run_picker
+
+    items: list[PickerItem] = []
+    for cp in display:
         label = cp.get("label", "") or "-"
         files = cp.get("files", [])
         file_names = ", ".join(f.get("backup_name", "?") for f in files[:3])
         if len(files) > 3:
             file_names += f" +{len(files) - 3}"
-
-        num = str(i).rjust(2)
-        _display.console.print(
-            f"  [{colors['accent']}]{num}[/{colors['accent']}]"
-            f"  [dim]{rel.ljust(10)}[/dim]  {label.ljust(24)}  [dim]{file_names}[/dim]"
-        )
-
-    _display.console.print()
+        rel = _rel(cp.get("timestamp", now))
+        items.append(PickerItem(
+            id=str(cp["id"]),
+            label=f"{rel.ljust(10)}  {label}",
+            description=file_names,
+        ))
 
     try:
-        raw = _display.console.input("  [dim]Pick checkpoint # (or Enter to cancel): [/dim]")
-        raw = raw.strip()
-        if not raw:
-            return None
-        idx = int(raw) - 1
-        if 0 <= idx < len(display):
-            return display[idx]["id"]
-        else:
-            _display.show_error(f"Invalid selection: {raw}")
-            return None
-    except (ValueError, EOFError, KeyboardInterrupt):
+        return run_picker(items, title="Rewind to checkpoint")
+    except (EOFError, KeyboardInterrupt):
         return None
 
 

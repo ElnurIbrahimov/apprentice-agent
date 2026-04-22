@@ -62,7 +62,7 @@ def _ctx(speak=False):
 # ── handle_help ───────────────────────────────────────────────────────────
 
 def test_handle_help_smoke():
-    from aura.cli.commands.handlers import handle_help
+    from aura.cli.commands import handle_help
     with patch("aura.cli.display.show_help"):
         handle_help(_make_mock_agent(), "", _ctx())
 
@@ -70,7 +70,7 @@ def test_handle_help_smoke():
 # ── handle_recall ─────────────────────────────────────────────────────────
 
 def test_handle_recall_with_query(capsys):
-    from aura.cli.commands.handlers import handle_recall
+    from aura.cli.commands import handle_recall
     agent = _make_mock_agent()
     agent.recall_memories.return_value = [{"content": "memory 1"}]
     handle_recall(agent, "test query", _ctx())
@@ -79,7 +79,7 @@ def test_handle_recall_with_query(capsys):
 
 
 def test_handle_recall_no_query(capsys):
-    from aura.cli.commands.handlers import handle_recall
+    from aura.cli.commands import handle_recall
     handle_recall(_make_mock_agent(), "", _ctx())
     out = capsys.readouterr().out
     assert "Usage" in out
@@ -88,7 +88,7 @@ def test_handle_recall_no_query(capsys):
 # ── handle_clear ──────────────────────────────────────────────────────────
 
 def test_handle_clear_smoke(capsys):
-    from aura.cli.commands.handlers import handle_clear
+    from aura.cli.commands import handle_clear
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)  # no agentic_loop
     with _patch_ctx(cli_ctx):
@@ -98,7 +98,7 @@ def test_handle_clear_smoke(capsys):
 
 
 def test_handle_clear_with_agentic_loop(capsys):
-    from aura.cli.commands.handlers import handle_clear
+    from aura.cli.commands import handle_clear
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_loop=True)
     with _patch_ctx(cli_ctx):
@@ -109,7 +109,7 @@ def test_handle_clear_with_agentic_loop(capsys):
 
 
 def test_handle_clear_uses_permissions_manager_for_confirmation(capsys):
-    from aura.cli.commands.handlers import handle_clear
+    from aura.cli.commands import handle_clear
 
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_permissions=True)
@@ -129,7 +129,7 @@ def test_handle_clear_uses_permissions_manager_for_confirmation(capsys):
 # ── handle_speak ──────────────────────────────────────────────────────────
 
 def test_handle_speak_with_text(capsys):
-    from aura.cli.commands.handlers import handle_speak
+    from aura.cli.commands import handle_speak
     agent = _make_mock_agent()
     handle_speak(agent, "hello world", _ctx())
     agent._speak.assert_called_once_with("hello world")
@@ -138,7 +138,7 @@ def test_handle_speak_with_text(capsys):
 
 
 def test_handle_speak_no_text(capsys):
-    from aura.cli.commands.handlers import handle_speak
+    from aura.cli.commands import handle_speak
     handle_speak(_make_mock_agent(), "", _ctx())
     out = capsys.readouterr().out
     assert "Usage" in out
@@ -147,7 +147,7 @@ def test_handle_speak_no_text(capsys):
 # ── handle_model ──────────────────────────────────────────────────────────
 
 def test_handle_model_set_by_name(capsys):
-    from aura.cli.commands.handlers import handle_model
+    from aura.cli.commands import handle_model
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)  # no loop
     with _patch_ctx(cli_ctx):
@@ -158,7 +158,7 @@ def test_handle_model_set_by_name(capsys):
 
 
 def test_handle_model_set_auto(capsys):
-    from aura.cli.commands.handlers import handle_model
+    from aura.cli.commands import handle_model
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)
     with _patch_ctx(cli_ctx):
@@ -169,7 +169,7 @@ def test_handle_model_set_auto(capsys):
 
 
 def test_handle_model_set_with_agentic_loop(capsys):
-    from aura.cli.commands.handlers import handle_model
+    from aura.cli.commands import handle_model
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_loop=True)
     with _patch_ctx(cli_ctx):
@@ -181,7 +181,7 @@ def test_handle_model_set_with_agentic_loop(capsys):
 # ── handle_compact ────────────────────────────────────────────────────────
 
 def test_handle_compact_smoke(capsys):
-    from aura.cli.commands.handlers import handle_compact
+    from aura.cli.commands import handle_compact
     agent = _make_mock_agent()
     handle_compact(agent, "", _ctx())
     agent.brain.compact_history.assert_called_once()
@@ -190,7 +190,7 @@ def test_handle_compact_smoke(capsys):
 
 
 def test_handle_compact_with_focus(capsys):
-    from aura.cli.commands.handlers import handle_compact
+    from aura.cli.commands import handle_compact
     agent = _make_mock_agent()
     handle_compact(agent, "python code", _ctx())
     agent.brain.compact_history.assert_called_once_with(focus="python code")
@@ -199,7 +199,7 @@ def test_handle_compact_with_focus(capsys):
 # ── handle_plan ───────────────────────────────────────────────────────────
 
 def test_handle_plan_no_arg(capsys):
-    from aura.cli.commands.handlers import handle_plan
+    from aura.cli.commands import handle_plan
     handle_plan(_make_mock_agent(), "", _ctx())
     out = capsys.readouterr().out
     assert "Usage" in out
@@ -208,7 +208,7 @@ def test_handle_plan_no_arg(capsys):
 # ── handle_browse ─────────────────────────────────────────────────────────
 
 def test_handle_browse_no_arg(capsys):
-    from aura.cli.commands.handlers import handle_browse
+    from aura.cli.commands import handle_browse
     handle_browse(_make_mock_agent(), "", _ctx())
     out = capsys.readouterr().out
     assert "Usage" in out
@@ -217,7 +217,7 @@ def test_handle_browse_no_arg(capsys):
 # ── handle_grep ───────────────────────────────────────────────────────────
 
 def test_handle_grep_no_arg(capsys):
-    from aura.cli.commands.handlers import handle_grep
+    from aura.cli.commands import handle_grep
     handle_grep(_make_mock_agent(), "", _ctx())
     out = capsys.readouterr().out
     assert "Usage" in out
@@ -226,7 +226,7 @@ def test_handle_grep_no_arg(capsys):
 # ── handle_search ─────────────────────────────────────────────────────────
 
 def test_handle_search_no_arg(capsys):
-    from aura.cli.commands.handlers import handle_search
+    from aura.cli.commands import handle_search
     handle_search(_make_mock_agent(), "", _ctx())
     out = capsys.readouterr().out
     assert "Usage" in out
@@ -235,14 +235,14 @@ def test_handle_search_no_arg(capsys):
 # ── handle_edit ───────────────────────────────────────────────────────────
 
 def test_handle_edit_no_arg(capsys):
-    from aura.cli.commands.handlers import handle_edit
+    from aura.cli.commands import handle_edit
     handle_edit(_make_mock_agent(), "", _ctx())
     out = capsys.readouterr().out
     assert "Usage" in out
 
 
 def test_handle_test_autofix_uses_permissions_manager_to_deny():
-    from aura.cli.commands.handlers import handle_test
+    from aura.cli.commands import handle_test
 
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_loop=True, with_permissions=True)
@@ -269,7 +269,7 @@ def test_handle_test_autofix_uses_permissions_manager_to_deny():
 
 
 def test_handle_test_autofix_uses_permissions_manager_to_allow():
-    from aura.cli.commands.handlers import handle_test
+    from aura.cli.commands import handle_test
 
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_loop=True, with_permissions=True)
@@ -299,14 +299,14 @@ def test_handle_test_autofix_uses_permissions_manager_to_allow():
 # ── handle_shell ──────────────────────────────────────────────────────────
 
 def test_handle_shell_no_arg(capsys):
-    from aura.cli.commands.handlers import handle_shell
+    from aura.cli.commands import handle_shell
     handle_shell(_make_mock_agent(), "", _ctx())
     out = capsys.readouterr().out
     assert "Usage" in out or "shell" in out.lower()
 
 
 def test_handle_shell_prompts_when_not_full_auto():
-    from aura.cli.commands.handlers import handle_shell
+    from aura.cli.commands import handle_shell
 
     agent = _make_mock_agent()
     shell_tool = MagicMock()
@@ -322,7 +322,7 @@ def test_handle_shell_prompts_when_not_full_auto():
 
 
 def test_handle_shell_skips_prompt_in_full_auto():
-    from aura.cli.commands.handlers import handle_shell
+    from aura.cli.commands import handle_shell
 
     agent = _make_mock_agent()
     shell_tool = MagicMock()
@@ -342,13 +342,13 @@ def test_handle_shell_skips_prompt_in_full_auto():
 
 @patch("aura.cli.display.console")
 def test_handle_fleet_no_arg(mock_console):
-    from aura.cli.commands.handlers import handle_fleet
+    from aura.cli.commands import handle_fleet
     handle_fleet(_make_mock_agent(), "", _ctx())
     mock_console.print.assert_called()
 
 
 def test_handle_agent_prompts_when_not_full_auto():
-    from aura.cli.commands.handlers import handle_agent
+    from aura.cli.commands import handle_agent
 
     agent = _make_mock_agent()
     agent.permissions = MagicMock()
@@ -367,7 +367,7 @@ def test_handle_agent_prompts_when_not_full_auto():
 
 
 def test_handle_agent_skips_prompt_in_full_auto():
-    from aura.cli.commands.handlers import handle_agent
+    from aura.cli.commands import handle_agent
 
     agent = _make_mock_agent()
     agent.permissions = MagicMock()
@@ -390,7 +390,7 @@ def test_handle_agent_skips_prompt_in_full_auto():
 
 @patch("aura.cli.display.console")
 def test_handle_tasks_no_bg_manager(mock_console):
-    from aura.cli.commands.handlers import handle_tasks
+    from aura.cli.commands import handle_tasks
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)  # no bg_manager
     with _patch_ctx(cli_ctx):
@@ -402,7 +402,7 @@ def test_handle_tasks_no_bg_manager(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_research_no_arg(mock_console):
-    from aura.cli.commands.handlers import handle_research
+    from aura.cli.commands import handle_research
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)  # no research_ctx
     with _patch_ctx(cli_ctx):
@@ -412,7 +412,7 @@ def test_handle_research_no_arg(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_research_with_topic(mock_console):
-    from aura.cli.commands.handlers import handle_research
+    from aura.cli.commands import handle_research
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)  # no research_ctx initially
     with _patch_ctx(cli_ctx):
@@ -426,7 +426,7 @@ def test_handle_research_with_topic(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_sources_no_research(mock_console):
-    from aura.cli.commands.handlers import handle_sources
+    from aura.cli.commands import handle_sources
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)
     with _patch_ctx(cli_ctx):
@@ -438,7 +438,7 @@ def test_handle_sources_no_research(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_export_no_research(mock_console):
-    from aura.cli.commands.handlers import handle_export
+    from aura.cli.commands import handle_export
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)
     with _patch_ctx(cli_ctx):
@@ -450,7 +450,7 @@ def test_handle_export_no_research(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_mood_no_engine(mock_console):
-    from aura.cli.commands.handlers import handle_mood
+    from aura.cli.commands import handle_mood
     with patch("aura.emotion.alma_engine.get_alma_engine", side_effect=Exception("no engine")):
         handle_mood(_make_mock_agent(), "", _ctx())
     # Should print "not available" message without crashing
@@ -460,7 +460,7 @@ def test_handle_mood_no_engine(mock_console):
 # ── handle_trust ──────────────────────────────────────────────────────────
 
 def test_handle_trust_smoke(capsys):
-    from aura.cli.commands.handlers import handle_trust
+    from aura.cli.commands import handle_trust
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_permissions=True)
     with _patch_ctx(cli_ctx):
@@ -471,7 +471,7 @@ def test_handle_trust_smoke(capsys):
 
 
 def test_handle_trust_off(capsys):
-    from aura.cli.commands.handlers import handle_trust
+    from aura.cli.commands import handle_trust
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_permissions=True)
     with _patch_ctx(cli_ctx):
@@ -482,7 +482,7 @@ def test_handle_trust_off(capsys):
 # ── handle_context ────────────────────────────────────────────────────────
 
 def test_handle_context_no_agentic_loop(capsys):
-    from aura.cli.commands.handlers import handle_context
+    from aura.cli.commands import handle_context
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)  # no loop
     with _patch_ctx(cli_ctx):
@@ -494,7 +494,7 @@ def test_handle_context_no_agentic_loop(capsys):
 # ── handle_rewind ─────────────────────────────────────────────────────────
 
 def test_handle_rewind_no_agentic_loop(capsys):
-    from aura.cli.commands.handlers import handle_rewind
+    from aura.cli.commands import handle_rewind
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)  # no loop
     with _patch_ctx(cli_ctx):
@@ -506,7 +506,7 @@ def test_handle_rewind_no_agentic_loop(capsys):
 # ── handle_cost ───────────────────────────────────────────────────────────
 
 def test_handle_cost_smoke(capsys):
-    from aura.cli.commands.handlers import handle_cost
+    from aura.cli.commands import handle_cost
     agent = _make_mock_agent()
     handle_cost(agent, "", _ctx())
     out = capsys.readouterr().out
@@ -518,7 +518,7 @@ def test_handle_cost_smoke(capsys):
 # ── handle_undo ───────────────────────────────────────────────────────────
 
 def test_handle_undo_no_agentic_loop(capsys):
-    from aura.cli.commands.handlers import handle_undo
+    from aura.cli.commands import handle_undo
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)  # no loop
     with _patch_ctx(cli_ctx):
@@ -531,7 +531,7 @@ def test_handle_undo_no_agentic_loop(capsys):
 
 @patch("aura.cli.display.console")
 def test_handle_diff_no_changes(mock_console):
-    from aura.cli.commands.handlers import handle_diff
+    from aura.cli.commands import handle_diff
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="", stderr="")
         handle_diff(_make_mock_agent(), "", _ctx())
@@ -540,7 +540,7 @@ def test_handle_diff_no_changes(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_diff_blocks_unsafe_flag(mock_console):
-    from aura.cli.commands.handlers import handle_diff
+    from aura.cli.commands import handle_diff
     handle_diff(_make_mock_agent(), "-c evil", _ctx())
     # Should have called show_error via console.print
     assert mock_console.print.called
@@ -549,21 +549,21 @@ def test_handle_diff_blocks_unsafe_flag(mock_console):
 # ── handle_git ────────────────────────────────────────────────────────────
 
 def test_handle_git_no_arg(capsys):
-    from aura.cli.commands.handlers import handle_git
+    from aura.cli.commands import handle_git
     handle_git(_make_mock_agent(), "", _ctx())
     out = capsys.readouterr().out
     assert "Usage" in out
 
 
 def test_handle_git_blocks_push(capsys):
-    from aura.cli.commands.handlers import handle_git
+    from aura.cli.commands import handle_git
     handle_git(_make_mock_agent(), "push", _ctx())
     out = capsys.readouterr().out
     assert "Blocked" in out
 
 
 def test_handle_git_blocks_dangerous_flag(capsys):
-    from aura.cli.commands.handlers import handle_git
+    from aura.cli.commands import handle_git
     handle_git(_make_mock_agent(), "log -c evil", _ctx())
     out = capsys.readouterr().out
     assert "Blocked" in out or "dangerous" in out.lower()
@@ -571,7 +571,7 @@ def test_handle_git_blocks_dangerous_flag(capsys):
 
 @patch("aura.cli.display.console")
 def test_handle_git_status(mock_console):
-    from aura.cli.commands.handlers import handle_git
+    from aura.cli.commands import handle_git
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(stdout="On branch main", stderr="")
         handle_git(_make_mock_agent(), "status", _ctx())
@@ -582,7 +582,7 @@ def test_handle_git_status(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_branch_no_arg(mock_console):
-    from aura.cli.commands.handlers import handle_branch
+    from aura.cli.commands import handle_branch
     handle_branch(_make_mock_agent(), "", _ctx())
     mock_console.print.assert_called()
 
@@ -591,7 +591,7 @@ def test_handle_branch_no_arg(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_blame_bad_format(mock_console):
-    from aura.cli.commands.handlers import handle_blame
+    from aura.cli.commands import handle_blame
     handle_blame(_make_mock_agent(), "nolinenum", _ctx())
     mock_console.print.assert_called()
 
@@ -599,7 +599,7 @@ def test_handle_blame_bad_format(mock_console):
 # ── handle_mcp ────────────────────────────────────────────────────────────
 
 def test_handle_mcp_no_loop(capsys):
-    from aura.cli.commands.handlers import handle_mcp
+    from aura.cli.commands import handle_mcp
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)  # no loop
     with _patch_ctx(cli_ctx):
@@ -611,7 +611,7 @@ def test_handle_mcp_no_loop(capsys):
 # ── handle_sessions ───────────────────────────────────────────────────────
 
 def test_handle_sessions_delete_not_found(capsys):
-    from aura.cli.commands.handlers import handle_sessions
+    from aura.cli.commands import handle_sessions
     agent = _make_mock_agent()
     with patch("aura.core.session.AgenticSession") as MockSes:
         mock_ses = MagicMock()
@@ -625,7 +625,7 @@ def test_handle_sessions_delete_not_found(capsys):
 
 
 def test_handle_trace_no_active_session(capsys):
-    from aura.cli.commands.handlers import handle_trace
+    from aura.cli.commands import handle_trace
 
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)
@@ -638,7 +638,7 @@ def test_handle_trace_no_active_session(capsys):
 
 @patch("aura.cli.display.console")
 def test_handle_trace_renders_recent_events(mock_console):
-    from aura.cli.commands.handlers import handle_trace
+    from aura.cli.commands import handle_trace
 
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_session=True)
@@ -662,7 +662,7 @@ def test_handle_trace_renders_recent_events(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_trace_last_groups_latest_run(mock_console):
-    from aura.cli.commands.handlers import handle_trace
+    from aura.cli.commands import handle_trace
 
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_session=True)
@@ -687,7 +687,7 @@ def test_handle_trace_last_groups_latest_run(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_trace_failures_renders_failed_run_summaries(mock_console):
-    from aura.cli.commands.handlers import handle_trace
+    from aura.cli.commands import handle_trace
 
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_session=True)
@@ -711,7 +711,7 @@ def test_handle_trace_failures_renders_failed_run_summaries(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_trace_runs_renders_recent_run_summaries_with_run_ids(mock_console):
-    from aura.cli.commands.handlers import handle_trace
+    from aura.cli.commands import handle_trace
 
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent, with_session=True)
@@ -736,14 +736,14 @@ def test_handle_trace_runs_renders_recent_run_summaries_with_run_ids(mock_consol
 
 @patch("aura.cli.display.console")
 def test_handle_theme_show_current(mock_console):
-    from aura.cli.commands.handlers import handle_theme
+    from aura.cli.commands import handle_theme
     handle_theme(_make_mock_agent(), "", _ctx())
     mock_console.print.assert_called()
 
 
 @patch("aura.cli.display.console")
 def test_handle_theme_set_unknown(mock_console):
-    from aura.cli.commands.handlers import handle_theme
+    from aura.cli.commands import handle_theme
     handle_theme(_make_mock_agent(), "nonexistent_theme", _ctx())
     # Should print error about unknown theme
     mock_console.print.assert_called()
@@ -753,7 +753,7 @@ def test_handle_theme_set_unknown(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_hook_list(mock_console):
-    from aura.cli.commands.handlers import handle_hook
+    from aura.cli.commands import handle_hook
     agent = _make_mock_agent()
     cli_ctx = _make_mock_cli_ctx(agent)  # no hook_manager initially
     with _patch_ctx(cli_ctx):
@@ -765,7 +765,7 @@ def test_handle_hook_list(mock_console):
 
 @patch("aura.cli.display.console")
 def test_handle_watch_stop(mock_console):
-    from aura.cli.commands.handlers import handle_watch
+    from aura.cli.commands import handle_watch
     agent = _make_mock_agent()
     mock_watcher = MagicMock()
     cli_ctx = _make_mock_cli_ctx(agent)

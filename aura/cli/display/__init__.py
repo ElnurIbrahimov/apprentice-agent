@@ -143,7 +143,14 @@ def show_welcome_info(agent: Any) -> None:
     console.print(t)
 
     info = Text("  ")
+    # Collapse $HOME → ~ and cap at 60 chars to stop long paths wrapping
+    # badly on 80-col terminals.
     cwd = os.getcwd().replace("\\", "/")
+    _home = os.path.expanduser("~").replace("\\", "/")
+    if cwd.lower().startswith(_home.lower()):
+        cwd = "~" + cwd[len(_home):]
+    if len(cwd) > 60:
+        cwd = "…" + cwd[-59:]
     info.append(cwd, style="dim")
 
     has_cloud_key = bool(os.environ.get("OLLAMA_API_KEY"))
@@ -193,12 +200,12 @@ def show_status_bar(
     permission_mode: str = "careful",
     bg_indicator: str = "",
     research_indicator: str = "",
-    mood_indicator: str = "",
     watch_indicator: str = "",
     steering_queue: object = None,
     session_title: str = "",
     message_count: int = 0,
     project_type: str = "",
+    **_unused: object,  # swallow legacy kwargs (mood_indicator) for back-compat
 ) -> None:
     """Update the persistent bottom toolbar."""
     from ..input import set_bottom_toolbar
@@ -212,7 +219,6 @@ def show_status_bar(
         permission_mode=permission_mode,
         bg_indicator=bg_indicator,
         research_indicator=research_indicator,
-        mood_indicator=mood_indicator,
         watch_indicator=watch_indicator,
         steering_queue=steering_queue,
         session_title=session_title,
@@ -339,8 +345,10 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
 
         if parsed.get("error"):
             err_msg = str(parsed["error"])
+            # Tail-truncate: the last 120 chars of a stack trace or stderr
+            # carry the actual failure line; the head is boilerplate.
             if len(err_msg) > 120:
-                err_msg = err_msg[:120] + "\u2026"
+                err_msg = "\u2026" + err_msg[-120:]
             console.print(f"{B}[{colors['error']}]\u2717 {err_msg}[/{colors['error']}]")
             return
 
@@ -514,68 +522,24 @@ def show_permission_prompt(
 # ─────────────────────────────────────────────────────────
 
 def show_response(text: str, model: str = "", stream: bool = True) -> None:
-    """Render agent response as clean markdown."""
-    # Late import avoids circular dependency with the streaming submodule.
-    from .streaming import _split_for_streaming, _split_into_blocks
+    """Render agent response as clean markdown.
 
+    The ``stream`` parameter is accepted for API compatibility but no longer
+    simulates a streaming effect — the real stream comes via
+    ``StreamingResponse`` when the LLM emits chunks. Simulated streaming
+    (time.sleep between word chunks of an already-complete string) only
+    slowed down slow terminals for no real user benefit.
+    """
     code_theme = _get_code_theme()
 
     console.print()
-
     max_width = min(console.width - 4, 100)
 
-    if not stream:
-        try:
-            md = Markdown(text, code_theme=code_theme)
-        except (ValueError, TypeError):
-            md = Text(text)
-        console.print(Padding(md, (0, 2)), width=max_width)
-    elif len(text) > 20:
-        import time
-
-        chunks = _split_for_streaming(text)
-        accumulated = ""
-        finalized_count = 0
-
-        with Live(console=console, refresh_per_second=15, transient=True) as live:
-            for chunk in chunks:
-                accumulated += chunk
-                blocks = _split_into_blocks(accumulated)
-
-                while finalized_count < len(blocks) - 1:
-                    block_text = blocks[finalized_count]
-                    try:
-                        block_md = Markdown(block_text, code_theme=code_theme)
-                    except (ValueError, TypeError):
-                        block_md = Text(block_text)
-                    live.update(Text(""))
-                    console.print(Padding(block_md, (0, 2)), width=max_width)
-                    finalized_count += 1
-
-                if blocks:
-                    active_block = blocks[-1]
-                    try:
-                        active_md = Markdown(active_block, code_theme=code_theme)
-                    except (ValueError, TypeError):
-                        active_md = Text(active_block)
-                    live.update(Padding(active_md, (0, 2)))
-
-                time.sleep(0.008)
-
-        blocks = _split_into_blocks(accumulated)
-        if blocks and finalized_count < len(blocks):
-            for i in range(finalized_count, len(blocks)):
-                try:
-                    block_md = Markdown(blocks[i], code_theme=code_theme)
-                except (ValueError, TypeError):
-                    block_md = Text(blocks[i])
-                console.print(Padding(block_md, (0, 2)), width=max_width)
-    else:
-        try:
-            md = Markdown(text, code_theme=code_theme)
-        except (ValueError, TypeError):
-            md = Text(text)
-        console.print(Padding(md, (0, 2)), width=max_width)
+    try:
+        md = Markdown(text, code_theme=code_theme)
+    except (ValueError, TypeError):
+        md = Text(text)
+    console.print(Padding(md, (0, 2)), width=max_width)
 
     if model:
         console.print(f"  [dim]{model}[/dim]")
@@ -641,10 +605,64 @@ def show_context_summary(
 # Errors / Info / Warnings
 # ─────────────────────────────────────────────────────────
 
-def show_error(message: str) -> None:
-    """Display error — clean single line with themed color."""
+def classify_exception(exc: BaseException) -> tuple[str, str | None]:
+    """Classify a raw exception into (user-facing message, hint).
+
+    Raw ``str(exc)`` surfaces noise like "Only one live display may be
+    active at once" to end users. This maps common failure modes to short
+    friendly messages with an actionable next step. If no rule matches,
+    returns the raw string and no hint.
+    """
+    name = type(exc).__name__
+    msg = str(exc) or name
+
+    if name == "LiveError" or "one live display" in msg.lower():
+        return ("Display glitch while rendering the last turn.",
+                "Try again. If it persists, run /clear to reset.")
+
+    if name in ("ReadTimeout", "ConnectTimeout", "ConnectError", "RemoteProtocolError",
+                "ConnectionError", "ConnectionRefusedError", "ConnectionResetError"):
+        return (f"Network hiccup reaching the model provider ({name}).",
+                "Check your connection and retry. `ollama serve` may need restarting.")
+    if name == "HTTPStatusError" or " 429" in msg or "Too Many Requests" in msg:
+        return ("Model provider rate-limited the request.",
+                "Wait a few seconds and retry, or switch models via /model.")
+    if any(code in msg for code in (" 500", " 502", " 503", " 504")):
+        return ("Model provider returned a server error.",
+                "Retry in a moment, or switch models via /model.")
+
+    if name == "JSONDecodeError":
+        return ("Model returned malformed JSON.",
+                "Retry; smaller models sometimes struggle with strict JSON.")
+
+    if name == "FileNotFoundError":
+        return (f"File not found: {msg}", None)
+    if name == "PermissionError":
+        return (f"Permission denied: {msg}",
+                "Check ACLs or whether another process holds the file.")
+
+    if name in ("KeyboardInterrupt", "CancelledError"):
+        return ("Aborted.", None)
+
+    return (msg, None)
+
+
+def show_error(message, *, hint: str | None = None) -> None:
+    """Display error — themed line, optional dim hint below.
+
+    If an exception is passed, it is run through classify_exception() so
+    callers don't have to repeat the mapping. Pass a plain string to
+    bypass classification.
+    """
     colors = _get_theme_colors()
+    if isinstance(message, BaseException):
+        text, auto_hint = classify_exception(message)
+        if hint is None:
+            hint = auto_hint
+        message = text
     console.print(f"  [{colors['error']}]\u2717[/{colors['error']}] {message}")
+    if hint:
+        console.print(f"    [dim]{hint}[/dim]")
 
 
 def show_info(message: str) -> None:

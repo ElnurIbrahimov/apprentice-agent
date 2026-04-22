@@ -383,22 +383,25 @@ def create_session():
         def _submit(event):
             event.current_buffer.validate_and_handle()
 
-        @kb.add('c-v')  # Ctrl+V — paste image or text from clipboard
-        def _paste(event):
-            try:
-                from .clipboard import read_clipboard_image, read_clipboard_text
-            except Exception:
-                return
-            img_path = read_clipboard_image()
-            if img_path:
-                event.current_buffer.insert_text(f"[image: {img_path}]")
-                return
-            text = read_clipboard_text()
-            if text:
-                # prompt_toolkit's default c-v binding is "paste from system
-                # clipboard" on most platforms anyway; we override it so that
-                # multi-line text or images get handled consistently across OSes.
-                event.current_buffer.insert_text(text)
+        # Ctrl+V — paste image or text from clipboard. Only register if the
+        # user hasn't bound ctrl+v to a different action in ~/.aura/keybindings.json.
+        # `get_action("ctrl+v")` returns the custom action if the user mapped
+        # ctrl+v themselves, None otherwise — in which case our clipboard
+        # paste fallback takes over.
+        if _registry.get_action("ctrl+v") is None:
+            @kb.add('c-v')
+            def _paste(event):
+                try:
+                    from .clipboard import read_clipboard_image, read_clipboard_text
+                except Exception:
+                    return
+                img_path = read_clipboard_image()
+                if img_path:
+                    event.current_buffer.insert_text(f"[image: {img_path}]")
+                    return
+                text = read_clipboard_text()
+                if text:
+                    event.current_buffer.insert_text(text)
 
         session = PromptSession(
             history=FileHistory(str(HISTORY_FILE)),
@@ -448,10 +451,13 @@ def _get_prompt_prefix() -> list:
     """
     import os
 
-    # Show meaningful directory name — collapse home dir
+    # Show meaningful directory name — collapse home dir.
+    # Use normcase+normpath so Windows case-insensitive FS compares work
+    # (C:\Users\Asus vs c:\users\asus) and `/` vs `\` differences collapse.
     cwd = os.getcwd()
     home = os.path.expanduser("~")
-    if cwd == home or cwd == home.replace("/", "\\"):
+    _norm = lambda p: os.path.normcase(os.path.normpath(p))
+    if _norm(cwd) == _norm(home):
         project = "~"
     else:
         project = os.path.basename(cwd)

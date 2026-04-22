@@ -11,23 +11,9 @@ def estimate_tokens(text: str) -> int:
     return _est(text)
 
 def estimate_messages_tokens(messages: List[Dict]) -> int:
-    """Estimate total tokens across a message list."""
-    total = 0
-    for msg in messages:
-        content = msg.get("content", "")
-        if isinstance(content, str):
-            total += estimate_tokens(content)
-        elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict):
-                    total += estimate_tokens(block.get("text", "") or json.dumps(block))
-                elif isinstance(block, str):
-                    total += estimate_tokens(block)
-        total += 4  # overhead per message
-        tool_calls = msg.get("tool_calls", [])
-        if tool_calls:
-            total += estimate_tokens(json.dumps(tool_calls))
-    return total
+    """Estimate total tokens across a message list — delegates to token_manager."""
+    from aura.core.token_manager import estimate_messages_tokens as _est_msgs
+    return _est_msgs(messages)
 
 def format_token_count(count: int) -> str:
     """Format token count: 500, 12.4K, 1.2M."""

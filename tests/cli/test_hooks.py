@@ -37,7 +37,9 @@ def test_fire_hook():
     # Use a cross-platform command
     cmd = "echo hello" if os.name != "nt" else "echo hello"
     mgr.add("post_edit", cmd, name="echo_test")
-    results = mgr.fire("post_edit", {"tool_name": "edit_file"})
+    # wait=True — default is async now (returns empty list) so results
+    # can be inspected synchronously when the caller actually needs them.
+    results = mgr.fire("post_edit", {"tool_name": "edit_file"}, wait=True)
     assert len(results) == 1
     assert results[0]["success"]
     assert "hello" in results[0]["stdout"]
@@ -53,7 +55,7 @@ def test_fire_timeout():
     cmd = "python -c \"import time; time.sleep(60)\""
     h = mgr.add("post_edit", cmd, name="slow")
     h.timeout = 1
-    results = mgr.fire("post_edit")
+    results = mgr.fire("post_edit", wait=True)
     assert len(results) == 1
     assert not results[0]["success"]
     assert "Timeout" in results[0].get("error", "")

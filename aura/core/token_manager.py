@@ -25,7 +25,7 @@ MODEL_CONTEXT_WINDOWS = {
     # Cloud models
     "minimax-m2.7:cloud": 1048576,
     "minimax-m2.5:cloud": 196608,
-    "kimi-k2.5:cloud": 131072,
+    "kimi-k2.6:cloud": 131072,
     "qwen3.5:397b-cloud": 131072,
     "qwen3.5:cloud": 131072,
     "deepseek-v3.2:cloud": 131072,
@@ -57,11 +57,27 @@ def estimate_tokens(text: str) -> int:
 
 
 def estimate_messages_tokens(messages: list[dict]) -> int:
-    """Sum token estimates across all messages including serialized tool_calls."""
+    """Sum token estimates across all messages including serialized tool_calls.
+
+    Handles both plain-string content and multi-part (list-of-dict) content
+    used by vision/tool-use models, where each block is a dict like
+    ``{"type": "image", "image": ...}`` or ``{"type": "text", "text": "..."}``.
+    """
     total = 0
     for msg in messages:
-        content = msg.get("content", "") or ""
-        total += estimate_tokens(content)
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            total += estimate_tokens(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    total += estimate_tokens(
+                        block.get("text", "") or json.dumps(block, default=str)
+                    )
+                elif isinstance(block, str):
+                    total += estimate_tokens(block)
+        elif content:
+            total += estimate_tokens(str(content))
         # Account for tool_calls serialization
         tool_calls = msg.get("tool_calls")
         if tool_calls:

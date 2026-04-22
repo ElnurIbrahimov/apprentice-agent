@@ -71,24 +71,21 @@ def run_tests(test_cmd: str, cwd: str = ".", timeout: int = 300) -> TestResult:
 
 
 def _parse_output(result: TestResult, output: str) -> None:
-    """Parse test output (supports pytest, jest, go test, cargo test patterns)."""
-    # pytest: "5 passed, 2 failed, 1 skipped in 3.2s"
-    m = re.search(r'(\d+) passed', output)
-    if m: result.passed = int(m.group(1))
-    m = re.search(r'(\d+) failed', output)
-    if m: result.failed = int(m.group(1))
-    m = re.search(r'(\d+) skipped', output)
-    if m: result.skipped = int(m.group(1))
-    m = re.search(r'(\d+) error', output)
-    if m: result.errors = int(m.group(1))
+    """Parse test output into the TestResult counters.
 
-    # jest: "Tests: 2 failed, 5 passed, 7 total"
-    m = re.search(r'Tests:\s*(\d+)\s+failed.*?(\d+)\s+passed', output)
-    if m and result.passed == 0:
-        result.failed = int(m.group(1))
-        result.passed = int(m.group(2))
+    Delegates regex parsing to aura.tools.test_detection — same logic the
+    POST_EDIT auto-verify pipeline uses. Framework is None here because the
+    /test command runs a user-supplied command without framework context;
+    test_detection.parse_test_output handles the pytest+jest unknown case.
+    """
+    from aura.tools.test_detection import parse_test_output
 
-    # Extract failure details
+    parsed = parse_test_output(None, output)
+    result.passed = parsed["passed"]
+    result.failed = parsed["failed"]
+    result.skipped = parsed["skipped"]
+    result.errors = parsed["errors"]
+
     failure_blocks = re.findall(r'FAILED\s+(.+?)(?:\n|$)', output)
     for fb in failure_blocks[:10]:
         result.failures.append({"test": fb.strip()})
@@ -119,30 +116,3 @@ def render_test_results(console: Console, result: TestResult) -> None:
             console.print(f"  [red]\u2717[/red] {f['test']}")
 
 
-@dataclass
-class TestHistory:
-    """Track test results over a session."""
-    __test__ = False  # Not a pytest test class
-    runs: List[TestResult] = field(default_factory=list)
-
-    def add(self, result: TestResult) -> None:
-        self.runs.append(result)
-        if len(self.runs) > 50:
-            self.runs = self.runs[-50:]
-
-    @property
-    def pass_rate(self) -> float:
-        if not self.runs:
-            return 0.0
-        successes = sum(1 for r in self.runs if r.success)
-        return successes / len(self.runs)
-
-    @property
-    def total_runs(self) -> int:
-        return len(self.runs)
-
-    def summary(self) -> str:
-        if not self.runs:
-            return "No test runs yet"
-        rate = self.pass_rate * 100
-        return f"{self.total_runs} runs, {rate:.0f}% pass rate"
