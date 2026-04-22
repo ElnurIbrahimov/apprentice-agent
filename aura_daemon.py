@@ -92,6 +92,53 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _maybe_ingest_claude_memory() -> None:
+    """Re-run scripts/ingest_claude_memory.py when ~/.aura/CLAUDE_MEMORY.md changes.
+
+    Hash-checked: skips if the file's md5 matches the last-seen hash. No-op if
+    the memory file doesn't exist (expected on fresh installs).
+    """
+    import hashlib
+    import subprocess
+
+    src = Path.home() / ".aura" / "CLAUDE_MEMORY.md"
+    if not src.exists():
+        return
+
+    marker = Path(__file__).parent / "aura_data" / "claude_memory.lastseen"
+    try:
+        current_hash = hashlib.md5(src.read_bytes()).hexdigest()
+    except OSError as e:
+        logger.warning("claude_memory hash failed: %s", e)
+        return
+
+    if marker.exists() and marker.read_text(encoding="utf-8").strip() == current_hash:
+        return  # unchanged
+
+    script = Path(__file__).parent / "scripts" / "ingest_claude_memory.py"
+    if not script.exists():
+        logger.warning("claude_memory ingest script missing: %s", script)
+        return
+
+    logger.info("Ingesting Claude memory into KG (hash changed)")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(current_hash, encoding="utf-8")
+            logger.info("Claude memory ingest OK")
+        else:
+            logger.warning("Claude memory ingest failed (rc=%d): %s",
+                           result.returncode, result.stderr[-500:])
+    except subprocess.TimeoutExpired:
+        logger.warning("Claude memory ingest timed out")
+    except Exception as e:
+        logger.warning("Claude memory ingest exception: %s", e)
+
+
 class AuraDaemon:
     """
     The living daemon.
@@ -154,6 +201,9 @@ class AuraDaemon:
         # Load agent (lazy — don't block startup)
         self._load_agent_thread = threading.Thread(target=self._load_agent, daemon=True)
         self._load_agent_thread.start()
+
+        # Re-ingest Claude memory if ~/.aura/CLAUDE_MEMORY.md changed (background)
+        threading.Thread(target=_maybe_ingest_claude_memory, daemon=True).start()
 
         # Start IPC server (CLI connects here)
         try:
