@@ -18,16 +18,20 @@ def test_install_wallclock_timeout_short_noop(monkeypatch):
 
 
 def test_install_wallclock_timeout_fires(monkeypatch):
-    """Timer-based timeout calls os._exit after the delay."""
-    called = {}
+    """Timer-based timeout signals the main thread after the delay."""
+    called = {"interrupt": False, "exit_code": None}
+
+    def _fake_interrupt():
+        called["interrupt"] = True
 
     def _fake_exit(code):
-        called["code"] = code
+        called["exit_code"] = code
 
+    monkeypatch.setattr("_thread.interrupt_main", _fake_interrupt)
     monkeypatch.setattr("os._exit", _fake_exit)
     _install_wallclock_timeout(1)  # 1 second
     time.sleep(1.3)
-    assert called.get("code") == 124
+    assert called["interrupt"] is True
 
 
 def test_main_argparse_registers_exec_flags():
