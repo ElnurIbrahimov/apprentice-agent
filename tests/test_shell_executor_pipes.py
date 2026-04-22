@@ -192,3 +192,46 @@ class TestValidateCommand:
         """Pipe to shell variants should still be blocked by BLOCKED_PATTERNS."""
         valid, reason = _tool()._validate_command("echo evil | bash")
         assert valid is False
+
+
+# ---- Compiler / build-tool sandboxing (C1 fix) ----
+
+class TestCompilerSandbox:
+    """Compilers run arbitrary code via build scripts. They must be routed
+    through the sandbox (SANDBOX_REQUIRED), not direct-exec."""
+
+    def test_cargo_build_requires_sandbox(self):
+        valid, reason = _tool()._validate_command("cargo build")
+        assert valid is True
+        assert reason == "SANDBOX_REQUIRED"
+
+    def test_gcc_compile_requires_sandbox(self):
+        valid, reason = _tool()._validate_command("gcc main.c -o main")
+        assert valid is True
+        assert reason == "SANDBOX_REQUIRED"
+
+    def test_make_requires_sandbox(self):
+        valid, reason = _tool()._validate_command("make install")
+        assert valid is True
+        assert reason == "SANDBOX_REQUIRED"
+
+    def test_rustc_requires_sandbox(self):
+        valid, reason = _tool()._validate_command("rustc main.rs")
+        assert valid is True
+        assert reason == "SANDBOX_REQUIRED"
+
+    def test_go_requires_sandbox(self):
+        valid, reason = _tool()._validate_command("go build ./...")
+        assert valid is True
+        assert reason == "SANDBOX_REQUIRED"
+
+    def test_ruff_still_direct_exec(self):
+        """Linters are read-only and stay on the direct-exec allowlist."""
+        valid, reason = _tool()._validate_command("ruff check .")
+        assert valid is True
+        assert reason == "OK"
+
+    def test_tsc_still_direct_exec(self):
+        valid, reason = _tool()._validate_command("tsc --noEmit")
+        assert valid is True
+        assert reason == "OK"

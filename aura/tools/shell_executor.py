@@ -422,7 +422,11 @@ BLOCKED_PATTERNS = [
     r"del\s+/[fq]\s+.*[cC]:\\",     # Windows delete system files
 ]
 
-# Security: allowed command prefixes (safe for direct execution)
+# Security: allowed command prefixes (safe for direct execution).
+# Compilers and build systems are DELIBERATELY excluded here — they execute
+# arbitrary code via build scripts (cargo build runs build.rs; make runs Makefile
+# recipes; gcc -x assembler can run raw machine code). They're in
+# SANDBOX_REQUIRED_COMMANDS below, so they get auto-routed through the sandbox.
 ALLOWED_COMMANDS_PREFIX = [
     "ls", "dir", "cd", "pwd", "echo", "cat", "head", "tail",
     "grep", "wc", "sort", "uniq", "diff", "mkdir", "cp",
@@ -431,8 +435,6 @@ ALLOWED_COMMANDS_PREFIX = [
     "type", "where", "whoami", "hostname", "ping", "nslookup",
     "tree", "more", "less", "cut", "tr",
     "export", "which", "man", "help", "cls", "clear",
-    "cargo", "rustc", "go", "java", "javac", "dotnet", "cmake",
-    "make", "gcc", "g++", "clang",
     "ipconfig", "ifconfig", "netstat", "ss",
     "kill", "xargs",
     # Dev tools — read-only / linting / testing
@@ -458,11 +460,30 @@ _INTERP_FLAGS = {
 
 # Commands that allow arbitrary code execution or data exfiltration.
 # These are auto-routed through run_sandboxed() instead of direct execution.
+#
+# Compilers and build systems belong here because build recipes / build.rs /
+# Makefile recipes execute arbitrary code. A malicious Cargo.toml cloned into
+# the cwd can exfiltrate secrets via a single `cargo build` if these ran
+# unsandboxed. Set AURA_ALLOW_UNSAFE_COMPILERS=1 to opt out (not recommended).
 SANDBOX_REQUIRED_COMMANDS = {
     "python", "python3", "pip", "pip3", "uv",
     "node", "npm", "npx", "yarn", "pnpm", "bun", "deno",
     "curl", "wget", "http",
+    # Compilers / build systems — arbitrary-code-exec via build scripts.
+    "cargo", "rustc", "go", "java", "javac", "dotnet",
+    "cmake", "make", "gcc", "g++", "clang",
 }
+if os.environ.get("AURA_ALLOW_UNSAFE_COMPILERS") == "1":
+    # Legacy behavior: treat compilers as direct-exec. Only for build boxes
+    # where Aura is the only agent and the user accepts the risk.
+    SANDBOX_REQUIRED_COMMANDS -= {
+        "cargo", "rustc", "go", "java", "javac", "dotnet",
+        "cmake", "make", "gcc", "g++", "clang",
+    }
+    ALLOWED_COMMANDS_PREFIX = ALLOWED_COMMANDS_PREFIX + [
+        "cargo", "rustc", "go", "java", "javac", "dotnet",
+        "cmake", "make", "gcc", "g++", "clang",
+    ]
 
 
 @dataclass
