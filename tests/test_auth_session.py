@@ -5,16 +5,27 @@ import time
 import pytest
 
 from api.auth_session import (
+    SESSION_TTL_SECONDS,
+    _REVOKED_SIGS,
     create_session_token,
     credentials_configured,
     extract_session_username,
     generate_salt,
     generate_secret,
     hash_password,
+    revoke_session_token,
     verify_credentials,
     verify_password,
     verify_session_token,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_revocation_table():
+    """Ensure the module-level revocation set doesn't leak across tests."""
+    _REVOKED_SIGS.clear()
+    yield
+    _REVOKED_SIGS.clear()
 
 
 @pytest.fixture
@@ -150,3 +161,46 @@ def test_extract_session_username_none_for_invalid_token(configured_env):
         def get(self, key, default=""):
             return "aura_session=not-a-real-token" if key.lower() == "cookie" else default
     assert extract_session_username(FakeHeaders()) is None
+
+
+def test_revoke_session_token_rejects_after_revoke(configured_env):
+    token = create_session_token("alice")
+    assert token is not None
+    assert verify_session_token(token) == "alice"
+    assert revoke_session_token(token) is True
+    assert verify_session_token(token) is None
+
+
+def test_revoke_session_token_is_idempotent(configured_env):
+    token = create_session_token("alice")
+    assert revoke_session_token(token) is True
+    # Second call is still fine.
+    assert revoke_session_token(token) is True
+    assert verify_session_token(token) is None
+
+
+def test_revoke_session_token_malformed_returns_false():
+    assert revoke_session_token("") is False
+    assert revoke_session_token("not.a.valid.token.shape") is False
+    assert revoke_session_token("no-dots-at-all") is False
+
+
+def test_revoke_session_token_prunes_expired_entries(configured_env):
+    # Revoke an already-expired token — should still succeed but not persist.
+    expired = create_session_token("alice", ttl_seconds=-10)
+    assert revoke_session_token(expired) is True
+    assert len(_REVOKED_SIGS) == 0
+    # A fresh revoke on a future token should not clobber this property.
+    live = create_session_token("alice")
+    assert revoke_session_token(live) is True
+    assert len(_REVOKED_SIGS) == 1
+
+
+def test_revoke_session_token_does_not_affect_other_tokens(configured_env):
+    t1 = create_session_token("alice")
+    # Guarantee a different expiry second by passing a distinct ttl.
+    t2 = create_session_token("alice", ttl_seconds=SESSION_TTL_SECONDS + 1)
+    assert t1 != t2
+    revoke_session_token(t1)
+    assert verify_session_token(t1) is None
+    assert verify_session_token(t2) == "alice"

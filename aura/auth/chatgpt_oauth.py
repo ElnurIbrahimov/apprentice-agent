@@ -71,8 +71,15 @@ def _generate_pkce():
     return verifier, challenge
 
 
-def _decode_jwt(token: str) -> Optional[dict]:
-    """Decode JWT payload without verification (we just need claims)."""
+def _decode_jwt_unverified(token: str) -> Optional[dict]:
+    """Decode JWT payload WITHOUT signature verification.
+
+    LOG-ONLY: the output must never be used for an authorization decision.
+    A caller with a forged signature but valid-shape payload can produce
+    anything here. Today this feeds a log line via _extract_account_id
+    (printed only, never granted trust). If you add a new caller, verify
+    the signature against OpenAI's public key first.
+    """
     try:
         parts = token.split(".")
         if len(parts) != 3:
@@ -88,8 +95,8 @@ def _decode_jwt(token: str) -> Optional[dict]:
 
 
 def _extract_account_id(access_token: str) -> Optional[str]:
-    """Extract ChatGPT account ID from JWT access token."""
-    payload = _decode_jwt(access_token)
+    """Extract ChatGPT account ID from JWT access token (for logging only)."""
+    payload = _decode_jwt_unverified(access_token)
     if not payload:
         return None
     auth_claim = payload.get("https://api.openai.com/auth", {})

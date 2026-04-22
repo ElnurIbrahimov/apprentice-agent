@@ -22,6 +22,7 @@ from api.auth_session import (
     credentials_configured,
     extract_session_username,
     get_configured_username,
+    revoke_session_token,
     verify_credentials,
 )
 
@@ -126,8 +127,20 @@ async def login(request: Request, response: Response, body: LoginRequest):
 
 
 @router.post("/logout")
-async def logout(response: Response):
-    """Clear the session cookie. Always succeeds."""
+async def logout(request: Request, response: Response):
+    """Revoke the session token server-side and clear the cookie.
+    Always succeeds (idempotent) so clients can't probe for validity."""
+    # Pull the token out of the cookie header ourselves — we need the raw
+    # string, not just the decoded username.
+    cookie_header = request.headers.get("cookie", "")
+    for part in cookie_header.split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == SESSION_COOKIE_NAME and value:
+            try:
+                revoke_session_token(value)
+            except Exception:
+                logger.debug("[web-auth] revoke failed", exc_info=True)
+            break
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         path="/",

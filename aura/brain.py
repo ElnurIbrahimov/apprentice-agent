@@ -213,13 +213,18 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         # LRU of most-recently-used models; dispatcher prefers these when scores tie.
         from collections import deque as _deque
         self._warm_models: _deque[str] = _deque(maxlen=2)
+        self._warm_models_lock = threading.Lock()
         self._query_count: int = 0  # Track queries for auto-reset (resets every 15)
         self._total_query_count: int = 0  # Total queries (never resets)
         self._model_override: Optional[str] = None  # Manual model override (bypasses auto-selection)
         self._action_mode: Optional[str] = None  # Current action mode (set by agent_service per request)
 
-        # Phase 4 — compaction notification flag
+        # Phase 4 — compaction notification flag + last-model tracker.
+        # _state_lock protects the read-modify-write sequences in think/think_stream/
+        # _auto_compact_if_needed, where a race could lose the notice or misreport
+        # which model handled the most recent call.
         self._compaction_pending: bool = False
+        self._state_lock = threading.Lock()
 
         # User inference priority: background tasks should yield when active.
         # Reference-counted so concurrent think()/think_stream() calls don't
@@ -334,9 +339,8 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 "failures": self._consecutive_think_failures,
                 "open_at": self._think_circuit_open_at,
             }
-            tmp = self._cb_state_file.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(payload), encoding="utf-8")
-            tmp.replace(self._cb_state_file)
+            from aura.paths import atomic_write_json
+            atomic_write_json(self._cb_state_file, payload, indent=0)
         except Exception as e:
             logger.debug(f"[BRAIN] Could not save circuit breaker state: {e}")
 
@@ -386,21 +390,37 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         except Exception:
             pass
 
+    def _consume_compaction_notice(self) -> bool:
+        """Atomically test-and-clear the compaction-pending flag.
+
+        Returns True exactly once per compaction event, even under concurrent
+        think() / think_stream() calls, so a second call that races with the
+        first sees False rather than emitting a duplicate notice.
+        """
+        with self._state_lock:
+            if self._compaction_pending:
+                self._compaction_pending = False
+                return True
+            return False
+
     def _touch_warm_slot(self, model: str) -> None:
         """Mark `model` as recently used. Keeps warm-set bounded to 2 (Ollama Pro sweet spot)."""
         if not model:
             return
-        try:
-            if model in self._warm_models:
-                # Move to the right (most-recent end) by removing + re-appending
-                self._warm_models.remove(model)
+        with self._warm_models_lock:
+            try:
+                if model in self._warm_models:
+                    # Move to the right (most-recent end) by removing + re-appending
+                    self._warm_models.remove(model)
+            except ValueError:
+                # Racy disappearance — harmless, fall through to append.
+                pass
             self._warm_models.append(model)
-        except Exception:
-            pass
 
     def get_warm_models(self) -> list[str]:
         """Return currently-warm models (order: oldest -> newest)."""
-        return list(self._warm_models)
+        with self._warm_models_lock:
+            return list(self._warm_models)
 
     def get_session_stats(self) -> dict:
         """Return per-session token usage and estimated cost (Phase 4)."""
@@ -1712,9 +1732,9 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             if _in_tok or _out_tok:
                 self._record_tokens(actual_model, _in_tok, _out_tok)
 
-            # Compaction notice
-            if self._compaction_pending:
-                self._compaction_pending = False
+            # Compaction notice — atomic consume so a racing think_stream() won't
+            # emit a duplicate and can't lose a fresh signal.
+            if self._consume_compaction_notice():
                 assistant_message = (
                     "_[Context compacted — older messages summarized to preserve memory]_\n\n"
                     + assistant_message
@@ -1783,9 +1803,8 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             full_response = ""
             _all_models_failed = False
 
-            # Compaction notice on streaming path
-            if self._compaction_pending:
-                self._compaction_pending = False
+            # Compaction notice on streaming path — atomic consume.
+            if self._consume_compaction_notice():
                 notice = "_[Context compacted — older messages summarized to preserve memory]_\n\n"
                 yield notice
                 full_response += notice
@@ -1891,7 +1910,12 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 self._user_inference_active.clear()
 
     def _trigger_world_model_extraction(self, recent: list, executor=None) -> None:
-        """Submit background world model extraction (deduplicates logic from think/think_stream)."""
+        """Submit background world model extraction (deduplicates logic from think/think_stream).
+
+        Uses the shared bg_submit() path, which already has a semaphore-capped
+        fallback for pool-shutdown; we no longer hand-roll an uncapped daemon
+        thread here (that could spawn unboundedly during shutdown chaos).
+        """
         try:
             from aura.consciousness.world_model import get_world_model
             wm = get_world_model()
@@ -1903,13 +1927,9 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                     executor.submit(_run_world_model_extraction, conv_id, recent, self._user_inference_active)
                     return
                 except RuntimeError:
-                    pass  # Executor shut down — fall through to daemon thread
-            threading.Thread(
-                target=_run_world_model_extraction,
-                args=(conv_id, recent, self._user_inference_active),
-                daemon=True,
-                name=f"wm-extract-{conv_id[:8]}",
-            ).start()
+                    pass  # Fall through to the shared pool path.
+            from aura.pools import bg_submit
+            bg_submit(_run_world_model_extraction, conv_id, recent, self._user_inference_active)
         except Exception as e:
             logger.debug(f"[Brain] non-critical: {e}")
 

@@ -12,8 +12,6 @@ Created: 2026-03-16
 
 import json
 import logging
-import os
-import tempfile
 import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -236,24 +234,11 @@ def load_narrative_self(path: Optional[str] = None) -> NarrativeSelf:
 
 
 def save_narrative_self(narrative: NarrativeSelf, path: Optional[str] = None) -> None:
-    """Atomically save NarrativeSelf to disk."""
+    """Atomically save NarrativeSelf to disk (crash-safe: fsync before rename)."""
+    from aura.paths import atomic_write_json
     file_path = Path(path) if path else _DEFAULT_PATH
-    file_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        data = json.dumps(asdict(narrative), indent=2, ensure_ascii=False)
-        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(file_path.parent), suffix=".tmp")
-        try:
-            os.write(tmp_fd, data.encode("utf-8"))
-            os.close(tmp_fd)
-            os.replace(tmp_path, str(file_path))
-        except Exception:
-            try:
-                os.close(tmp_fd)
-            except OSError:
-                pass
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            raise
+        atomic_write_json(file_path, asdict(narrative), indent=2)
     except Exception as e:
         logger.warning("[NarrativeSelf] Failed to save: %s", e)
 

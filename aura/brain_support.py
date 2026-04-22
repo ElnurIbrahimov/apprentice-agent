@@ -267,21 +267,14 @@ def call_with_timeout(func: Callable, timeout: int = LLM_TIMEOUT, default: Any =
         # Also detect interpreter-level shutdown (sys.is_finalizing() is Python 3.9+)
         if getattr(sys, 'is_finalizing', lambda: False)():
             return default
-        logger.warning("Shared executor unavailable (%s), using fallback", exc)
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(func)
-                try:
-                    return future.result(timeout=timeout)
-                except concurrent.futures.TimeoutError:
-                    logger.warning("Fallback LLM call timed out")
-                    return default
-                except (ConnectionError, OSError, ValueError) as fallback_exc:
-                    logger.error("Fallback LLM error: %s", fallback_exc)
-                    return default
-        except RuntimeError:
-            # Interpreter is shutting down — ThreadPoolExecutor cannot be created
-            return default
+        # Non-shutdown RuntimeError from the shared pool is abnormal. Spawning an
+        # ad-hoc ThreadPoolExecutor as a workaround masks the real problem and
+        # violates the 3-pool discipline. Log loudly and fail closed.
+        logger.error(
+            "Shared LLM pool raised a non-shutdown RuntimeError (%s); returning default.",
+            exc,
+        )
+        return default
 
 
 def is_rate_limit_error(exc: Exception) -> bool:
