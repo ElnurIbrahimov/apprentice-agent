@@ -127,4 +127,4 @@ def test_typecheck_override_cmd_used(tmp_path):
     # Override command should have received the files.
     args, _kwargs = m.call_args
     cmd = args[0]
-    assert "foo.py" in cmd
+    assert any("foo.py" in str(a) for a in cmd)

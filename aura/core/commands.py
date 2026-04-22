@@ -902,7 +902,7 @@ def _cmd_ide_validate() -> int:
     cwd = os.getcwd()
     tasks_path = os.path.join(cwd, ".vscode", "tasks.json")
     if not os.path.exists(tasks_path):
-        console.print(f"  [yellow]No Aura IDE integration installed.[/] Run: aura ide setup")
+        console.print("  [yellow]No Aura IDE integration installed.[/] Run: aura ide setup")
         return 2
 
     try:
