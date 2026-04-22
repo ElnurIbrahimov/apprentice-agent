@@ -33,7 +33,7 @@ LATENCY_SLOW     = "slow"      # >3s first-token (big MoE)
 @dataclass(frozen=True)
 class ModelProfile:
     """Typed metadata for one model."""
-    name: str                                  # Ollama identifier, e.g. "kimi-k2.5:cloud"
+    name: str                                  # Ollama identifier, e.g. "kimi-k2.6:cloud"
     provider: str                              # "ollama_cloud", "chatgpt", "anthropic"
     cost_in_per_1k: float                      # USD per 1K input tokens
     cost_out_per_1k: float                     # USD per 1K output tokens
@@ -76,8 +76,8 @@ MODELS: dict[str, ModelProfile] = {
     ),
 
     # ── Reasoning / planning ────────────────────────────────────────────
-    "kimi-k2.5:cloud": ModelProfile(
-        name="kimi-k2.5:cloud",
+    "kimi-k2.6:cloud": ModelProfile(
+        name="kimi-k2.6:cloud",
         provider="ollama_cloud",
         cost_in_per_1k=0.003, cost_out_per_1k=0.003,
         context_length=256_000,

@@ -173,7 +173,7 @@ class TestValidators:
 
     def test_validate_model_name_accepts_valid(self):
         from api.utils import validate_model_name
-        assert validate_model_name("kimi-k2.5:cloud") == "kimi-k2.5:cloud"
+        assert validate_model_name("kimi-k2.6:cloud") == "kimi-k2.6:cloud"
         assert validate_model_name("qwen3.5:397b-cloud") == "qwen3.5:397b-cloud"
         assert validate_model_name("nemotron-3-super:cloud") == "nemotron-3-super:cloud"
 

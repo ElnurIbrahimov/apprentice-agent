@@ -37,7 +37,7 @@ LUCIDE_CDN = '<script src="https://unpkg.com/lucide@latest"></script>'
 
 # Models known to accept images in their message content
 VISION_MODELS = {
-    "kimi-k2.5:cloud", "kimi-k2.5",
+    "kimi-k2.6:cloud", "kimi-k2.6",
     "chatgpt:gpt-5.4", "chatgpt:gpt-5.4-thinking", "chatgpt:gpt-5.3-codex",
     "chatgpt:gpt-4o",
     "gemini:gemini-2.5-pro", "gemini:gemini-2.0-flash",

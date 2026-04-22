@@ -38,10 +38,10 @@ def test_parse_chain_multiple_steps():
 
 
 def test_parse_chain_with_model_overrides():
-    steps = parse_chain("research X @kimi-k2.5:cloud -> summarize @nemotron-3-super:cloud")
+    steps = parse_chain("research X @kimi-k2.6:cloud -> summarize @nemotron-3-super:cloud")
     assert len(steps) == 2
     assert steps[0].prompt_template == "research X"
-    assert steps[0].model == "kimi-k2.5:cloud"
+    assert steps[0].model == "kimi-k2.6:cloud"
     assert steps[1].prompt_template == "summarize"
     assert steps[1].model == "nemotron-3-super:cloud"
 

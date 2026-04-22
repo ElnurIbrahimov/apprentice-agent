@@ -2,28 +2,56 @@
 """Mid-turn steering — queue user messages while agent is running."""
 from __future__ import annotations
 
+import logging
 import threading
 from collections import deque
-from typing import List, Optional
+from typing import Callable, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class SteeringQueue:
     """Thread-safe queue for mid-turn user messages.
 
     While the agentic loop is running, the user can type messages that get
-    queued and injected into the next iteration as user context.
+    queued and injected into the next iteration as user context. A push() with
+    preempt=True additionally fires an on_preempt callback — typically wired to
+    AgenticLoop.cancel() — so the current iteration aborts and the next one
+    picks up the steering message immediately.
     """
 
     def __init__(self, max_queued: int = 5):
         self._queue: deque = deque(maxlen=max_queued)
         self._lock = threading.Lock()
         self._follow_up: Optional[str] = None
+        self._on_preempt: Optional[Callable[[], None]] = None
 
-    def push(self, message: str) -> None:
-        """Queue a message to inject on the next agentic iteration."""
+    def set_preempt_callback(self, callback: Optional[Callable[[], None]]) -> None:
+        """Register a callback fired whenever push(preempt=True) is called.
+
+        ChatSession registers AgenticLoop.cancel here so a preempt-flagged
+        steering message aborts the in-flight tool loop within a couple
+        iterations, instead of waiting for the full turn to finish.
+        """
+        with self._lock:
+            self._on_preempt = callback
+
+    def push(self, message: str, preempt: bool = False) -> None:
+        """Queue a message to inject on the next agentic iteration.
+
+        When preempt is True, also fire the registered preempt callback so the
+        currently running iteration aborts cleanly — turning steering from
+        "fire and queue" into true interruption.
+        """
         message = message[:500]  # length cap to limit injection size
         with self._lock:
             self._queue.append(message)
+            cb = self._on_preempt if preempt else None
+        if cb is not None:
+            try:
+                cb()
+            except Exception:
+                logger.debug("steering_preempt_callback_failed", exc_info=True)
 
     def push_follow_up(self, message: str) -> None:
         """Queue a follow-up prompt for after the current turn completes."""

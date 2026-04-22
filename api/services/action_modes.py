@@ -119,7 +119,7 @@ ACTION_TRIGGERS = {
 
 ACTION_MODE_MODELS = {
     "frontend": {
-        "preferred": "kimi-k2.5:cloud",
+        "preferred": "kimi-k2.6:cloud",
         "fallbacks": ["chatgpt:gpt-5.3-codex"],
     },
     "rapid": {
@@ -136,18 +136,18 @@ ACTION_MODE_MODELS = {
     },
     "research": {
         "preferred": "qwen3.5:397b-cloud",
-        "fallbacks": ["kimi-k2.5:cloud"],
+        "fallbacks": ["kimi-k2.6:cloud"],
     },
     "deep_research": {
         "preferred": "qwen3.5:397b-cloud",
-        "fallbacks": ["kimi-k2.5:cloud"],
+        "fallbacks": ["kimi-k2.6:cloud"],
     },
     "debug": {
         "preferred": "chatgpt:gpt-5.4-thinking",
         "fallbacks": ["glm-5.1:cloud", "minimax-m2.7:cloud"],
     },
     "vision": {
-        "preferred": "kimi-k2.5:cloud",
+        "preferred": "kimi-k2.6:cloud",
         "fallbacks": ["chatgpt:gpt-5.4"],
     },
     "swarm": {
@@ -155,11 +155,11 @@ ACTION_MODE_MODELS = {
         "fallbacks": ["qwen3.5:397b-cloud"],
     },
     "artifact": {
-        "preferred": "kimi-k2.5:cloud",
+        "preferred": "kimi-k2.6:cloud",
         "fallbacks": ["minimax-m2.5:cloud"],
     },
     "agent": {
-        "preferred": "kimi-k2.5:cloud",
+        "preferred": "kimi-k2.6:cloud",
         "fallbacks": ["glm-5.1:cloud", "minimax-m2.7:cloud"],
     },
 }

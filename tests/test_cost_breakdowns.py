@@ -67,13 +67,13 @@ def test_get_stats_by_model(tmp_log):
 
 
 def test_get_stats_by_provider_groups_by_prefix(tmp_log):
-    _insert(tmp_log, "s1", "kimi-k2.5:cloud", 100, 50, 0.01)
-    _insert(tmp_log, "s1", "kimi-k2.5:cloud", 200, 100, 0.02)
+    _insert(tmp_log, "s1", "kimi-k2.6:cloud", 100, 50, 0.01)
+    _insert(tmp_log, "s1", "kimi-k2.6:cloud", 200, 100, 0.02)
     _insert(tmp_log, "s1", "qwen3-coder:480b-cloud", 300, 150, 0.03)
 
     rows = tmp_log.get_stats_by_provider()
     providers = {r["provider"] for r in rows}
-    assert "kimi-k2.5" in providers or "kimi" in providers
+    assert "kimi-k2.6" in providers or "kimi" in providers
     # qwen3-coder should be its own provider bucket
     assert "qwen3-coder" in providers
 

@@ -1,6 +1,6 @@
 ---
 tier: balanced
-# model: kimi-k2.5:cloud
+# model: kimi-k2.6:cloud
 test_cmd: pytest
 auto_test: true
 # permissions:
@@ -26,7 +26,7 @@ Frameworks: FastAPI, PyTorch, Transformers
 ## Models
 
 ### Cloud (Ollama Pro — 13 models)
-- kimi-k2.5:cloud, nemotron-3-super:cloud, qwen3.5:397b-cloud, qwen3.5:cloud
+- kimi-k2.6:cloud, nemotron-3-super:cloud, qwen3.5:397b-cloud, qwen3.5:cloud
 - deepseek-v3.2:cloud, glm-5:cloud, glm-5.1:cloud, gemma4:31b-cloud
 - minimax-m2.7:cloud, minimax-m2.5:cloud
 - qwen3-coder:480b-cloud, qwen3-coder-next:cloud, gpt-oss:120b-cloud
@@ -45,9 +45,9 @@ Frameworks: FastAPI, PyTorch, Transformers
 
 ## Default Model Roles
 - **Fast**: nemotron-3-super:cloud
-- **Reasoning**: kimi-k2.5:cloud
+- **Reasoning**: kimi-k2.6:cloud
 - **Code**: minimax-m2.7:cloud
-- **Vision**: kimi-k2.5:cloud
+- **Vision**: kimi-k2.6:cloud
 - **Thinking**: qwen3.5:397b-cloud
 - **Long context**: minimax-m2.7:cloud
 

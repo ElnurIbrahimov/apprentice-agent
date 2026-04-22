@@ -82,7 +82,7 @@ def test_select_models_user_override():
     brain = MagicMock()
     brain._chatgpt_client = None
     models = _select_models(brain, user_models="kimi,deepseek,chatgpt")
-    assert models["advocate"] == "kimi-k2.5:cloud"
+    assert models["advocate"] == "kimi-k2.6:cloud"
     assert models["critic"] == "deepseek-v3.2:cloud"
     assert models["analyst"] == "chatgpt:gpt-5.4"
 

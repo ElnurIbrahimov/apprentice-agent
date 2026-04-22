@@ -4,7 +4,7 @@ import { HTTP, apiFetch, getAuthHeaders } from '../api';
 import { md } from '../markdown';
 import { Copy, Check, Star, Eye, EyeOff, Trophy } from 'lucide-react';
 
-const COMPARE_DEFAULTS = ['minimax-m2.7:cloud', 'qwen3.5:397b-cloud', 'kimi-k2.5:cloud'];
+const COMPARE_DEFAULTS = ['minimax-m2.7:cloud', 'qwen3.5:397b-cloud', 'kimi-k2.6:cloud'];
 
 // ELO rating system
 const ELO_KEY = 'aura-compare-elo';

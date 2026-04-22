@@ -1,20 +1,16 @@
 """Shared session bootstrap used by chat mode and one-shot agentic mode.
 
 Centralizes the cwd + gather_context + AURA.md config + tier resolution + router
-construction block that was duplicated between oneshot.py and chat_session.py.
-
-Does NOT construct the PermissionManager: chat mode and one-shot use different
-permission UIs (rich `_cli_confirm` method vs. plain closure), different default
-modes (`auto_edit` vs `careful`), and different callback attachment points. Each
-caller builds its own permission manager; the bootstrap only supplies everything
-up to that point.
+construction block, plus a `build_permission_manager()` helper that used to be
+duplicated between oneshot.py and chat_session.py. Callers inject their own
+confirm callback (Rich prompt for chat, JSON-mode-aware closure for oneshot).
 """
 from __future__ import annotations
 
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from aura.core.context import gather_context, get_aura_md_config
 from aura.core.router import ModelRouter
@@ -75,3 +71,33 @@ def build_session_bootstrap(args: Any, brain: Any = None) -> SessionBootstrap:
         model=model,
         display_model=display_model,
     )
+
+
+def build_permission_manager(
+    *,
+    aura_config: Optional[dict] = None,
+    trust: bool = False,
+    default_mode: str = "careful",
+    confirm_callback: Optional[Callable[[str, str], str]] = None,
+) -> Any:
+    """Construct the shared PermissionManager used by chat, oneshot, and fast paths.
+
+    Args:
+        aura_config: Parsed AURA.md dict. If provided, ``apply_aura_md_overrides``
+            runs after the mode is set.
+        trust: True → mode is forced to ``full_auto`` regardless of ``default_mode``.
+        default_mode: Mode applied when trust is False. Chat mode uses
+            ``auto_edit``, oneshot/fast paths use ``careful``.
+        confirm_callback: Callable ``(tool_name, description) -> str`` returning one
+            of ``'allow_once' | 'allow_session' | 'allow_always' | 'deny'``. Attached
+            only if not None.
+    """
+    from aura.core.permissions import PermissionManager
+
+    pm = PermissionManager()
+    pm.set_mode("full_auto" if trust else default_mode)
+    if aura_config:
+        pm.apply_aura_md_overrides(aura_config)
+    if confirm_callback is not None:
+        pm.set_confirm_callback(confirm_callback)
+    return pm

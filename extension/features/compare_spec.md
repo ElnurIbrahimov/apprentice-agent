@@ -264,7 +264,7 @@ let compareInitialized = false;
 const COMPARE_DEFAULT_MODELS = [
   'minimax-m2.7:cloud',
   'qwen3.5:397b-cloud',
-  'kimi-k2.5:cloud',
+  'kimi-k2.6:cloud',
 ];
 
 function initComparePanel() {

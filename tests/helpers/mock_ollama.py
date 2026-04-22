@@ -29,7 +29,7 @@ DEFAULT_RESPONSE = "This is a mock response from the test Ollama server."
 # Fake model list matching what Aura Config expects
 FAKE_MODELS = [
     {"name": "nemotron-3-super:cloud", "size": 0, "digest": "abc123", "modified_at": "2026-01-01T00:00:00Z"},
-    {"name": "kimi-k2.5:cloud", "size": 0, "digest": "def456", "modified_at": "2026-01-01T00:00:00Z"},
+    {"name": "kimi-k2.6:cloud", "size": 0, "digest": "def456", "modified_at": "2026-01-01T00:00:00Z"},
     {"name": "qwen3.5:397b-cloud", "size": 0, "digest": "ghi789", "modified_at": "2026-01-01T00:00:00Z"},
     {"name": "minimax-m2.7:cloud", "size": 0, "digest": "jkl012", "modified_at": "2026-01-01T00:00:00Z"},
     {"name": "test-model:latest", "size": 1_000_000, "digest": "test000", "modified_at": "2026-01-01T00:00:00Z"},

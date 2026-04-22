@@ -115,10 +115,10 @@ def test_unknown_error_is_retryable():
 
 def test_classified_error_is_dataclass():
     err = _StatusError("rate limit", status_code=429)
-    result = classify_api_error(err, provider="openrouter", model="kimi-k2.5:cloud")
+    result = classify_api_error(err, provider="openrouter", model="kimi-k2.6:cloud")
     assert isinstance(result, ClassifiedError)
     assert result.provider == "openrouter"
-    assert result.model == "kimi-k2.5:cloud"
+    assert result.model == "kimi-k2.6:cloud"
     assert result.status_code == 429
 
 

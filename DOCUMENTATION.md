@@ -238,7 +238,7 @@ Logs every action's outcome for later analysis.
   "retry_rate": 50.0,
   "avg_confidence": 87.5,
   "tool_usage": {"code_executor": 1, "web_search": 3},
-  "model_usage": {"kimi-k2.5:cloud": 3, "nemotron-3-super:cloud": 1}
+  "model_usage": {"kimi-k2.6:cloud": 3, "nemotron-3-super:cloud": 1}
 }
 ```
 
@@ -293,8 +293,8 @@ Automatically routes tasks to the most appropriate model based on complexity.
 | Model | Config Key | Use Case |
 |-------|------------|----------|
 | `nemotron-3-super:cloud` | `MODEL_FAST` | Simple tasks, greetings, short answers |
-| `kimi-k2.5:cloud` | `MODEL_REASON` | Reasoning, planning, code, evaluation |
-| `kimi-k2.5:cloud` | `MODEL_VISION` | Image/screenshot analysis |
+| `kimi-k2.6:cloud` | `MODEL_REASON` | Reasoning, planning, code, evaluation |
+| `kimi-k2.6:cloud` | `MODEL_VISION` | Image/screenshot analysis |
 
 **Task Types (enum):**
 ```python
@@ -324,7 +324,7 @@ response = brain.think("Hello!")  # Uses nemotron-3-super:cloud
 response = brain.think("Plan a strategy", task_type=TaskType.REASONING)
 
 # Check which model was used
-print(brain.get_last_model_used())  # "kimi-k2.5:cloud"
+print(brain.get_last_model_used())  # "kimi-k2.6:cloud"
 ```
 
 **Metacognition logging:**
@@ -860,8 +860,8 @@ builder.enable_tool('bmi_calculator')
   - `_select_model()` method for automatic model selection
   - `TaskType` enum: SIMPLE, REASONING, CODE, VISION
   - Routes simple tasks to `nemotron-3-super:cloud` (fast)
-  - Routes reasoning/code to `kimi-k2.5:cloud`
-  - Routes vision to `kimi-k2.5:cloud`
+  - Routes reasoning/code to `kimi-k2.6:cloud`
+  - Routes vision to `kimi-k2.6:cloud`
   - Logs `model_used` in metacognition
 
 - **Fast-Path Responses** (`agent.py`)

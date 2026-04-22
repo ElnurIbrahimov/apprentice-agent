@@ -55,7 +55,7 @@ def _emit_trace(decision: dict) -> None:
 # This avoids model-switching latency — all 3 stay loaded.
 CONCURRENT_SLOTS = {
     "max": {
-        "orchestrator": "kimi-k2.5:cloud",         # reasoning + orchestration + vision
+        "orchestrator": "kimi-k2.6:cloud",         # reasoning + orchestration + vision
         "coder": "minimax-m2.5:cloud",              # code gen (SWE 80.2%)
         "fast": "nemotron-3-super:cloud",           # tool dispatch + throughput
     },
@@ -87,14 +87,14 @@ _CATEGORY_TO_SLOT = {
 # Routing table: task_category -> {tier: model_name}
 # Updated 2026-03-13 — based on verified benchmarks (SWE-bench, AIME, MMLU-Pro)
 #
-# Models available (cloud): minimax-m2.7, minimax-m2.5, kimi-k2.5, qwen3.5:397b,
+# Models available (cloud): minimax-m2.7, minimax-m2.5, kimi-k2.6, qwen3.5:397b,
 #   qwen3.5, deepseek-v3.2, qwen3-coder:480b, qwen3-coder-next, gpt-oss:120b,
 #   glm-5, glm-5.1, nemotron-3-super
 # Utility (local): nomic-embed-text, glm-ocr
 #
 ROUTING_TABLE = {
     "orchestrator": {
-        "max": "kimi-k2.5:cloud",              # MMLU-Pro 86.4%, SWE 76.8%, AIME 96.1%
+        "max": "kimi-k2.6:cloud",              # MMLU-Pro 86.4%, SWE 76.8%, AIME 96.1%
         "balanced": "glm-5:cloud",              # SWE 77.8%, hallucination 34% (lowest)
         "fast": "nemotron-3-super:cloud",       # fast cloud
     },
@@ -110,7 +110,7 @@ ROUTING_TABLE = {
     },
     "reasoning": {
         "max": "deepseek-v3.2:cloud",          # AIME 94.2%, IMO gold, MMLU-Pro 85%
-        "balanced": "kimi-k2.5:cloud",          # AIME 96.1%, MMLU-Pro 86.4%
+        "balanced": "kimi-k2.6:cloud",          # AIME 96.1%, MMLU-Pro 86.4%
         "fast": "qwen3.5:397b-cloud",           # deep planning
     },
     "tool_dispatch": {
@@ -124,9 +124,9 @@ ROUTING_TABLE = {
         "fast": "minimax-m2.5:cloud",           # 196K context
     },
     "vision": {
-        "max": "kimi-k2.5:cloud",              # MMMU-Pro 78.5%, OCR 92.3%, MathVision 84.2%
+        "max": "kimi-k2.6:cloud",              # MMMU-Pro 78.5%, OCR 92.3%, MathVision 84.2%
         "balanced": "qwen3.5:cloud",            # 397B MoE, multimodal capable
-        "fast": "kimi-k2.5:cloud",              # native multimodal
+        "fast": "kimi-k2.6:cloud",              # native multimodal
     },
     "throughput": {
         "max": "nemotron-3-super:cloud",       # 2.2x faster than GPT-OSS, PinchBench 85.6%
@@ -134,9 +134,9 @@ ROUTING_TABLE = {
         "fast": "nemotron-3-super:cloud",       # fast cloud
     },
     "frontend": {
-        "fast": "kimi-k2.5:cloud",
-        "balanced": "kimi-k2.5:cloud",
-        "max": "kimi-k2.5:cloud",
+        "fast": "kimi-k2.6:cloud",
+        "balanced": "kimi-k2.6:cloud",
+        "max": "kimi-k2.6:cloud",
     },
 }
 

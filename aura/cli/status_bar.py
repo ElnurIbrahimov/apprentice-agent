@@ -77,7 +77,6 @@ def build_status_bar(
     last_turn_cost: float = 0.0,
     bg_indicator: str = "",
     research_indicator: str = "",
-    mood_indicator: str = "",       # accepted but ignored (removed from output)
     watch_indicator: str = "",
     steering_queue: object = None,
     session_title: str = "",

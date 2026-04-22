@@ -22,7 +22,7 @@ class ReactMixin:
     # Cloud models known to support tool calling well, in preference order
     _REACT_TOOL_MODEL = "glm-5:cloud"         # Fast, reliable tool calling
     _REACT_CODE_MODEL = "deepseek-v3.2:cloud"  # Better for code tasks
-    _REACT_REASON_MODEL = "kimi-k2.5:cloud"    # Best for complex reasoning
+    _REACT_REASON_MODEL = "kimi-k2.6:cloud"    # Best for complex reasoning
 
     # =================================================================
     # ReAct Loop Helper Methods
@@ -283,7 +283,7 @@ class ReactMixin:
         # Handle LLM error with fallback chain
         if "error" in step:
             logger.error(f"[REACT] LLM error: {step['error']}")
-            _fallback_models = ["glm-5:cloud", "deepseek-v3.2:cloud", "kimi-k2.5:cloud"]
+            _fallback_models = ["glm-5:cloud", "deepseek-v3.2:cloud", "kimi-k2.6:cloud"]
             _fallback_models = [m for m in _fallback_models if m != step_model]
             for _fb_model in _fallback_models:
                 logger.info(f"[REACT] Trying fallback model: {_fb_model}")

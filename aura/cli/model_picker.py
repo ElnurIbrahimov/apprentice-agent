@@ -13,10 +13,10 @@ _logger = logging.getLogger(__name__)
 # Model roles with display info (updated from Config on startup)
 MODEL_ROLES: list[tuple[str, str, str]] = [
     ("fast", "nemotron-3-super:cloud", "fast inference"),
-    ("reason", "kimi-k2.5:cloud", "256K ctx, top agentic"),
+    ("reason", "kimi-k2.6:cloud", "256K ctx, top agentic"),
     ("code", "minimax-m2.7:cloud", "1M ctx, SWE-Pro 56.2%"),
     ("think", "qwen3.5:397b-cloud", "256K ctx, hybrid thinking"),
-    ("vision", "kimi-k2.5:cloud", "multimodal"),
+    ("vision", "kimi-k2.6:cloud", "multimodal"),
     ("longctx", "minimax-m2.7:cloud", "1M ctx"),
 ]
 
@@ -24,13 +24,31 @@ MODEL_ROLES: list[tuple[str, str, str]] = [
 _MODELS_CACHE_TTL: float = 60.0
 _models_cache_result: list[str] = []
 _models_cache_ts: float = 0.0
+# Last fetch status — surfaces a one-line error in the picker footer when the
+# Ollama fetch fails, instead of silently returning an empty list.
+_models_fetch_error: Optional[str] = None
 
 
-def _fetch_all_models() -> list[str]:
-    """Fetch all available models from Ollama (cached for 60s)."""
+def invalidate_models_cache() -> None:
+    """Clear the Ollama model cache so the next fetch refreshes.
+
+    Bound to F5 inside the picker; lets users force-refresh after starting a
+    new model pull or restarting the Ollama daemon without waiting out the
+    60s TTL.
+    """
     global _models_cache_result, _models_cache_ts
+    _models_cache_result = []
+    _models_cache_ts = 0.0
+
+
+def _fetch_all_models(force: bool = False) -> list[str]:
+    """Fetch all available models from Ollama (cached for 60s).
+
+    force=True bypasses the cache — used by the picker's F5 refresh binding.
+    """
+    global _models_cache_result, _models_cache_ts, _models_fetch_error
     now = time.monotonic()
-    if _models_cache_result and (now - _models_cache_ts) < _MODELS_CACHE_TTL:
+    if not force and _models_cache_result and (now - _models_cache_ts) < _MODELS_CACHE_TTL:
         return _models_cache_result
     try:
         import requests
@@ -40,9 +58,18 @@ def _fetch_all_models() -> list[str]:
             models = resp.json().get("models", [])
             _models_cache_result = [m["name"] for m in models]
             _models_cache_ts = now
-    except Exception:
+            _models_fetch_error = None
+        else:
+            _models_fetch_error = f"Ollama returned HTTP {resp.status_code}"
+    except Exception as exc:
+        _models_fetch_error = f"Ollama fetch failed: {exc}"
         _logger.debug("ollama_model_fetch_failed", exc_info=True)
     return _models_cache_result
+
+
+def last_fetch_error() -> Optional[str]:
+    """Read-only accessor for the last Ollama fetch error (or None)."""
+    return _models_fetch_error
 
 
 def _fetch_chatgpt_models() -> list[str]:
@@ -174,34 +201,43 @@ def _pick_model_interactive(current_model: str) -> Optional[str]:
 
 def _pick_model_fallback(console: _Console, current_model: str) -> Optional[str]:
     """Simple fallback picker when prompt_toolkit can't create an Application."""
-    items = _build_model_list(current_model)
-    console.print("\n[bold cyan]  Model Picker[/bold cyan]")
-    for i, (model, role, ctx) in enumerate(items):
-        marker = " [green]<-[/green]" if model == current_model else ""
-        model_short = model.replace(":cloud", "").replace(":latest", "")
-        console.print(f"  [bold cyan]{i + 1:>2}[/bold cyan]. {model_short:<32s} [dim yellow]{role:<10s}[/dim yellow] [dim]{ctx}[/dim]{marker}")
+    while True:
+        items = _build_model_list(current_model)
+        err = last_fetch_error()
+        console.print("\n[bold cyan]  Model Picker[/bold cyan]")
+        if err:
+            console.print(f"  [yellow]{err} — showing cached results. Type 'r' to refresh.[/yellow]")
+        for i, (model, role, ctx) in enumerate(items):
+            marker = " [green]<-[/green]" if model == current_model else ""
+            model_short = model.replace(":cloud", "").replace(":latest", "")
+            console.print(f"  [bold cyan]{i + 1:>2}[/bold cyan]. {model_short:<32s} [dim yellow]{role:<10s}[/dim yellow] [dim]{ctx}[/dim]{marker}")
 
-    console.print()
-    try:
-        pick = input("  Pick # or name (q to cancel) > ").strip()
-    except (EOFError, KeyboardInterrupt):
-        return None
+        console.print()
+        try:
+            pick = input("  Pick # or name (q to cancel, r to refresh) > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
 
-    if not pick or pick.lower() in ("q", "esc"):
-        return None
+        if not pick or pick.lower() in ("q", "esc"):
+            return None
 
-    try:
-        idx = int(pick) - 1
-        if 0 <= idx < len(items):
-            return items[idx][0]
-    except ValueError:
-        pass
+        if pick.lower() in ("r", "refresh"):
+            invalidate_models_cache()
+            console.print("  [dim]Refreshing model list...[/dim]")
+            continue
 
-    for model, _, _ in items:
-        if pick.lower() in model.lower():
-            return model
+        try:
+            idx = int(pick) - 1
+            if 0 <= idx < len(items):
+                return items[idx][0]
+        except ValueError:
+            pass
 
-    return pick
+        for model, _, _ in items:
+            if pick.lower() in model.lower():
+                return model
+
+        return pick
 
 
 def update_model_roles_from_config() -> None:

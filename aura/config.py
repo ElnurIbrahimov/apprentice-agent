@@ -57,7 +57,7 @@ def _close_validation_session():
 # Updated Apr 2026 — all models accessed via Ollama cloud API
 VERIFIED_CLOUD_MODELS = {
     # Fast / general
-    "kimi-k2.5:cloud",                # 1T/32B MoE, multimodal, 256K, 92% MMLU
+    "kimi-k2.6:cloud",                # 1T/32B MoE, multimodal, 256K, 92% MMLU
     "nemotron-3-super:cloud",         # 120B/12B Mamba-MoE, 1M ctx, 449 tok/s
     "glm-5:cloud",                    # 744B/40B MoE, 200K, 69 tok/s, lowest hallucination
     # Reasoning / planning
@@ -181,13 +181,13 @@ class Config:
     # Model chains (first available is used as fallback)
     MODEL_FAST_CHAIN = [
         "nemotron-3-super:cloud",          # Primary: 449 tok/s, 1M ctx
-        "kimi-k2.5:cloud",                # Fallback: strong general
+        "kimi-k2.6:cloud",                # Fallback: strong general
         "glm-5.1:cloud",                   # Fallback: 744B MoE, strong all-around
         "glm-5:cloud",                     # Fallback: 69 tok/s, low hallucination
         "gemma4:31b-cloud",                # Fallback: 104 tok/s, multimodal
     ]
     MODEL_REASON_CHAIN = [
-        "kimi-k2.5:cloud",                # Primary: 92% MMLU, 96.1% AIME, 256K
+        "kimi-k2.6:cloud",                # Primary: 92% MMLU, 96.1% AIME, 256K
         "qwen3.5:397b-cloud",             # Fallback: 87.8 MMLU-Pro, hybrid thinking
         "glm-5.1:cloud",                   # Fallback: 744B MoE, +28% coding over GLM-5
         "glm-5:cloud",                     # Fallback: 96% MMLU, lowest hallucination
@@ -203,13 +203,13 @@ class Config:
         "deepseek-v3.2:cloud",             # Fallback: 67.8% SWE, cheapest
     ]
     MODEL_VISION_CHAIN = [
-        "kimi-k2.5:cloud",                # Primary: native multimodal, 256K
+        "kimi-k2.6:cloud",                # Primary: native multimodal, 256K
         "gemma4:31b-cloud",                # Fallback: native vision+audio, 256K
         "qwen3.5:397b-cloud",             # Fallback: multimodal, 262K
     ]
     MODEL_THINK_CHAIN = [
         "qwen3.5:397b-cloud",             # Primary: hybrid think/non-think, 262K
-        "kimi-k2.5:cloud",                # Fallback: 96.1% AIME
+        "kimi-k2.6:cloud",                # Fallback: 96.1% AIME
         "glm-5.1:cloud",                   # Fallback: 744B MoE, strong reasoning
         "glm-5:cloud",                     # Fallback: 92.7% AIME, low hallucination
         "gemma4:31b-cloud",                # Fallback: 89.2% AIME
@@ -219,15 +219,15 @@ class Config:
         "minimax-m2.7:cloud",             # Fallback: 205K, self-evolving
         "minimax-m2.5:cloud",              # Fallback: 196K
         "qwen3.5:397b-cloud",             # Fallback: 262K
-        "kimi-k2.5:cloud",                 # Fallback: 256K
+        "kimi-k2.6:cloud",                 # Fallback: 256K
         "glm-5.1:cloud",                   # Fallback: 200K context
     ]
 
     # Primary defaults
     MODEL_FAST: str = os.getenv("MODEL_FAST", "nemotron-3-super:cloud")
-    MODEL_REASON: str = os.getenv("MODEL_REASON", "kimi-k2.5:cloud")
+    MODEL_REASON: str = os.getenv("MODEL_REASON", "kimi-k2.6:cloud")
     MODEL_CODE: str = os.getenv("MODEL_CODE", "minimax-m2.7:cloud")
-    MODEL_VISION: str = os.getenv("MODEL_VISION", "kimi-k2.5:cloud")
+    MODEL_VISION: str = os.getenv("MODEL_VISION", "kimi-k2.6:cloud")
     MODEL_THINK: str = os.getenv("MODEL_THINK", "qwen3.5:397b-cloud")
     MODEL_LONGCTX: str = os.getenv("MODEL_LONGCTX", "minimax-m2.7:cloud")
 

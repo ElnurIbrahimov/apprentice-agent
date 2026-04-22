@@ -6,7 +6,7 @@ Philosophy:
 - Pick the best model by catalog specialty for that class, respecting the
   current cost budget and warm-slot preference.
 - Cheap tasks go cheap (deepseek-v3.2 / nemotron-3-super). Hard tasks go deep
-  (kimi-k2.5 / qwen3.5:397b / minimax-m2.5). No more "nemotron handles 80% of
+  (kimi-k2.6 / qwen3.5:397b / minimax-m2.5). No more "nemotron handles 80% of
   traffic because the router has no data."
 
 This sits alongside the neural Router (`aura/routing/router.py`). The neural

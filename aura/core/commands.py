@@ -57,6 +57,7 @@ def handle_subcommand(command: str, args: argparse.Namespace) -> int:
     """Dispatch subcommand. Returns exit code."""
     from aura.cli.commands.daemon_commands import cmd_start as _cmd_start, cmd_stop as _cmd_stop
     from aura.cli.commands.heatmap_commands import cmd_heatmap as _cmd_heatmap
+    from aura.cli.commands.log_commands import cmd_log as _cmd_log
     from aura.cli.commands.worktree_commands import cmd_worktree as _cmd_worktree
     handlers = {
         "init": cmd_init,
@@ -70,6 +71,7 @@ def handle_subcommand(command: str, args: argparse.Namespace) -> int:
         "status": cmd_status,
         "recall": cmd_recall,
         "why": cmd_why,
+        "log": _cmd_log,
         "start": _cmd_start,
         "stop": _cmd_stop,
         "heatmap": _cmd_heatmap,
@@ -705,6 +707,16 @@ def cmd_recall(args: argparse.Namespace) -> int:
 
 
 def cmd_ide_setup(args: argparse.Namespace) -> int:
+    """Dispatch `aura ide {setup|reset|validate}`."""
+    action = (getattr(args, "action", None) or "setup").lower()
+    if action == "reset":
+        return _cmd_ide_reset()
+    if action == "validate":
+        return _cmd_ide_validate()
+    return _cmd_ide_setup_apply()
+
+
+def _cmd_ide_setup_apply() -> int:
     """Generate VS Code tasks.json and print MCP config snippet."""
     import sys as _sys
 
@@ -818,6 +830,122 @@ def cmd_ide_setup(args: argparse.Namespace) -> int:
     console.print(Panel(json.dumps(mcp_config, indent=4), border_style="dim"))
     console.print()
     return 0
+
+
+def _cmd_ide_reset() -> int:
+    """Remove Aura-authored entries from .vscode/tasks.json; leave user tasks intact.
+
+    We identify Aura tasks by their "Aura: " label prefix (the convention used by
+    the setup path). Non-Aura tasks, inputs that weren't authored by us, and any
+    other keys in the tasks.json are preserved untouched.
+    """
+    cwd = os.getcwd()
+    tasks_path = os.path.join(cwd, ".vscode", "tasks.json")
+
+    if not os.path.exists(tasks_path):
+        console.print(f"  [dim]No {tasks_path} to reset.[/dim]")
+        return 0
+
+    try:
+        with open(tasks_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        console.print(f"  [red]Could not parse {tasks_path}: {e}[/red]")
+        return 1
+
+    original_tasks = data.get("tasks", [])
+    kept_tasks = [t for t in original_tasks if not str(t.get("label", "")).startswith("Aura:")]
+    removed = len(original_tasks) - len(kept_tasks)
+
+    # Remove inputs we added (auraPrompt is the only one)
+    inputs = data.get("inputs", [])
+    kept_inputs = [i for i in inputs if i.get("id") != "auraPrompt"]
+    inputs_removed = len(inputs) - len(kept_inputs)
+
+    if removed == 0 and inputs_removed == 0:
+        console.print("  [dim]No Aura-authored entries found; nothing to reset.[/dim]")
+        return 0
+
+    data["tasks"] = kept_tasks
+    if kept_inputs or inputs_removed:
+        data["inputs"] = kept_inputs
+
+    # If nothing else is left in the file, offer to remove it entirely.
+    is_empty = not kept_tasks and not kept_inputs and set(data.keys()) <= {"version", "tasks", "inputs"}
+    if is_empty:
+        try:
+            os.remove(tasks_path)
+            console.print(f"  [green]Removed[/] {tasks_path} (was only Aura entries).")
+        except OSError as e:
+            console.print(f"  [red]Could not remove {tasks_path}: {e}[/red]")
+            return 1
+    else:
+        try:
+            with open(tasks_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            console.print(f"  [green]Reset[/] {tasks_path} (removed {removed} task(s), {inputs_removed} input(s))")
+        except OSError as e:
+            console.print(f"  [red]Could not write {tasks_path}: {e}[/red]")
+            return 1
+    return 0
+
+
+def _cmd_ide_validate() -> int:
+    """Compare current .vscode/tasks.json against what cmd_ide_setup would generate.
+
+    Reports any drift: missing Aura tasks, extra Aura tasks, or a command string
+    that has changed (usually means Aura was moved or the Python interpreter
+    changed). Exit code 0 = matches, 1 = drift, 2 = no integration installed.
+    """
+    import sys as _sys
+
+    cwd = os.getcwd()
+    tasks_path = os.path.join(cwd, ".vscode", "tasks.json")
+    if not os.path.exists(tasks_path):
+        console.print(f"  [yellow]No Aura IDE integration installed.[/] Run: aura ide setup")
+        return 2
+
+    try:
+        with open(tasks_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        console.print(f"  [red]Could not parse {tasks_path}: {e}[/red]")
+        return 1
+
+    main_py = str(Path(__file__).resolve().parents[2] / "main.py")
+    expected_cmd_prefix = f'"{_sys.executable}" "{main_py}"'
+    expected_labels = {
+        "Aura: Chat",
+        "Aura: Run Prompt",
+        "Aura: Init Project",
+        "Aura: Smart Commit",
+    }
+
+    actual_aura_tasks = [t for t in data.get("tasks", []) if str(t.get("label", "")).startswith("Aura:")]
+    actual_labels = {t.get("label") for t in actual_aura_tasks}
+
+    missing = expected_labels - actual_labels
+    extra = actual_labels - expected_labels
+    stale_cmd: list[str] = []
+    for t in actual_aura_tasks:
+        cmd = str(t.get("command", ""))
+        if cmd and expected_cmd_prefix not in cmd:
+            stale_cmd.append(f"  - {t.get('label', '?')}: command path drifted")
+
+    drift = bool(missing or extra or stale_cmd)
+    if not drift:
+        console.print(f"  [green]OK[/] — {tasks_path} matches current Aura integration.")
+        return 0
+
+    console.print(f"  [yellow]Drift detected in {tasks_path}:[/]")
+    if missing:
+        console.print(f"  Missing: {', '.join(sorted(missing))}")
+    if extra:
+        console.print(f"  Extra Aura tasks (not in current template): {', '.join(sorted(extra))}")
+    for line in stale_cmd:
+        console.print(line)
+    console.print("\n  Fix with: [cyan]aura ide setup[/] (re-applies current template)")
+    return 1
 
 
 def _detect_test_cmd(project_root: str) -> str:

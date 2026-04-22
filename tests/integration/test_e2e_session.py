@@ -224,9 +224,9 @@ class TestChainExecution:
         """parse_chain extracts @model suffixes."""
         from aura.cli.chain_mode import parse_chain
 
-        steps = parse_chain("research X @kimi-k2.5:cloud -> summarize @nemotron-3-super:cloud")
+        steps = parse_chain("research X @kimi-k2.6:cloud -> summarize @nemotron-3-super:cloud")
         assert len(steps) == 2
-        assert steps[0].model == "kimi-k2.5:cloud"
+        assert steps[0].model == "kimi-k2.6:cloud"
         assert steps[1].model == "nemotron-3-super:cloud"
 
     def test_run_chain_executes_all_steps(self, mock_brain):
