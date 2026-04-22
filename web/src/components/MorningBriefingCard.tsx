@@ -16,6 +16,7 @@ import {
   ClockIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface HandStatus {
   name: string;
@@ -61,8 +62,8 @@ export function MorningBriefingCard() {
   const fetchData = useCallback(async () => {
     try {
       const [statusRes, historyRes] = await Promise.all([
-        fetch('/api/hands/morning_briefing'),
-        fetch('/api/hands/history?limit=5'),
+        apiFetch('/api/hands/morning_briefing'),
+        apiFetch('/api/hands/history?limit=5'),
       ]);
       if (statusRes.ok) {
         const data = await statusRes.json();
@@ -102,7 +103,7 @@ export function MorningBriefingCard() {
     haptics.medium();
     setRunning(true);
     try {
-      await fetch('/api/hands/morning_briefing/run', { method: 'POST' });
+      await apiFetch('/api/hands/morning_briefing/run', { method: 'POST' });
       // Poll for completion
       setTimeout(() => fetchData(), 3000);
       setTimeout(() => fetchData(), 8000);

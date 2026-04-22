@@ -110,8 +110,18 @@ export function serializeDOM(): SerializedElement[] {
   return els;
 }
 
+// Allowlist: only these action verbs can be dispatched to execAction. Any
+// other value (including undefined) is refused before we reach the DOM.
+const ALLOWED_EXEC_ACTIONS = new Set([
+  'scroll', 'click', 'type', 'selectOption',
+]);
+
 export function execAction(action: ExecActionParams): ExecActionResult {
-  if (action.action === 'scroll') {
+  const verb = action && typeof action.action === 'string' ? action.action : '';
+  if (!ALLOWED_EXEC_ACTIONS.has(verb)) {
+    return { ok: false, error: 'Unknown action: ' + verb };
+  }
+  if (verb === 'scroll') {
     window.scrollBy(0, action.amount || 300);
     return { ok: true };
   }
@@ -122,15 +132,15 @@ export function execAction(action: ExecActionParams): ExecActionResult {
     return { ok: false, error: 'Invalid selector: ' + action.selector };
   }
   if (!el) return { ok: false, error: 'Element not found: ' + action.selector };
-  if (action.action === 'click') { (el as HTMLElement).click(); return { ok: true }; }
-  if (action.action === 'type') {
+  if (verb === 'click') { (el as HTMLElement).click(); return { ok: true }; }
+  if (verb === 'type') {
     (el as HTMLElement).focus();
     (el as HTMLInputElement).value = action.text || '';
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
     return { ok: true };
   }
-  if (action.action === 'selectOption') {
+  if (verb === 'selectOption') {
     if (el.tagName.toLowerCase() !== 'select') return { ok: false, error: 'Element is not a <select>' };
     const selectEl = el as HTMLSelectElement;
     const opt: HTMLOptionElement | undefined = [...selectEl.options].find(
@@ -141,7 +151,9 @@ export function execAction(action: ExecActionParams): ExecActionResult {
     selectEl.dispatchEvent(new Event('change', { bubbles: true }));
     return { ok: true };
   }
-  return { ok: false, error: 'Unknown action: ' + action.action };
+  // ALLOWED_EXEC_ACTIONS covers every branch above; unreachable unless the
+  // set and the branches drift out of sync.
+  return { ok: false, error: 'Unhandled action: ' + verb };
 }
 
 // ── OCR Overlay ───────────────────────────────────────────────────────────────
@@ -1587,6 +1599,14 @@ export function setupMessageListener(ext: typeof chrome, handlers: MessageHandle
       _sender: chrome.runtime.MessageSender,
       sendResponse: (response: any) => void
     ): boolean | undefined => {
+      // Sender gate: only accept messages from our own extension. Content
+      // scripts + UI + background all share ext.runtime.id. Foreign
+      // extensions would have a different id; web pages can't reach us at
+      // all (no externally_connectable in the manifest), but this keeps the
+      // door shut if that ever changes.
+      if (_sender && _sender.id && _sender.id !== ext.runtime.id) {
+        return false;
+      }
       if (msg.type === 'EXTRACT_PAGE') {
         sendResponse(handlers.extractMainContent());
         return false;

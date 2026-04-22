@@ -659,31 +659,36 @@ finally:
 
         # Evaluate in-process with a restricted namespace. A subprocess would add
         # ~200ms on Windows per call; math eval is a hot agent path, so we keep it
-        # in-process and enforce a wall-clock watchdog. On timeout the caller
-        # returns immediately but the worker thread leaks until the expression
-        # finishes on its own — DANGEROUS_MATH_ATTRS and the exponent guard are
-        # the actual CPU bounds that prevent runaway leaks in practice.
-        # Do NOT use `with ThreadPoolExecutor(...)` — its __exit__ blocks until
-        # running futures complete, which defeats the timeout.
-        from concurrent.futures import ThreadPoolExecutor
+        # in-process and enforce a wall-clock watchdog via the shared tool_pool.
+        # DANGEROUS_MATH_ATTRS and the exponent guard are the actual CPU bounds
+        # that prevent runaway leaks if the worker keeps computing past timeout.
         from concurrent.futures import TimeoutError as _FuturesTimeout
+        from aura.pools import tool_pool, is_shutting_down
+
         safe_globals = {"__builtins__": {}, "math": _math}
         safe_locals = {f: getattr(__builtins__, f, None) or getattr(_math, f, None)
                        for f in MATH_FUNCS}
         compiled = compile(tree, "<math>", "eval")
+
         def _eval_math():
             return eval(compiled, safe_globals, safe_locals)
-        _ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix="math-watchdog")
+
         try:
-            result = _ex.submit(_eval_math).result(timeout=self.timeout)
-            _ex.shutdown(wait=False)
+            future = tool_pool().submit(_eval_math)
+        except RuntimeError:
+            # Pool already shut down — happens at interpreter exit.
+            if is_shutting_down():
+                return {"success": False, "output": "", "error": "Interpreter shutting down"}
+            raise
+        try:
+            result = future.result(timeout=self.timeout)
             return {"success": True, "output": str(result), "errors": None, "code": expression}
         except _FuturesTimeout:
-            _ex.shutdown(wait=False, cancel_futures=True)
+            # Best-effort cancel. The worker may still be spinning; the AST
+            # guards above cap CPU so leaks are bounded, not unbounded.
+            future.cancel()
             return {"success": False, "output": "", "error": f"Math evaluation timed out after {self.timeout}s"}
         except ZeroDivisionError:
-            _ex.shutdown(wait=False)
             return {"success": False, "output": "", "error": "Division by zero"}
         except Exception as e:
-            _ex.shutdown(wait=False)
             return {"success": False, "output": "", "error": str(e)}

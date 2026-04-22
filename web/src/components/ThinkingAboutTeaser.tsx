@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface ActiveThought {
   id: string;
@@ -56,8 +57,8 @@ export function ThinkingAboutTeaser() {
   const fetchAll = useCallback(async () => {
     try {
       const [stateRes, teaserRes] = await Promise.all([
-        fetch('/api/thinking/state'),
-        fetch('/api/thinking/teaser'),
+        apiFetch('/api/thinking/state'),
+        apiFetch('/api/thinking/teaser'),
       ]);
 
       if (stateRes.ok) {
@@ -97,7 +98,7 @@ export function ThinkingAboutTeaser() {
   // Generate a new thought manually
   const generateThought = async () => {
     try {
-      await fetch('/api/thinking/generate?force=true', { method: 'POST' });
+      await apiFetch('/api/thinking/generate?force=true', { method: 'POST' });
       fetchAll();
     } catch (e) {
       console.error('Failed to generate thought:', e);

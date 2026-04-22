@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { usePolling } from './usePolling';
+import { apiFetch } from '../utils/apiFetch';
 
 interface IdleBehavior {
   type: string;
@@ -64,7 +65,7 @@ export function useIdleBehaviors(enabled: boolean = true) {
 
     activityTimeoutRef.current = setTimeout(async () => {
       try {
-        await fetch('/api/idle/activity', { method: 'POST' });
+        await apiFetch('/api/idle/activity', { method: 'POST' });
       } catch (e) {
         // Silently ignore
       }
@@ -104,7 +105,7 @@ export function useIdleBehaviors(enabled: boolean = true) {
     if (!enabled) return;
 
     try {
-      const response = await fetch('/api/idle/state');
+      const response = await apiFetch('/api/idle/state');
       if (response.ok) {
         const data = await response.json();
         setIdleState(data);
@@ -119,7 +120,7 @@ export function useIdleBehaviors(enabled: boolean = true) {
     if (!enabled) return;
 
     try {
-      const response = await fetch('/api/idle/animation');
+      const response = await apiFetch('/api/idle/animation');
       if (response.ok) {
         const data = await response.json();
         setAnimationParams(data);

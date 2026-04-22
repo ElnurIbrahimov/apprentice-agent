@@ -7,6 +7,7 @@ import {
 import { useSettingsStore } from '../store/settingsStore';
 import type { ColorPreset } from '../store/settingsStore';
 import { toast } from './Toast';
+import { apiFetch } from '../utils/apiFetch';
 
 // ─── Provider Definitions ────────────────────────────────────────────────────
 
@@ -256,7 +257,7 @@ function PersonalitySection() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch('/api/alma/personality').then(r => r.json()).then(data => {
+    apiFetch('/api/alma/personality').then(r => r.json()).then(data => {
       if (data.available) {
         setAvailable(true);
         setTraits(data.traits);
@@ -267,7 +268,7 @@ function PersonalitySection() {
   const save = async () => {
     setSaving(true);
     try {
-      const resp = await fetch('/api/alma/personality', {
+      const resp = await apiFetch('/api/alma/personality', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(traits),
@@ -317,7 +318,7 @@ function PersonalitySection() {
         <button
           onClick={async () => {
             try {
-              const resp = await fetch('/api/alma/personality/reset', { method: 'POST' });
+              const resp = await apiFetch('/api/alma/personality/reset', { method: 'POST' });
               if (resp.ok) {
                 const data = await resp.json();
                 if (data.traits) setTraits(data.traits);
@@ -371,7 +372,7 @@ export function SettingsPage() {
 
   // Fetch provider status
   useEffect(() => {
-    fetch('/api/providers').then(r => r.json()).then(data => {
+    apiFetch('/api/providers').then(r => r.json()).then(data => {
       const status: Record<string, boolean> = {};
       const list = Array.isArray(data) ? data : (data.providers || []);
       list.forEach((p: any) => { status[p.name] = p.configured; });
@@ -381,7 +382,7 @@ export function SettingsPage() {
 
   const saveProviderKey = useCallback(async (provider: string, key: string) => {
     try {
-      const resp = await fetch(`/api/providers/${provider}/key`, {
+      const resp = await apiFetch(`/api/providers/${provider}/key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key }),
@@ -395,7 +396,7 @@ export function SettingsPage() {
 
   const removeProviderKey = useCallback(async (provider: string) => {
     try {
-      const resp = await fetch(`/api/providers/${provider}/key`, { method: 'DELETE' });
+      const resp = await apiFetch(`/api/providers/${provider}/key`, { method: 'DELETE' });
       if (resp.ok) {
         setProviderStatus(prev => ({ ...prev, [provider]: false }));
         toast.success('Removed', `${provider} key removed`);

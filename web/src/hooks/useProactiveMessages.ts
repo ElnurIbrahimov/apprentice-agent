@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { usePolling } from './usePolling';
 import { hasSeenProactive, markProactiveSeen } from './proactiveDedup';
+import { apiFetch } from '../utils/apiFetch';
 
 interface ProactiveMessageResponse {
   action: string;
@@ -32,7 +33,7 @@ export function useProactiveMessages(enabled: boolean = true) {
     isPollingRef.current = true;
 
     try {
-      const response = await fetch('/api/proactive/messages');
+      const response = await apiFetch('/api/proactive/messages');
       if (!response.ok) return;
 
       const data: ProactiveMessagesResponse = await response.json();
@@ -69,7 +70,7 @@ export function useProactiveMessages(enabled: boolean = true) {
           });
 
           // Also record interaction with daemon
-          fetch('/api/proactive/interaction', { method: 'POST' }).catch(() => {});
+          apiFetch('/api/proactive/interaction', { method: 'POST' }).catch(() => {});
         }
       }
 

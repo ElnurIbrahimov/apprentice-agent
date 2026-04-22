@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { StopIcon, ClipboardDocumentIcon, CheckIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type InputMode = 'paste' | 'upload';
@@ -63,7 +64,7 @@ export function PdfPanel() {
 
   /* Fetch models */
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [
@@ -122,7 +123,7 @@ export function PdfPanel() {
       try {
         const formData = new FormData();
         formData.append('file', file);
-        const res = await fetch('/api/pdf/parse', { method: 'POST', body: formData });
+        const res = await apiFetch('/api/pdf/parse', { method: 'POST', body: formData });
         if (res.ok) {
           const data = await res.json();
           if (data.text && data.text.length > 50) {
@@ -196,7 +197,7 @@ export function PdfPanel() {
     abortRef.current = controller;
 
     try {
-      const res = await fetch('/api/generate/raw', {
+      const res = await apiFetch('/api/generate/raw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

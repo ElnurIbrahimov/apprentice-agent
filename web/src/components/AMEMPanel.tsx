@@ -10,6 +10,7 @@ import {
   TagIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 const CATEGORY_COLORS: Record<string, string> = {
   general: 'bg-gray-600',
@@ -46,7 +47,7 @@ export function AMEMPanel() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch('/api/amem/stats');
+      const res = await apiFetch('/api/amem/stats');
       if (res.ok) {
         const data = await res.json();
         setStats(data);
@@ -59,7 +60,7 @@ export function AMEMPanel() {
   const fetchNotes = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/amem/notes?limit=20');
+      const res = await apiFetch('/api/amem/notes?limit=20');
       if (res.ok) {
         const data = await res.json();
         setNotes(data.notes || []);
@@ -75,7 +76,7 @@ export function AMEMPanel() {
     if (!searchQuery.trim()) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/amem/search', {
+      const res = await apiFetch('/api/amem/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: searchQuery, k: 10, follow_links: true }),
@@ -95,7 +96,7 @@ export function AMEMPanel() {
     if (!newContent.trim()) return;
     setAddLoading(true);
     try {
-      const res = await fetch('/api/amem/remember', {
+      const res = await apiFetch('/api/amem/remember', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -122,7 +123,7 @@ export function AMEMPanel() {
   const consolidate = async () => {
     setLoading(true);
     try {
-      await fetch('/api/amem/consolidate', { method: 'POST' });
+      await apiFetch('/api/amem/consolidate', { method: 'POST' });
       await fetchStats();
       await fetchNotes();
     } catch {

@@ -3,6 +3,7 @@ import { useChatStore } from '../store/chatStore';
 import { usePolling } from '../hooks/usePolling';
 import type { Thought } from '../types';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 const THOUGHT_ICONS: Record<string, string> = {
   perceive: '🔍',
@@ -35,7 +36,7 @@ export function ThoughtStream() {
   const fetchThoughts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/thoughts');
+      const res = await apiFetch('/api/thoughts');
       if (res.ok) {
         const data = await res.json();
         setThoughts(data.thoughts || []);
@@ -50,7 +51,7 @@ export function ThoughtStream() {
 
   const clearThoughts = async () => {
     try {
-      await fetch('/api/thoughts/clear', { method: 'POST' });
+      await apiFetch('/api/thoughts/clear', { method: 'POST' });
       setThoughts([]);
       setThoughtCount(0);
     } catch (e) {

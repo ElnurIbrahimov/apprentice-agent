@@ -17,6 +17,7 @@ import {
   XMarkIcon,
   ChatBubbleLeftRightIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 // ─── Card types ───
 type InsightCard = {
@@ -45,9 +46,9 @@ export function InsightsFeed() {
 
   const fetchInsights = useCallback(async () => {
     const results = await Promise.allSettled([
-      fetch('/api/proactive/curiosity').then(r => r.ok ? r.json() : null),
-      fetch('/api/proactive/suggestion').then(r => r.ok ? r.json() : null),
-      fetch('/api/motivation/actions').then(r => r.ok ? r.json() : null),
+      apiFetch('/api/proactive/curiosity').then(r => r.ok ? r.json() : null),
+      apiFetch('/api/proactive/suggestion').then(r => r.ok ? r.json() : null),
+      apiFetch('/api/motivation/actions').then(r => r.ok ? r.json() : null),
     ]);
 
     const newCards: InsightCard[] = [];
@@ -114,7 +115,7 @@ export function InsightsFeed() {
   const handleDismiss = useCallback((id: string) => {
     haptics.light();
     setDismissed(prev => new Set(prev).add(id));
-    fetch('/api/proactive/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+    apiFetch('/api/proactive/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
   }, []);
 
   const handleTellMore = useCallback((card: InsightCard) => {

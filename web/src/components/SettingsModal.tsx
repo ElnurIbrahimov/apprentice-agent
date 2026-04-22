@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { useSettingsStore, type Settings } from '../store/settingsStore';
 import { toast } from './Toast';
+import { apiFetch } from '../utils/apiFetch';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -39,7 +40,7 @@ function ApiProviderManager() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch('/api/providers').then(r => r.json()).then(data => {
+    apiFetch('/api/providers').then(r => r.json()).then(data => {
       const status: Record<string, boolean> = {};
       if (Array.isArray(data)) {
         data.forEach((p: any) => { status[p.name] = p.configured; });
@@ -54,7 +55,7 @@ function ApiProviderManager() {
     if (!keyInput.trim()) return;
     setSaving(true);
     try {
-      const resp = await fetch(`/api/providers/${providerName}/key`, {
+      const resp = await apiFetch(`/api/providers/${providerName}/key`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: keyInput.trim() }),
@@ -75,7 +76,7 @@ function ApiProviderManager() {
 
   const removeKey = async (providerName: string) => {
     try {
-      const res = await fetch(`/api/providers/${providerName}/key`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/providers/${providerName}/key`, { method: 'DELETE' });
       if (res.ok) {
         setProviders(prev => ({ ...prev, [providerName]: false }));
         toast.success('Removed', `${providerName} key removed`);
@@ -175,7 +176,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   const fetchPersonality = async () => {
     try {
-      const response = await fetch('/api/alma/personality');
+      const response = await apiFetch('/api/alma/personality');
       if (response.ok) {
         const data = await response.json();
         setPersonalityAvailable(data.available);
@@ -194,7 +195,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const savePersonality = async () => {
     setPersonalityLoading(true);
     try {
-      const response = await fetch('/api/alma/personality', {
+      const response = await apiFetch('/api/alma/personality', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(personality),
@@ -214,7 +215,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const resetPersonality = async () => {
     setPersonalityLoading(true);
     try {
-      const response = await fetch('/api/alma/personality/reset', { method: 'POST' });
+      const response = await apiFetch('/api/alma/personality/reset', { method: 'POST' });
       if (response.ok) {
         const data = await response.json();
         setPersonality(data.traits);

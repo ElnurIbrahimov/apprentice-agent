@@ -3,6 +3,7 @@ import { usePolling } from '../hooks/usePolling';
 import type { NeuroDreamStatus } from '../types';
 import { ArrowPathIcon, MoonIcon, SunIcon } from '@heroicons/react/24/outline';
 import { formatPercent } from '../utils/format';
+import { apiFetch } from '../utils/apiFetch';
 
 const PHASE_ICONS: Record<string, string> = {
   light: '🌙',
@@ -19,7 +20,7 @@ export function NeuroDreamPanel() {
   const fetchStatus = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/neurodream');
+      const res = await apiFetch('/api/neurodream');
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
@@ -37,7 +38,7 @@ export function NeuroDreamPanel() {
   const triggerSleep = async () => {
     setActionLoading(true);
     try {
-      await fetch('/api/neurodream/sleep', { method: 'POST' });
+      await apiFetch('/api/neurodream/sleep', { method: 'POST' });
       await fetchStatus();
     } catch (e) {
       console.error('Failed to trigger sleep:', e);
@@ -48,7 +49,7 @@ export function NeuroDreamPanel() {
   const triggerWake = async () => {
     setActionLoading(true);
     try {
-      await fetch('/api/neurodream/wake', { method: 'POST' });
+      await apiFetch('/api/neurodream/wake', { method: 'POST' });
       await fetchStatus();
     } catch (e) {
       console.error('Failed to wake up:', e);

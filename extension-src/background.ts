@@ -278,6 +278,13 @@ chrome.notifications?.onButtonClicked?.addListener(async (notificationId: string
 // to fire a notification. The sidebar handles its own rendering; this path
 // is only for when the sidebar is closed.
 ext.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  // Sender gate: accept messages only from our own extension contexts
+  // (content scripts + UI). The manifest has no externally_connectable so
+  // foreign extensions cannot reach us today, but this is cheap belt-and-
+  // suspenders against future manifest edits.
+  if (_sender && _sender.id && _sender.id !== ext.runtime.id) {
+    return false;
+  }
   if (!msg || typeof msg !== 'object') return false;
 
   if (msg.type === 'AURA_ENSURE_OFFSCREEN') {

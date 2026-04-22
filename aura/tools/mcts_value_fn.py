@@ -11,9 +11,14 @@ smarter as the cache grows.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
+import os
 import pickle
+import secrets
+import stat
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -23,6 +28,69 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL_DIR = Path("data/mcts_value")
 DEFAULT_MODEL_FILE = DEFAULT_MODEL_DIR / "model.pkl"
 MIN_TRAINING_PAIRS = 50
+
+# --- HMAC signing for pickle integrity ---------------------------------------
+# `pickle.load` is arbitrary-code-exec on hostile input. We sign every model
+# file we write and refuse to load anything without a valid HMAC. The key is
+# generated on first save and stored next to the model with user-only perms.
+
+_KEY_FILE_NAME = "key"
+_SIG_SUFFIX = ".sig"
+
+
+def _key_path(model_path: Path) -> Path:
+    return model_path.parent / _KEY_FILE_NAME
+
+
+def _sig_path(model_path: Path) -> Path:
+    return model_path.with_suffix(model_path.suffix + _SIG_SUFFIX)
+
+
+def _get_or_create_key(model_path: Path) -> bytes:
+    """Return the HMAC key for this model path, creating it on first use.
+
+    Generates a 32-byte random key, writes it 0o600 (POSIX) next to the model.
+    On Windows, permissions rely on filesystem ACLs — the data dir should
+    already be user-scoped.
+    """
+    kp = _key_path(model_path)
+    if kp.exists():
+        raw = kp.read_bytes()
+        if len(raw) >= 32:
+            return raw
+        logger.warning("[MCTSValueFn] key file at %s is too short — regenerating", kp)
+    kp.parent.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_bytes(32)
+    kp.write_bytes(key)
+    try:
+        kp.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+    except OSError:
+        pass  # Windows — ACL-based
+    return key
+
+
+def _sign_model(model_path: Path, data_bytes: bytes) -> None:
+    key = _get_or_create_key(model_path)
+    sig = hmac.new(key, data_bytes, hashlib.sha256).hexdigest()
+    _sig_path(model_path).write_text(sig, encoding="ascii")
+
+
+def _verify_model(model_path: Path, data_bytes: bytes) -> bool:
+    """Return True iff the signature file matches an HMAC we'd produce today.
+
+    Missing key file, missing sig file, or mismatch all fail closed.
+    """
+    kp = _key_path(model_path)
+    sp = _sig_path(model_path)
+    if not (kp.exists() and sp.exists()):
+        return False
+    try:
+        key = kp.read_bytes()
+        stored = sp.read_text(encoding="ascii").strip()
+    except OSError:
+        return False
+    expected = hmac.new(key, data_bytes, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(stored, expected)
 
 
 def _walk_nodes(node: dict, out: List[dict], parent_content: str = "") -> None:
@@ -135,14 +203,16 @@ def train_value_fn(
     rmse = float(np.sqrt(mean_squared_error(y, predictions)))
 
     model_path.parent.mkdir(parents=True, exist_ok=True)
-    with model_path.open("wb") as f:
-        pickle.dump({
-            "model": model,
-            "n_samples": len(X_list),
-            "rmse": rmse,
-            "trained_at": time.time(),
-            "embedding_dim": X.shape[1],
-        }, f)
+    payload_bytes = pickle.dumps({
+        "model": model,
+        "n_samples": len(X_list),
+        "rmse": rmse,
+        "trained_at": time.time(),
+        "embedding_dim": X.shape[1],
+    })
+    # Write model + HMAC sidecar so _ensure_loaded can refuse tampered files.
+    model_path.write_bytes(payload_bytes)
+    _sign_model(model_path, payload_bytes)
 
     elapsed = round(time.time() - t0, 2)
     logger.info(f"[MCTSValueFn] trained on {len(X_list)} pairs, rmse={rmse:.4f}, {elapsed}s")
@@ -174,8 +244,17 @@ class ValuePredictor:
         if not self.model_path.exists():
             return False
         try:
-            with self.model_path.open("rb") as f:
-                data = pickle.load(f)
+            payload_bytes = self.model_path.read_bytes()
+            # HMAC verify BEFORE unpickling — pickle.load on hostile input is RCE.
+            if not _verify_model(self.model_path, payload_bytes):
+                logger.warning(
+                    "[ValuePredictor] refusing to load %s: HMAC signature missing or "
+                    "invalid. Retrain to regenerate (the predictor will return the "
+                    "no-signal default in the meantime).",
+                    self.model_path,
+                )
+                return False
+            data = pickle.loads(payload_bytes)
             self._model = data["model"]
             self._n_samples = int(data.get("n_samples", 0))
             self._rmse = float(data.get("rmse", 1.0))

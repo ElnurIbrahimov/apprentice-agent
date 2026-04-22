@@ -7,6 +7,7 @@ import {
   CurrencyDollarIcon,
   PuzzlePieceIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 export function ToolsPanel() {
   const [tools, setTools] = useState<Tool[]>([]);
@@ -29,9 +30,9 @@ export function ToolsPanel() {
     setLoading(true);
     try {
       const [toolsRes, voiceRes, costsRes] = await Promise.all([
-        fetch('/api/tools'),
-        fetch('/api/voice'),
-        fetch('/api/costs/summary'),
+        apiFetch('/api/tools'),
+        apiFetch('/api/voice'),
+        apiFetch('/api/costs/summary'),
       ]);
       if (!mountedRef.current) return;
       if (toolsRes.ok) {
@@ -58,7 +59,7 @@ export function ToolsPanel() {
     setReloading(true);
     setReloadMsg(null);
     try {
-      const res = await fetch('/api/plugins/reload', { method: 'POST' });
+      const res = await apiFetch('/api/plugins/reload', { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
