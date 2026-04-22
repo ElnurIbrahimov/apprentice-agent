@@ -101,16 +101,16 @@ class TestGetClient:
         """Without brain, returns local client and unchanged model."""
         with patch('aura.tools.vision.ollama.Client', return_value=mock_client):
             tool = VisionTool()
-        client, model = tool._get_client("kimi-k2.5:cloud")
+        client, model = tool._get_client("kimi-k2.6:cloud")
         assert client is mock_client
-        assert model == "kimi-k2.5:cloud"
+        assert model == "kimi-k2.6:cloud"
 
     def test_brain_client_when_brain_provided(self, mock_brain):
         """With brain, returns brain's client."""
         tool = VisionTool(brain=mock_brain)
-        client, model = tool._get_client("kimi-k2.5:cloud")
+        client, model = tool._get_client("kimi-k2.6:cloud")
         assert client is mock_brain.client
-        assert model == "kimi-k2.5:cloud"
+        assert model == "kimi-k2.6:cloud"
 
     def test_cloud_suffix_stripped(self, mock_brain):
         """Cloud-suffixed model names with -cloud are stripped to base names."""
@@ -132,10 +132,10 @@ class TestGetClient:
 class TestFallbackChain:
     def test_primary_model_succeeds(self, mock_brain):
         """When primary model works, no fallback needed."""
-        tool = VisionTool(model="kimi-k2.5:cloud", brain=mock_brain)
+        tool = VisionTool(model="kimi-k2.6:cloud", brain=mock_brain)
         content, model_used = tool._analyze_with_fallback("base64data", "describe")
         assert content == "A test image description"
-        assert model_used == "kimi-k2.5:cloud"
+        assert model_used == "kimi-k2.6:cloud"
         mock_brain.client.chat.assert_called_once()
 
     def test_fallback_on_primary_failure(self, mock_brain):
@@ -161,7 +161,7 @@ class TestFallbackChain:
         """Primary model isn't tried twice if it's also in the chain."""
         mock_brain.client.chat.side_effect = Exception("fail")
         # Use a model that's in MODEL_VISION_CHAIN
-        tool = VisionTool(model="kimi-k2.5:cloud", brain=mock_brain)
+        tool = VisionTool(model="kimi-k2.6:cloud", brain=mock_brain)
         with pytest.raises(RuntimeError):
             tool._analyze_with_fallback("base64data", "describe")
         # The primary model should appear only once in the tried list
@@ -214,9 +214,9 @@ class TestAnalyzeImage:
 
     def test_returns_model_used(self, tiny_png, mock_brain):
         """Result dict includes which model actually handled the request."""
-        tool = VisionTool(model="kimi-k2.5:cloud", brain=mock_brain)
+        tool = VisionTool(model="kimi-k2.6:cloud", brain=mock_brain)
         result = tool.analyze_image(tiny_png)
-        assert result["model"] == "kimi-k2.5:cloud"
+        assert result["model"] == "kimi-k2.6:cloud"
 
     def test_all_models_fail_returns_error(self, tiny_png, mock_brain):
         mock_brain.client.chat.side_effect = Exception("fail")

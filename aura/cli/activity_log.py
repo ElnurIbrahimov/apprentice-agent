@@ -92,7 +92,16 @@ class ActivityLog:
     def log(self, prompt: str, response: str = "", model: str = "",
             session_id: str = "", tokens_in: int = 0, tokens_out: int = 0,
             cost: float = 0.0, tool_calls: int = 0) -> int:
-        """Log an interaction. Returns the row ID."""
+        """Log an interaction. Returns the row ID.
+
+        The embedding computation (nomic-embed-text via Ollama, 50-200ms per
+        call) was previously synchronous on this insert path — it sat in the
+        middle of the chat turn and added latency to every message. It's now
+        dispatched to bg_pool() so the insert returns immediately and the
+        embedding lands when Ollama responds; semantic_search() already falls
+        back to FTS5 when the embedding column is NULL, so the window between
+        insert and embedding arrival degrades gracefully.
+        """
         # Extract slash command name for future usage stats (Phase 5)
         command: Optional[str] = None
         if prompt and prompt.lstrip().startswith("/"):
@@ -110,26 +119,57 @@ class ActivityLog:
             )
             row_id = cursor.lastrowid
             conn.commit()
-            # Optionally compute and store embedding for semantic search
-            try:
-                import struct
-
-                import ollama
-                resp = ollama.embed(model="nomic-embed-text:latest", input=f"{prompt} {(response or '')[:500]}")
-                if resp and "embeddings" in resp and resp["embeddings"]:
-                    emb = resp["embeddings"][0]
-                    blob = struct.pack(f'{len(emb)}f', *emb)
-                    conn.execute("UPDATE interactions SET embedding = ? WHERE id = ?", (blob, row_id))
-                    conn.commit()
-            except Exception:
-                logger.debug("Failed to store embedding for activity log entry", exc_info=True)
-            return row_id
         except Exception as e:
             logger.warning("[ActivityLog] Failed to log interaction: %s", e)
             conn.rollback()
+            conn.close()
             return -1
         finally:
-            conn.close()
+            # conn is closed inside the exception path too; success path closes here.
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+        # Defer the embedding compute to bg_pool so chat turns don't block
+        # waiting for Ollama. A separate connection is opened in the worker
+        # because sqlite3 connections aren't safe to share across threads.
+        if row_id is not None and row_id > 0:
+            try:
+                from aura.pools import bg_submit
+                bg_submit(self._compute_and_store_embedding, row_id, prompt, response)
+            except Exception:
+                logger.debug("embedding_bg_submit_failed", exc_info=True)
+        return row_id if row_id is not None else -1
+
+    def _compute_and_store_embedding(self, row_id: int, prompt: str, response: str) -> None:
+        """Background worker: compute an embedding and write it to the row.
+
+        Runs on bg_pool. Failure modes (Ollama offline, model not pulled,
+        connection error) are swallowed at debug level — FTS5 still works
+        without embeddings so we degrade gracefully rather than noise the log.
+        """
+        try:
+            import struct
+
+            import ollama
+            resp = ollama.embed(
+                model="nomic-embed-text:latest",
+                input=f"{prompt} {(response or '')[:500]}",
+            )
+            if not (resp and "embeddings" in resp and resp["embeddings"]):
+                return
+            emb = resp["embeddings"][0]
+            blob = struct.pack(f'{len(emb)}f', *emb)
+            conn = sqlite3.connect(str(self._db_path), timeout=10)
+            try:
+                conn.execute("UPDATE interactions SET embedding = ? WHERE id = ?", (blob, row_id))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("Failed to store embedding for activity log entry", exc_info=True)
 
     def search(self, query: str, limit: int = 20) -> List[Dict]:
         """Full-text search across prompts and responses."""
@@ -316,7 +356,7 @@ class ActivityLog:
     def get_stats_by_provider(self, session_id: str = "") -> list[dict]:
         """Aggregate per-model stats, then collapse by provider prefix.
 
-        'kimi-k2.5:cloud' → provider 'kimi'
+        'kimi-k2.6:cloud' → provider 'kimi'
         'qwen3-coder:480b-cloud' → provider 'qwen3-coder'
         """
         per_model = self.get_stats_by_model(session_id=session_id)

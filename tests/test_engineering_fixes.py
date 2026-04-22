@@ -249,8 +249,8 @@ class TestModelNameValidation:
 
     def test_validate_model_name_accepts_cloud_model(self):
         from api.utils import validate_model_name
-        result = validate_model_name("kimi-k2.5:cloud")
-        assert result == "kimi-k2.5:cloud"
+        result = validate_model_name("kimi-k2.6:cloud")
+        assert result == "kimi-k2.6:cloud"
 
     def test_validate_model_name_rejects_shell_chars(self):
         from api.utils import validate_model_name

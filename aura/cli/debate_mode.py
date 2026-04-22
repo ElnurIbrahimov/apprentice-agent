@@ -89,14 +89,14 @@ SYNTHESIS_SYSTEM = (
 # ── Default model selection ───────────────────────────────────────────
 
 DEFAULT_MODELS = {
-    "advocate": "kimi-k2.5:cloud",
+    "advocate": "kimi-k2.6:cloud",
     "critic": "deepseek-v3.2:cloud",
     "analyst": "chatgpt:gpt-5.4",
 }
 
 # Fallback when ChatGPT is not available (2 debaters only, saves a slot)
 FALLBACK_MODELS = {
-    "advocate": "kimi-k2.5:cloud",
+    "advocate": "kimi-k2.6:cloud",
     "critic": "deepseek-v3.2:cloud",
 }
 
@@ -112,7 +112,7 @@ def _select_models(brain, user_models: Optional[str] = None) -> dict:
     """
     if user_models:
         aliases = {
-            "kimi": "kimi-k2.5:cloud",
+            "kimi": "kimi-k2.6:cloud",
             "qwen": "qwen3.5:397b-cloud",
             "deepseek": "deepseek-v3.2:cloud",
             "minimax": "minimax-m2.7:cloud",

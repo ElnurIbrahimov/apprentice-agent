@@ -24,7 +24,7 @@ def test_successful_chat_passes_through():
     wrapped = _mk_wrapped()
     wrapped.chat.return_value = {"message": {"role": "assistant", "content": "hi"}}
     client = ResilientOllamaClient(wrapped, provider_label="ollama_cloud")
-    result = client.chat(model="kimi-k2.5:cloud", messages=[{"role": "user", "content": "hi"}])
+    result = client.chat(model="kimi-k2.6:cloud", messages=[{"role": "user", "content": "hi"}])
     assert result["message"]["content"] == "hi"
     assert wrapped.chat.call_count == 1
 

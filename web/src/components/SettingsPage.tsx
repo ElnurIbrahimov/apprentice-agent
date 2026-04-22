@@ -28,7 +28,7 @@ const TEXT_PROVIDERS: ProviderDef[] = [
   { name: 'deepseek', display: 'DeepSeek', placeholder: 'sk-...', description: 'DeepSeek V3, Coder' },
   { name: 'minimax', display: 'MiniMax', placeholder: 'eyJ...', description: 'MiniMax-M2.7, 1M context' },
   { name: 'qwen', display: 'Qwen (Alibaba)', placeholder: 'sk-...', description: 'Qwen 3.5, Qwen-Coder' },
-  { name: 'kimi', display: 'Kimi (Moonshot)', placeholder: 'sk-...', description: 'Kimi K2.5, 256K context' },
+  { name: 'kimi', display: 'Kimi (Moonshot)', placeholder: 'sk-...', description: 'Kimi K2.6, 256K context' },
   { name: 'glm', display: 'GLM (Zhipu)', placeholder: 'Bearer...', description: 'GLM-5, CogView' },
   { name: 'groq', display: 'Groq', placeholder: 'gsk_...', description: 'Ultra-fast LPU inference' },
   { name: 'together', display: 'Together AI', placeholder: 'Bearer...', description: '100+ open models hosted' },

@@ -57,7 +57,7 @@ def test_status_bar_contains_rl_segment_at_120_cols():
         "x-ratelimit-remaining-requests": "20",  # 80% used
     })
     rendered = build_status_bar(
-        model="kimi-k2.5:cloud",
+        model="kimi-k2.6:cloud",
         token_used=1000,
         token_limit=200000,
         permission_mode="careful",
@@ -76,7 +76,7 @@ def test_status_bar_omits_rl_below_120_cols():
         "x-ratelimit-remaining-requests": "20",
     })
     rendered = build_status_bar(
-        model="kimi-k2.5:cloud",
+        model="kimi-k2.6:cloud",
         token_used=1000,
         token_limit=200000,
         permission_mode="careful",
@@ -89,7 +89,7 @@ def test_status_bar_omits_rl_below_120_cols():
 def test_status_bar_no_rl_when_snapshots_empty():
     _clear_snapshots()
     rendered = build_status_bar(
-        model="kimi-k2.5:cloud",
+        model="kimi-k2.6:cloud",
         token_used=1000,
         token_limit=200000,
         permission_mode="careful",

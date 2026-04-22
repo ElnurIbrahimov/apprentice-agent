@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Optional
 
 from ..context import get_ctx
@@ -192,7 +193,22 @@ def handle_fleet(agent, arg, context) -> Optional[str]:
             return {"success": True, "response": response or "", "iterations": 1}
         except Exception as e:  # Catch-all: runs in thread pool, must not propagate
             return {"success": False, "error": str(e)}
-    executor = FleetExecutor(max_workers=3)
+    # Honor AURA.md `fleet.max_workers` / `fleet.budget_per_task` so projects
+    # can tune parallelism per-repo instead of being stuck at the 3-worker
+    # default. Falls back to 3 / 1.0 when the keys are absent.
+    _fleet_cfg: dict = {}
+    try:
+        from aura.core.context import get_aura_md_config as _get_cfg
+        _raw = _get_cfg(os.getcwd()) or {}
+        if isinstance(_raw.get("fleet"), dict):
+            _fleet_cfg = _raw["fleet"]
+    except (ImportError, OSError, KeyError, TypeError):
+        logger.debug("fleet_config_lookup_failed", exc_info=True)
+
+    _max_workers = int(_fleet_cfg.get("max_workers", 3))
+    _budget_per_task = float(_fleet_cfg.get("budget_per_task", 1.0))
+
+    executor = FleetExecutor(max_workers=_max_workers, budget_per_task=_budget_per_task)
     run_fleet_live(_fleet_console, fleet, executor, _fleet_task_fn)
 
 
@@ -317,7 +333,7 @@ def handle_chain(agent, arg, context) -> Optional[str]:
         console.print()
         console.print("  [bold]Usage:[/bold]")
         console.print('    /chain "research X" -> "summarize" -> "write code"')
-        console.print('    /chain research X @kimi-k2.5:cloud -> summarize @nemotron-3-super:cloud')
+        console.print('    /chain research X @kimi-k2.6:cloud -> summarize @nemotron-3-super:cloud')
         console.print("    /chain save <name> step1 -> step2 -> step3")
         console.print("    /chain run <name>")
         console.print("    /chain list")

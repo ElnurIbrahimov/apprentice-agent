@@ -9,7 +9,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from aura.core.chat_handler import ChatMixin
 from aura.core.direct_handlers import DirectHandlersMixin
@@ -846,7 +846,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         """Register a callback for CLI permission prompts."""
         self._cli_confirm_callback = callback
 
-    def run(self, goal: str, context: Optional[dict] = None, use_fastpath: Optional[bool] = None, timeout_seconds: int = AGENT_TIMEOUT) -> dict:
+    def run(self, goal: str, context: Optional[dict] = None, use_fastpath: Optional[bool] = None, timeout_seconds: int = AGENT_TIMEOUT, permissions: Optional[Any] = None) -> dict:
         """Run the agent loop to achieve a goal.
 
         Args:
@@ -854,7 +854,17 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             context: Optional context dictionary
             use_fastpath: Override fast-path behavior (None uses self.use_fastpath)
             timeout_seconds: Maximum time for the entire agent loop
+            permissions: Optional PermissionManager. When provided, the internal
+                ToolExecutor is re-wired so every tool call inside _react_step
+                respects sandbox tier, trust mode, and per-tool AURA.md rules.
+                Without this, the fast / oneshot paths would execute tools using
+                a default-constructed PermissionManager that ignores CLI flags.
         """
+        if permissions is not None:
+            self.permissions = permissions
+            if getattr(self, "_tool_executor", None) is not None:
+                self._tool_executor.permissions = permissions
+
         start_time = time.time()
         logger.info(f"[AGENT] Starting run() with goal: {goal[:100]}...")
 

@@ -23,7 +23,7 @@ def _get_default_compare_models():
         from aura.config import Config
         return [Config.MODEL_CODE, Config.MODEL_THINK, Config.MODEL_REASON]
     except Exception:
-        return ["minimax-m2.7:cloud", "qwen3.5:397b-cloud", "kimi-k2.5:cloud"]
+        return ["minimax-m2.7:cloud", "qwen3.5:397b-cloud", "kimi-k2.6:cloud"]
 
 
 class CompareRequest(BaseModel):

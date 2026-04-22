@@ -16,7 +16,7 @@ def _make_session() -> SimpleNamespace:
         _conversation_history=[{"role": "user", "content": "hi"}],
         model_override="qwen",
     )
-    return SimpleNamespace(
+    session = SimpleNamespace(
         console=MagicMock(),
         agent=agent,
         agentic=agentic,
@@ -32,6 +32,17 @@ def _make_session() -> SimpleNamespace:
         _show_bar=MagicMock(),
         _show_perm_banner=MagicMock(),
     )
+
+    # Mirror the real ChatSession.apply_model_override helper so the test
+    # exercises the single-source-of-truth path introduced in 3.6.
+    def _apply(model):
+        resolved = None if (model is None or model == "auto") else model
+        brain.set_model_override(resolved)
+        agentic.model_override = resolved
+        session.current_model = resolved or "auto"
+
+    session.apply_model_override = _apply
+    return session
 
 
 def test_signal_command_palette_injects_selected_command():
