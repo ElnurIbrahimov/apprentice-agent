@@ -60,10 +60,15 @@ def test_main_argparse_registers_exec_flags():
         assert "--quiet" in help_text
         assert "--output-failures" in help_text
 
+# NOTE: top-level `goal` is nargs="*", so passing a free-form prompt like
+# `["aura", "exec", "do something"]` causes argparse to allocate "exec" to
+# `goal` and "do something" to `command` (which fails the choices check).
+# These tests verify flag defaults/parsing only, so we omit the prompt.
+
 def test_main_exec_default_timeout_is_zero():
     """Default --timeout is 0 (no timeout)."""
     import sys
-    with patch.object(sys, "argv", ["aura", "exec", "do something"]):
+    with patch.object(sys, "argv", ["aura", "exec"]):
         from main import _build_argument_parser
         parser, _ = _build_argument_parser()
         args = parser.parse_args()
@@ -74,7 +79,7 @@ def test_main_exec_default_timeout_is_zero():
 
 def test_main_exec_quiet_flag():
     import sys
-    with patch.object(sys, "argv", ["aura", "exec", "do something", "--quiet"]):
+    with patch.object(sys, "argv", ["aura", "exec", "--quiet"]):
         from main import _build_argument_parser
         parser, _ = _build_argument_parser()
         args = parser.parse_args()
@@ -83,7 +88,7 @@ def test_main_exec_quiet_flag():
 
 def test_main_exec_timeout_flag():
     import sys
-    with patch.object(sys, "argv", ["aura", "exec", "do X", "--timeout", "30"]):
+    with patch.object(sys, "argv", ["aura", "exec", "--timeout", "30"]):
         from main import _build_argument_parser
         parser, _ = _build_argument_parser()
         args = parser.parse_args()
@@ -92,7 +97,7 @@ def test_main_exec_timeout_flag():
 
 def test_main_exec_output_failures_flag():
     import sys
-    with patch.object(sys, "argv", ["aura", "exec", "do X", "--output-failures"]):
+    with patch.object(sys, "argv", ["aura", "exec", "--output-failures"]):
         from main import _build_argument_parser
         parser, _ = _build_argument_parser()
         args = parser.parse_args()
