@@ -152,7 +152,12 @@ class GatewayDaemon:
             "decisions_made": 0,
             "messages_sent": 0,
             "start_time": None,
+            "sub_task_failures": 0,
         }
+        # Last exception from the event-bus subscription task, surfaced via
+        # health checks so a dead subscription is visible even though the
+        # daemon.state still reads RUNNING.
+        self._sub_task_failure: Optional[BaseException] = None
 
         # Load persisted state (graceful degradation)
         self._load_persisted_state()
@@ -332,13 +337,15 @@ class GatewayDaemon:
         # Subscribe to all channels
         channels = list(EventBus.CHANNELS.keys())
 
-        # Start subscription in background (store reference to detect failures)
+        # Start subscription in background (store reference to detect failures).
+        # If the subscription task dies, event delivery silently stops while
+        # the daemon's state still reads RUNNING, so capture the failure in a
+        # visible way (full traceback + stats counter + surfaced attribute)
+        # rather than a one-line lambda log.
         self._sub_task = asyncio.create_task(
             self.event_bus.subscribe(channels, self._handle_event)
         )
-        self._sub_task.add_done_callback(
-            lambda t: t.exception() and logger.error(f"Event bus subscription died: {t.exception()}")
-        )
+        self._sub_task.add_done_callback(self._on_sub_task_done)
 
         # Start decision loop
         self._task = asyncio.create_task(self._decision_loop())
@@ -346,6 +353,30 @@ class GatewayDaemon:
         self.state = DaemonState.RUNNING
         self._stats["start_time"] = datetime.now()
         logger.info("[GatewayDaemon] Started")
+
+    def _on_sub_task_done(self, task: "asyncio.Task") -> None:
+        """Done-callback for the event-bus subscription task.
+
+        The subscription is expected to run forever. Any completion while the
+        daemon is still RUNNING means events have stopped flowing. Surface it
+        loudly (stats counter + stored exception + ERROR log with traceback)
+        so health checks and operators can see the failure instead of guessing
+        why nothing is happening.
+        """
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            if self.state == DaemonState.RUNNING:
+                logger.error("[GatewayDaemon] Event bus subscription returned unexpectedly")
+            return
+        self._sub_task_failure = exc
+        self._stats["sub_task_failures"] += 1
+        logger.error(
+            "[GatewayDaemon] Event bus subscription died while state=%s",
+            self.state.value,
+            exc_info=exc,
+        )
 
     async def stop(self) -> None:
         """Stop the Gateway Daemon."""
@@ -1491,8 +1522,8 @@ class GatewayDaemon:
                 elif boundary_type == "idle_pause":
                     return None  # Don't message for idle pauses
                 elif boundary_type == "app_switch":
-                    payload.get("to_app", "")
-                    return None  # App switches are too frequent to message about
+                    # App switches are too frequent to message about.
+                    return None
 
         elif event.source == "system":
             if event.event_type == "security_warning":

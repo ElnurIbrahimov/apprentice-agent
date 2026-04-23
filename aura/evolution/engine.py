@@ -379,7 +379,16 @@ class GEPAEngine:
                 scores[idx] = score
                 self.cache.put(cand_hash, examples[idx].cache_key(), score)
 
-        # Guard against None entries from partial evaluation failures
+        # Guard against None entries from partial evaluation failures.
+        # Log the count so a broken adapter/scorer does not silently masquerade
+        # as a candidate that happened to score 0.0 on real examples.
+        none_count = sum(1 for s in scores if s is None)
+        if none_count:
+            logger.warning(
+                "[GEPA] coerced %d/%d None scores -> 0.0 for candidate %s "
+                "(likely eval/scoring failure, not real zero-score tasks)",
+                none_count, len(scores), getattr(candidate, "id", "?"),
+            )
         scores = [s if s is not None else 0.0 for s in scores]
         return scores
 

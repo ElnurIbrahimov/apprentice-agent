@@ -121,9 +121,9 @@ class NarrativeSelf:
             with self._lock:
                 if new_growth is not None:
                     self.recent_growth = new_growth
-                if new_concern is not None:
+                if new_concern is not None and new_concern not in self.active_concerns:
                     self.active_concerns = [new_concern] + self.active_concerns[:4]
-                if new_question is not None:
+                if new_question is not None and new_question not in self.unresolved_questions:
                     self.unresolved_questions = [new_question] + self.unresolved_questions[:4]
                 if new_relationship is not None:
                     self.relationship_state = new_relationship

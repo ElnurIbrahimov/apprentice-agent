@@ -651,8 +651,8 @@ class AuraDaemon:
             if dream_ts is not None:
                 try:
                     self._last_dream_run_at = float(dream_ts)
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as e:
+                    logger.warning("Ignoring malformed last_dream_run_at %r: %s", dream_ts, e)
             else:
                 # Legacy field (pre-hysteresis) — treat as midnight of that date.
                 legacy = data.get("last_dream_date")
@@ -661,15 +661,15 @@ class AuraDaemon:
                         from datetime import date as date_cls, datetime as dt_cls
                         d = date_cls.fromisoformat(legacy)
                         self._last_dream_run_at = dt_cls(d.year, d.month, d.day).timestamp()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Ignoring malformed legacy last_dream_date %r: %s", legacy, e)
 
             gepa_ts = data.get("last_gepa_run_at")
             if gepa_ts is not None:
                 try:
                     self._last_gepa_run_at = float(gepa_ts)
-                except (TypeError, ValueError):
-                    pass
+                except (TypeError, ValueError) as e:
+                    logger.warning("Ignoring malformed last_gepa_run_at %r: %s", gepa_ts, e)
             else:
                 legacy = data.get("last_gepa_date")
                 if legacy:
@@ -677,8 +677,8 @@ class AuraDaemon:
                         from datetime import date as date_cls, datetime as dt_cls
                         d = date_cls.fromisoformat(legacy)
                         self._last_gepa_run_at = dt_cls(d.year, d.month, d.day).timestamp()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Ignoring malformed legacy last_gepa_date %r: %s", legacy, e)
         except Exception as e:
             logger.debug("Failed to load daemon state: %s", e)
 
@@ -967,7 +967,22 @@ class IPCServer:
                     break
             data = b"".join(chunks).decode("utf-8").strip()
             if data:
-                msg = json.loads(data)
+                try:
+                    msg = json.loads(data)
+                except json.JSONDecodeError as je:
+                    logger.warning("IPC rejected: malformed JSON (%s)", je)
+                    try:
+                        conn.send(json.dumps({"status": "error", "reason": "malformed json"}).encode())
+                    except Exception:
+                        pass
+                    return
+                if not isinstance(msg, dict):
+                    logger.warning("IPC rejected: payload is not a JSON object")
+                    try:
+                        conn.send(json.dumps({"status": "error", "reason": "payload must be a json object"}).encode())
+                    except Exception:
+                        pass
+                    return
                 # Validate auth token before processing any command
                 import hmac
                 msg_token = msg.get("token", "")

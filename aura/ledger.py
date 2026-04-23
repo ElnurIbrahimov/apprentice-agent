@@ -16,9 +16,15 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from aura.jsonl_utils import rotate_jsonl_if_needed
+
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
+# Size cap for the ledger file before rotation. Chosen to match the jsonl_utils
+# default (5 MB) — keeps iter_entries() O(N) but bounded, consistent with every
+# other JSONL store in the repo (routing_stats, telemetry, alma history, etc).
+_LEDGER_MAX_BYTES = 5 * 1024 * 1024
 
 
 def _ledger_path() -> Path:
@@ -61,6 +67,7 @@ def append_edit(
     try:
         path = _ledger_path()
         with _LOCK:
+            rotate_jsonl_if_needed(path, max_bytes=_LEDGER_MAX_BYTES)
             with path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception:
