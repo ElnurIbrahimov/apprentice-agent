@@ -150,9 +150,12 @@ class BasePlatform(ABC):
         Uses ApprenticeAgent.chat() which handles fast-path, memory,
         emotion, LLM generation, and humanization internally.
         """
+        # chat() is synchronous (LLM call + memory ops, can take many seconds).
+        # Run in a thread so the event loop can keep serving other handlers.
+        import asyncio
         try:
             if hasattr(self.aura, 'chat'):
-                response = self.aura.chat(text)
+                response = await asyncio.to_thread(self.aura.chat, text)
                 if response:
                     return response
         except Exception as e:

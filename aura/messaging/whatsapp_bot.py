@@ -304,14 +304,17 @@ class WhatsAppBot(BasePlatform):
         except Exception as e:
             logger.error(f"Fast path error: {e}")
 
-        # Use the real AURA agent for response generation
+        # Use the real AURA agent for response generation. chat() is sync
+        # (LLM + memory), so run in a thread to avoid blocking the asyncio
+        # event loop that serves other Baileys websocket messages.
+        import asyncio
         try:
             if hasattr(self.aura, 'chat'):
-                response = self.aura.chat(text, user_id=user_id)
+                response = await asyncio.to_thread(self.aura.chat, text, user_id=user_id)
                 if response:
                     return response
             elif hasattr(self.aura, 'generate_response'):
-                response = self.aura.generate_response(text)
+                response = await asyncio.to_thread(self.aura.generate_response, text)
                 if response:
                     return response
         except Exception as e:
