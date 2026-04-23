@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..700&family=Inter+Tight:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -7,9 +7,14 @@
 /* CSS Custom Properties for easy theming */
 :root {
   /* Base theme — NextGen */
-  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-family: 'Inter Tight', system-ui, sans-serif;
   line-height: 1.5;
   font-weight: 400;
+
+  /* Display font for headings / hero — pairs with Inter Tight */
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Inter Tight', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   color-scheme: dark;
   color: #ededed;
   background-color: #030303;
@@ -108,6 +113,22 @@
 
   /* Tooltip */
   --shadow-tooltip: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+/* Typography utilities — display (Fraunces) and body (Inter Tight) */
+.font-display { font-family: var(--font-display); font-feature-settings: 'ss01', 'ss02'; letter-spacing: -0.015em; }
+.font-body { font-family: var(--font-body); }
+.font-mono { font-family: var(--font-mono); }
+
+/* In-conversation search: pulse the active match briefly */
+@keyframes search-match-pulse {
+  0%   { box-shadow: inset 0 0 0 2px rgba(250, 204, 21, 0.0), 0 0 0 rgba(250, 204, 21, 0.0); background: rgba(250, 204, 21, 0.0); }
+  30%  { box-shadow: inset 0 0 0 2px rgba(250, 204, 21, 0.65), 0 0 18px rgba(250, 204, 21, 0.45); background: rgba(250, 204, 21, 0.12); }
+  100% { box-shadow: inset 0 0 0 2px rgba(250, 204, 21, 0.0), 0 0 0 rgba(250, 204, 21, 0.0); background: rgba(250, 204, 21, 0.0); }
+}
+.search-match-pulse {
+  animation: search-match-pulse 1.5s ease-out;
+  border-radius: 12px;
 }
 
 /* =============================================
@@ -555,10 +576,10 @@ body {
 
 .mesh-blob {
   position: absolute;
-  filter: blur(120px);
+  filter: blur(140px);
   border-radius: 50%;
   animation: float 20s infinite ease-in-out alternate;
-  opacity: 0.38;
+  opacity: 0.22;
 }
 
 .blob-1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: var(--mood-mesh-1); animation-delay: 0s; transition: background 2s ease; }
@@ -597,13 +618,10 @@ html.light .grain { opacity: 0.02; }
   }
 }
 
+/* Grain overlay retained as a no-op for backwards-compat — element kept in markup
+   so theme transitions don't trigger layout shifts, but it renders nothing. */
 .grain {
-  position: fixed;
-  top: 0; left: 0; width: 100%; height: 100%;
-  z-index: 1;
-  opacity: 0.04;
-  pointer-events: none;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  display: none;
 }
 
 /* All real content sits above the background layers */

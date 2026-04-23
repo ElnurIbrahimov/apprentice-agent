@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import type { Tool, VoiceStatus, SessionCosts } from '../types';
 import {
   WrenchScrewdriverIcon,
@@ -6,8 +6,33 @@ import {
   MagnifyingGlassIcon,
   CurrencyDollarIcon,
   PuzzlePieceIcon,
+  ClockIcon,
 } from '@heroicons/react/24/outline';
+import { StarIcon as StarOutline } from '@heroicons/react/24/outline';
+import { StarIcon as StarSolid } from '@heroicons/react/24/solid';
 import { apiFetch } from '../utils/apiFetch';
+import { useChatStore } from '../store/chatStore';
+import { topMatches } from '../utils/toolMatch';
+import { SparklesIcon } from '@heroicons/react/24/outline';
+
+const PINNED_KEY = 'aura-tools-pinned';
+
+function readPinned(): Set<string> {
+  try {
+    const raw = localStorage.getItem(PINNED_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr.filter((x) => typeof x === 'string')) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function writePinned(set: Set<string>) {
+  try {
+    localStorage.setItem(PINNED_KEY, JSON.stringify([...set]));
+  } catch { /* private mode */ }
+}
 
 export function ToolsPanel() {
   const [tools, setTools] = useState<Tool[]>([]);
@@ -19,7 +44,41 @@ export function ToolsPanel() {
   const [reloadMsg, setReloadMsg] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [pinned, setPinned] = useState<Set<string>>(() => readPinned());
+  const [intent, setIntent] = useState('');
   const mountedRef = useRef(true);
+
+  const intentMatches = useMemo(() => topMatches(intent, tools, 5), [intent, tools]);
+
+  const chatMessages = useChatStore((s) => s.messages);
+
+  // Recently-used tools: scan the chat store's toolTrace entries (freshest first).
+  const recentTools = useMemo(() => {
+    const seen = new Map<string, number>(); // name -> most recent timestamp
+    for (const msg of chatMessages) {
+      if (!msg.toolTrace) continue;
+      for (const t of msg.toolTrace) {
+        if (!t.tool) continue;
+        const ts = t.timestamp ?? 0;
+        const prev = seen.get(t.tool) ?? 0;
+        if (ts > prev) seen.set(t.tool, ts);
+      }
+    }
+    return [...seen.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name]) => name);
+  }, [chatMessages]);
+
+  const togglePin = useCallback((name: string) => {
+    setPinned((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      writePinned(next);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -85,6 +144,33 @@ export function ToolsPanel() {
       return matchesSearch && matchesCategory;
     });
   }, [tools, search, activeCategory]);
+
+  const toolByName = useMemo(() => {
+    const map = new Map<string, Tool>();
+    for (const t of tools) map.set(t.name, t);
+    return map;
+  }, [tools]);
+
+  // Promote pinned + recent to their own rows; hide them from the "All" section
+  // so they don't double-appear when no search/filter is active.
+  const pinnedTools = useMemo(
+    () => [...pinned].map((n) => toolByName.get(n)).filter((t): t is Tool => !!t),
+    [pinned, toolByName],
+  );
+  const recentlyUsedTools = useMemo(
+    () => recentTools
+      .filter((n) => !pinned.has(n))
+      .map((n) => toolByName.get(n))
+      .filter((t): t is Tool => !!t),
+    [recentTools, pinned, toolByName],
+  );
+  const hideInMainGrid = useMemo(() => {
+    if (search || activeCategory) return new Set<string>(); // don't hide during explicit search
+    return new Set<string>([
+      ...pinnedTools.map((t) => t.name),
+      ...recentlyUsedTools.map((t) => t.name),
+    ]);
+  }, [pinnedTools, recentlyUsedTools, search, activeCategory]);
 
   const CATEGORY_COLORS: Record<string, string> = {
     Core: 'bg-blue-900/40 text-blue-300 hover:bg-blue-800/50',
@@ -221,6 +307,91 @@ export function ToolsPanel() {
           Tools ({filteredTools.length}/{tools.length})
         </h3>
 
+        {/* Capability search — natural-language intent → ranked tools */}
+        <div className="mb-3">
+          <div className="relative">
+            <SparklesIcon className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#c4b5fd' }} />
+            <input
+              type="text"
+              value={intent}
+              onChange={(e) => setIntent(e.target.value)}
+              placeholder="What are you trying to do? e.g. 'summarize a PDF' or 'search the web'"
+              className="w-full bg-chat-assistant border rounded pl-8 pr-3 py-1.5 text-sm text-chat-text placeholder-chat-text-secondary/60 focus:outline-none"
+              style={{ borderColor: intent ? 'rgba(124,58,237,0.5)' : 'var(--border-default)' }}
+            />
+            {intent && (
+              <button
+                onClick={() => setIntent('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-chat-text-secondary hover:text-chat-text text-xs"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {intent && (
+            <div className="mt-2">
+              {intentMatches.length === 0 ? (
+                <div className="text-xs text-chat-text-secondary py-2">
+                  No matching tools — try different words or simpler terms.
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="text-[10px] uppercase tracking-wide text-chat-text-secondary mb-1">
+                    Suggested tools
+                  </div>
+                  {intentMatches.map(({ tool, score, matchedTerms }) => (
+                    <div
+                      key={tool.name}
+                      className="rounded p-2 text-xs flex items-start gap-2 group"
+                      style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className="text-chat-text font-medium truncate">{tool.name}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] shrink-0 ${getToolBadgeColor(tool.category)}`}>
+                            {tool.category}
+                          </span>
+                          <span className="ml-auto text-[10px] text-purple-300 font-mono flex-shrink-0">
+                            {Math.round(score * 10) / 10}
+                          </span>
+                        </div>
+                        <div className="text-chat-text-secondary leading-relaxed">
+                          {tool.description}
+                        </div>
+                        {matchedTerms.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {Array.from(new Set(matchedTerms)).slice(0, 5).map((t) => (
+                              <span
+                                key={t}
+                                className="text-[9px] font-mono px-1 py-0.5 rounded"
+                                style={{ background: 'rgba(124,58,237,0.22)', color: '#c4b5fd' }}
+                              >
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => togglePin(tool.name)}
+                        aria-label={pinned.has(tool.name) ? 'Unpin tool' : 'Pin tool'}
+                        className={`flex-shrink-0 p-1 rounded transition-all ${pinned.has(tool.name) ? 'opacity-100' : 'opacity-30 group-hover:opacity-100'}`}
+                      >
+                        {pinned.has(tool.name)
+                          ? <StarSolid className="w-3.5 h-3.5 text-yellow-400" />
+                          : <StarOutline className="w-3.5 h-3.5 text-chat-text-secondary hover:text-yellow-300" />
+                        }
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Search */}
         <div className="relative mb-3">
           <MagnifyingGlassIcon className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-chat-text-secondary" />
@@ -270,33 +441,107 @@ export function ToolsPanel() {
           </div>
         )}
 
-        {/* Tool grid */}
+        {/* Pinned row */}
+        {pinnedTools.length > 0 && !search && !activeCategory && (
+          <ToolSection title="Pinned" icon={<StarSolid className="w-3.5 h-3.5 text-yellow-400" />}>
+            {pinnedTools.map((tool) => (
+              <ToolRow
+                key={tool.name}
+                tool={tool}
+                pinned={pinned.has(tool.name)}
+                onTogglePin={togglePin}
+                badgeColor={getToolBadgeColor(tool.category)}
+              />
+            ))}
+          </ToolSection>
+        )}
+
+        {/* Recently used row */}
+        {recentlyUsedTools.length > 0 && !search && !activeCategory && (
+          <ToolSection title="Recently used" icon={<ClockIcon className="w-3.5 h-3.5 text-chat-text-secondary" />}>
+            {recentlyUsedTools.map((tool) => (
+              <ToolRow
+                key={tool.name}
+                tool={tool}
+                pinned={pinned.has(tool.name)}
+                onTogglePin={togglePin}
+                badgeColor={getToolBadgeColor(tool.category)}
+              />
+            ))}
+          </ToolSection>
+        )}
+
+        {/* Main tool grid */}
         <div className="space-y-1.5 max-h-96 overflow-y-auto pr-0.5">
           {filteredTools.length === 0 && (
             <div className="text-chat-text-secondary text-sm text-center py-4">
               No tools match "{search}"
             </div>
           )}
-          {filteredTools.map((tool) => (
-            <div
-              key={tool.name}
-              className="bg-chat-assistant rounded p-2 text-xs flex items-start gap-2"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className="text-chat-text font-medium truncate">{tool.name}</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] shrink-0 ${getToolBadgeColor(tool.category)}`}>
-                    {tool.category}
-                  </span>
-                </div>
-                <div className="text-chat-text-secondary leading-relaxed" title={tool.description}>
-                  {tool.description}
-                </div>
-              </div>
-            </div>
-          ))}
+          {filteredTools
+            .filter((t) => !hideInMainGrid.has(t.name))
+            .map((tool) => (
+              <ToolRow
+                key={tool.name}
+                tool={tool}
+                pinned={pinned.has(tool.name)}
+                onTogglePin={togglePin}
+                badgeColor={getToolBadgeColor(tool.category)}
+              />
+            ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ToolSection({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="mb-3">
+      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-chat-text-secondary mb-1.5">
+        {icon}
+        <span>{title}</span>
+      </div>
+      <div className="space-y-1.5">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+interface ToolRowProps {
+  tool: Tool;
+  pinned: boolean;
+  onTogglePin: (name: string) => void;
+  badgeColor: string;
+}
+
+function ToolRow({ tool, pinned, onTogglePin, badgeColor }: ToolRowProps) {
+  return (
+    <div className="bg-chat-assistant rounded p-2 text-xs flex items-start gap-2 group">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <span className="text-chat-text font-medium truncate">{tool.name}</span>
+          <span className={`px-1.5 py-0.5 rounded text-[10px] shrink-0 ${badgeColor}`}>
+            {tool.category}
+          </span>
+        </div>
+        <div className="text-chat-text-secondary leading-relaxed" title={tool.description}>
+          {tool.description}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => onTogglePin(tool.name)}
+        aria-label={pinned ? 'Unpin tool' : 'Pin tool'}
+        title={pinned ? 'Unpin' : 'Pin to top'}
+        className={`flex-shrink-0 p-1 rounded transition-all ${pinned ? 'opacity-100' : 'opacity-30 group-hover:opacity-100'}`}
+      >
+        {pinned
+          ? <StarSolid className="w-3.5 h-3.5 text-yellow-400" />
+          : <StarOutline className="w-3.5 h-3.5 text-chat-text-secondary hover:text-yellow-300" />
+        }
+      </button>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { detectToolSuggestion } from '../utils/detectToolSuggestion';
 import { useSettingsStore } from '../store/settingsStore';
@@ -33,6 +33,8 @@ import {
   DocumentTextIcon,
   CodeBracketIcon,
   LinkIcon,
+  MagnifyingGlassIcon,
+  ChevronUpIcon,
 } from '@heroicons/react/24/outline';
 
 // Swipe drawer constants
@@ -107,16 +109,9 @@ function ThinkingShimmer({ toolStatus }: { toolStatus: { name: string; action: s
   );
 }
 
-// Default follow-up suggestions
-const FOLLOW_UP_SETS = [
-  ['Tell me more', 'Can you explain that differently?', 'What else should I know?'],
-  ['Go deeper on that', 'Give me an example', 'What are the tradeoffs?'],
-  ['Summarize that', 'What would you recommend?', 'Any alternatives?'],
-];
-
 export function ChatContainer() {
   useMoodTheme();
-  const { messages, isLoading, error, setError, connectionStatus, toolStatus, isSwitchingConversation, suggestions, setSuggestions, clearSuggestions, fleetData, clearFleetData, clearResearchProgress, citationsPanelOpen, toggleCitationsPanel, toolSuggestion } = useChatStore();
+  const { messages, isLoading, error, setError, connectionStatus, toolStatus, isSwitchingConversation, suggestions, clearSuggestions, fleetData, clearFleetData, clearResearchProgress, citationsPanelOpen, toggleCitationsPanel, toolSuggestion, forkedFrom, clearForkedFrom } = useChatStore();
   const { sendMessage, stopGeneration, connect: reconnect } = useWebSocket();
   const { settings } = useSettingsStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -127,6 +122,67 @@ export function ChatContainer() {
   // Artifact panel state
   const [artifactCode, setArtifactCode] = useState<string | null>(null);
   const [artifactType, setArtifactType] = useState<ArtifactType>('html');
+
+  // In-conversation search (Ctrl+F)
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchIndex, setSearchIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const searchMatches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length < 2) return [] as string[];
+    return messages
+      .filter((m) => m.content.toLowerCase().includes(q))
+      .map((m) => m.id);
+  }, [messages, searchQuery]);
+
+  // Clamp index to match count whenever matches change.
+  useEffect(() => {
+    if (searchIndex >= searchMatches.length) setSearchIndex(0);
+  }, [searchMatches.length, searchIndex]);
+
+  // Scroll the active match into view + pulse it.
+  useEffect(() => {
+    if (!searchOpen || searchMatches.length === 0) return;
+    const targetId = searchMatches[searchIndex];
+    if (!targetId) return;
+    const el = document.querySelector<HTMLElement>(`[data-message-id="${targetId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('search-match-pulse');
+      const t = setTimeout(() => el.classList.remove('search-match-pulse'), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [searchIndex, searchMatches, searchOpen]);
+
+  // Keyboard: Ctrl/Cmd+F to open, Esc to close, Enter = next, Shift+Enter = prev.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        setSearchOpen(true);
+        setTimeout(() => searchInputRef.current?.focus(), 0);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+  }, []);
+
+  const searchNext = useCallback(() => {
+    if (searchMatches.length === 0) return;
+    setSearchIndex((i) => (i + 1) % searchMatches.length);
+  }, [searchMatches.length]);
+
+  const searchPrev = useCallback(() => {
+    if (searchMatches.length === 0) return;
+    setSearchIndex((i) => (i - 1 + searchMatches.length) % searchMatches.length);
+  }, [searchMatches.length]);
 
   const handleOpenArtifact = useCallback((code: string, type: ArtifactType) => {
     setArtifactCode(code);
@@ -382,15 +438,14 @@ export function ChatContainer() {
     }
   }, [isLoading]);
 
-  // Show suggestion chips + play receive sound after response completes
+  // Play receive sound after response completes. Contextual suggestion chips
+  // come from the server (via `suggestions` store) — no generic fallback.
   useEffect(() => {
     if (prevIsLoadingRef.current && !isLoading && messages.length > 0) {
-      const set = FOLLOW_UP_SETS[Math.floor(Math.random() * FOLLOW_UP_SETS.length)];
-      setSuggestions(set);
       if (settings.soundEnabled) sounds.receive();
     }
     prevIsLoadingRef.current = isLoading;
-  }, [isLoading, messages.length, setSuggestions, settings.soundEnabled]);
+  }, [isLoading, messages.length, settings.soundEnabled]);
 
   // After a response is complete, suggest a tool
   useEffect(() => {
@@ -403,7 +458,7 @@ export function ChatContainer() {
     }
   }, [isLoading, messages.length]);
 
-  // Auto-dismiss error after 10 seconds + haptic/sound on error
+  // Auto-dismiss error after 30 seconds + haptic/sound on error
   useEffect(() => {
     if (!error) return;
     haptic(100);
@@ -415,6 +470,7 @@ export function ChatContainer() {
   const handleSend = useCallback(async (message: string, attachments?: FileAttachment[], actionMode?: string | null) => {
     clearSuggestions();
     clearResearchProgress();
+    clearForkedFrom();
     setThinkingHistory(null);
     setThinkingExpanded(false);
     initialMessageCountRef.current = useChatStore.getState().messages.length;
@@ -460,7 +516,7 @@ export function ChatContainer() {
     // Pass actionMode for auto-model selection (null = use user's selected model)
     sendMessage(message, attachments, undefined, actionMode);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clearSuggestions, clearResearchProgress, sendMessage]);
+  }, [clearSuggestions, clearResearchProgress, clearForkedFrom, sendMessage]);
 
   const isDisabled = isLoading || connectionStatus !== 'connected';
   const hasCitationsInConversation = messages.some(m => m.citations && m.citations.length > 0);
@@ -527,6 +583,63 @@ export function ChatContainer() {
         </div>
       )}
 
+      {/* In-conversation search overlay */}
+      {searchOpen && (
+        <div
+          className="flex items-center gap-2 px-3 py-2 animate-slide-up-fade"
+          style={{
+            background: 'var(--surface-1)',
+            borderBottom: '1px solid var(--border-default)',
+          }}
+        >
+          <MagnifyingGlassIcon className="w-4 h-4 text-chat-text-secondary flex-shrink-0" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
+              else if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? searchPrev() : searchNext(); }
+            }}
+            placeholder="Search this conversation…"
+            className="flex-1 bg-transparent text-chat-text text-sm outline-none placeholder-chat-text-secondary/60"
+            autoFocus
+          />
+          <span className="text-xs text-chat-text-secondary tabular-nums min-w-[64px] text-center">
+            {searchMatches.length > 0
+              ? `${searchIndex + 1} / ${searchMatches.length}`
+              : searchQuery.trim().length >= 2 ? 'no matches' : ''}
+          </span>
+          <button
+            onClick={searchPrev}
+            disabled={searchMatches.length === 0}
+            className="p-1 rounded text-chat-text-secondary hover:text-chat-text disabled:opacity-30 transition-colors"
+            aria-label="Previous match"
+            title="Previous (Shift+Enter)"
+          >
+            <ChevronUpIcon className="w-4 h-4" />
+          </button>
+          <button
+            onClick={searchNext}
+            disabled={searchMatches.length === 0}
+            className="p-1 rounded text-chat-text-secondary hover:text-chat-text disabled:opacity-30 transition-colors"
+            aria-label="Next match"
+            title="Next (Enter)"
+          >
+            <ChevronDownIcon className="w-4 h-4" />
+          </button>
+          <button
+            onClick={closeSearch}
+            className="p-1 rounded text-chat-text-secondary hover:text-chat-text transition-colors"
+            aria-label="Close search"
+            title="Close (Esc)"
+          >
+            <XMarkIcon className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Connection status banner */}
       {connectionStatus !== 'connected' && (
         <div className={`px-4 py-2 text-center text-sm transition-all duration-300 ${
@@ -557,6 +670,29 @@ export function ChatContainer() {
           <span className="flex-1 text-center">{error}</span>
           <button onClick={() => setError(null)} aria-label="Dismiss error" className="ml-auto flex-shrink-0">
             <XMarkIcon className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Forked-from banner — shown until first send in the new thread */}
+      {forkedFrom && (
+        <div
+          className="px-4 py-2 text-xs flex items-center gap-2 animate-slide-up-fade"
+          style={{
+            background: 'rgba(124,58,237,0.12)',
+            borderBottom: '1px solid rgba(124,58,237,0.25)',
+            color: '#c4b5fd',
+          }}
+        >
+          <span className="flex-1 text-center">
+            Forked from a previous conversation — continue below to start a new thread. The original is saved in your sidebar.
+          </span>
+          <button
+            onClick={clearForkedFrom}
+            aria-label="Dismiss fork notice"
+            className="flex-shrink-0 opacity-70 hover:opacity-100"
+          >
+            <XMarkIcon className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
@@ -633,8 +769,8 @@ export function ChatContainer() {
             />
 
             {/* Welcome heading */}
-            <h1 className="text-3xl sm:text-5xl font-light tracking-tight mb-3 sm:mb-4 text-center animate-fade-in text-gradient-hero relative"
-              style={{ letterSpacing: '-0.04em' }}
+            <h1 className="font-display text-4xl sm:text-6xl font-normal tracking-tight mb-3 sm:mb-4 text-center animate-fade-in relative"
+              style={{ letterSpacing: '-0.02em', color: 'var(--text-primary)' }}
             >
               What should we explore?
             </h1>
@@ -692,15 +828,16 @@ export function ChatContainer() {
               const isNew = index >= initialMessageCountRef.current;
               const animIndex = isNew ? index - initialMessageCountRef.current : 0;
               return (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  animateIn={isNew}
-                  animationIndex={animIndex}
-                  onRegenerate={handleSend}
-                  onStop={message.isStreaming ? stopGeneration : undefined}
-                  onOpenArtifact={handleOpenArtifact}
-                />
+                <div key={message.id} data-message-id={message.id}>
+                  <MessageBubble
+                    message={message}
+                    animateIn={isNew}
+                    animationIndex={animIndex}
+                    onRegenerate={handleSend}
+                    onStop={message.isStreaming ? stopGeneration : undefined}
+                    onOpenArtifact={handleOpenArtifact}
+                  />
+                </div>
               );
             })}
             <ResearchProgress />
