@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import shlex
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,13 @@ class HookManager:
     def __init__(self):
         self._hooks: List[Hook] = []
         self._builtins_loaded: bool = False
+        # Trust root for validating caller-supplied project_root in hook
+        # contexts. Captured at manager-init time so later chdir()s cannot
+        # widen the trust boundary.
+        try:
+            self._trusted_root = str(Path(os.getcwd()).resolve())
+        except OSError:
+            self._trusted_root = os.getcwd()
 
     def add(self, event: str, command: str, name: str = "") -> Hook:
         """Register a hook. Returns the hook object."""
@@ -117,7 +126,6 @@ class HookManager:
 
     def _execute_hook(self, hook: Hook, context: Dict) -> Dict:
         """Execute a single hook command."""
-        import os
         import re as _re
 
         # Clamp timeout to [1, 300] seconds
@@ -140,9 +148,20 @@ class HookManager:
 
         # Resolve cwd to project_root if the caller passed one through context
         # (tools that `cd` via shell otherwise leave hooks in the wrong dir).
-        cwd = context.get("project_root") or os.getcwd()
-        if not isinstance(cwd, str) or not os.path.isdir(cwd):
-            cwd = os.getcwd()
+        # SECURITY: only accept project_root values that resolve inside the
+        # manager's trusted root captured at init time. Otherwise malicious
+        # context (e.g. an attacker-controlled AURA: comment in a watched
+        # file) could redirect shell commands to any directory on disk.
+        cwd = os.getcwd()
+        requested = context.get("project_root")
+        if isinstance(requested, str) and os.path.isdir(requested):
+            try:
+                resolved = Path(requested).resolve()
+                trusted = Path(self._trusted_root).resolve()
+                if resolved == trusted or resolved.is_relative_to(trusted):
+                    cwd = str(resolved)
+            except (ValueError, OSError):
+                logger.debug("hook_project_root_rejected requested=%r", requested)
 
         try:
             cmd_args = shlex.split(hook.command)
@@ -176,13 +195,18 @@ class HookManager:
         hooks_config = config.get("hooks", [])
         count = 0
         for h in hooks_config:
-            if isinstance(h, dict) and "event" in h and "command" in h:
-                self.add(
-                    event=h["event"],
-                    command=h["command"],
-                    name=h.get("name", ""),
-                )
-                count += 1
+            if not (isinstance(h, dict) and "event" in h and "command" in h):
+                continue
+            cmd = h["command"]
+            if not isinstance(cmd, str) or not cmd.strip():
+                logger.debug("hook_config_skipped empty_command name=%r", h.get("name"))
+                continue
+            self.add(
+                event=h["event"],
+                command=cmd,
+                name=h.get("name", ""),
+            )
+            count += 1
         return count
 
     def load_builtin_hooks(self, project_config: Dict) -> None:

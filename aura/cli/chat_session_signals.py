@@ -78,8 +78,14 @@ class SessionSignalController:
                 tmp_path = f.name
             try:
                 _sp.call([editor, tmp_path])
-                edited = Path(tmp_path).read_text().strip()
-            except (FileNotFoundError, OSError) as exc:
+                # Force UTF-8 — the default encoding follows the locale, so
+                # on a non-UTF-8 Windows console (e.g., cp1252) any non-ASCII
+                # editor content (Azerbaijani, accented chars, smart quotes)
+                # raises UnicodeDecodeError mid-session.
+                edited = Path(tmp_path).read_text(
+                    encoding="utf-8", errors="replace"
+                ).strip()
+            except (FileNotFoundError, OSError, UnicodeDecodeError) as exc:
                 self._session.console.print(f"[red]Editor failed: {exc}[/red]")
                 edited = ""
             finally:
@@ -94,15 +100,11 @@ class SessionSignalController:
                         import logging as _l
                         _log = _l.getLogger("aura.cli.chat_session_signals")
                     _log.debug("editor_tmp_unlink_failed path=%s", tmp_path, exc_info=True)
-                    # Best-effort registry for next startup to sweep
-                    try:
-                        from pathlib import Path as _P
-                        cleanup_log = _P.home() / ".aura" / "tmp_cleanup.txt"
-                        cleanup_log.parent.mkdir(parents=True, exist_ok=True)
-                        with cleanup_log.open("a", encoding="utf-8") as _f:
-                            _f.write(tmp_path + "\n")
-                    except Exception:
-                        pass
+                    # Prior versions appended the unlink-failed path to
+                    # ~/.aura/tmp_cleanup.txt for a "next startup sweep" that
+                    # was never implemented. The file grew monotonically with
+                    # no consumer. Orphan editor temp files are rare and
+                    # small, so we just accept them silently.
             if not edited:
                 return SignalHandlingResult(should_continue_loop=True)
             return SignalHandlingResult(

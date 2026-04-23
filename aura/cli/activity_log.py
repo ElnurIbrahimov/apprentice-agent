@@ -109,6 +109,7 @@ class ActivityLog:
             command = first.lstrip("/")[:40] or None
 
         conn = sqlite3.connect(str(self._db_path), timeout=10)
+        row_id: Optional[int] = None
         try:
             cursor = conn.execute(
                 """INSERT INTO interactions
@@ -121,16 +122,19 @@ class ActivityLog:
             conn.commit()
         except Exception as e:
             logger.warning("[ActivityLog] Failed to log interaction: %s", e)
-            conn.rollback()
-            conn.close()
-            return -1
+            row_id = -1
         finally:
-            # conn is closed inside the exception path too; success path closes here.
-            if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+            # Single close path. SQLite auto-rollbacks any uncommitted
+            # transaction on close, so an explicit rollback in the except
+            # branch is redundant. Prior version called close() in both
+            # except and finally, double-closing on error.
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+        if row_id == -1:
+            return -1
 
         # Defer the embedding compute to bg_pool so chat turns don't block
         # waiting for Ollama. A separate connection is opened in the worker

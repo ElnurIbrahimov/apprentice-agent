@@ -126,7 +126,15 @@ class StreamingResponse:
                 self._in_fence = not self._in_fence
 
     def chunk(self, text: str) -> None:
-        """Append a text chunk and re-render NEW content since last pause."""
+        """Append a text chunk and re-render NEW content since last pause.
+
+        Live render uses plain ``Text`` instead of ``Markdown`` to keep
+        per-chunk cost O(len(new)) instead of O(len(new)^2) — a full
+        CommonMark parse over the growing accumulator on every chunk made
+        late-stream frames stutter on long code-heavy replies. Final
+        Markdown formatting is still applied in ``pause()`` and
+        ``finish()``, which commit the permanent render to scrollback.
+        """
         if self._spinner_active:
             self._spinner_active = False
             self._fade_frames_remaining = 3
@@ -136,23 +144,19 @@ class StreamingResponse:
         self._accumulated += text
         if self._live:
             new_content = self._accumulated[self._permanent_len:]
-            renderable = self._wrap_for_render(new_content)
             try:
-                md = Markdown(renderable, code_theme=_display._get_code_theme())
+                body = Text(new_content)
                 if self._fade_frames_remaining > 0:
                     self._fade_frames_remaining -= 1
-                    padded = Padding(md, (0, 2), style="dim")
+                    padded = Padding(body, (0, 2), style="dim")
                 else:
-                    padded = Padding(md, (0, 2))
+                    padded = Padding(body, (0, 2))
                 self._live.update(padded)
             except Exception:
-                # Any Rich render error (MarkupError, LiveError, etc.) must
-                # NOT kill the stream callback. Fall back to plain text and
-                # swallow failures in the fallback too.
-                try:
-                    self._live.update(Padding(Text(new_content), (0, 2)))
-                except Exception:
-                    pass
+                # Any Rich render error (LiveError etc.) must NOT kill the
+                # stream callback. Swallow silently — the final Markdown
+                # render in finish() will catch anything we missed here.
+                pass
 
     def pause(self) -> None:
         """Pause live rendering for tool call display."""
@@ -174,10 +178,13 @@ class StreamingResponse:
                     self._live.transient = False
                 except Exception:
                     pass
-            # permanent_len is about to advance — capture the fence state at
-            # the new boundary so the next resume() starts with correct context.
-            self._advance_fence_state(new_content)
         finally:
+            # Advance fence state in lockstep with permanent_len. Putting
+            # _advance_fence_state inside the try block leaves these two
+            # invariants out of sync if anything above raises — fence flag
+            # stays old while the pointer moves forward, corrupting the
+            # next resume()'s synthetic-fence wrapping.
+            self._advance_fence_state(new_content)
             # Always release Rich Live slot — otherwise a Rich error above
             # would leave it taken and the next turn crashes.
             try:

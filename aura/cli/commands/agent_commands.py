@@ -228,6 +228,10 @@ def _handle_agent_command(agent, arg: str):
     specialist = parts[0].lower() if parts else ""
     task = parts[1] if len(parts) > 1 else ""
 
+    # SECURITY: confirm_action is fail-closed and handles EOFError/
+    # KeyboardInterrupt from the input() fallback internally. Do not catch
+    # broadly here — falling through to spawn the agent on a swallowed
+    # AttributeError would bypass the user approval the prompt was asking for.
     try:
         if arg:
             approval_args = {"task": task or arg, "specialist": specialist}
@@ -239,8 +243,9 @@ def _handle_agent_command(agent, arg: str):
             ):
                 _agent_console.print("  Cancelled.")
                 return
-    except (AttributeError, EOFError, KeyboardInterrupt):
-        logger.debug("agent_permission_check_skipped", exc_info=True)
+    except KeyboardInterrupt:
+        _agent_console.print("  Cancelled.")
+        return
 
     if not hasattr(agent, 'orchestrator') or agent.orchestrator is None:
         try:

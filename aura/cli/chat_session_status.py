@@ -8,27 +8,39 @@ logger = logging.getLogger(__name__)
 
 
 def show_startup_diagnostics(console: Any) -> None:
-    """Show quick warnings if Ollama or cloud key are missing."""
+    """Show quick warnings if Ollama or cloud key are missing.
+
+    The Ollama reachability HEAD probe runs in a background daemon
+    thread so a slow or unreachable host doesn't stall the interactive
+    prompt by up to 2s on every startup. The warning still prints when
+    the probe fails, just asynchronously.
+    """
     import os as _os
+    import threading as _threading
 
     if not _os.environ.get("OLLAMA_API_KEY"):
         console.print(
-            "  [yellow]\u26a0 OLLAMA_API_KEY not set \u2014 cloud models unavailable. "
+            "  [yellow]⚠ OLLAMA_API_KEY not set — cloud models unavailable. "
             "Set it in .env[/yellow]"
         )
 
-    # Quick Ollama reachability check (2s timeout)
-    try:
-        import urllib.request
+    def _probe() -> None:
+        try:
+            import urllib.request
 
-        host = _os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-        req = urllib.request.Request(host, method="HEAD")
-        urllib.request.urlopen(req, timeout=2)
-    except Exception:
-        console.print(
-            "  [yellow]\u26a0 Ollama not running \u2014 start with: "
-            "ollama serve[/yellow]"
-        )
+            host = _os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+            req = urllib.request.Request(host, method="HEAD")
+            urllib.request.urlopen(req, timeout=0.3)
+        except Exception:
+            try:
+                console.print(
+                    "  [yellow]⚠ Ollama not running — start with: "
+                    "ollama serve[/yellow]"
+                )
+            except Exception:
+                logger.debug("startup_ollama_probe_print_failed", exc_info=True)
+
+    _threading.Thread(target=_probe, daemon=True, name="aura-ollama-probe").start()
 
 
 class SessionStatusController:

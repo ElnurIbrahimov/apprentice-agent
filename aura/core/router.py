@@ -56,17 +56,17 @@ def _emit_trace(decision: dict) -> None:
 CONCURRENT_SLOTS = {
     "max": {
         "orchestrator": "kimi-k2.6:cloud",         # reasoning + orchestration + vision
-        "coder": "minimax-m2.5:cloud",              # code gen (SWE 80.2%)
+        "coder": "minimax-m2.7:cloud",              # SWE-Pro 56.2%, self-evolving, 205K
         "fast": "nemotron-3-super:cloud",           # tool dispatch + throughput
     },
     "balanced": {
-        "orchestrator": "glm-5:cloud",              # orchestration + code (SWE 77.8%)
-        "coder": "glm-5.1:cloud",                   # code gen + SWE 77.8%, +28% coding
+        "orchestrator": "glm-5:cloud",              # orchestration, low hallucination
+        "coder": "glm-5.1:cloud",                   # SWE 77.8%, +28% coding over GLM-5
         "fast": "nemotron-3-super:cloud",            # tool dispatch + throughput
     },
     "fast": {
         "orchestrator": "nemotron-3-super:cloud",   # everything fast
-        "coder": "qwen3-coder-next:cloud",          # code
+        "coder": "minimax-m2.7:cloud",              # 10B active, fast code MoE
         "fast": "nemotron-3-super:cloud",            # same (1 slot)
     },
 }
@@ -99,14 +99,14 @@ ROUTING_TABLE = {
         "fast": "nemotron-3-super:cloud",       # fast cloud
     },
     "code_gen": {
-        "max": "minimax-m2.5:cloud",           # SWE 80.2%, Multi-SWE 51.3%, BFCL 76.8%
-        "balanced": "glm-5.1:cloud",            # SWE 77.8%, +28% coding over GLM-5
-        "fast": "qwen3-coder-next:cloud",       # efficient code MoE
+        "max": "glm-5.1:cloud",                # SWE 77.8%, +28% coding over GLM-5
+        "balanced": "minimax-m2.7:cloud",      # SWE-Pro 56.2%, self-evolving, 205K
+        "fast": "minimax-m2.7:cloud",           # 10B active — fast code MoE
     },
     "small_edit": {
-        "max": "qwen3-coder-next:cloud",       # SWE 70.6%, 3B active — fast for edits
-        "balanced": "qwen3-coder-next:cloud",
-        "fast": "nemotron-3-super:cloud",       # fast cloud
+        "max": "glm-5.1:cloud",                # SWE 77.8%, reliable for edits
+        "balanced": "minimax-m2.7:cloud",      # 10B active, fast
+        "fast": "minimax-m2.7:cloud",           # 10B active, fast code MoE
     },
     "reasoning": {
         "max": "deepseek-v3.2:cloud",          # AIME 94.2%, IMO gold, MMLU-Pro 85%
@@ -134,9 +134,9 @@ ROUTING_TABLE = {
         "fast": "nemotron-3-super:cloud",       # fast cloud
     },
     "frontend": {
-        "fast": "kimi-k2.6:cloud",
-        "balanced": "kimi-k2.6:cloud",
-        "max": "kimi-k2.6:cloud",
+        "fast": "minimax-m2.7:cloud",
+        "balanced": "minimax-m2.7:cloud",
+        "max": "glm-5.1:cloud",
     },
 }
 

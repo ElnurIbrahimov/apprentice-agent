@@ -129,8 +129,10 @@ def _select_models(brain, user_models: Optional[str] = None) -> dict:
             models[roles[i]] = model
         return models
 
-    # Auto-select: check ChatGPT availability
-    has_chatgpt = brain._chatgpt_client is not None
+    # Auto-select: check ChatGPT availability. Use getattr with a default so
+    # a brain class that lacks _chatgpt_client (refactor, test double, etc.)
+    # falls back to the no-ChatGPT path instead of raising AttributeError.
+    has_chatgpt = getattr(brain, "_chatgpt_client", None) is not None
     if has_chatgpt:
         return dict(DEFAULT_MODELS)
     else:
@@ -261,6 +263,9 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
 
     # Phase 1: Run all debaters in parallel
     console.print()
+    # Track wall-clock from the start of Phase 1 so total_elapsed reflects the
+    # full debate (phase 1 + wait loop + phase 2 synthesis), not just synthesis.
+    debate_start = time.time()
     with Live(
         _build_debate_display(result, "debating"),
         console=console,
@@ -295,7 +300,6 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
             "What is the recommended path forward?"
         )
 
-        synth_start = time.time()
         try:
             synth_response = brain.think(
                 synthesis_prompt,
@@ -312,9 +316,7 @@ def run_debate(brain, question: str, user_models: Optional[str] = None) -> Debat
             result.synthesis = f"Synthesis failed: {e}"
 
         result.judge_model = judge_model
-        result.total_elapsed = time.time() - synth_start + max(
-            (p.elapsed for p in positions), default=0
-        )
+        result.total_elapsed = time.time() - debate_start
 
         live.update(_build_debate_display(result, "done"))
 

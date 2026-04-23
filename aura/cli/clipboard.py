@@ -14,7 +14,10 @@ import logging
 import os
 import tempfile
 import time
+from pathlib import Path
 from typing import Optional
+
+_ALLOWED_IMG_EXTS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"})
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +83,25 @@ def read_clipboard_image() -> Optional[str]:
     if img is None:
         return None
     # On Linux ImageGrab may return a list of file paths for a copied file.
+    # SECURITY: paths come from the X clipboard and may be arbitrary strings.
+    # Validate each candidate is an absolute path to a regular file with a
+    # recognized image extension before handing it to Pillow — stops
+    # /proc/self/mem, large sparse files, and similar content-probe attacks.
     if isinstance(img, list):
         for candidate in img:
             try:
+                if not isinstance(candidate, (str, os.PathLike)):
+                    continue
+                p = Path(candidate)
+                if not p.is_absolute():
+                    continue
+                if p.suffix.lower() not in _ALLOWED_IMG_EXTS:
+                    continue
+                if not p.is_file():
+                    continue
                 from PIL import Image
-                Image.open(candidate).verify()
-                return candidate
+                Image.open(p).verify()
+                return str(p)
             except Exception:
                 continue
         return None

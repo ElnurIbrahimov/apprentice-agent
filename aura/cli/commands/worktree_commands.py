@@ -73,12 +73,40 @@ def cmd_worktree(args: argparse.Namespace) -> int:
         try:
             if sys.platform.startswith("win"):
                 subprocess.Popen(
-                    ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path} && aura"],
+                    ["cmd", "/c", "start", "cmd", "/k", "aura"],
                     cwd=str(path), close_fds=True,
                 )
+                console.print(f"  [dim]Opened a new session in {path}[/]")
             else:
-                subprocess.Popen([os.environ.get("SHELL", "/bin/sh"), "-lc", f"cd '{path}' && aura"])
-            console.print(f"  [dim]Opened a new session in {path}[/]")
+                # Prior version spawned `sh -lc "aura"` with no terminal
+                # window — aura ran as a background child of the current
+                # shell and the user saw nothing. Probe common Linux
+                # emulators via shutil.which; fall back to a helpful
+                # message if none installed.
+                import shutil as _shutil
+                _terminals = [
+                    ("x-terminal-emulator", ["-e", "aura"]),
+                    ("gnome-terminal", ["--", "aura"]),
+                    ("konsole", ["-e", "aura"]),
+                    ("alacritty", ["-e", "aura"]),
+                    ("kitty", ["aura"]),
+                    ("wezterm", ["start", "aura"]),
+                    ("xfce4-terminal", ["-e", "aura"]),
+                    ("xterm", ["-e", "aura"]),
+                ]
+                launched = False
+                for binary, args in _terminals:
+                    if _shutil.which(binary):
+                        subprocess.Popen([binary, *args], cwd=str(path))
+                        launched = True
+                        break
+                if launched:
+                    console.print(f"  [dim]Opened a new session in {path}[/]")
+                else:
+                    console.print(
+                        "  [yellow]No terminal emulator found.[/] "
+                        f"Run: [cyan]cd {path} && aura[/]"
+                    )
         except Exception as e:
             console.print(f"  [yellow]Open failed:[/] {e}")
     else:

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from concurrent.futures import as_completed
-
-from aura.pools import llm_pool
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional
@@ -237,13 +235,20 @@ class FleetExecutor:
                 on_update(fleet)
             return task
 
-        pool = llm_pool()
-        futures = {pool.submit(_run_task, task): task for task in fleet.tasks}
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception:
-                pass
+        # Use a dedicated pool bounded by _max_workers instead of the shared
+        # aura.pools.llm_pool — otherwise a single fleet saturates the 4-slot
+        # shared pool and starves every other concurrent LLM caller (debate,
+        # chain, background tasks) until fleet finishes.
+        with ThreadPoolExecutor(
+            max_workers=max(1, self._max_workers),
+            thread_name_prefix="fleet",
+        ) as pool:
+            futures = {pool.submit(_run_task, task): task for task in fleet.tasks}
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception:
+                    pass
 
         fleet.end_time = time.time()
         return fleet

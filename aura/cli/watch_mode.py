@@ -98,30 +98,45 @@ class FileWatcher:
         hit.response = response
 
     def scan_file(self, file_path: Path) -> List[WatchHit]:
-        """Scan a single file for AI comments."""
-        hits = []
+        """Scan a single file for AI comments.
+
+        Collects candidate hits without holding the lock, then merges
+        fingerprint de-dup updates in a single critical section at the end.
+        Prior behavior re-acquired the lock for every regex match inside an
+        os.walk loop, blocking UI-thread callers of get_hits() during long
+        scans and risking deadlock if a registered on_hit callback ever
+        touched the same lock.
+        """
         try:
             content = file_path.read_text(encoding="utf-8", errors="ignore")
         except (OSError, PermissionError):
             return []
 
+        candidates: List[tuple[str, WatchHit]] = []
         for pattern in WATCH_PATTERNS:
             for match in pattern.finditer(content):
                 instruction = match.group(1).strip()
-                # Find line number
                 line_num = content[:match.start()].count("\n") + 1
                 fingerprint = f"{file_path}:{line_num}:{instruction}"
+                candidates.append((
+                    fingerprint,
+                    WatchHit(
+                        file_path=str(file_path),
+                        line_number=line_num,
+                        instruction=instruction,
+                        pattern_type="AURA" if "AURA" in pattern.pattern else "AI",
+                    ),
+                ))
 
-                with self._lock:
-                    if fingerprint not in self._seen:
-                        hit = WatchHit(
-                            file_path=str(file_path),
-                            line_number=line_num,
-                            instruction=instruction,
-                            pattern_type="AURA" if "AURA" in pattern.pattern else "AI",
-                        )
-                        hits.append(hit)
-                        self._seen.add(fingerprint)
+        if not candidates:
+            return []
+
+        hits: List[WatchHit] = []
+        with self._lock:
+            for fingerprint, hit in candidates:
+                if fingerprint not in self._seen:
+                    self._seen.add(fingerprint)
+                    hits.append(hit)
         return hits
 
     def scan_all(self) -> List[WatchHit]:

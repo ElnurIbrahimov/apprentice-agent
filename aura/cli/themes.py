@@ -212,6 +212,7 @@ THEMES: Dict[str, AuraTheme] = {
 # Default theme
 _current_theme: AuraTheme = THEMES["dark"]
 _theme_lock = threading.Lock()
+_theme_version: int = 0  # bumped by set_theme(); hot-path callers cache against this
 _THEMES_DIR = Path.home() / ".aura" / "themes"
 
 
@@ -221,14 +222,26 @@ def get_theme() -> AuraTheme:
         return _current_theme
 
 
+def theme_version() -> int:
+    """Monotonic counter bumped on every successful set_theme().
+
+    Render hot paths (spinner, streamer) cache derived theme values against
+    this counter so they only recompute when the theme actually changes,
+    instead of taking the theme lock on every frame.
+    """
+    # Reading an int is atomic in CPython; no lock needed for the fast path.
+    return _theme_version
+
+
 def set_theme(name: str) -> bool:
     """Set the active theme by name. Returns True if successful."""
-    global _current_theme
+    global _current_theme, _theme_version
 
     # Check built-in themes
     if name in THEMES:
         with _theme_lock:
             _current_theme = THEMES[name]
+            _theme_version += 1
         return True
 
     # Check custom themes
@@ -236,6 +249,7 @@ def set_theme(name: str) -> bool:
     if custom:
         with _theme_lock:
             _current_theme = custom
+            _theme_version += 1
         return True
 
     return False

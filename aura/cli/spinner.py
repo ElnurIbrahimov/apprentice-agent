@@ -24,21 +24,37 @@ SPINNER_VERBS = [
 ]
 
 
+# Cache theme-derived colors against themes.theme_version() so render frames
+# don't take the theme lock 12x/sec. Invalidates automatically on /theme.
+_accent_cache: tuple[int, str, str] | None = None
+_stall_cache: tuple[int, str, str] | None = None
+
+
 def _get_accent_colors() -> tuple[str, str]:
-    """Get accent and shimmer colors from theme."""
+    """Get accent and shimmer colors from theme (cached per theme version)."""
+    global _accent_cache
     try:
-        from aura.cli.themes import get_theme
+        from aura.cli.themes import get_theme, theme_version
+        v = theme_version()
+        if _accent_cache is not None and _accent_cache[0] == v:
+            return _accent_cache[1], _accent_cache[2]
         theme = get_theme()
+        _accent_cache = (v, theme.accent, theme.accent_dim)
         return theme.accent, theme.accent_dim
     except (ImportError, AttributeError):
         return "#D777AF", "#B0578F"
 
 
 def _get_stall_colors() -> tuple[str, str]:
-    """Get error colors for the stall state."""
+    """Get error colors for the stall state (cached per theme version)."""
+    global _stall_cache
     try:
-        from aura.cli.themes import get_theme
+        from aura.cli.themes import get_theme, theme_version
+        v = theme_version()
+        if _stall_cache is not None and _stall_cache[0] == v:
+            return _stall_cache[1], _stall_cache[2]
         theme = get_theme()
+        _stall_cache = (v, theme.error, theme.error)
         return theme.error, theme.error
     except (ImportError, AttributeError):
         return "#FF6B80", "#FF6B80"

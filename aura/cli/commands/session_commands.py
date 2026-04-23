@@ -581,6 +581,12 @@ def handle_changes(agent, arg, context) -> Optional[str]:
         console.print("[dim]No files modified in this session.[/dim]")
         return
 
+    # Resolve the session's project root once so every diff runs against the
+    # SAME git repo. Using os.path.dirname(f) per file meant files outside
+    # the session repo (or inside a submodule) diffed against a different
+    # HEAD (or no repo at all) and silently returned empty.
+    project_root = getattr(ctx.agentic_loop, "project_root", None) or os.getcwd()
+
     console.print(f"\n[bold]Files modified this session ({len(hot_files)}):[/bold]\n")
     for f in hot_files:
         basename = os.path.basename(f)
@@ -590,7 +596,7 @@ def handle_changes(agent, arg, context) -> Optional[str]:
             result = subprocess.run(
                 ["git", "diff", "HEAD~1", "--", safe_path],
                 capture_output=True, text=True, timeout=5,
-                cwd=os.path.dirname(f) or ".",
+                cwd=project_root,
             )
             if result.stdout:
                 adds = result.stdout.count('\n+') - result.stdout.count('\n+++')

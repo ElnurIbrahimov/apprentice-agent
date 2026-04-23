@@ -14,6 +14,8 @@ def _make_session() -> SimpleNamespace:
     return SimpleNamespace(
         bridge=bridge,
         _channel_lock=threading.Lock(),
+        _turn_lock=threading.Lock(),
+        pending_injections=[],
         agentic=SimpleNamespace(run=MagicMock()),
         console=MagicMock(),
         agent=SimpleNamespace(brain=MagicMock()),
@@ -95,6 +97,8 @@ def test_drain_channels_processes_one_message_and_sends_response():
     display_response.assert_called_once_with(session.console, ch_msg, "world")
     session.bridge.send_response.assert_called_once_with(ch_msg, "world")
     assert not session._channel_lock.locked()
+    # Turn lock must also be released so the main turn can proceed.
+    assert not session._turn_lock.locked()
 
 
 def test_run_exits_cleanly_when_input_returns_none():

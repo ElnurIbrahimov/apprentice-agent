@@ -38,21 +38,38 @@ def _get_tool_renderer() -> ToolOutputRenderer:
     return ToolOutputRenderer(console=console)
 
 
+# Cache theme-derived values against themes.theme_version() so render hot
+# paths (Markdown chunk(), per-frame status) don't take the theme lock on
+# every call. Invalidates automatically when /theme runs.
+_code_theme_cache: tuple[int, str] | None = None
+_theme_colors_cache: tuple[int, dict] | None = None
+
+
 def _get_code_theme() -> str:
-    """Get the current code theme from the theme system."""
+    """Get the current code theme from the theme system (version-cached)."""
+    global _code_theme_cache
     try:
-        from aura.cli.themes import get_theme
-        return get_theme().code_theme
+        from aura.cli.themes import get_theme, theme_version
+        v = theme_version()
+        if _code_theme_cache is not None and _code_theme_cache[0] == v:
+            return _code_theme_cache[1]
+        value = get_theme().code_theme
+        _code_theme_cache = (v, value)
+        return value
     except (ImportError, AttributeError):
         return "monokai"
 
 
 def _get_theme_colors() -> dict:
-    """Get semantic colors from current theme."""
+    """Get semantic colors from current theme (version-cached)."""
+    global _theme_colors_cache
     try:
-        from aura.cli.themes import get_theme
+        from aura.cli.themes import get_theme, theme_version
+        v = theme_version()
+        if _theme_colors_cache is not None and _theme_colors_cache[0] == v:
+            return _theme_colors_cache[1]
         theme = get_theme()
-        return {
+        colors = {
             "accent": theme.accent,
             "accent_dim": theme.accent_dim,
             "success": theme.success,
@@ -68,6 +85,8 @@ def _get_theme_colors() -> dict:
             "text_secondary": theme.text_secondary,
             "text_muted": theme.text_muted,
         }
+        _theme_colors_cache = (v, colors)
+        return colors
     except (ImportError, AttributeError):
         return {
             "accent": "#D777AF",

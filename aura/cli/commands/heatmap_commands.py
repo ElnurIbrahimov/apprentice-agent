@@ -80,7 +80,15 @@ def cmd_heatmap(args: argparse.Namespace) -> int:
 
         target: Optional[Path]
         if session:
-            target = heatmap_dir / f"{session}.json"
+            candidate = (heatmap_dir / f"{session}.json").resolve()
+            try:
+                if not candidate.is_relative_to(heatmap_dir.resolve()):
+                    console.print("  [red]Invalid session name.[/]")
+                    return 1
+            except (ValueError, OSError):
+                console.print("  [red]Invalid session name.[/]")
+                return 1
+            target = candidate
             if not target.exists():
                 console.print(f"  [yellow]No heatmap for session {session}[/]")
                 return 1

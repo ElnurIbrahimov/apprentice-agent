@@ -23,8 +23,18 @@ class SessionRuntimeController:
         if not self._session._channel_lock.acquire(blocking=False):
             return
 
+        # Also acquire the turn lock — without it, the drain thread's
+        # agentic.run() races the main loop's interactive agentic.run() and
+        # corrupts _conversation_history (AgenticLoop has no internal lock).
+        # Non-blocking: if the main turn is in progress, skip this drain;
+        # the bridge message stays queued and we retry on the next loop tick.
+        if not self._session._turn_lock.acquire(blocking=False):
+            self._session._channel_lock.release()
+            return
+
         ch_msg = self._session.bridge.get_pending_message(timeout=0)
         if ch_msg is None:
+            self._session._turn_lock.release()
             self._session._channel_lock.release()
             return
 
@@ -44,6 +54,12 @@ class SessionRuntimeController:
             except Exception:
                 logger.debug("channel_response_display_failed", exc_info=True)
             finally:
+                # Release in reverse acquisition order so a queued main turn
+                # can grab _turn_lock before the next drain_channels tick.
+                try:
+                    self._session._turn_lock.release()
+                except RuntimeError:
+                    logger.debug("drain_turn_lock_release_failed", exc_info=True)
                 self._session._channel_lock.release()
 
         import threading
@@ -52,8 +68,12 @@ class SessionRuntimeController:
         try:
             t.start()
         except RuntimeError:
-            # Thread creation failed (OS resource exhaustion) — release lock manually
+            # Thread creation failed (OS resource exhaustion) — release locks
             # so subsequent drain_channels calls are not permanently blocked.
+            try:
+                self._session._turn_lock.release()
+            except RuntimeError:
+                pass
             self._session._channel_lock.release()
 
     def submit_background(self, user_input: str) -> None:
@@ -269,14 +289,28 @@ class SessionRuntimeController:
         data = payload.encode()
 
         # Windows: prefer the named pipe to match the daemon's primary channel.
+        # Wrap the open-write in a bounded thread so a hung daemon pipe
+        # doesn't freeze the UI — blocking mode `open()` on a Windows named
+        # pipe waits indefinitely for the server to accept. Matches the
+        # 100ms budget of the TCP fallback below.
         if os.name == "nt":
-            try:
-                # Open-write-close keeps us consistent with a one-shot TCP send.
-                with open(self._IPC_PIPE_NAME, "wb", buffering=0) as pipe:
-                    pipe.write(data)
+            import threading as _th
+            ok_flag = [False]
+
+            def _pipe_write() -> None:
+                try:
+                    with open(self._IPC_PIPE_NAME, "wb", buffering=0) as pipe:
+                        pipe.write(data)
+                    ok_flag[0] = True
+                except OSError:
+                    pass
+
+            t = _th.Thread(target=_pipe_write, daemon=True, name="aura-ipc-pipe")
+            t.start()
+            t.join(timeout=0.5)
+            if ok_flag[0]:
                 return True
-            except OSError:
-                pass  # fall back to TCP
+            # Fall through to TCP if pipe write failed or timed out.
 
         try:
             import socket

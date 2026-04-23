@@ -84,31 +84,44 @@ class BackgroundManager:
         )
 
         def _worker():
+            # Keep state transitions atomic w.r.t. cancel() which takes the
+            # same lock. Capture cancellation status under the lock — reading
+            # _cancelled outside the lock after the state-commit block races
+            # with a concurrent cancel() that lands between lock release and
+            # the on_complete check, firing the callback on a cancelled task.
+            cancelled_now = False
             try:
                 result = execute_fn(prompt)
-                if task._cancelled:
-                    return  # Cancelled while running; don't overwrite state
-                task.end_time = time.time()
-                task.iterations = result.get("iterations", 0)
-                if result.get("success"):
-                    task.state = TaskState.COMPLETED
-                    task.result = result.get("response", "")[:2000]
-                else:
-                    task.state = TaskState.FAILED
-                    task.error = result.get("error", "Unknown error")[:500]
             except Exception as e:
-                if task._cancelled:
-                    return
-                task.end_time = time.time()
-                task.state = TaskState.FAILED
-                task.error = str(e)[:500]
+                with self._lock:
+                    cancelled_now = task._cancelled
+                    if cancelled_now:
+                        return
+                    task.end_time = time.time()
+                    task.state = TaskState.FAILED
+                    task.error = str(e)[:500]
+            else:
+                with self._lock:
+                    cancelled_now = task._cancelled
+                    if cancelled_now:
+                        return
+                    task.end_time = time.time()
+                    task.iterations = result.get("iterations", 0)
+                    if result.get("success"):
+                        task.state = TaskState.COMPLETED
+                        task.result = result.get("response", "")[:2000]
+                    else:
+                        task.state = TaskState.FAILED
+                        task.error = result.get("error", "Unknown error")[:500]
 
             # Cancelled tasks must NOT fire on_complete — the user already
             # saw the cancel notification and should not get a second
-            # completion popup for the same task.
-            if self._on_complete and not task._cancelled:
+            # completion popup for the same task. Use the snapshot captured
+            # under the lock; do not re-read task._cancelled here.
+            cb = self._on_complete
+            if cb and not cancelled_now:
                 try:
-                    self._on_complete(task)
+                    cb(task)
                 except Exception as e:
                     logger.debug(f"[Background] on_complete callback failed for task {task_id}: {e}")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -54,6 +55,8 @@ def _make_session() -> SimpleNamespace:
         _show_bar=MagicMock(),
         speak=True,
         _auto_test_enabled=True,
+        _turn_lock=threading.Lock(),
+        pending_injections=[],
     )
 
 
@@ -197,7 +200,11 @@ def test_run_agent_handles_tool_callbacks_and_auto_test_feedback():
         "post_edit",
         {"tool_name": "edit_file", "file_path": "src/app.py"},
     )
-    assert session.agentic._conversation_history[-1]["content"] == (
-        "[Auto-test failed after editing] pytest failed"
-    )
+    # Auto-test failure is now deferred to pending_injections (drained at
+    # the start of the NEXT run_agent call) instead of being injected into
+    # _conversation_history mid-turn. Mid-turn injection used to race
+    # agentic.run() — now race-free.
+    assert session.pending_injections == [
+        "[Auto-test failed after editing]\npytest failed"
+    ]
     assert session._streamer_displayed is True

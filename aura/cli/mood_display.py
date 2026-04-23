@@ -102,7 +102,7 @@ def render_mood_detail(console: Console, emotional_state: Dict) -> None:
     def pad_bar(value: float, label: str) -> str:
         normalized = (value + 1) / 2  # -1..1 -> 0..1
         filled = int(normalized * 10)
-        bar = "\u2588" * filled + "\u2591" * (10 - filled)
+        bar = "█" * filled + "░" * (10 - filled)
         return f"  {label:<12} [{bar}] {value:+.2f}"
 
     text.append(pad_bar(p, "Pleasure") + "\n")
@@ -116,7 +116,7 @@ def render_mood_detail(console: Console, emotional_state: Dict) -> None:
         for name, value in neuro.items():
             filled = max(0, min(10, int(value * 10))) if isinstance(value, (int, float)) else 5
             value_display = value if isinstance(value, (int, float)) else 0.0
-            bar = "\u2588" * filled + "\u2591" * (10 - filled)
+            bar = "█" * filled + "░" * (10 - filled)
             text.append(f"  {name:<16} [{bar}] {value_display:.2f}\n", style="dim")
 
     # Active emotions
@@ -126,27 +126,13 @@ def render_mood_detail(console: Console, emotional_state: Dict) -> None:
         for em in emotions[:5]:
             name = em.get("name", em) if isinstance(em, dict) else str(em)
             intensity = em.get("intensity", 0.5) if isinstance(em, dict) else 0.5
-            text.append(f"    \u2022 {name} ({intensity:.1f})\n")
+            text.append(f"    • {name} ({intensity:.1f})\n")
 
     # Recent influences
     influences = emotional_state.get("recent_influences", emotional_state.get("triggers", []))
     if influences:
         text.append("\n  Recent influences:\n", style="bold")
         for inf in influences[:3]:
-            text.append(f"    \u2192 {inf}\n", style="dim")
+            text.append(f"    → {inf}\n", style="dim")
 
     console.print(Panel(text, title="[bold magenta]Emotional State[/bold magenta]", border_style="magenta"))
-
-
-def format_dream_insight(insight: str) -> str:
-    """Format a dream insight for display as a proactive suggestion."""
-    return f"[dim magenta]\U0001f4ad Dream insight: {insight}[/dim magenta]"
-
-
-def format_break_suggestion(session_duration_minutes: float, cognitive_load: float) -> Optional[str]:
-    """Suggest a break if the session is long and cognitive load is high."""
-    if session_duration_minutes > 60 and cognitive_load > 0.7:
-        return "[dim yellow]\u2615 You've been at this for over an hour with high cognitive load. Consider a short break.[/dim yellow]"
-    elif session_duration_minutes > 120:
-        return "[dim yellow]\u2615 Session is over 2 hours. A break might help with focus.[/dim yellow]"
-    return None

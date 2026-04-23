@@ -188,6 +188,17 @@ class ChatSession:
 
         import threading
         self._channel_lock = threading.Lock()
+        # Serializes the main interactive turn against bridge-drained turns.
+        # Acquired by SessionExecutionController.run_agent for the duration
+        # of agentic.run(); drain_channels tries non-blocking and skips if
+        # held. Without this both code paths can call agentic.run() in
+        # parallel and corrupt _conversation_history.
+        self._turn_lock = threading.Lock()
+        # Queue of synthetic context strings to prepend to the next user
+        # turn. Populated by _run_auto_test_async's deferred completion
+        # callback; drained at the start of run_agent. Replaces the prior
+        # mid-turn mutation of _conversation_history (data race).
+        self.pending_injections: list[str] = []
 
         self._pending_follow_up: Optional[str] = None
         self._follow_up_depth = 0

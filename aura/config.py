@@ -195,12 +195,8 @@ class Config:
         "deepseek-v3.2:cloud",             # Fallback: 85.0 MMLU-Pro
     ]
     MODEL_CODE_CHAIN = [
-        "minimax-m2.7:cloud",             # Primary: SWE-Pro 56.2%, self-evolving, 205K
-        "minimax-m2.5:cloud",             # Fallback: 80.2% SWE-Bench
-        "glm-5.1:cloud",                  # Fallback: 77.8% SWE, +28% coding over GLM-5
-        "qwen3-coder:480b-cloud",          # Fallback: 69.6% SWE, 480B code specialist
-        "qwen3-coder-next:cloud",          # Fallback: 71.3% SWE, 172 tok/s
-        "deepseek-v3.2:cloud",             # Fallback: 67.8% SWE, cheapest
+        "glm-5.1:cloud",                  # Primary: 77.8% SWE, +28% coding over GLM-5
+        "minimax-m2.7:cloud",             # Fallback: SWE-Pro 56.2%, self-evolving, 205K
     ]
     MODEL_VISION_CHAIN = [
         "kimi-k2.6:cloud",                # Primary: native multimodal, 256K

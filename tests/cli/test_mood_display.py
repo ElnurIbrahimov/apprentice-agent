@@ -2,7 +2,7 @@
 import pytest
 from aura.cli.mood_display import (
     get_mood_emoji, get_mood_label, create_mood_indicator,
-    render_mood_detail, format_dream_insight, format_break_suggestion,
+    render_mood_detail,
 )
 from rich.console import Console
 from io import StringIO
@@ -48,18 +48,3 @@ def test_render_mood_detail():
     assert "Pleasure" in output
     assert "dopamine" in output
 
-def test_dream_insight():
-    result = format_dream_insight("Pattern detected in your coding style")
-    assert "Dream insight" in result
-
-def test_break_suggestion_short_session():
-    assert format_break_suggestion(30, 0.5) is None
-
-def test_break_suggestion_long_session():
-    result = format_break_suggestion(65, 0.8)
-    assert result is not None
-    assert "break" in result.lower()
-
-def test_break_suggestion_very_long():
-    result = format_break_suggestion(125, 0.3)
-    assert result is not None

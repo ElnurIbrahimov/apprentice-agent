@@ -123,6 +123,19 @@ class SessionExecutionController:
         from .display import StreamingResponse, show_error, show_response_attribution
         from aura.core.agentic_loop_events import LoopEvent
 
+        # Drain deferred injections from prior turns (e.g., async auto-test
+        # results that completed after the previous turn). Prepend them to
+        # this user prompt so the model sees them as fresh context. Replaces
+        # the prior pattern of mutating _conversation_history mid-turn from
+        # the event-callback thread, which raced agentic.run().
+        pending = getattr(self._session, "pending_injections", None)
+        if pending:
+            try:
+                prefix = "\n\n".join(pending) + "\n\n---\n\n"
+                user_input = prefix + (user_input or "")
+            finally:
+                pending.clear()
+
         streamer = StreamingResponse(model=self._session.current_model)
         streamer.start()
         tool_call_count = 0
@@ -140,6 +153,13 @@ class SessionExecutionController:
         # from agentic.run(). Previously finish() sat outside the try block and
         # never ran on error, leaving the Rich Live display orphaned and
         # corrupting the next turn's render.
+        #
+        # The turn lock serializes this main interactive turn against bridge-
+        # drained turns spawned by SessionRuntimeController.drain_channels.
+        # AgenticLoop has no internal lock and shares _conversation_history,
+        # so two concurrent agentic.run() calls would interleave history
+        # mutations. Acquired here, released in the outer finally.
+        self._session._turn_lock.acquire()
         try:
             try:
                 def _on_event(event: LoopEvent) -> None:
@@ -245,19 +265,31 @@ class SessionExecutionController:
 
             # Feed per-turn stats into the streamer before finishing so the
             # summary line shows $cost and ctx% in addition to token counts.
+            # Cache ctx_used + cur_cost on the session so process_normal_result
+            # can reuse them instead of recomputing (token estimation walks
+            # the full conversation history; get_session_stats is a brain
+            # call — both wasteful per turn).
             try:
                 from .context_bar import estimate_messages_tokens, get_context_limit
                 cost_delta = 0.0
+                cur_cost = 0.0
                 try:
                     stats = self._session.agent.brain.get_session_stats()
                     cur_cost = float(stats.get("cost_usd", 0.0) or 0.0)
                     prev_cost = float(getattr(self._session, "_last_session_cost", 0.0) or 0.0)
                     cost_delta = max(0.0, cur_cost - prev_cost)
-                    self._session._last_session_cost = cur_cost
                 except Exception:
                     logger.debug("Failed to compute cost delta for turn stats", exc_info=True)
+                # Always advance the baseline — even if the stats fetch
+                # failed (cur_cost stays 0.0). Otherwise a stale baseline
+                # from two turns ago inflates the next successful turn's
+                # delta by the entire missed interval.
+                self._session._last_session_cost = cur_cost
                 ctx_used = estimate_messages_tokens(self._session.agentic._conversation_history)
                 ctx_limit = get_context_limit(self._session.current_model)
+                self._session._last_turn_ctx_used = ctx_used
+                self._session._last_turn_cost_usd = cur_cost
+                self._session._last_turn_cached = True
                 streamer.set_turn_stats(cost_delta=cost_delta, ctx_used=ctx_used, ctx_limit=ctx_limit)
             except Exception:
                 logger.debug("Failed to set turn stats on streamer", exc_info=True)
@@ -282,6 +314,14 @@ class SessionExecutionController:
 
             return result
         finally:
+            # Release the turn lock first so a queued drain_channels can
+            # pick up bridge messages during streamer teardown / watchdog
+            # cleanup. Wrapped in try/except in case the acquire above
+            # raised (defensive — current code can't reach here without it).
+            try:
+                self._session._turn_lock.release()
+            except RuntimeError:
+                logger.debug("turn_lock_release_skipped (already released)", exc_info=True)
             if cancel_watch_stop is not None:
                 try:
                     cancel_watch_stop()
@@ -313,6 +353,13 @@ class SessionExecutionController:
           has released Rich's Live slot, then prints the "Aborted (Esc)"
           message. Printing from the watchdog thread races Rich and
           causes ``LiveError: Only one live display may be active at once``.
+
+        Uses ``PeekConsoleInputW`` via ctypes to check the next input event
+        WITHOUT consuming it, so non-ESC keys stay in the console buffer for
+        prompt_toolkit's next input cycle. Without the peek, the watchdog's
+        ``getwch()`` ate the user's first character on every streaming turn.
+        Falls back to the legacy consume-everything behavior if the Win32
+        call fails (unusual console handles, redirected stdin, etc.).
         """
         import os
         if os.name != "nt":
@@ -324,28 +371,113 @@ class SessionExecutionController:
 
         import threading
 
+        # ctypes shim for PeekConsoleInputW. Falls back to consume-everything
+        # if initialization fails.
+        _peek_available = False
+        _peek_fn = None
+        _std_input_h = None
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _KEY_EVENT_REC(ctypes.Structure):
+                _fields_ = [
+                    ("bKeyDown", wintypes.BOOL),
+                    ("wRepeatCount", wintypes.WORD),
+                    ("wVirtualKeyCode", wintypes.WORD),
+                    ("wVirtualScanCode", wintypes.WORD),
+                    ("uChar", ctypes.c_wchar),
+                    ("dwControlKeyState", wintypes.DWORD),
+                ]
+
+            # Union of event-specific record types. We only read KeyEvent;
+            # the other members just reserve enough bytes for the union.
+            class _EVENT_UNION(ctypes.Union):
+                _fields_ = [
+                    ("KeyEvent", _KEY_EVENT_REC),
+                    ("_pad", ctypes.c_byte * 16),
+                ]
+
+            class _INPUT_REC(ctypes.Structure):
+                _fields_ = [("EventType", wintypes.WORD), ("Event", _EVENT_UNION)]
+
+            _k32 = ctypes.windll.kernel32
+            _std_input_h = _k32.GetStdHandle(wintypes.DWORD(-10))  # STD_INPUT_HANDLE
+            _k32.PeekConsoleInputW.argtypes = [
+                wintypes.HANDLE,
+                ctypes.POINTER(_INPUT_REC),
+                wintypes.DWORD,
+                ctypes.POINTER(wintypes.DWORD),
+            ]
+            _k32.PeekConsoleInputW.restype = wintypes.BOOL
+            _peek_fn = _k32.PeekConsoleInputW
+            _INPUT_REC_T = _INPUT_REC
+            _KEY_EVENT_TYPE = 0x0001
+            _VK_ESCAPE = 0x1B
+            # Validate handle is usable (GetStdHandle returns INVALID_HANDLE_VALUE == -1 cast).
+            if _std_input_h and _std_input_h != wintypes.HANDLE(-1).value:
+                _peek_available = True
+        except Exception:
+            logger.debug("peek_console_input_init_failed", exc_info=True)
+            _peek_available = False
+
         stop_evt = threading.Event()
         esc_evt = threading.Event()
         session = self._session
+
+        def _fire_esc() -> None:
+            esc_evt.set()
+            try:
+                # cancel() just sets a threading.Event — thread-safe.
+                # The ABORT MESSAGE is printed by the main thread after
+                # Live is released.
+                session.agentic.cancel()
+            except Exception:
+                logger.debug("Failed to cancel agentic loop on Esc", exc_info=True)
 
         def _watch():
             while not stop_evt.is_set():
                 try:
                     if msvcrt.kbhit():  # type: ignore[attr-defined]
-                        ch = msvcrt.getwch()  # type: ignore[attr-defined]
-                        # ESC is '\x1b'. Ignore anything else so we don't
-                        # swallow keys that belong to prompt_toolkit's next
-                        # input cycle.
-                        if ch == "\x1b":
-                            esc_evt.set()
-                            try:
-                                # cancel() just sets a threading.Event —
-                                # thread-safe. The ABORT MESSAGE is printed
-                                # by the main thread after Live is released.
-                                session.agentic.cancel()
-                            except Exception:
-                                logger.debug("Failed to cancel agentic loop on Esc", exc_info=True)
-                            return
+                        if _peek_available:
+                            # Peek without consuming. If the next event is
+                            # a KEY_EVENT for ESC keydown, we consume it and
+                            # fire; otherwise we leave it for prompt_toolkit.
+                            rec = _INPUT_REC_T()
+                            n_read = wintypes.DWORD(0)
+                            ok = _peek_fn(
+                                _std_input_h,
+                                ctypes.byref(rec),
+                                1,
+                                ctypes.byref(n_read),
+                            )
+                            if ok and n_read.value > 0:
+                                is_esc = (
+                                    rec.EventType == _KEY_EVENT_TYPE
+                                    and bool(rec.Event.KeyEvent.bKeyDown)
+                                    and rec.Event.KeyEvent.wVirtualKeyCode == _VK_ESCAPE
+                                )
+                                if is_esc:
+                                    try:
+                                        msvcrt.getwch()  # type: ignore[attr-defined]
+                                    except Exception:
+                                        pass
+                                    _fire_esc()
+                                    return
+                                # Non-ESC: leave in buffer, let prompt_toolkit
+                                # consume it when streaming ends.
+                                # Sleep a bit longer so we don't tight-loop
+                                # while a pending key waits — the peek
+                                # doesn't drain it, so kbhit() stays True
+                                # until prompt_toolkit reads it.
+                                stop_evt.wait(0.25)
+                                continue
+                        else:
+                            # Fallback: legacy consume-everything behavior.
+                            ch = msvcrt.getwch()  # type: ignore[attr-defined]
+                            if ch == "\x1b":
+                                _fire_esc()
+                                return
                 except Exception:
                     return
                 stop_evt.wait(0.1)
@@ -401,17 +533,26 @@ class SessionExecutionController:
         if self._session.msg_count == 1 and user_input:
             self._session.session_title = user_input[:50].strip()
         # current_model is maintained by apply_model_override; no re-read needed.
-        self._session.token_used = estimate_messages_tokens(
-            self._session.agentic._conversation_history
-        )
+        # Reuse the cached ctx_used / cost_usd computed inside run_agent for this
+        # same turn. Both are expensive (estimate_messages_tokens walks the full
+        # history; get_session_stats is a brain call). The cache is marked valid
+        # only when run_agent populated it this turn — fall back to fresh compute
+        # otherwise (defensive; normal flow always hits the cached path).
+        if getattr(self._session, "_last_turn_cached", False):
+            self._session.token_used = getattr(self._session, "_last_turn_ctx_used", 0)
+            cost_usd = getattr(self._session, "_last_turn_cost_usd", 0.0)
+            self._session._last_turn_cached = False
+        else:
+            self._session.token_used = estimate_messages_tokens(
+                self._session.agentic._conversation_history
+            )
+            cost_usd = 0.0
+            try:
+                stats = self._session.agent.brain.get_session_stats()
+                cost_usd = stats.get("cost_usd", 0.0)
+            except (AttributeError, TypeError, KeyError):
+                logger.debug("session_stats_read_failed", exc_info=True)
         self._session.token_limit = get_context_limit(self._session.current_model)
-
-        cost_usd = 0.0
-        try:
-            stats = self._session.agent.brain.get_session_stats()
-            cost_usd = stats.get("cost_usd", 0.0)
-        except (AttributeError, TypeError, KeyError):
-            logger.debug("session_stats_read_failed", exc_info=True)
 
         self._session._show_bar(
             model=self._session.current_model,
@@ -510,62 +651,58 @@ class SessionExecutionController:
             self._run_auto_test_async()
 
     def _run_auto_test_async(self) -> None:
-        """Kick off auto-test on the bg_pool and wait cancellably.
+        """Kick off auto-test on the bg_pool and defer the injection.
 
-        Running ``_run_auto_test`` inline inside the streaming event
-        callback freezes the spinner for the duration of the test subprocess
-        (can be minutes) and makes Ctrl+C / Esc cancellation unreliable on
-        Windows. Moving the subprocess onto ``bg_pool`` and polling its
-        future in short ticks lets the user abort the turn while pytest is
-        still running.
+        Prior version polled `future.result(timeout=0.5)` in a loop up to
+        180s INSIDE the event-callback thread that owns streamer rendering.
+        That blocked all stream updates for the duration of the test (can
+        be minutes), made Esc cancellation unreliable, and mutated
+        ``_conversation_history`` mid-turn while ``agentic.run()`` was
+        iterating it (data race).
+
+        New behavior: fire-and-forget the future, register an
+        ``add_done_callback`` that enqueues the failure into the session's
+        ``pending_injections``. The next ``run_agent`` call drains the
+        queue and prepends the failure context to the next user prompt.
+        Net effect: auto-test failures show up at the START of the NEXT
+        turn instead of mid-turn — coherent and race-free.
         """
         try:
             from aura.pools import bg_pool
         except Exception:
             # Fallback to old sync behavior if pool infra is missing.
+            # Same race as before, but at least the test still runs.
             logger.debug("auto_test_bg_pool_unavailable", exc_info=True)
             try:
                 test_result = self._session.agentic._run_auto_test()
                 if test_result:
-                    self._session.agentic._conversation_history.append(
-                        {"role": "user",
-                         "content": f"[Auto-test failed after editing] {test_result}"}
-                    )
+                    self._enqueue_auto_test_result(test_result)
             except Exception:
                 logger.debug("Failed to run auto-test after file edit", exc_info=True)
             return
 
         future = bg_pool().submit(self._session.agentic._run_auto_test)
-        cancel_event = getattr(self._session.agentic, "_cancel_event", None)
 
-        import time as _t
-        # Hard upper bound so a hung test doesn't stall the turn forever.
-        # 180s matches the average project test-suite budget; beyond that
-        # we surface "auto-test still running" and let the agent move on.
-        deadline = _t.monotonic() + 180.0
-        while _t.monotonic() < deadline:
+        def _on_auto_test_done(fut) -> None:
             try:
-                test_result = future.result(timeout=0.5)
-                if test_result:
-                    self._session.agentic._conversation_history.append(
-                        {"role": "user",
-                         "content": f"[Auto-test failed after editing] {test_result}"}
-                    )
-                return
+                test_result = fut.result(timeout=0)
             except Exception as exc:
-                # concurrent.futures.TimeoutError → keep polling; other
-                # exceptions propagate as logged failures.
-                if type(exc).__name__ == "TimeoutError":
-                    if cancel_event is not None and cancel_event.is_set():
-                        # Test still going but the user aborted — let the
-                        # future run to completion in the background; its
-                        # result just won't be injected.
-                        return
-                    continue
                 logger.debug("auto_test_failed", exc_info=True)
-                return
-        # Timed out. Future keeps running in bg_pool; result is abandoned.
-        logger.info("auto_test_exceeded_180s_abandoning_result")
+                test_result = f"(auto-test runner failed: {type(exc).__name__})"
+            if test_result:
+                self._enqueue_auto_test_result(test_result)
+
+        future.add_done_callback(_on_auto_test_done)
+
+    def _enqueue_auto_test_result(self, test_result: str) -> None:
+        """Queue an auto-test failure for prepending to the next user turn."""
+        pending = getattr(self._session, "pending_injections", None)
+        if pending is None:
+            # Defensive: if the session predates the queue attribute, fall
+            # back to logging — better than crashing.
+            logger.warning("pending_injections missing; auto-test result dropped: %s", test_result[:200])
+            return
+        pending.append(f"[Auto-test failed after editing]\n{test_result}")
 
     def _print_execution_summary(self, summary_parts: list[str]) -> None:
         try:

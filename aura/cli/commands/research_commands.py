@@ -49,7 +49,7 @@ def handle_export(agent, arg, context) -> Optional[str]:
         md = research_ctx.export_markdown()
         safe_topic = _re_export.sub(r'[^\w\-]', '_', research_ctx.topic)[:30]
         out_path = Path(f"research_{safe_topic}.md")
-        out_path.write_text(md)
+        out_path.write_text(md, encoding="utf-8")
         _export_console.print(f"[green]Exported to {out_path}[/green]")
     else:
         _export_console.print("[dim]No active research session to export.[/dim]")

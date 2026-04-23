@@ -43,9 +43,12 @@ def _highlight_line(line_text: str, language: str, base_style: str) -> Text:
     syntax = Syntax(line_text, language, theme="monokai", background_color="default")
     highlighted = syntax.highlight(line_text)
 
-    # Create result with the base diff style, then overlay syntax color spans
+    # Create result with the base diff style, then overlay syntax color spans.
+    # Use the public `.spans` property instead of `._spans` — the private
+    # attribute is not part of Rich's API contract and a Rich minor-version
+    # bump could silently downgrade all syntax highlighting to solid green/red.
     result = Text(line_text, style=base_style)
-    for span in highlighted._spans:
+    for span in highlighted.spans:
         result.stylize(span.style, span.start, span.end)
     return result
 

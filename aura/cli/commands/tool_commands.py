@@ -276,6 +276,12 @@ def _handle_shell_command(agent, arg: str):
         _shell_console.print("  /bash ls -la")
         return
 
+    # SECURITY: do NOT swallow exceptions from confirm_action with a broad
+    # except that falls through to execute the shell command. confirm_action
+    # is now fail-closed internally and handles EOFError/KeyboardInterrupt
+    # from the input() fallback. The only thing we still need to handle here
+    # is a Ctrl-C landing in the prompt window — return Cancelled, never
+    # fall through to execute.
     try:
         if not confirm_action(
             agent,
@@ -285,8 +291,9 @@ def _handle_shell_command(agent, arg: str):
         ):
             _shell_console.print("  Cancelled.")
             return
-    except (AttributeError, EOFError, KeyboardInterrupt, OSError):
-        logger.debug("shell_permission_check_skipped", exc_info=True)
+    except KeyboardInterrupt:
+        _shell_console.print("  Cancelled.")
+        return
 
     tool = agent.tools.get("shell_executor")
     if not tool:

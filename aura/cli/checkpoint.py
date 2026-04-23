@@ -22,6 +22,16 @@ class CheckpointManager:
         self._max = max_checkpoints
         self._index_path = self._dir / "index.json"
         self._lock = threading.Lock()
+        # Trust root for restore() destination validation. Captured at
+        # init time so a tampered index.json cannot redirect restores
+        # outside the project (e.g., to /etc/passwd or C:\Windows).
+        # Defaults to the parent of the checkpoint dir, which is the
+        # project root in the typical layout (.aura_checkpoints/ inside
+        # the project). Subclasses can override by setting _trusted_root.
+        try:
+            self._trusted_root = str(Path(self._dir).resolve().parent)
+        except OSError:
+            self._trusted_root = str(Path.cwd())
         self._index: List[Dict] = self._load_index()
 
     def _load_index(self) -> List[Dict]:
@@ -113,8 +123,21 @@ class CheckpointManager:
             cp_dir = self._dir / checkpoint_id
             if not cp_dir.exists():
                 return False
+            try:
+                trusted = Path(self._trusted_root).resolve()
+            except OSError:
+                trusted = Path(self._trusted_root)
             for f_info in entry["files"]:
                 dest = Path(f_info["original_path"]).resolve()
+                # SECURITY: only restore destinations inside the trusted
+                # root. A tampered index.json could otherwise overwrite
+                # arbitrary files (local privilege escalation surface).
+                try:
+                    if not (dest == trusted or dest.is_relative_to(trusted)):
+                        # Skip silently rather than failing the whole restore.
+                        continue
+                except (ValueError, OSError):
+                    continue
                 backup_name = f_info.get("backup_name")
                 if not f_info.get("original_exists", True):
                     try:
