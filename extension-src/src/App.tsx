@@ -177,7 +177,12 @@ export default function App() {
         window.dispatchEvent(new CustomEvent('ocr-result', { detail: msg }));
       }
       if (msg.type === 'SWITCH_PANEL' && msg.panel) {
-        setPanel(msg.panel);
+        // Validate panel id against the registered set before switching —
+        // content scripts / context menus pass msg.panel as string; an
+        // unrecognised id would mount nothing and leave the sidebar blank.
+        if (PANEL_ENTRIES.some((e) => e.id === msg.panel)) {
+          setPanel(msg.panel);
+        }
       }
       if (msg.type === 'COMPONENT_CAPTURED') {
         setPanel('capture');

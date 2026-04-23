@@ -1191,6 +1191,16 @@ class BrowserTool:
                 return {"success": False, "error": f"Could not parse coordinates from: {text[:100]}"}
 
             x, y = int(match.group(1)), int(match.group(2))
+            # Clamp to viewport so a hallucinated "99999,99999" from the
+            # vision model cannot push Playwright into an error path — it
+            # silently succeeds off-screen otherwise and leaves the planner
+            # loop looking "successful" with no visible effect.
+            try:
+                vp = self._page.viewport_size or {"width": 1280, "height": 720}
+                x = max(0, min(x, int(vp["width"]) - 1))
+                y = max(0, min(y, int(vp["height"]) - 1))
+            except Exception:
+                pass
             self._page.mouse.click(x, y)
             return {"success": True, "description": description, "coordinates": [x, y]}
         except ImportError:
