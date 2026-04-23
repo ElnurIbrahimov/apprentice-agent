@@ -10,6 +10,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { OnboardingFlow } from './components/OnboardingFlow';
 import { BottomTabBar } from './components/BottomTabBar';
 import { haptic } from './utils/haptics';
+import { setFaviconState } from './utils/statusFavicon';
 import { ToolLauncher, ToolSubNav } from './components/ToolLauncher';
 import type { ToolId } from './components/ToolLauncher';
 import {
@@ -42,7 +43,6 @@ const ReasoningTreePanel = lazy(() => import('./components/ReasoningTreePanel').
 const ActivityTimeline = lazy(() => import('./components/ActivityTimeline').then(m => ({ default: m.ActivityTimeline })));
 const MemoryTimeline = lazy(() => import('./components/MemoryTimeline').then(m => ({ default: m.MemoryTimeline })));
 const KnowledgeGraphExplorer = lazy(() => import('./components/KnowledgeGraphExplorer').then(m => ({ default: m.KnowledgeGraphExplorer })));
-const HandsDashboard = lazy(() => import('./components/HandsDashboard'));
 const TaskQueuePanel = lazy(() => import('./components/TaskQueuePanel').then(m => ({ default: m.TaskQueuePanel })));
 const SettingsPage = lazy(() => import('./components/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const CodeInterpreter = lazy(() => import('./components/CodeInterpreter').then(m => ({ default: m.CodeInterpreter })));
@@ -82,7 +82,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 ];
 
 type CreateSubTab = 'code' | 'webcreator' | 'app' | 'game' | 'dashboard' | 'slides' | 'image';
-type InsightsSubTab = 'monitor' | 'feed' | 'world' | 'briefing' | 'dreams' | 'evolution' | 'activity' | 'memory' | 'knowledge' | 'hands' | 'queue' | 'advanced';
+type InsightsSubTab = 'monitor' | 'feed' | 'world' | 'briefing' | 'dreams' | 'evolution' | 'activity' | 'memory' | 'knowledge' | 'queue' | 'advanced';
 type ToolsSubTab = 'launcher' | 'system' | ToolId;
 
 function TabSkeleton() {
@@ -115,7 +115,7 @@ function SubTabBar({ tabs, active, onChange }: { tabs: { id: string; label: stri
 }
 
 function MainApp() {
-  const { sidebarOpen, setSidebarOpen, toggleSidebar, conversations, connectionStatus } = useChatStore();
+  const { sidebarOpen, setSidebarOpen, toggleSidebar, conversations, connectionStatus, isLoading } = useChatStore();
   const { settings } = useSettingsStore();
   const { toasts, removeToast } = useToastStore();
   const [isMobile, setIsMobile] = useState(false);
@@ -136,7 +136,6 @@ function MainApp() {
       import('./components/ActivityTimeline');
       import('./components/MemoryTimeline');
       import('./components/KnowledgeGraphExplorer');
-      import('./components/HandsDashboard');
       import('./components/TaskQueuePanel');
       import('./components/SettingsPage');
       import('./components/ToolsPanel');
@@ -164,7 +163,7 @@ function MainApp() {
     ? conversations.filter(c =>
         (c.title || '').toLowerCase().includes(mobileSearchQuery.toLowerCase())
       )
-    : conversations.slice(0, 20);
+    : conversations;
 
   // Apply font size setting
   useEffect(() => {
@@ -186,6 +185,26 @@ function MainApp() {
   useEffect(() => {
     applyColorPreset(settings.colorPreset ?? 'aura');
   }, [settings.colorPreset]);
+
+  // Favicon / tab title state machine:
+  //   isLoading  → thinking
+  //   !isLoading → idle (or attention, if loading ended while tab was hidden)
+  useEffect(() => {
+    // Fires on every isLoading transition AND on visibility change.
+    const syncFavicon = () => {
+      if (isLoading) {
+        setFaviconState('thinking');
+        return;
+      }
+      setFaviconState(document.hidden ? 'attention' : 'idle');
+    };
+    syncFavicon();
+    const onVis = () => {
+      if (!document.hidden) setFaviconState(isLoading ? 'thinking' : 'idle');
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [isLoading]);
 
   // Keyboard shortcuts
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
@@ -216,7 +235,7 @@ function MainApp() {
         const idx = parseInt(e.key) - 1;
         if (TABS[idx]) setActiveTab(TABS[idx].id);
       }
-      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+      if (e.ctrlKey && e.altKey && (e.key === 't' || e.key === 'T')) {
         e.preventDefault();
         toggleTheme();
       }
@@ -369,7 +388,6 @@ function MainApp() {
                 { id: 'activity', label: 'Activity' },
                 { id: 'memory', label: 'Memory' },
                 { id: 'knowledge', label: 'Graph' },
-                { id: 'hands', label: 'Hands' },
                 { id: 'queue', label: 'Queue' },
                 { id: 'advanced', label: 'Advanced' },
               ]}
@@ -390,7 +408,6 @@ function MainApp() {
               {insightsSubTab === 'activity' && <ActivityTimeline />}
               {insightsSubTab === 'memory' && <MemoryTimeline />}
               {insightsSubTab === 'knowledge' && <KnowledgeGraphExplorer />}
-              {insightsSubTab === 'hands' && <HandsDashboard />}
               {insightsSubTab === 'queue' && <TaskQueuePanel />}
               {insightsSubTab === 'advanced' && (
                 <div className="h-full overflow-y-auto p-4 space-y-4 tab-panel-scroll">
@@ -473,7 +490,7 @@ function MainApp() {
           ${isMobile && sidebarOpen ? 'shadow-2xl' : ''}
         `}
       >
-        <ErrorBoundary>
+        <ErrorBoundary label="Sidebar">
           <Sidebar onClose={() => setSidebarOpen(false)} />
         </ErrorBoundary>
       </aside>
@@ -551,13 +568,13 @@ function MainApp() {
         {/* Tab content — ChatContainer is always mounted to keep WebSocket alive */}
         <div className="flex-1 overflow-hidden relative">
           <div style={{ display: activeTab === 'chat' ? 'flex' : 'none' }} className="h-full flex-col">
-            <ErrorBoundary>
+            <ErrorBoundary label="Chat">
               <ChatContainer />
             </ErrorBoundary>
           </div>
           {activeTab !== 'chat' && (
             <div className="h-full overflow-hidden">
-              <ErrorBoundary>
+              <ErrorBoundary label={TABS.find((t) => t.id === activeTab)?.label ?? 'Tab'}>
                 <Suspense fallback={<TabSkeleton />}>
                   {renderTabContent()}
                 </Suspense>
@@ -655,7 +672,7 @@ function MainApp() {
               ['Ctrl+N', 'New chat'],
               ['Ctrl+K', 'Command palette'],
               ['Ctrl+/', 'Settings'],
-              ['Ctrl+Shift+T', 'Toggle theme'],
+              ['Ctrl+Alt+T', 'Toggle theme'],
               ['Escape', 'Close panel/modal'],
               ['?', 'This help'],
             ].map(([key, desc]) => (
@@ -701,10 +718,11 @@ function App() {
           setAuth({ status: 'anonymous', configured: true });
         }
       } catch {
-        // /me endpoint unreachable (old server build). Fall back to anonymous
-        // *only if* the app would also 401 — but since we can't easily know,
-        // let the app through and surface errors organically.
-        if (!cancelled) setAuth({ status: 'authenticated', username: '' });
+        // /me endpoint unreachable — show the login page rather than silently
+        // authenticating. Old servers that don't run cookie auth return
+        // `configured: false` above, so hitting this branch means the server
+        // is actually down or returned a non-JSON error.
+        if (!cancelled) setAuth({ status: 'anonymous', configured: true });
       }
     })();
     return () => { cancelled = true; };

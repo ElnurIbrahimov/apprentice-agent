@@ -62,6 +62,7 @@ export interface Message {
   toolTrace?: ToolTrace[];
   compareResults?: ModelResult[];
   memoriesUsed?: string[];  // Memory snippets that influenced this response
+  actionMode?: string | null;  // e.g. 'delegate', 'research', 'compare' — preserved from composer
   proactive?: {
     action: string;       // e.g., 'notify', 'suggest', 'remind', 'ask'
     trigger?: string;     // What triggered this message

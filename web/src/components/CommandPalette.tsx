@@ -45,7 +45,7 @@ function buildCommands(props: Omit<CommandPaletteProps, 'isOpen' | 'onClose'>): 
     // Actions
     { id: 'new-chat',       label: 'New Chat',       shortcut: 'Ctrl+N',       category: 'Actions', action: newChat },
     { id: 'toggle-sidebar', label: 'Toggle Sidebar', shortcut: 'Ctrl+B',       category: 'Actions', action: toggleSidebar },
-    { id: 'toggle-theme',   label: 'Toggle Theme',   shortcut: 'Ctrl+Shift+T', category: 'Actions', action: toggleTheme },
+    { id: 'toggle-theme',   label: 'Toggle Theme',   shortcut: 'Ctrl+Alt+T', category: 'Actions', action: toggleTheme },
     { id: 'settings',       label: 'Open Settings',  shortcut: 'Ctrl+/',       category: 'Actions', action: () => setActiveTab('settings') },
 
     // Create sub-tabs

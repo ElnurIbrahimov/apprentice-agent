@@ -2,6 +2,9 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { hasSeenProactive, markProactiveSeen } from './proactiveDedup';
+import {
+  enqueueMessage, listQueued, removeQueued, queuedCount as readQueuedCount,
+} from '../utils/messageQueue';
 import type { WebSocketMessage, FileAttachment } from '../types';
 
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/chat/stream`;
@@ -293,6 +296,9 @@ export function useWebSocket() {
         reconnectAttempts.current = 0;
         setError(null);
         startHeartbeat();
+        // Fire-and-forget queue drain — if there are messages we couldn't send
+        // while disconnected, replay them now in order.
+        void drainQueue();
       };
 
       ws.onmessage = (event) => {
@@ -347,30 +353,8 @@ export function useWebSocket() {
     }
   }, [setConnectionStatus, setError, startHeartbeat, stopHeartbeat, getReconnectDelay, handleMessage]);
 
-  // Send message
-  const sendMessage = useCallback((message: string, attachments?: FileAttachment[], modelOverride?: string | null, actionMode?: string | null) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      setError('Not connected to server');
-      return false;
-    }
-
-    addMessage({
-      role: 'user',
-      content: message,
-      attachments,
-    });
-
-    setIsLoading(true);
-    setError(null);
-    currentMessageId.current = null;
-
-    clearResponseTimeout();
-    responseTimeout.current = setTimeout(() => {
-      setIsLoading(false);
-      setError('Response timed out. AURA may be busy — please try again.');
-      currentMessageId.current = null;
-    }, 90000);
-
+  // Actually push a payload over the wire — assumes the socket is OPEN.
+  const wirePayload = useCallback((message: string, attachments: FileAttachment[] | undefined, modelOverride: string | null | undefined, actionMode: string | null | undefined) => {
     const selectedModel = modelOverride !== undefined
       ? modelOverride
       : useChatStore.getState().selectedModel;
@@ -387,7 +371,6 @@ export function useWebSocket() {
     if (selectedModel) payload.model = selectedModel;
     if (actionMode) payload.action_mode = actionMode;
 
-    // Include conversation_id for multi-conversation support
     const conversationId = useChatStore.getState().currentConversationId;
     if (conversationId) payload.conversation_id = conversationId;
     if (attachments?.length) {
@@ -398,10 +381,61 @@ export function useWebSocket() {
         path: a.path,
       }));
     }
+    wsRef.current?.send(JSON.stringify(payload));
+  }, []);
 
-    wsRef.current.send(JSON.stringify(payload));
+  // Send message — queues to localStorage if offline so nothing gets lost.
+  const sendMessage = useCallback((message: string, attachments?: FileAttachment[], modelOverride?: string | null, actionMode?: string | null) => {
+    const connected = wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
+
+    addMessage({
+      role: 'user',
+      content: message,
+      attachments,
+      actionMode: actionMode ?? null,
+    });
+
+    if (!connected) {
+      // Queue for replay on reconnect. Don't set loading — we can't show
+      // progress for something that hasn't started.
+      enqueueMessage({
+        message,
+        attachments,
+        modelOverride,
+        actionMode,
+        conversationId: useChatStore.getState().currentConversationId,
+      });
+      setError(`You're offline — message queued (${readQueuedCount()} pending). Will send on reconnect.`);
+      return false;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    currentMessageId.current = null;
+
+    clearResponseTimeout();
+    responseTimeout.current = setTimeout(() => {
+      setIsLoading(false);
+      setError('Response timed out. AURA may be busy — please try again.');
+      currentMessageId.current = null;
+    }, 300000);
+
+    wirePayload(message, attachments, modelOverride, actionMode);
     return true;
-  }, [addMessage, setIsLoading, setError, clearResponseTimeout]);
+  }, [addMessage, setIsLoading, setError, clearResponseTimeout, wirePayload]);
+
+  // Drain any queued messages on reconnect. Paces sends to avoid slamming
+  // the server with a burst.
+  const drainQueue = useCallback(async () => {
+    const queue = listQueued();
+    if (queue.length === 0) return;
+    for (const q of queue) {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) break;
+      wirePayload(q.message, q.attachments, q.modelOverride, q.actionMode);
+      removeQueued(q.id);
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }, [wirePayload]);
 
   // Disconnect
   const disconnect = useCallback(() => {
