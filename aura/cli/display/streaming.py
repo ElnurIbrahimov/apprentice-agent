@@ -254,6 +254,10 @@ class StreamingResponse:
                 else:
                     self._displayed = bool(self._accumulated.strip())
             finally:
+                # Keep fence state in lockstep with _permanent_len — mirrors
+                # the invariant pause() maintains. Cheap, and avoids a broken
+                # state if anyone ever calls resume() after finish().
+                self._advance_fence_state(new_content)
                 # Always release Rich Live slot — otherwise next turn crashes.
                 try:
                     self._live.stop()

@@ -114,6 +114,18 @@ class SessionRuntimeController:
             self._session.console.print("[red]Too many background tasks running.[/red]")
 
     def save_session_if_initialized(self) -> None:
+        # Best-effort cancel of in-flight background tasks before atexit runs
+        # their daemon threads into the ground. shutdown() flips each task's
+        # _cancelled flag (so the worker's post-execute state-commit branch
+        # returns without overwriting state) and joins with a bounded
+        # deadline. Done before session.save() so the session file records
+        # the bg tasks as FAILED/Cancelled rather than stuck in RUNNING.
+        bg_manager = getattr(self._session, "bg_manager", None)
+        if bg_manager is not None:
+            try:
+                bg_manager.shutdown(timeout=2.0)
+            except Exception:
+                pass
         if self._session._session_initialized:
             self._session.agentic_session.save()
 
