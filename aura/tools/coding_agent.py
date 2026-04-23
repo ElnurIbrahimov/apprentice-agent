@@ -169,7 +169,26 @@ class CodingAgentTool:
         run_cwd = cwd or os.getcwd()
         env = os.environ.copy()
         if env_overrides:
-            env.update(env_overrides)
+            # Filter env_overrides against a denylist so a caller cannot
+            # accidentally (or maliciously) inject Aura auth tokens, cloud
+            # provider credentials, or PYTHONPATH into a spawned coding
+            # agent subprocess. The subprocess already inherits os.environ
+            # which is the intended source for those values; env_overrides
+            # should only carry task-specific extras.
+            _DENY_PREFIXES = ("AURA_", "AWS_", "GCP_", "GOOGLE_", "AZURE_",
+                              "ANTHROPIC_", "OPENAI_")
+            _DENY_EXACT = {"PYTHONPATH", "PYTHONHOME", "LD_PRELOAD",
+                           "DYLD_INSERT_LIBRARIES"}
+            safe_overrides = {}
+            for k, v in env_overrides.items():
+                key = str(k)
+                if key in _DENY_EXACT or any(key.startswith(p) for p in _DENY_PREFIXES):
+                    logger.warning(
+                        "[coding_agent] dropping sensitive env override %r", key
+                    )
+                    continue
+                safe_overrides[key] = v
+            env.update(safe_overrides)
 
         logger.info("[coding_agent] dispatching %s in %s: %s", agent, run_cwd, shlex.join(cmd))
         start = time.time()

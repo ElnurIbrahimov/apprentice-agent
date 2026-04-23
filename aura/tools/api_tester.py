@@ -391,42 +391,31 @@ class APITesterTool:
         return headers
 
     def _validate_url(self, url: str) -> Tuple[Optional[str], Optional[str]]:
-        """Validate and normalize URL. Returns (url, error)."""
+        """Validate and normalize URL. Returns (url, error).
+
+        Delegates SSRF checks to aura.security.ssrf_guard.validate_url_safe
+        which has the authoritative private-IP / cloud-metadata blocklist
+        (AWS / GCP / Azure / Alibaba / Oracle / DigitalOcean). Previous
+        implementation maintained its own short hardcoded list that drifted
+        behind the central guard.
+        """
         parsed = urlparse(url)
         if not parsed.scheme:
             url = "https://" + url
         if not urlparse(url).netloc:
             return None, f"Invalid URL: {url}"
 
-        # SSRF protection
-        import ipaddress
-        import socket as _socket
-        _parsed = urlparse(url)
-        _hostname = _parsed.hostname or ""
-        _ssrf_blocked = [
-            "169.254.169.254", "metadata.google.internal",
-            "169.254.170.2", "168.63.129.16", "0.0.0.0", "10.0.0.1",
-        ]
-        if _hostname in _ssrf_blocked:
-            return None, "Blocked: metadata endpoint"
-
-        _hostname_lower = _hostname.lower()
-        if _hostname_lower in ("localhost", "[::1]", "::1"):
-            return None, "Blocked: localhost/loopback addresses not allowed"
+        try:
+            from aura.security.ssrf_guard import validate_url_safe
+        except ImportError:
+            # If ssrf_guard is unavailable (unexpected), refuse rather than
+            # silently allowing a lax validation path.
+            return None, "SSRF guard unavailable"
 
         try:
-            _ip = ipaddress.ip_address(_hostname)
-            if _ip.is_private or _ip.is_loopback or _ip.is_link_local or _ip.is_reserved:
-                return None, "Blocked: private/loopback IP addresses not allowed"
-        except ValueError:
-            try:
-                _resolved = _socket.getaddrinfo(_hostname, None, _socket.AF_UNSPEC, _socket.SOCK_STREAM)
-                for _family, _type, _proto, _canonname, _sockaddr in _resolved:
-                    _resolved_ip = ipaddress.ip_address(_sockaddr[0])
-                    if _resolved_ip.is_private or _resolved_ip.is_loopback or _resolved_ip.is_link_local or _resolved_ip.is_reserved:
-                        return None, "Blocked: hostname resolves to private/loopback IP"
-            except (_socket.gaierror, OSError):
-                return None, "Blocked: DNS resolution failed for hostname"
+            validate_url_safe(url)
+        except ValueError as e:
+            return None, f"Blocked: {e}"
 
         return url, None
 

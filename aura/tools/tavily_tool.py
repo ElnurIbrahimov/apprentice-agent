@@ -6,6 +6,8 @@ from typing import Dict, List, Optional
 
 import requests
 
+from aura.security.ssrf_guard import validate_url_safe
+
 logger = logging.getLogger(__name__)
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
@@ -102,9 +104,23 @@ class TavilyTool:
         if not valid_urls:
             return {"error": "No valid http/https URLs provided"}
 
+        # SSRF guard — same discipline as firecrawl_tool.scrape(). Tavily
+        # fetches server-side so any URL an attacker slips into our input
+        # would otherwise become Tavily's SSRF, not ours, but there is no
+        # reason to launder private-IP/metadata URLs through this path.
+        safe_urls: List[str] = []
+        for u in valid_urls:
+            try:
+                validate_url_safe(u)
+                safe_urls.append(u)
+            except ValueError as e:
+                logger.warning("[Tavily] extract refused for %s: %s", u, e)
+        if not safe_urls:
+            return {"error": "All URLs rejected by SSRF guard"}
+
         payload = {
             "api_key": self._api_key,
-            "urls": valid_urls[:5],  # API limit
+            "urls": safe_urls[:5],  # API limit
         }
 
         try:

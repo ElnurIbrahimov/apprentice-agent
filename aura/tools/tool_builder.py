@@ -523,11 +523,21 @@ class ToolBuilderTool:
         if not best_match:
             return None
 
-        # Try to inspect the class for public method signatures
+        # Try to inspect the class for public method signatures. Enforce a
+        # strict module-path whitelist even though both code paths above
+        # compose the path from trusted sources (_LAZY_IMPORTS dict and
+        # _sanitize_name output) — belt-and-suspenders against future
+        # drift where a registry entry or new lazy-import might leak a
+        # non-aura.tools namespace into importlib.
+        import importlib
+        import re as _re
+        module_path = best_match["module_path"]
+        if not _re.match(r"^aura\.tools(?:\.custom)?\.[a-z0-9_]+$", module_path):
+            logger.warning("[ToolBuilder] refusing import of non-whitelisted module: %r", module_path)
+            return None
         methods = []
         try:
-            import importlib
-            mod = importlib.import_module(best_match["module_path"])
+            mod = importlib.import_module(module_path)
             cls = getattr(mod, best_match["class_name"], None)
             if cls:
                 import inspect
