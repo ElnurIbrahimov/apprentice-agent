@@ -105,8 +105,13 @@ def cmd_stop(args: argparse.Namespace) -> int:
     except Exception:
         try:
             if sys.platform.startswith("win"):
+                # timeout: taskkill can hang on a wedged/inaccessible process —
+                # cap so the CLI doesn't block forever. 10s is generous; if
+                # we're still past that, surface the failure via check=False
+                # and let the user run `aura status` / Task Manager manually.
                 subprocess.run(["taskkill", "/F", "/PID", str(pid)], check=False,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=10)
             else:
                 os.kill(pid, 15)
                 time.sleep(2)
@@ -116,6 +121,9 @@ def cmd_stop(args: argparse.Namespace) -> int:
                 except ProcessLookupError:
                     pass
             console.print(f"  [green]Stopped[/] (PID {pid})")
+        except subprocess.TimeoutExpired:
+            console.print(f"  [red]taskkill timed out[/] (PID {pid})  — process may be wedged; check Task Manager")
+            return 1
         except Exception as e:
             console.print(f"  [red]Stop failed:[/] {e}")
             return 1

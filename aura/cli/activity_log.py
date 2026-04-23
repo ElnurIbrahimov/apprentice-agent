@@ -17,6 +17,47 @@ logger = logging.getLogger(__name__)
 _LOG_DB_PATH = Path.home() / ".aura" / "logs.db"
 
 
+# Conservative redaction for prompt/response bodies before they land in the
+# activity log SQLite. Targets only well-known secret shapes — generic key=val
+# redaction is left off so legitimate prose like "my password is weak" is not
+# mangled. The log is still intended for the local user, not sharing.
+_SECRET_KEY_NAMES = (
+    r"api[_-]?key|apikey|secret|token|password|passwd|bearer|auth[_-]?token"
+    r"|client[_-]?secret|access[_-]?token|refresh[_-]?token"
+)
+_SECRET_PATTERNS = [
+    # KEY=value or KEY: value or KEY="value" — only when the key name is
+    # unambiguous. Matches the value up to whitespace, quote, or line end.
+    re.compile(
+        rf"(?i)\b({_SECRET_KEY_NAMES})\s*[:=]\s*[\"']?([^\s\"']+)",
+    ),
+    # Known provider token prefixes (OpenAI, Anthropic, Stripe, GitHub, Slack, AWS).
+    re.compile(r"\b(sk-[A-Za-z0-9_\-]{20,})\b"),
+    re.compile(r"\b(sk-ant-[A-Za-z0-9_\-]{20,})\b"),
+    re.compile(r"\b(sk_live_[A-Za-z0-9]{20,})\b"),
+    re.compile(r"\b(ghp_[A-Za-z0-9]{20,})\b"),
+    re.compile(r"\b(github_pat_[A-Za-z0-9_]{20,})\b"),
+    re.compile(r"\b(xox[baprs]-[A-Za-z0-9-]{10,})\b"),
+    re.compile(r"\b(AKIA[0-9A-Z]{16})\b"),
+]
+
+
+def _sanitize_for_log(text: str) -> str:
+    """Redact common secret shapes before persisting to the activity log.
+
+    Defense in depth — the user may paste .env output or command lines with
+    tokens without realising it ends up on disk.
+    """
+    if not text:
+        return text
+    # First-pass: named key=value redaction (keeps the key name, masks value).
+    text = _SECRET_PATTERNS[0].sub(lambda m: f"{m.group(1)}=***", text)
+    # Second-pass: raw provider token prefixes, regardless of surrounding key.
+    for pat in _SECRET_PATTERNS[1:]:
+        text = pat.sub("***", text)
+    return text
+
+
 @dataclass
 class LogEntry:
     """A single interaction log entry."""
@@ -115,8 +156,10 @@ class ActivityLog:
                 """INSERT INTO interactions
                    (timestamp, session_id, prompt, response, model, tokens_in, tokens_out, cost, tool_calls, command)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (time.time(), session_id, prompt[:10000], response[:50000], model,
-                 tokens_in, tokens_out, cost, tool_calls, command),
+                (time.time(), session_id,
+                 _sanitize_for_log(prompt)[:10000],
+                 _sanitize_for_log(response)[:50000],
+                 model, tokens_in, tokens_out, cost, tool_calls, command),
             )
             row_id = cursor.lastrowid
             conn.commit()
