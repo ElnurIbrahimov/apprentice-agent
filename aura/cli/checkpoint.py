@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -11,6 +12,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class CheckpointManager:
@@ -106,7 +109,13 @@ class CheckpointManager:
                 old = self._index.pop()
                 old_dir = self._dir / old["id"]
                 if old_dir.exists():
-                    shutil.rmtree(old_dir, ignore_errors=True)
+                    # Windows editors / AV can lock files in the checkpoint
+                    # dir; log at debug rather than silently swallow so
+                    # leaked checkpoint directories are observable.
+                    try:
+                        shutil.rmtree(old_dir)
+                    except OSError as e:
+                        logger.debug("checkpoint_rmtree_failed: %s (%s)", old_dir, e)
 
             self._save_index()
             return cp_id
@@ -174,6 +183,9 @@ class CheckpointManager:
             for entry in self._index:
                 cp_dir = self._dir / entry["id"]
                 if cp_dir.exists():
-                    shutil.rmtree(cp_dir, ignore_errors=True)
+                    try:
+                        shutil.rmtree(cp_dir)
+                    except OSError as e:
+                        logger.debug("checkpoint_rmtree_failed: %s (%s)", cp_dir, e)
             self._index.clear()
             self._save_index()

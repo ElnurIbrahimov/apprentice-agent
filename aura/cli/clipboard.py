@@ -97,6 +97,12 @@ def read_clipboard_image() -> Optional[str]:
                     continue
                 if p.suffix.lower() not in _ALLOWED_IMG_EXTS:
                     continue
+                # Reject symlinks — closes the TOCTOU between is_file() and
+                # Pillow's open(), where a local attacker could swap a
+                # regular file for a symlink pointing at /proc/self/mem or
+                # similar.
+                if p.is_symlink():
+                    continue
                 if not p.is_file():
                     continue
                 from PIL import Image

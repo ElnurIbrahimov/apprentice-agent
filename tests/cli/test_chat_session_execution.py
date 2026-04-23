@@ -171,11 +171,28 @@ def test_run_agent_handles_tool_callbacks_and_auto_test_feedback():
 
     session.agentic.run = _run
 
+    # The auto-test result lands in session.pending_injections via a done
+    # callback on the future returned by bg_pool().submit(). Under real
+    # bg_pool, that's racy against run_agent() returning — test has flaked
+    # once under -x pool-cold-start. Pin bg_pool to a synchronous executor
+    # so the callback fires before run_agent returns, deterministically.
+    from concurrent.futures import Future as _Future
+
+    class _SyncExec:
+        def submit(self, fn, *args, **kwargs):
+            fut: _Future = _Future()
+            try:
+                fut.set_result(fn(*args, **kwargs))
+            except Exception as e:  # pragma: no cover — test fixture
+                fut.set_exception(e)
+            return fut
+
     with (
         patch("aura.cli.display.StreamingResponse", return_value=streamer),
         patch("aura.cli.display.show_tool_call") as show_tool_call,
         patch("aura.cli.display.show_tool_result_inline") as show_tool_result_inline,
         patch("aura.cli.display.show_response_attribution") as show_response_attribution,
+        patch("aura.pools.bg_pool", return_value=_SyncExec()),
     ):
         result = controller.run_agent("fix auth")
 
