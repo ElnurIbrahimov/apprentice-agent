@@ -127,3 +127,61 @@ def test_ping():
     server = AuraACPServer(project_root=".")
     responses = _drive(server, [{"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}}])
     assert responses[0]["result"] == {}
+
+
+class TestProcessLineValidation:
+    """Regression: server used to crash when JSON parsed to a non-dict type.
+
+    The run() loop called _handle(request) directly, which does
+    request.get('method'). A list/string/null top-level value would
+    AttributeError there, and the outer except block would then
+    AttributeError again on request.get('id'), crashing the server.
+    Must return a clean -32600 Invalid Request instead.
+    """
+
+    def _process(self, line: str) -> list[dict]:
+        server = AuraACPServer(project_root=".")
+        captured: list[dict] = []
+        server._write = lambda data: captured.append(data)
+        server.process_line(line)
+        return captured
+
+    def test_list_request_rejected(self):
+        captured = self._process("[1, 2, 3]")
+        assert len(captured) == 1
+        err = captured[0]["error"]
+        assert err["code"] == -32600
+        assert "Invalid Request" in err["message"]
+
+    def test_string_request_rejected(self):
+        captured = self._process('"hello"')
+        assert len(captured) == 1
+        assert captured[0]["error"]["code"] == -32600
+
+    def test_null_request_rejected(self):
+        captured = self._process("null")
+        assert len(captured) == 1
+        assert captured[0]["error"]["code"] == -32600
+
+    def test_number_request_rejected(self):
+        captured = self._process("42")
+        assert len(captured) == 1
+        assert captured[0]["error"]["code"] == -32600
+
+    def test_invalid_json_gives_parse_error(self):
+        captured = self._process("{not-valid-json")
+        assert len(captured) == 1
+        assert captured[0]["error"]["code"] == -32700
+
+    def test_blank_line_ignored(self):
+        captured = self._process("   ")
+        assert captured == []
+
+    def test_valid_dict_passes_through(self):
+        captured = self._process(json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}}
+        ))
+        # ping returns a valid result, not an error
+        assert len(captured) == 1
+        assert "error" not in captured[0]
+        assert captured[0]["result"] == {}

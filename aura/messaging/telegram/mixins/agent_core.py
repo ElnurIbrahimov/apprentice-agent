@@ -732,10 +732,11 @@ class AgentCoreMixin:
                 artifacts.append(screenshot)
                 brain._last_screenshot_path = None
 
+        from aura.paths import user_data_path
         output_dirs = [
-            Path("data/output"),
-            Path("data/screenshots"),
-            Path("data/generated"),
+            user_data_path("output"),
+            user_data_path("screenshots"),
+            user_data_path("generated"),
         ]
         cutoff = _time.time() - 60
 

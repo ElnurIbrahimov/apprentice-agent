@@ -322,7 +322,35 @@ class ExtensionChannel(ChannelAdapter):
                 body,
             )
 
-        # All other paths proceed to WebSocket upgrade.
+        # WebSocket upgrade: gate on Origin to prevent drive-by JS from
+        # arbitrary web pages (WebSockets are NOT same-origin-restricted —
+        # any page can open `ws://localhost:9828` and drive the agent's
+        # full local tool access otherwise). Browser extensions send
+        # `chrome-extension://...` or `moz-extension://...`; same-origin
+        # native clients may send no Origin header at all. Both are allowed.
+        # Anything else is refused with 403.
+        origin = ""
+        try:
+            origin = request.headers.get("Origin", "") or request.headers.get("origin", "")
+        except Exception:
+            origin = ""
+        if origin and not (
+            origin.startswith("chrome-extension://")
+            or origin.startswith("moz-extension://")
+            or origin.startswith("safari-web-extension://")
+            or origin == "null"  # file:// or sandboxed
+        ):
+            logger.warning(
+                "[ExtensionChannel] Rejecting WS upgrade from disallowed origin: %s",
+                origin,
+            )
+            return Response(
+                HTTPStatus.FORBIDDEN,
+                "Forbidden",
+                websockets.datastructures.Headers({"Content-Type": "text/plain"}),
+                b"Origin not permitted",
+            )
+
         # Note: websockets v16 Request has no .method — all requests
         # reaching process_request are GET (the HTTP parser rejects others).
         return None

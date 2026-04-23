@@ -106,7 +106,11 @@ class MultiUserManager:
         identity_core: Optional[IdentityCore] = None,
         knowledge_abstractor: Optional[KnowledgeAbstractor] = None,
     ):
-        self._data_dir = data_dir or Path("data/multi_user")
+        if data_dir:
+            self._data_dir = data_dir
+        else:
+            from aura.paths import user_data_path
+            self._data_dir = user_data_path("multi_user")
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 

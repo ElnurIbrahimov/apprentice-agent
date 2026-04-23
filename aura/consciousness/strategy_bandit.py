@@ -11,7 +11,6 @@ import contextvars
 import json
 import logging
 import math
-import os
 import random
 import re
 import sqlite3
@@ -20,7 +19,6 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -394,9 +392,10 @@ class StrategyBandit:
         self._classifier = ProblemClassifier()
         self._reward_computer = CompositeRewardComputer()
 
-        # Resolve DB path
+        # Resolve DB path (AURA_DATA_DIR honored, else anchored under AURA_ROOT)
         if db_path is None:
-            data_dir = Path(os.getenv("AURA_DATA_DIR", "data"))
+            from aura.paths import resolve_data_dir
+            data_dir = resolve_data_dir()
             data_dir.mkdir(parents=True, exist_ok=True)
             self._db_path = str(data_dir / "aura_meta.db")
         else:

@@ -37,8 +37,11 @@ _FAISS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
-# Default DB path (overridable via Config)
-_DEFAULT_DB_PATH = Path("data/aura_memory.db")
+# Default DB path (overridable via Config or AURA_MEMORY_DB_PATH env var).
+# Anchored under AURA_ROOT — running `aura` from any directory used to
+# silently create a fresh DB under `<cwd>/data/` and lose all prior memory.
+from aura.paths import user_data_path as _user_data_path
+_DEFAULT_DB_PATH = _user_data_path("aura_memory.db")
 
 
 def _float32_to_blob(vec: np.ndarray) -> bytes:

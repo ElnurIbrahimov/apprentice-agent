@@ -20,7 +20,8 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PATH = Path("data/narrative_self.json")
+from aura.paths import user_data_path as _user_data_path
+_DEFAULT_PATH = _user_data_path("narrative_self.json")
 
 
 @dataclass

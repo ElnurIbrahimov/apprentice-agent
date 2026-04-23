@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 from rich.panel import Panel
 from rich.table import Table
@@ -584,8 +585,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     console.print("\n  [bold]Strategy bandit:[/]")
     try:
         import sqlite3
-        from pathlib import Path as _P
-        data_dir = _P(os.getenv("AURA_DATA_DIR", "data"))
+        from aura.paths import resolve_data_dir
+        data_dir = resolve_data_dir()
         db_path = data_dir / "aura_meta.db"
         if db_path.exists():
             conn = sqlite3.connect(str(db_path))
@@ -602,8 +603,8 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     console.print("\n  [bold]Daemon:[/]")
     try:
-        from pathlib import Path as _P
-        pid_file = _P(os.getenv("AURA_DATA_DIR", "data")) / "daemon.pid"
+        from aura.paths import resolve_data_dir
+        pid_file = resolve_data_dir() / "daemon.pid"
         if pid_file.exists():
             pid = pid_file.read_text().strip()
             console.print(f"    PID: [cyan]{pid}[/] (see {pid_file})")

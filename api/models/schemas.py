@@ -184,3 +184,10 @@ class SaveToMemoryResponse(BaseModel):
     message_count: int = 0
     title: str = ""
     error: Optional[str] = None
+
+
+class MessageFeedbackRequest(BaseModel):
+    """Thumbs up/down feedback on an assistant message."""
+    message_id: str = Field(default="", max_length=128)
+    conversation_id: str = Field(default="", max_length=128)
+    rating: str = Field(..., pattern=r"^(positive|negative)$")

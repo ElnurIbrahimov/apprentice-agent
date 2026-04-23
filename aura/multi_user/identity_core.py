@@ -174,7 +174,11 @@ class IdentityCore:
     """AURA's persistent, layered identity system."""
 
     def __init__(self, data_dir: Optional[Path] = None):
-        self._data_dir = data_dir or Path("data/identity_core")
+        if data_dir:
+            self._data_dir = data_dir
+        else:
+            from aura.paths import user_data_path
+            self._data_dir = user_data_path("identity_core")
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
         self.constitutional = ConstitutionalLayer()

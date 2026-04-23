@@ -426,7 +426,11 @@ class LocalRAG:
         """
         from ..config import Config
 
-        self.data_dir = data_dir or (Path(os.getenv("AURA_DATA_DIR", "data")) / "rag")
+        if data_dir:
+            self.data_dir = data_dir
+        else:
+            from aura.paths import resolve_data_dir
+            self.data_dir = resolve_data_dir() / "rag"
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         self._index_file_path = self.data_dir / "index.json"

@@ -73,8 +73,11 @@ def _git_auto_commit(file_path: str, message: str) -> Optional[str]:
         if hash_result.returncode == 0:
             return hash_result.stdout.strip()
 
-    except Exception:
-        pass  # Edit succeeded — never fail because of git
+    except Exception as e:
+        # Edit succeeded — never fail because of git. But log at debug
+        # so the failure isn't completely invisible when investigating
+        # "why didn't this auto-commit" reports.
+        logger.debug("[code_edit] auto-commit swallowed: %s", e)
 
     return None
 

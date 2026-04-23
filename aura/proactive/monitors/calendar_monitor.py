@@ -213,8 +213,9 @@ class CalendarMonitor(BaseMonitor):
         - Paths configured in self._ics_paths
         """
         events = []
+        from aura.paths import user_data_path
         search_dirs = [
-            Path("data/calendars"),
+            user_data_path("calendars"),
             Path.home() / "calendars",
             Path.home() / "Documents" / "calendars",
         ]

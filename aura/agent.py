@@ -645,6 +645,16 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
         metadata: dict | None = None,
     ) -> dict:
         """Build a standardized response dict."""
+        # Surface the model that actually handled this call so non-interactive
+        # consumers (scripts reading --fast JSON output) can audit routing
+        # without having to --routing-trace every run. Prefer the explicit
+        # override, fall back to the brain's last-used model, else "" so the
+        # key is always present.
+        _model = (
+            getattr(self.brain, "_model_override", None)
+            or getattr(self.brain, "_last_model_used", None)
+            or ""
+        )
         result = {
             "goal": goal,
             "completed": completed,
@@ -652,6 +662,7 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
             "fast_path": fast_path,
             "response": response,
             "history": history or [],
+            "model": _model,
         }
         if metadata:
             result.update(metadata)

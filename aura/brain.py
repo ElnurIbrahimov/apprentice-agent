@@ -1139,20 +1139,28 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         fast_model = Config.MODEL_FAST
         try:
             client, actual_model = self._get_client_for_model(fast_model)
-            # Use bg_pool (not llm_pool) to avoid competing with user inference
-            from aura.pools import bg_pool as _bg_pool_fn
+            # Submit to llm_pool, NOT bg_pool. compact_history() runs on
+            # bg_pool and calls _quick_generate; if we also submitted to
+            # bg_pool here and then blocked on future.result(), eight
+            # concurrent compactions would saturate bg_pool's 8 workers and
+            # deadlock. llm_pool is the semantic home for LLM calls anyway.
+            from aura.pools import llm_pool as _llm_pool_fn
+            response = None
             try:
-                future = _bg_pool_fn().submit(
+                future = _llm_pool_fn().submit(
                     lambda: client.chat(
                         model=actual_model,
                         messages=[{"role": "user", "content": prompt}]
                     )
                 )
                 response = future.result(timeout=timeout)
-            except Exception:
-                response = None
-            if response is None:
+            except concurrent.futures.TimeoutError:
                 logger.warning(f"[BRAIN] Quick generate timed out after {timeout}s")
+                return ""
+            except Exception as submit_err:
+                logger.warning(f"[BRAIN] Quick generate call failed: {submit_err}")
+                return ""
+            if response is None:
                 return ""
             return _resp_content(response)
         except Exception as e:

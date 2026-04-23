@@ -33,7 +33,11 @@ class UserMindModel:
 
     def __init__(self, user_id: str, data_dir: Optional[Path] = None):
         self.user_id = user_id
-        self._data_dir = data_dir or Path("data/user_models") / user_id
+        if data_dir:
+            self._data_dir = data_dir
+        else:
+            from aura.paths import user_data_path
+            self._data_dir = user_data_path("user_models") / user_id
         self._data_dir.mkdir(parents=True, exist_ok=True)
 
         # === Core ToM components (reused from TheoryOfMind) ===

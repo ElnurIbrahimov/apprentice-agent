@@ -28,7 +28,8 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB_PATH = Path("data/telegram_state.db")
+from aura.paths import user_data_path as _user_data_path
+_DEFAULT_DB_PATH = _user_data_path("telegram_state.db")
 
 
 class TelegramStore:

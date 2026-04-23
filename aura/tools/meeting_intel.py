@@ -29,7 +29,8 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-MEETINGS_DIR = Path(os.getenv("AURA_DATA_DIR", "data")) / "meetings"
+from aura.paths import resolve_data_dir as _resolve_data_dir
+MEETINGS_DIR = _resolve_data_dir() / "meetings"
 WHISPER_MODEL = os.getenv("AMBIENT_AUDIO_MODEL", "base")
 SAMPLE_RATE = 16000
 CHUNK_FRAMES = 512

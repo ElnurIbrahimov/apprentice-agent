@@ -81,14 +81,26 @@ else:
 
 from logging.handlers import RotatingFileHandler
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [DAEMON] %(levelname)s %(name)s %(message)s",
-    handlers=[
-        RotatingFileHandler(LOG_FILE, maxBytes=10_000_000, backupCount=5, encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
+
+def _configure_daemon_logging() -> None:
+    """Install the daemon's stdout+file logger.
+
+    Kept out of module scope because this file is imported from CLI paths
+    (see aura.cli.commands.daemon_commands) just to reach AuraDaemon/PID_FILE.
+    Running basicConfig at import-time pollutes every short-lived subcommand's
+    stdout with [DAEMON] INFO lines. Only the actual `python aura_daemon.py`
+    process — or an explicit call from the start command — should install it.
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [DAEMON] %(levelname)s %(name)s %(message)s",
+        handlers=[
+            RotatingFileHandler(LOG_FILE, maxBytes=10_000_000, backupCount=5, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -1028,6 +1040,11 @@ def install_service():
 
 
 def main():
+    # Install stdout+file logging only when running as the actual daemon
+    # process. Importers (CLI subcommands) keep whatever logging config the
+    # CLI already set up.
+    _configure_daemon_logging()
+
     parser = argparse.ArgumentParser(description="AURA Living Daemon")
     parser.add_argument("--install", action="store_true", help="Install as Windows service")
     parser.add_argument("--status", action="store_true", help="Check daemon status")

@@ -46,20 +46,121 @@ const SLIDE_TEMPLATES = [
   { label: 'Research Findings', icon: '🔬', desc: 'Study results presentation', prompt: 'A research study presentation: study title and authors, research question, literature summary, hypothesis, methodology overview, sample characteristics table, 4 results slides (histogram, box plot, correlation heatmap, grouped bar chart with p-values), discussion, limitations, implications, and references. Academic clean design.' },
   { label: 'Brand Guidelines', icon: '🎨', desc: 'Brand identity standards', prompt: 'A brand guidelines presentation: brand logo and variations, color palette (primary, secondary, accent with hex codes), typography system (heading and body fonts with sizes), logo usage rules (dos and donts), imagery style guide with examples, iconography style, social media templates, business card and stationery, voice and tone examples, and brand application examples.' },
   { label: 'Sprint Review', icon: '🔄', desc: 'Agile sprint retrospective', prompt: 'A sprint review presentation: sprint number and dates, sprint goal recap, completed stories (card list with points), demo screenshots of delivered features, velocity chart (last 6 sprints), burndown chart, bugs fixed and technical debt addressed, team feedback (what went well, what to improve), and next sprint planning priorities. Clean dev-friendly design.' },
+  { label: 'All-Hands', icon: '👥', desc: 'Company update, wins, priorities', prompt: 'A company all-hands presentation: mission reminder, quarter highlights (3 big wins with metrics), financial snapshot, team spotlights with photos, product roadmap preview, hiring updates, Q&A prompts, and one-shared-goal closing slide. Warm team-focused design.' },
+  { label: 'Monthly Update', icon: '📅', desc: 'Progress, blockers, next steps', prompt: 'A monthly team update: goals vs progress (bar chart), key achievements bullet list, active projects status cards (on-track/at-risk/blocked color-coded), team changes (new hires, role changes), lessons learned, next month priorities, and open questions for leadership.' },
+  { label: 'Investor Update', icon: '💼', desc: 'Metrics, runway, asks', prompt: 'An investor update deck: TL;DR slide, North Star metric trend, revenue / MRR / ARR charts, customer wins and logos, product shipped this period, team changes, cash/runway card, key risks, and specific asks (intros, hires, advice). Clean professional black/white design.' },
+  { label: 'Post-Mortem', icon: '🔥', desc: 'Incident analysis, timeline, actions', prompt: 'A blameless post-mortem presentation: incident summary (what happened, duration, impact, severity), timeline of events with timestamps, root cause analysis (5 whys), what went well vs what went poorly, action items with owners and dates, metrics affected chart, and prevention measures. Somber professional design.' },
+  { label: 'Roadmap Review', icon: '🗺️', desc: 'Quarters, themes, commitments', prompt: 'A product roadmap presentation: vision statement, strategic themes (3 pillars), quarter-by-quarter roadmap swim lanes (Q1/Q2/Q3/Q4), committed vs aspirational clearly labeled, dependencies callouts, success metrics per theme, and how we measure progress. Strategic executive design.' },
+  { label: 'Competitive Analysis', icon: '⚔️', desc: 'Landscape, positioning, differentiation', prompt: 'A competitive analysis deck: market landscape slide, competitor matrix (us vs 3-4 others on 6 dimensions), positioning map (2x2), feature comparison table, pricing comparison, differentiation strengths, threats to watch, and strategic recommendations. Analytical business design.' },
+  { label: 'User Research Readout', icon: '🔍', desc: 'Interviews, themes, insights', prompt: 'A user research presentation: study overview (participants, methodology), participant breakdown (demographics), key themes (3-5 top findings with supporting quotes), behavioral insights, surprising discoveries, opportunity areas, and recommended next steps. Empathetic human-centered design.' },
+  { label: 'A/B Test Results', icon: '🧪', desc: 'Variants, metrics, decision', prompt: 'An experiment results presentation: hypothesis and test design, control vs variant metrics comparison, primary metric significance (p-value, confidence interval), secondary metrics table, segment breakdown, surprising findings, decision (ship/kill/iterate), and learnings for future tests. Clean data-driven design.' },
+  { label: 'NPS Review', icon: '❤️', desc: 'Score, drivers, verbatims', prompt: 'An NPS quarterly review: current NPS score and trend, score distribution histogram, promoter/passive/detractor breakdown, top themes from verbatims with sample quotes, improvement actions taken from last quarter, category-level NPS (features/support/pricing), and priorities for next quarter.' },
+  { label: 'Budget Proposal', icon: '💵', desc: 'Request, rationale, ROI', prompt: 'A budget proposal presentation: executive summary, current-state problem, proposed investment breakdown, ROI projections with sensitivity analysis, implementation timeline Gantt, risks and mitigations, alternatives considered, and requested approval. Finance formal design.' },
+  { label: 'OKR Planning', icon: '🎯', desc: 'Objectives, key results, commitments', prompt: 'An OKR planning session deck: company-level objectives, team objective options with trade-offs, draft key results with measurability rubric, dependencies between teams, aspirational vs committed split, capacity check, and decision-making framework. Collaborative strategy design.' },
+  { label: 'Hackathon Pitch', icon: '⚡', desc: 'Problem, demo, ask', prompt: 'A hackathon presentation (under 3 minutes): bold problem hook, 30-second live demo description, how it works (3 key technical points with diagram), impact stats, team selfie, and what we need next (hiring, funding, users). Energetic bold design.' },
+  { label: 'Keynote', icon: '⭐', desc: 'Big idea, story, call-to-action', prompt: 'A keynote-style presentation with cinematic feel: opening quote full-screen, establishing story (why we are here), three-act structure (tension, reveal, call-to-action), 7-8 visually striking slides with minimal text and large imagery, and memorable closing line. High-contrast bold design.' },
+  { label: 'TED-style Talk', icon: '💡', desc: 'Idea worth spreading', prompt: 'A TED-style talk deck: opening hook (personal story or surprising statistic), the idea in one sentence, three supporting arguments with vivid examples, counterargument addressed, call-to-reflection (not just action), closing image full-screen, and 5-word takeaway. Minimal typographic design, one idea per slide.' },
+  { label: 'Webinar', icon: '🖥️', desc: 'Learn, demo, Q&A', prompt: 'A webinar presentation: welcome with housekeeping (mute/chat/Q&A), presenter bio, learning objectives, content sections (3-4 topics each with summary slide + deep dive), live demo placeholder slide, poll/interactive slide, Q&A prompt, and next-step CTA with resource links.' },
+  { label: 'Workshop Facilitator', icon: '📓', desc: 'Agenda, exercises, debrief', prompt: 'A workshop facilitator deck: welcome and norms, learning objectives, mini-lecture slides (3 concepts), exercise instructions (timing, group size, prompts), debrief discussion questions, synthesis slide, key takeaways, and action planning template. Educational collaborative design.' },
+  { label: 'Training Module', icon: '🎓', desc: 'Lesson plan, assessment', prompt: 'A training module presentation: module title and learning outcomes, prerequisite knowledge check, concept explanations with visual aids, worked examples, hands-on exercise instructions, knowledge check quiz questions, summary and key takeaways, and links to further resources. Clean educational design.' },
+  { label: 'Book Summary', icon: '📖', desc: 'Key ideas, quotes, application', prompt: 'A book summary presentation: book cover and author, one-sentence thesis, 5-7 key ideas (one per slide with explanation and example), most impactful quotes, how to apply in work/life, recommended chapters to read in full, and connections to other books. Clean literary design.' },
+  { label: 'Book Club', icon: '📚', desc: 'Discussion questions, themes', prompt: 'A book club discussion deck: book overview, author background, plot/argument summary (no spoilers version), themes and motifs, favorite passages, discussion questions (10), opposing viewpoints prompts, and next book suggestion. Warm conversational design.' },
+  { label: 'Grand Rounds', icon: '🩺', desc: 'Medical case presentation', prompt: 'A medical grand-rounds presentation: case history (anonymized), chief complaint and vitals, examination findings, differential diagnosis, investigations ordered and results, working diagnosis and reasoning, management plan, outcome and follow-up, teaching points, and references. Clean clinical design.' },
+  { label: 'Journal Club', icon: '🧠', desc: 'Paper critique, discussion', prompt: 'A journal club presentation: paper citation and significance, background/gap, research question and hypothesis, study design, methods overview, key results with figures, authors conclusions, your critical appraisal (strengths/weaknesses/bias), applicability to practice, and discussion questions. Academic serif design.' },
+  { label: 'Scientific Poster', icon: '🖼️', desc: 'Compact research summary', prompt: 'A poster-style presentation (each slide = a poster panel): title and authors banner, background and hypothesis, methods with flow diagram, results with 2-3 key figures, discussion and implications, conclusions bullet list, acknowledgments and funding, and QR code placeholder for full paper. Academic portrait layout.' },
+  { label: 'Grant Pitch', icon: '💰', desc: 'Significance, innovation, approach', prompt: 'A research grant pitch: specific aims slide, significance/impact, innovation and novelty, preliminary data, research approach per aim (methods, milestones, risks, alternatives), team and environment, budget justification summary, and timeline. Formal academic design.' },
+  { label: 'Legal Opening', icon: '⚖️', desc: 'Mock trial, story, evidence', prompt: 'A legal opening statement deck: case title, one-sentence theory of the case, narrative of events, key evidence preview (3 items with thumbnails), witness list overview, elements the jury must find, closing ask, and thematic tagline. Formal austere design.' },
+  { label: 'Campaign Rally', icon: '📣', desc: 'Platform, crowd, call-to-action', prompt: 'A political campaign deck: candidate name and tagline, why Im running (origin story), platform pillars (3-5 policy areas with specific proposals), accomplishments track record, endorsements, volunteer and donate CTAs, event schedule, and closing inspirational slide. Bold patriotic design.' },
+  { label: 'Town Hall', icon: '🏛️', desc: 'Community update, Q&A', prompt: 'A town hall presentation: welcome and agenda, community issues addressed (budget, safety, services), key numbers and metrics, completed projects, planned initiatives, how residents can engage, Q&A format, and contact info slide. Civic friendly design.' },
+  { label: 'Real Estate Listing', icon: '🏠', desc: 'Property pitch, photos, specs', prompt: 'A real estate listing presentation: property photo hero, address and price, key specs (beds/baths/sqft/year), room-by-room photo slides with captions, neighborhood highlights, school district info, recent comparables, offer process, and agent contact slide. Elegant property-focused design.' },
+  { label: 'Travel Itinerary', icon: '✈️', desc: 'Trip plan, day-by-day, map', prompt: 'A travel itinerary presentation: destination hero with dates, flight/transportation summary, day-by-day slides (morning/afternoon/evening activities with photos), accommodations, restaurants to try, budget breakdown, packing checklist, and emergency contacts. Adventurous travel design.' },
+  { label: 'Product Teardown', icon: '🔍', desc: 'Competitor deep dive', prompt: 'A product teardown deck: product overview (screenshots, positioning), first-time user experience flow slides, strengths (what they do well), weaknesses (gaps and friction), strategic insights about their approach, implications for our strategy, and what we should steal/avoid. Analytical design.' },
+  { label: 'Partnership Pitch', icon: '🤝', desc: 'Why us, mutual value, ask', prompt: 'A partnership pitch deck: our company overview, why we value their brand/audience, proposed partnership structure (3 options), mutual value breakdown with metrics, similar partnerships that worked, timeline and next steps, success metrics, and contact/CTA. Business-forward design.' },
+  { label: 'Retrospective', icon: '🔄', desc: 'Start/Stop/Continue format', prompt: 'A team retrospective presentation: period covered, team morale check, wins to celebrate (5 items), Start items (things to begin), Stop items (things to end), Continue items (things working well), action items with owners, and appreciation slide. Warm team design.' },
+  { label: 'Onboarding Kickoff', icon: '👋', desc: 'New hire welcome deck', prompt: 'A new-hire onboarding deck: welcome slide with team photos, company mission and values, how we work (norms, tools, communication), meet-the-team spotlights, 30/60/90-day plan, resources and setup checklist, first-week calendar, and who to ask for help. Friendly inclusive design.' },
+  { label: 'Reorg Announcement', icon: '🔀', desc: 'Structure change, rationale', prompt: 'A reorganization announcement: why were changing (context), what specifically is changing (old vs new org charts side by side), impact on each team, what is NOT changing (reassurance), reporting changes, timeline and milestones, how we will transition, and Q&A prompts. Direct honest design.' },
+  { label: 'Status Update', icon: '📊', desc: 'Project health, risks, next', prompt: 'A project status update: project name and sponsor, overall status (RAG: green/amber/red) with reasoning, key milestones hit/missed, burndown or timeline visual, risks and issues register (with mitigations), asks and decisions needed, and upcoming milestones. Clean PM design.' },
+  { label: 'Interview Prep', icon: '💬', desc: 'Candidate assessment framework', prompt: 'An interview kickoff deck for a hiring loop: role summary and success profile, assessment rubric (3-5 competencies with behavioral anchors), interview plan by interviewer (topics, time allocation), common biases to watch for, debrief protocol and calibration, and strong-hire example. Clean HR design.' },
 ];
 
-const SYSTEM_PROMPT = `You are a presentation designer. Generate a complete HTML presentation with inline CSS and JavaScript.
+const SYSTEM_PROMPT = `You are a senior presentation designer building a production-quality deck in a single HTML file using Reveal.js 5.
 
-Rules:
-- Output ONLY complete HTML starting with <!DOCTYPE html>
-- Each slide is a <section class='slide'> element
-- Include CSS for: slide layout (100vw x 100vh per slide), navigation, transitions
-- Include JS for keyboard navigation (arrow keys) and slide counter
-- Use professional typography and colors matching the requested style
-- Make slides visually impactful with proper hierarchy
-- Include speaker notes as data-notes attributes
-- NO markdown, NO explanation, ONLY the HTML document
-- If user asks for modifications, return the COMPLETE updated HTML`;
+OUTPUT FORMAT
+- Output ONLY complete HTML starting with <!DOCTYPE html> — no markdown fences, no prose
+- If user asks for modifications, return the COMPLETE updated HTML
+
+REQUIRED STACK
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reset.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/theme/black.min.css" id="theme">
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/plugin/notes/notes.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/plugin/highlight/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/plugin/highlight/monokai.min.css">
+
+Google Fonts: pick a distinctive pair for the deck (serif display + grotesque body works well for editorial; grotesque pair for technical; pick one based on vibe).
+Optional: Chart.js v4 CDN for data slides; Lucide icons.
+
+STRUCTURE (this is non-negotiable — Reveal requires it)
+<body>
+  <div class="reveal">
+    <div class="slides">
+      <section data-transition="fade">
+        <h1>Slide 1</h1>
+        <aside class="notes">Speaker notes for slide 1.</aside>
+      </section>
+      <section>
+        <h2>Slide 2</h2>
+        <ul>
+          <li class="fragment">Appears on next click</li>
+          <li class="fragment fade-up">Appears with fade-up</li>
+        </ul>
+      </section>
+      <!-- vertical stack example -->
+      <section>
+        <section><h2>Parent</h2></section>
+        <section><h3>Child 1 (down arrow)</h3></section>
+      </section>
+    </div>
+  </div>
+  <script>
+    Reveal.initialize({
+      hash: true,
+      controls: true,
+      progress: true,
+      slideNumber: 'c/t',
+      transition: 'fade', // or 'slide' | 'convex' | 'concave' | 'zoom' | 'none'
+      plugins: [RevealNotes, RevealHighlight]
+    });
+  </script>
+</body>
+
+THEME SELECTION
+- Dark (default): black.min.css
+- Light editorial: white.min.css, simple.min.css
+- Vibrant: league.min.css, moon.min.css, night.min.css
+- Minimal: beige.min.css, serif.min.css
+Or omit the theme CSS entirely and style from scratch with your own tokens.
+
+DESIGN DIRECTIVES (quality bar)
+- One dominant color per deck. Pick a register and commit.
+- Distinctive typography pair — no Inter/Poppins/Plus-Jakarta defaults. Examples: Fraunces + Inter Tight (editorial), IBM Plex Sans + IBM Plex Serif (technical), Space Grotesk + Space Mono (modern tech).
+- Each slide must have ONE clear idea. Don't cram bullet lists — break into multiple slides and use fragments for progressive reveal.
+- Big type. Slide H1 should be 72-120px. Body 24-36px minimum.
+- Use fragments (class="fragment") for reveals. Variants: fade-in (default), fade-up, fade-down, fade-left, fade-right, grow, shrink, highlight-current-blue, highlight-red.
+- Section slides (data-background-color, data-background-image) to break chapters.
+- Charts/diagrams get full slides, not tiny corner thumbnails.
+- Speaker notes (<aside class="notes">) on every content slide — keep under 40 words.
+
+SLIDE COUNT & STYLE
+- Respect the user-requested slide count. Don't pad with filler.
+- Respect the user-requested style (Professional/Minimal/Creative/Dark/Colorful) — pick theme + typography accordingly.
+
+AVOID AI-SLOP TELLS
+- No purple gradient title slide
+- No "Agenda" slide with generic bullet-point icons
+- No clipart-style emoji in headings of a professional deck
+- No "Thank you!" final slide with rainbow gradient — end on a memorable line, a question, or a CTA`;
 
 /* ── Component ── */
 export function SlidesPanel() {
@@ -700,7 +801,7 @@ export function SlidesPanel() {
             <iframe
               ref={iframeRef}
               srcDoc={buildSrcdoc(currentHtml)}
-              sandbox="allow-scripts allow-same-origin"
+              sandbox="allow-scripts"
               className="w-full h-full border-none"
               title="Slides preview"
             />

@@ -1159,11 +1159,13 @@ class CodebaseIndex:
     ):
         self.project_path = Path(project_path).resolve()
 
-        # DB location: explicit path, or data/codebase_index/index.db
+        # DB location: explicit path, or AURA_ROOT/data/codebase_index/index.db.
+        # Anchored so the index persists across invocations from different cwds.
         if db_path:
             self._db_path = Path(db_path)
         else:
-            self._db_path = Path("data/codebase_index/index.db")
+            from aura.paths import user_data_path
+            self._db_path = user_data_path("codebase_index/index.db")
 
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()

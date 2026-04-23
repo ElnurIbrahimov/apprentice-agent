@@ -25,7 +25,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_DIR = Path("data/mcts_value")
+from aura.paths import user_data_path as _user_data_path
+DEFAULT_MODEL_DIR = _user_data_path("mcts_value")
 DEFAULT_MODEL_FILE = DEFAULT_MODEL_DIR / "model.pkl"
 MIN_TRAINING_PAIRS = 50
 
@@ -120,7 +121,7 @@ def extract_training_pairs(
     the predictor some path awareness without needing a sequence model.
     """
     if cache_dir is None:
-        cache_dir = Path("data") / "mcts_cache"
+        cache_dir = _user_data_path("mcts_cache")
     if not cache_dir.exists():
         return []
 

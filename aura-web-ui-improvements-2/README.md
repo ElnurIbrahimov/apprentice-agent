@@ -214,12 +214,11 @@ Built panels:
 
 ### Shared Utilities Created
 
-- `GenerativePanel` base component — Reusable chat + streaming + model selector
-- `systemPrompts` object — Prompt templates for all 19 panels
-- `outputFormatters` — Specialized renderers (code, markdown, tables, etc.)
-- `panelConfig` — Unified panel metadata (icon, label, description, shortcut)
-- Theme color mappings — Emotion-aware UI theming
-- Citation/reference rendering — Unified source attribution
+- `useStreamingGenerate` hook (`web/src/hooks/useStreamingGenerate.ts`) — Reusable streaming wrapper around `/api/generate/raw` with abort support
+- Theme color mappings (`web/src/utils/moodTheme.ts`, `emotionConstants.ts`) — Emotion-aware UI theming
+- Citation/reference rendering (inline badges + `CitationsPanel`) — Unified source attribution
+
+> **Not built (originally planned):** a shared `GenerativePanel` base component, `systemPrompts.ts`, `outputFormatters.ts`, and `panelConfig.ts` were NOT created. Each of the 19 tool panels hand-rolls its own prompt string, streaming glue, and output renderer. Consolidating them is still open work.
 
 ### Security & Performance
 
@@ -256,7 +255,7 @@ web/src/store/settingsStore.ts           — Theme, font, behavior
 web/src/hooks/useWebSocket.ts            — WS connection + messages
 web/src/hooks/usePolling.ts              — REST polling manager
 web/src/hooks/useMoodTheme.ts            — Emotion → CSS mapping
-web/src/hooks/useGenerativeStream.ts     — Streaming generation (new)
+web/src/hooks/useStreamingGenerate.ts    — Streaming generation wrapper
 web/src/components/ChatContainer.tsx     — Main chat surface
 web/src/components/MessageBubble.tsx     — Message rendering
 web/src/components/MessageInput.tsx      — Input bar + model selector
@@ -265,7 +264,6 @@ web/src/components/CodeInterpreter.tsx   — Python REPL + AI gen
 web/src/components/ImageGenPanel.tsx     — Image gen (ComfyUI/SVG)
 web/src/components/ArtifactsPanel.tsx    — HTML/React/SVG preview
 web/src/components/SettingsPage.tsx      — Provider keys, appearance
-web/src/components/GenerativePanel.tsx   — Base component for all tools (new)
 web/src/components/SearchPanel.tsx       — Web search
 web/src/components/ResearchPanel.tsx     — Deep research
 web/src/components/AgentPanel.tsx        — Task automation
@@ -285,8 +283,5 @@ web/src/components/CapturePanel.tsx      — Screenshot tool
 web/src/components/WisebasePanel.tsx     — Knowledge base
 web/src/components/ModelsPanel.tsx       — Model explorer
 web/src/components/ComparePanel.tsx      — Model comparison
-web/src/utils/systemPrompts.ts           — All panel prompts (new)
-web/src/utils/outputFormatters.ts        — Panel output renderers (new)
-web/src/utils/panelConfig.ts             — Panel metadata (new)
 web/src/index.css                        — Tailwind + themes + tokens
 ```

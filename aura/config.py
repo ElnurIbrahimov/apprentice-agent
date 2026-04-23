@@ -584,6 +584,11 @@ class Config:
     DREAM_ENABLE_GRAPH_DENSIFICATION: bool = os.getenv("DREAM_ENABLE_GRAPH_DENSIFICATION", "false").lower() == "true"
 
     # Consolidated Memory Store (Phase 2)
-    AURA_MEMORY_DB_PATH: str = os.getenv("AURA_MEMORY_DB_PATH", "data/aura_memory.db")
+    # Default anchored under AURA_ROOT (not CWD) — invoking `aura` from any
+    # directory other than the project root used to create an orphan DB.
+    AURA_MEMORY_DB_PATH: str = os.getenv(
+        "AURA_MEMORY_DB_PATH",
+        str(Path(__file__).resolve().parent.parent / "data" / "aura_memory.db"),
+    )
     FADEM_HALF_LIFE_HOURS: float = float(os.getenv("FADEM_HALF_LIFE_HOURS", str(14 * 24)))  # 2 weeks default
     FADEM_PRUNE_THRESHOLD: float = float(os.getenv("FADEM_PRUNE_THRESHOLD", "0.05"))

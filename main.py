@@ -160,7 +160,8 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
 
     _wants_help = any(a in ("-h", "--help") for a in sys.argv[1:])
     valued_flags = _collect_valued_flags(parser)
-    use_subparsers = _argv_has_subcommand(sys.argv[1:], valued_flags) or _wants_help
+    _has_subcommand = _argv_has_subcommand(sys.argv[1:], valued_flags)
+    use_subparsers = _has_subcommand or _wants_help
     if use_subparsers:
         subparsers = parser.add_subparsers(dest="command")
         subparsers.add_parser("init", help="Create AURA.md in current project")
@@ -224,22 +225,39 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
         sub_log.add_argument("--format", dest="log_format", choices=["markdown", "json"], default="markdown")
         sub_log.add_argument("--limit", type=int, default=20)
 
+    # Register `goal` only when we won't collide with subparser dispatch.
+    # In --help mode we still want the positional documented, and argparse
+    # never actually matches positionals during --help (it prints and exits),
+    # so it's safe to add it there for display purposes.
+    if not _has_subcommand:
+        _add_goal_positional(parser)
+
     return parser, use_subparsers
 
 
-def _add_top_level_arguments(parser: argparse.ArgumentParser) -> None:
-    """Register every non-subparser argument.
+def _add_goal_positional(parser: argparse.ArgumentParser) -> None:
+    """Register the one-shot `goal` positional.
 
-    Called BEFORE the subparser decision so _collect_valued_flags can scan the
-    parser's actions and know which `--flag value` pairs to skip when looking
-    for the first positional.
+    Split out from _add_top_level_arguments because argparse's nargs='*' eats
+    subcommand tokens greedily. `aura recall telegram` would bind goal=[],
+    then hand "telegram" to the subparser as a command choice and explode with
+    'invalid choice'. Only register `goal` when subparsers are NOT in play.
     """
-    # Positional prompt for one-shot agentic mode
     parser.add_argument(
         "goal",
         nargs="*",
         help="One-shot agentic prompt (e.g., aura 'fix the login bug')"
     )
+
+
+def _add_top_level_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register every non-subparser flag (no positionals).
+
+    Called BEFORE the subparser decision so _collect_valued_flags can scan the
+    parser's actions and know which `--flag value` pairs to skip when looking
+    for the first positional. The `goal` positional is added later, only when
+    no subcommand was detected — see _add_goal_positional.
+    """
     parser.add_argument(
         "--max-iterations",
         type=int,
@@ -678,7 +696,7 @@ def main() -> None:
     # feed into the same dispatcher. Default is the rich agentic loop; --fast
     # is the escape hatch for scripts that only want a raw one-shot answer.
     noninteractive_prompt = args.prompt
-    if not noninteractive_prompt and args.goal:
+    if not noninteractive_prompt and getattr(args, "goal", None):
         noninteractive_prompt = " ".join(args.goal)
 
     if noninteractive_prompt and not args.voice:
@@ -689,6 +707,17 @@ def main() -> None:
         if args.fast and getattr(agent, "_resume_session_id", None):
             _get_console().print("[dim yellow]Note: --resume forces full agentic path (ignoring --fast)[/dim yellow]")
             args.fast = False
+
+        # Honor --model on every non-interactive path. Without this pin, the
+        # brain's router falls back to the default fast chain and silently
+        # ignores the user's override. Interactive chat already does this via
+        # run_chat_mode; the non-interactive paths did not.
+        _requested_model = getattr(args, "model", None)
+        if _requested_model:
+            try:
+                agent.brain.set_model_override(_requested_model)
+            except Exception:
+                logger.debug("set_model_override_failed", exc_info=True)
 
         if args.fast:
             from aura.cli.session_bootstrap import build_permission_manager, build_session_bootstrap

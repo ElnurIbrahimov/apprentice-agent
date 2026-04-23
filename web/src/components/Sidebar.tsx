@@ -47,7 +47,7 @@ export function Sidebar({ onClose }: SidebarProps) {
               />
             </div>
             <div>
-              <span className="text-chat-text font-bold text-lg" title={`AURA v${pkg.version}`}>AURA</span>
+              <span className="font-display text-chat-text font-semibold text-xl tracking-tight" title={`AURA v${pkg.version}`}>AURA</span>
               <AuraStatusLine
                 status={isLoading ? 'Thinking...' : null}
                 isVisible={connectionStatus === 'connected'}

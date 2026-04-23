@@ -24,7 +24,11 @@ class AgenticSession:
     """Persist full agentic sessions to JSON on disk."""
 
     def __init__(self, sessions_dir: str | None = None):
-        self.sessions_dir = Path(sessions_dir or "data/agentic_sessions")
+        if sessions_dir:
+            self.sessions_dir = Path(sessions_dir)
+        else:
+            from aura.paths import user_data_path
+            self.sessions_dir = user_data_path("agentic_sessions")
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.session_id: str = ""
         self.messages: list[dict] = []

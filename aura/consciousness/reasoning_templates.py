@@ -11,14 +11,12 @@ Part of AURA's meta-cognitive self-improvement system.
 import json
 import logging
 import math
-import os
 import sqlite3
 import struct
 import threading
 import time
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -244,9 +242,10 @@ class ReasoningTemplateLibrary:
         self._embedder = _EmbeddingHelper()
         self._trace_count_since_abstraction = 0
 
-        # Resolve DB path (shared aura_meta.db)
+        # Resolve DB path (shared aura_meta.db; AURA_DATA_DIR honored)
         if db_path is None:
-            data_dir = Path(os.getenv("AURA_DATA_DIR", "data"))
+            from aura.paths import resolve_data_dir
+            data_dir = resolve_data_dir()
             data_dir.mkdir(parents=True, exist_ok=True)
             self._db_path = str(data_dir / "aura_meta.db")
         else:

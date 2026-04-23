@@ -8,6 +8,13 @@ _REACT_TOOL_MODEL, _REACT_CODE_MODEL, _REACT_REASON_MODEL.
 
 import json
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Imported for string-forward-ref annotations only. Keeping this in a
+    # TYPE_CHECKING block avoids the circular import this file was extracted
+    # from agent.py to break.
+    from aura.core.code_agent import CodeAgentMode  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

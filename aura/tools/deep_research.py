@@ -356,7 +356,11 @@ class ResearchCache:
     operations are wrapped in try/except so a DB failure never breaks research."""
 
     def __init__(self, db_path: Optional[str] = None):
-        self._db_path = db_path or str(Path("data") / "research_cache.db")
+        if db_path:
+            self._db_path = db_path
+        else:
+            from aura.paths import user_data_path
+            self._db_path = str(user_data_path("research_cache.db"))
         self._conn: Optional[sqlite3.Connection] = None
         self._lock = threading.Lock()  # Protect shared connection across threads
         self._init_db()

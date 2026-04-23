@@ -194,35 +194,192 @@ const TEMPLATE_CATEGORIES = [
       { label: 'Black Friday', icon: '🏷️', desc: 'Deals, countdown, urgency', prompt: 'Create a Black Friday/Cyber Monday deals page with huge countdown timer, deals grid (original/sale price, % off badges), category filter, "Almost Gone" urgency indicators, early access email signup, and terms & conditions.' },
     ]
   },
+  {
+    category: 'Travel & Hospitality',
+    templates: [
+      { label: 'Travel Agency', icon: '🌴', desc: 'Destinations, packages, booking', prompt: 'Create a travel agency website with hero (destination carousel), featured packages grid (6 cards with photos, price from, duration, rating), destination explorer by continent, travel insurance section, testimonials with photos, "build your trip" CTA, and travel blog preview. Warm sunset palette.' },
+      { label: 'Airbnb Clone', icon: '🏡', desc: 'Search, listings, filters', prompt: 'Create a short-term rental homepage (Airbnb-style) with hero image + search bar (destination/dates/guests), category pills (Beachfront/Cabin/Pool/Unique stays), listing cards grid (photo carousel, location, dates, price/night, rating), map preview toggle, filter modal trigger, and footer with host CTA.' },
+      { label: 'Cruise Line', icon: '🛳️', desc: 'Itineraries, ships, deals', prompt: 'Create a cruise line website with full-screen hero (ship at sea), upcoming itineraries grid (ports, days, price from), ship fleet showcase, onboard experiences (dining/entertainment/spa), destination ports map, deals banner, and booking form with cabin class selector.' },
+      { label: 'Tour Guide', icon: '🗺️', desc: 'Tours, guides, booking', prompt: 'Create a local tours website with hero video placeholder, tour cards grid (photo, duration, group size, price, language options, rating), filter by city/category/duration, meet-your-guide profiles, FAQ section, and instant booking with date picker and participant count.' },
+      { label: 'Adventure Travel', icon: '🏔️', desc: 'Expeditions, difficulty, gear', prompt: 'Create an adventure travel outfitter site with bold cinematic hero (mountaineer/diver/trekker), expedition grid with difficulty levels (easy/moderate/expert), what is included checklist, required gear list, safety certifications, guide credentials, photo journal, and expedition signup.' },
+      { label: 'Retreat Center', icon: '🧘', desc: 'Programs, schedule, lodging', prompt: 'Create a yoga/wellness retreat website with serene hero, upcoming retreats calendar, daily schedule sample, lodging photos, menu preview, facilitator bios, testimonials, pricing tiers, and booking form with room preference. Soft earthy palette.' },
+      { label: 'Ski Resort', icon: '⛷️', desc: 'Lift status, lessons, lodging', prompt: 'Create a ski resort website with hero (snowy mountain), live conditions bar (snow depth/lifts open/temperature), trail map embed placeholder, lift ticket pricing, ski school packages, rental info, on-mountain dining, and lodging booking. Cool blue/white palette.' },
+      { label: 'Bed & Breakfast', icon: '🛏️', desc: 'Rooms, breakfast, location', prompt: 'Create a cozy bed & breakfast website with warm hero, room gallery with tour, breakfast menu highlights, local attraction list with map, host bio, guest reviews, availability calendar, and book-direct CTA with best-price-guarantee badge. Homey traditional palette.' },
+      { label: 'Airline', icon: '✈️', desc: 'Book flights, loyalty, status', prompt: 'Create an airline homepage with hero, flight search (from/to/dates/passengers/class) prominent, deals grid, loyalty program signup, check-in and flight status quick links, destinations map, seat preview, and mobile app download callouts.' },
+      { label: 'Camping & RV Park', icon: '🏕️', desc: 'Sites, amenities, reservations', prompt: 'Create a campground website with outdoorsy hero, site types (tent/RV/cabin) with photos, amenities grid (showers/WiFi/laundry/fire pits), interactive site map, rates table, activities list, pet policy, and reservation form with date range. Earthy woodsy palette.' },
+    ]
+  },
+  {
+    category: 'Food & Beverage',
+    templates: [
+      { label: 'Coffee Shop', icon: '☕', desc: 'Menu, story, location', prompt: 'Create a coffee shop website with warm hero (steaming cup), story of the shop, menu with categories (espresso/drip/cold brew/pastries), bean origin map, roasting process, loyalty program signup, store hours & location, and order-ahead CTA. Warm brown/cream palette.' },
+      { label: 'Bakery', icon: '🥐', desc: 'Products, custom orders, gallery', prompt: 'Create a bakery website with inviting hero, product categories (breads/pastries/cakes/cookies), custom cake order form with inspiration gallery, featured seasonal items, baking process photos, delivery zones, and daily-bake schedule. Warm bakery palette (cream, butter yellow, dusty pink).' },
+      { label: 'Brewery', icon: '🍺', desc: 'Beers, taproom, events', prompt: 'Create a craft brewery website with moody industrial hero, beer lineup cards (name, style, ABV, IBU, description, rotating tap indicator), brewery tour booking, taproom hours, upcoming events calendar, merch store preview, and distributor/where-to-buy section.' },
+      { label: 'Winery', icon: '🍷', desc: 'Wines, tastings, vineyard', prompt: 'Create a winery website with scenic vineyard hero, wine varietals grid (vintage/notes/price/stock), tasting room reservation calendar, vineyard history timeline, meet the winemaker, wine club tiers, shipping FAQ, and shop with age gate. Elegant burgundy/gold palette.' },
+      { label: 'Food Truck', icon: '🚚', desc: 'Schedule, menu, follow', prompt: 'Create a food truck website with playful hero, today\'s location with map pin, this weeks schedule, full menu with prices, Instagram feed embed placeholder, catering inquiry form, and social follow badges. Bold street-food palette.' },
+      { label: 'Catering', icon: '🥘', desc: 'Packages, gallery, quote', prompt: 'Create a catering company website with elegant hero (event setup), event packages (corporate/wedding/private), menu sample galleries per cuisine, minimum guest count info, past event gallery with client quotes, chef bio, and quote request form with event details. Refined neutral palette.' },
+      { label: 'Meal Prep Service', icon: '🥗', desc: 'Plans, menu, delivery', prompt: 'Create a meal prep/delivery service website with fresh hero, weekly menu preview, subscription plan tiers (3/5/7 meals/week), dietary filters (keto/vegan/low-carb/paleo), nutritional info modals, delivery zones, how-it-works steps, and first-week-discount signup. Fresh green palette.' },
+      { label: 'Ice Cream Shop', icon: '🍦', desc: 'Flavors, scoops, fun', prompt: 'Create a playful ice cream shop website with bright hero, flavor grid with descriptions (seasonal badges), custom-sundae builder UI (scoops/toppings/sauces), nearby locations, birthday party packages, loyalty card (10 scoops = free), and Instagram-worthy gallery. Pastel palette.' },
+      { label: 'Farmers Market', icon: '🥕', desc: 'Vendors, schedule, map', prompt: 'Create a farmers market website with rustic hero, this-week vendor list (by category: produce/meat/dairy/baked goods), seasonal produce calendar, market hours and locations, community events, vendor application form, and "what\'s fresh this week" blog feed. Earthy organic palette.' },
+      { label: 'Juice Bar', icon: '🥤', desc: 'Menu, benefits, cleanse', prompt: 'Create a juice/smoothie bar website with vibrant hero, menu grid organized by benefit (Energy/Detox/Beauty/Immunity), ingredient transparency callouts, 3-day cleanse packages, smoothie bowl photo gallery, loyalty program, and delivery/pickup toggle. Vibrant health palette.' },
+    ]
+  },
+  {
+    category: 'Home & Local Services',
+    templates: [
+      { label: 'Plumber', icon: '🔧', desc: 'Services, 24/7, estimate', prompt: 'Create a plumbing service website with trust-building hero (truck photo + licensed badge), services list (repair/install/emergency), 24/7 emergency banner with phone, service area map, upfront pricing transparency, customer reviews, and instant-quote form. Trustworthy blue palette.' },
+      { label: 'Electrician', icon: '⚡', desc: 'Licensed, services, estimates', prompt: 'Create an electrician services website with hero (licensed badge + years in business), residential and commercial service categories, common projects gallery (panel upgrades, EV chargers, lighting), safety certifications, financing options, and online booking. Professional yellow/navy palette.' },
+      { label: 'Cleaning Service', icon: '🧹', desc: 'Packages, booking, eco', prompt: 'Create a home cleaning service website with bright clean hero, packages (standard/deep/move-in-out), booking calendar with pricing by home size, eco-friendly product callout, background-checked staff emphasis, recurring discount, and instant-quote form.' },
+      { label: 'Landscaping', icon: '🌳', desc: 'Design, maintenance, gallery', prompt: 'Create a landscaping company website with lush hero, services (design/install/maintenance/hardscape), before/after project gallery slider, seasonal package subscriptions, plant selection guide, sustainability practices, service area map, and consultation request form. Earthy green palette.' },
+      { label: 'HVAC', icon: '❄️', desc: 'Repair, install, maintenance', prompt: 'Create an HVAC service website with hero (clean technician photo), heating/cooling service grid, maintenance plan tiers (bronze/silver/gold), energy-savings calculator widget placeholder, emergency service badge, brand partner logos (Carrier/Trane/Lennox), and appointment booking.' },
+      { label: 'Pest Control', icon: '🐜', desc: 'Treatments, packages, urgency', prompt: 'Create a pest control website with clean hero (not gross — tech at work), pest type quick-diagnoses grid (ants/roaches/termites/rodents with "got this?" CTAs), inspection booking (free), service packages, before/after home photos, family-safe-products callout, and review wall.' },
+      { label: 'Painter', icon: '🎨', desc: 'Interior, exterior, portfolio', prompt: 'Create a painting contractor website with hero (finished room photo), interior/exterior service split, portfolio gallery by room type, color consultation offer, prep-and-cleanup promise, 2-year workmanship warranty, licensed/insured/bonded badges, and free estimate form. Tasteful neutral palette.' },
+      { label: 'Roofing', icon: '🏚️', desc: 'Inspections, replacement, storm', prompt: 'Create a roofing company website with confident hero (finished roof aerial photo), services (new roof, repair, storm damage, inspection), financing options, manufacturer-certified badges, before/after storm damage gallery, insurance claim assistance, and inspection request form.' },
+      { label: 'Locksmith', icon: '🔑', desc: '24/7, automotive, residential', prompt: 'Create a locksmith service website with urgent hero (24/7 phone large), service categories (residential/commercial/automotive/emergency), service area map, upfront pricing (no hidden fees badge), typical response time, bonded-licensed-insured badges, and quick-quote form.' },
+      { label: 'Interior Designer', icon: '🛋️', desc: 'Portfolio, process, packages', prompt: 'Create an interior design studio website with editorial hero (beautiful room), portfolio grid by style (modern/traditional/bohemian/minimalist), designers profile with philosophy, service packages (e-design/full service/consultation only), process steps timeline, press mentions, and discovery call CTA. Elegant neutral palette.' },
+      { label: 'Handyman', icon: '🔨', desc: 'Jobs, rates, reviews', prompt: 'Create a handyman service website with approachable hero, common jobs grid with typical pricing (fans/furniture/drywall/painting/tile), hourly rate transparency, neighborhood-focus badge, quick booking form for small jobs, insured badge, and customer-since-when local roots emphasis.' },
+      { label: 'Moving Company', icon: '📦', desc: 'Quote, packing, interstate', prompt: 'Create a moving company website with hero (truck + smiling team), service types (local/long-distance/packing/storage), instant online quote form (move date/size/distance), moving checklist resource, real customer reviews, insurance coverage explanation, and booking CTA.' },
+    ]
+  },
+  {
+    category: 'Pet & Animal',
+    templates: [
+      { label: 'Veterinary Clinic', icon: '🐾', desc: 'Services, vets, appointments', prompt: 'Create a vet clinic website with warm hero (vet + pet), services grid (wellness/surgery/dental/emergency), meet-the-vets bios with photos, new patient welcome packet download, appointment booking, emergency contact, pet portal login, and adoption events. Friendly trustworthy palette.' },
+      { label: 'Dog Walker', icon: '🐕', desc: 'Packages, schedule, photos', prompt: 'Create a dog walking service website with joyful hero (dog running), service packages (30/45/60 min walks, dog park visits, solo vs group), daily photo updates mention, GPS walk-tracking feature, insurance & bonded, neighborhood map, and meet-and-greet booking. Playful warm palette.' },
+      { label: 'Pet Groomer', icon: '✂️', desc: 'Services, photos, booking', prompt: 'Create a pet grooming website with before/after transformation hero, services grid (bath/haircut/nails/de-shed), pricing by pet size, appointment booking calendar, team groomers with specialties, photo gallery of happy pups, and first-time-client discount. Soft pastel palette.' },
+      { label: 'Pet Store', icon: '🐠', desc: 'Supplies, food, fish/reptile', prompt: 'Create a pet supply store website with hero (cute pets), category grid (dog/cat/small animal/reptile/fish/bird), featured products carousel, brand logos, curbside pickup info, loyalty program, pet adoption partners, and subscription auto-delivery option.' },
+      { label: 'Animal Shelter', icon: '🐶', desc: 'Adoptable, donate, volunteer', prompt: 'Create an animal shelter website with emotional hero ("adopt dont shop"), adoptable pets grid (photo/name/breed/age/bio), adoption process steps, donate button (preset amounts), volunteer signup, foster program info, success stories, and events calendar. Warm hopeful palette.' },
+      { label: 'Horse Stable', icon: '🐴', desc: 'Lessons, boarding, trails', prompt: 'Create an equestrian/horse stable website with dramatic hero (rider + horse), services (lessons/boarding/training/trail rides), instructor bios, pricing and packages, facilities tour, show results, lesson booking form, and photo gallery. Classic English-country palette.' },
+    ]
+  },
+  {
+    category: 'Events & Entertainment',
+    templates: [
+      { label: 'Wedding Planner', icon: '💐', desc: 'Packages, portfolio, inquire', prompt: 'Create a wedding planner website with elegant hero (real-wedding photo), planning packages (full/partial/day-of), past weddings gallery by style, vendor network callouts, planning timeline resource, pricing FAQ, consult booking form, and press features. Romantic sophisticated palette.' },
+      { label: 'DJ Service', icon: '🎧', desc: 'Events, playlists, booking', prompt: 'Create a wedding/event DJ website with cinematic hero (lit dance floor), event types (weddings/corporate/birthdays/schools), DJ bio with reel video, sample playlists by genre, equipment list with photos, pricing packages, availability checker, and booking form.' },
+      { label: 'Photographer', icon: '📸', desc: 'Portfolio, packages, book', prompt: 'Create a photographer website (wedding/portrait/event) with image-first hero, portfolio grid (categories: weddings/portraits/events/brands), about the photographer with personality, packages with deliverables, booking process, FAQ, and inquiry form. Timeless editorial design.' },
+      { label: 'Band/Musician', icon: '🎸', desc: 'Music, tour, merch', prompt: 'Create a band website with moody hero (band photo), latest release with streaming links (Spotify/Apple/YouTube/Bandcamp), upcoming tour dates table with ticket links, music videos gallery, merch shop preview, bio and discography, email list signup, and booking inquiries.' },
+      { label: 'Comedy Club', icon: '🎤', desc: 'Lineup, tickets, reservations', prompt: 'Create a comedy club website with bold hero (stage spotlight), upcoming shows grid (headliner photo/name/date/time/ticket button), two-drink-minimum info, seating chart and reservation form, open-mic night schedule, past headliners wall, food menu, and newsletter. Dramatic theatrical palette.' },
+      { label: 'Theater Company', icon: '🎭', desc: 'Season, tickets, education', prompt: 'Create a theater company website with artistic hero (current production photo), current season lineup, individual show pages preview, ticket subscriptions (3/5/7-show packages), education programs, donate/sponsor, casting auditions, and venue info. Dramatic classical palette.' },
+      { label: 'Escape Room', icon: '🔓', desc: 'Rooms, difficulty, book', prompt: 'Create an escape room website with mysterious hero, room grid (title/theme/difficulty/duration/group size/photo), how-it-works steps, group party packages, leaderboard for fastest escapes, waiver form, gift cards, and room booking calendar. Dark mystery palette.' },
+      { label: 'Dance Studio', icon: '💃', desc: 'Classes, schedule, teachers', prompt: 'Create a dance studio website with expressive hero (dancer mid-movement), class styles grid (ballet/hip-hop/contemporary/jazz/tap), weekly schedule table, instructor bios, try-a-free-class CTA, student performance photos, recital info, and registration form. Vibrant arts palette.' },
+      { label: 'Music School', icon: '🎹', desc: 'Lessons, teachers, recitals', prompt: 'Create a music school website with warm hero (student + teacher at piano), instruments taught grid, teacher profiles with credentials, lesson packages (private/group/online), recital photos, try-a-lesson CTA, tuition rates, and registration. Classic educational palette.' },
+      { label: 'Event Venue', icon: '🏛️', desc: 'Spaces, capacity, book', prompt: 'Create an event venue rental website with grand hero (empty space staged), space options (ballroom/garden/rooftop/intimate) each with capacity and photos, preferred vendor list, floor plans, pricing by day of week, virtual tour placeholder, and availability calendar. Elegant luxurious palette.' },
+      { label: 'Summer Camp', icon: '🏕️', desc: 'Programs, dates, register', prompt: 'Create a summer camp website with joyful hero (kids at campfire), program tracks by age (day camp, overnight, specialty camps), session dates, daily schedule sample, counselor-in-training program, cost and financial aid, photos from past summers, and registration with early-bird pricing. Bright cheerful palette.' },
+    ]
+  },
+  {
+    category: 'Productivity SaaS',
+    templates: [
+      { label: 'Task Manager SaaS', icon: '✅', desc: 'Landing, features, pricing', prompt: 'Create a task-manager SaaS landing page (Todoist/Asana-style) with hero (app screenshot), problem/solution, 6 feature cards with illustrations, integrations logos, use-case sections (teams/students/freelancers), pricing tiers with 14-day trial, reviews, and CTA.' },
+      { label: 'CRM SaaS', icon: '📇', desc: 'Sales pipeline, features', prompt: 'Create a CRM SaaS landing page (HubSpot/Pipedrive-style) with hero (pipeline view screenshot), key features (contact management, deals, email, reports), testimonial video placeholder, integration marketplace preview, pricing tiers, free tier callout, and demo request form.' },
+      { label: 'Note-Taking App', icon: '📝', desc: 'Capture, organize, search', prompt: 'Create a note-taking app landing (Notion/Obsidian-style) with hero (app screenshot showing blocks), core concepts (blocks/databases/pages/links), killer features (3 showcases), template gallery preview, mobile app badges, pricing, and community mention. Minimal airy design.' },
+      { label: 'Calendar/Scheduling', icon: '📅', desc: 'Calendly-style, integrations', prompt: 'Create a scheduling SaaS landing page (Calendly-style) with hero (booking page mockup), how-it-works 3 steps, features (round-robin, buffers, reminders), calendar integrations logos, use cases (sales, teams, solo), pricing, free version callout, and signup form.' },
+      { label: 'Password Manager SaaS', icon: '🔐', desc: 'Security, sync, family', prompt: 'Create a password manager SaaS landing (1Password/Bitwarden-style) with hero (vault screenshot), security emphasis (zero-knowledge, encryption), device sync, autofill, family sharing, compromised password monitor, business plans, free trial, and security audit report link.' },
+      { label: 'Team Chat SaaS', icon: '💬', desc: 'Channels, integrations, bots', prompt: 'Create a team chat SaaS landing page (Slack/Discord-style) with hero (app UI screenshot), features (channels/DMs/threads/huddles), integrations gallery, enterprise security, pricing, free tier with limits, testimonial quotes from team leads, and get-started CTA.' },
+      { label: 'File Sharing SaaS', icon: '📂', desc: 'Upload, share, sync', prompt: 'Create a file-sharing/cloud-storage SaaS landing (Dropbox-style) with hero (folder view), features (file sharing, sync, version history, comments), security certifications, pricing per user, teams plan, native app badges, and 30-day free trial.' },
+      { label: 'Form Builder SaaS', icon: '📋', desc: 'Templates, logic, analytics', prompt: 'Create a form-builder SaaS landing (Typeform-style) with hero (form preview), features (conditional logic, integrations, analytics), template gallery preview, use cases, pricing, free plan callout, customer logos, and create-first-form CTA.' },
+      { label: 'Survey Tool SaaS', icon: '📊', desc: 'Templates, results, NPS', prompt: 'Create a survey tool SaaS landing with hero (survey in action), survey types (NPS/CSAT/market-research), advanced logic, beautiful results dashboards screenshot, integrations, HIPAA/GDPR badges, tier pricing, and start-free-survey CTA.' },
+      { label: 'Project Management SaaS', icon: '📈', desc: 'Kanban, Gantt, time tracking', prompt: 'Create a project-management SaaS landing (Monday/ClickUp-style) with hero (Kanban board screenshot), views (list/board/calendar/Gantt/timeline), collaboration features, automations, templates, customer stories, pricing tiers, and 14-day trial signup.' },
+      { label: 'Email Marketing SaaS', icon: '📧', desc: 'Campaigns, automation, list', prompt: 'Create an email marketing SaaS landing (Mailchimp/ConvertKit-style) with hero (campaign builder screenshot), features (drag-and-drop builder, automations, list growth, analytics), templates, deliverability emphasis, pricing by list size, free tier, and signup.' },
+      { label: 'Analytics SaaS', icon: '📡', desc: 'Dashboards, events, integrations', prompt: 'Create an analytics SaaS landing (Mixpanel/Amplitude-style) with hero (dashboard screenshot), product features (events, funnels, retention, cohorts), tracking plan help, privacy-first callout, enterprise features, integration marketplace preview, pricing, and free tier with 1M events.' },
+    ]
+  },
+  {
+    category: 'Utility & Tools',
+    templates: [
+      { label: 'URL Shortener', icon: '🔗', desc: 'Shorten, analytics, custom', prompt: 'Create a URL shortener tool website with simple hero (one input + shorten button), features (custom aliases, QR codes, click analytics, expiration), free vs pro comparison, recent short links table placeholder, browser extension CTA, and API docs link.' },
+      { label: 'File Converter', icon: '🔄', desc: 'Drag-drop, formats, batch', prompt: 'Create a file converter tool website with hero (drag-drop zone), format support (PDF/image/audio/video with conversions matrix), batch processing mention, privacy (files deleted after 24h), free file size limit with paid upgrade, recently converted list, and no-signup-required emphasis.' },
+      { label: 'QR Code Generator', icon: '🔳', desc: 'Input, customize, download', prompt: 'Create a QR code generator tool website with hero (example QR), type tabs (URL/text/WiFi/vCard/email), customization (color/logo/shape), live preview, download as PNG/SVG, bulk mode for paid, scan statistics for dynamic QRs, and API pricing.' },
+      { label: 'PDF Tools', icon: '📄', desc: 'Merge, split, compress, convert', prompt: 'Create a PDF utilities website (SmallPDF-style) with hero, tool grid (merge/split/compress/convert/rotate/edit/sign/unlock), drag-drop workflow, privacy guarantee (files deleted), free tier limits, pro unlimited, team plan, and get-started CTA.' },
+      { label: 'Image Compressor', icon: '🖼️', desc: 'Shrink, batch, quality', prompt: 'Create an image compression tool website with hero (before/after file size comparison), drag-drop uploader, batch processing, quality slider preview, format support (JPG/PNG/WebP/AVIF), lossless option, API for developers, and 100% browser-side privacy messaging.' },
+      { label: 'Color Palette Tool', icon: '🎨', desc: 'Generate, save, export', prompt: 'Create a color palette generator website with hero (live-generating palette on scroll), generate button, lock colors, save palette, explore curated palettes gallery, extract palette from image upload, export as CSS/Tailwind/PNG, and palettes-of-the-day feed.' },
+      { label: 'Icon Library', icon: '✨', desc: 'Browse, download, license', prompt: 'Create an icon library website (Heroicons/Feather-style) with search bar hero, icon grid with live preview, category filter sidebar, stroke/solid/duotone variants, copy-SVG and download buttons, framework integrations (React/Vue/Svelte), and open-source license.' },
+      { label: 'Font Pairing', icon: '🔤', desc: 'Combine, preview, Google Fonts', prompt: 'Create a font-pairing tool website with hero (sample pairing), pairing generator (randomize heading + body), Google Fonts integration note, user-curated pairings gallery, save-to-collection, copy CSS/@import, use-case suggestions (editorial/tech/luxury), and typography blog teaser.' },
+      { label: 'Typing Test', icon: '⌨️', desc: 'WPM, races, history', prompt: 'Create a typing-speed-test website with big prompt text and input field front-and-center, WPM/accuracy/time displays, test duration selector (15/30/60/120s), custom text paste option, multiplayer race rooms, personal history chart, and global leaderboard. Minimalist monospace design.' },
+      { label: 'Calculator Suite', icon: '🧮', desc: 'Mortgage, BMI, tip, etc.', prompt: 'Create a calculator hub website with hero (search calculators), category grid (financial/health/math/conversion), popular calculators with preview (mortgage/loan/BMI/tip/age/percentage), standalone calculator pages linked, recently used, and request-a-calculator form.' },
+    ]
+  },
+  {
+    category: 'Automotive & Transportation',
+    templates: [
+      { label: 'Auto Repair Shop', icon: '🔧', desc: 'Services, certs, appointments', prompt: 'Create an auto repair shop website with trust-heavy hero (clean shop + ASE certified logo), services (oil change/brakes/tires/diagnostics/alignment), transparent pricing, technician bios, warranty info, loaner-car availability, customer reviews, and appointment booking.' },
+      { label: 'Car Rental', icon: '🚗', desc: 'Fleet, locations, book', prompt: 'Create a car rental company website with hero (sleek car + city), search bar (pickup/return location/dates), fleet grid by category (economy/SUV/luxury/electric), daily rate and features per car, loyalty program signup, locations map, and booking confirmation flow. Clean modern palette.' },
+      { label: 'Bike Shop', icon: '🚲', desc: 'Sales, repair, community', prompt: 'Create a bike shop website with hero (action bike photo), inventory (road/mountain/hybrid/ebike/kids), repair services and turnaround time, group rides calendar, community events, size guide, financing, and test-ride booking. Energetic active palette.' },
+      { label: 'Motorcycle Dealer', icon: '🏍️', desc: 'Inventory, service, gear', prompt: 'Create a motorcycle dealership website with bold hero (motorcycle + rider), new and used inventory grid with filters, service center booking, gear/parts shop preview, financing calculator, community rides, rider safety course, and dealership info. Dark bold palette.' },
+      { label: 'Rideshare Driver Portal', icon: '🚖', desc: 'Earnings, tips, community', prompt: 'Create a driver-focused rideshare landing page with hero ("Earn on your schedule"), earnings calculator widget, requirements checklist, signup steps, city-by-city availability, driver perks (gas/insurance/tax help), testimonials, and referral program.' },
+      { label: 'EV Charging', icon: '🔌', desc: 'Network, stations, app', prompt: 'Create an EV charging network website with hero (sleek charger), live station map with availability, how it works (download app, start charge, pay), network size stat, speed tiers (Level 2 / DC Fast / Ultra), business/fleet solutions, and app download badges. Clean electric-green palette.' },
+    ]
+  },
+  {
+    category: 'Kids & Family',
+    templates: [
+      { label: 'Daycare', icon: '🧸', desc: 'Programs, staff, enroll', prompt: 'Create a daycare/preschool website with warm hero (kids playing safely), programs by age group (infant/toddler/preschool/pre-K), daily schedule sample, meet the teachers, curriculum philosophy (Montessori/Reggio/play-based), tuition and hours, enrollment form, and parent testimonials. Cheerful primary palette.' },
+      { label: 'After-School Program', icon: '🎒', desc: 'Activities, pickup, enroll', prompt: 'Create an after-school program website with fun hero (kids doing activities), program offerings (homework help/sports/arts/STEM), pickup schools serviced, daily schedule, staff bios, snacks provided, fees, enrollment form, and parent portal.' },
+      { label: 'Pediatrician', icon: '👶', desc: 'Doctors, services, book', prompt: 'Create a pediatric clinic website with gentle hero (smiling family), services (well visits/sick visits/vaccines/lactation), pediatricians bios, new patient welcome, after-hours guidance, same-day sick appointments, insurance accepted, and patient portal.' },
+      { label: 'Kids Party Planner', icon: '🎉', desc: 'Themes, packages, book', prompt: 'Create a childrens party planner website with colorful hero (decorated party), theme gallery (superhero/princess/unicorn/safari), package tiers, venue partner info (or at-home option), add-ons (balloon artist/magician/cake), booking form with date picker, and FAQs.' },
+      { label: 'Family Photographer', icon: '📷', desc: 'Sessions, gallery, book', prompt: 'Create a family photographer website with warm hero (family photo), session types (newborn/maternity/family/senior), gallery by type, packages with deliverables, styling guide, booking calendar, client portal mention, and client testimonials. Warm editorial palette.' },
+      { label: 'Kids Bookstore', icon: '📚', desc: 'Books, storytime, events', prompt: 'Create a childrens bookstore website with magical hero (kids reading), browse by age, staff pick shelves, storytime schedule, author-visit events, book club, gift cards, and online ordering with curbside. Whimsical warm palette.' },
+    ]
+  },
 ];
 
-const SYSTEM_PROMPT = `You are an expert web designer and developer. Generate a complete, beautiful HTML page with inline CSS and JavaScript.
+const DESIGN_DIRECTIVES = `DESIGN DIRECTIVES (read carefully — this is the quality bar)
+- Do NOT default to: purple gradient hero, Plus Jakarta Sans / Inter / Poppins / Space Grotesk, generic glassmorphism cards, pastel tech-purple accents, gradient text on the H1, stacked feature-icon cards with identical rounded squares. These are AI-slop tells.
+- Pick a distinctive typeface PAIR per brief — examples: Fraunces + Inter Tight (editorial), Instrument Serif + Geist (modern editorial), Playfair + Work Sans (classic luxury), Redaction + Mona Sans (brutalist editorial), IBM Plex Serif + IBM Plex Sans (technical), Syne + Archivo (bold display), DM Serif Display + DM Sans (elegant). Load via Google Fonts.
+- Commit to ONE dominant color. Avoid evenly-distributed multi-color palettes. Warm beige + one terracotta, deep forest + one gold, off-black + one signal red — pick a register and hold it.
+- Use MODERN CSS where it raises quality: container queries (@container), view transitions (view-transition-name), @layer cascade control, backdrop-filter, subgrid, :has() selectors, scroll-driven animations (animation-timeline: scroll()), color-mix(), oklch() colors.
+- Respect the brief's vibe. If the brief says "minimal", do not add motion or gradients. If it says "editorial", lean into serif type and asymmetric layout. If it says "brutalist", drop rounded corners and use raw monospace.`;
 
-Rules:
-- Output ONLY the complete HTML code starting with <!DOCTYPE html>
-- Include ALL CSS in a <style> tag inside <head>
-- Include ALL JavaScript in a <script> tag before </body>
-- Use modern CSS: flexbox, grid, custom properties, smooth transitions
-- Use clean typography with system fonts
-- Make it fully responsive
-- Use professional color schemes with proper contrast
-- Add subtle animations and hover effects
-- NO markdown fences, NO explanation text, ONLY the HTML document
-- If the user asks for modifications, return the COMPLETE updated HTML`;
+const QUALITY_BAR = `QUALITY BAR
+- Fully responsive — prefer container queries over media queries for component-level responsiveness
+- Semantic HTML (main/nav/article/section/aside/footer), ARIA landmarks, visible focus states, prefers-reduced-motion respected
+- Real domain-appropriate sample content — never "Lorem ipsum", never empty placeholder sections
+- Motion is purposeful: page-load reveal, micro-interactions on hover, NOT everything pulsing and rotating
+- Images via https://picsum.photos/<seed>/<w>/<h> or https://images.unsplash.com with meaningful alt text, OR high-quality inline SVG
+- Icons via Lucide CDN (not emoji in primary UI)`;
+
+const SYSTEM_PROMPT = `You are a senior web designer building a production-quality landing page in a single HTML file.
+
+OUTPUT FORMAT
+- Output ONLY complete HTML starting with <!DOCTYPE html> — no markdown fences, no prose
+- All CSS in <style>, all JS in <script>. External libraries via CDN in <head>
+- If user asks for modifications, return the COMPLETE updated HTML
+
+ALLOWED LIBRARIES (use what the brief calls for, not everything)
+- Google Fonts via <link> — always use a distinctive pair, never browser defaults
+- Alpine.js (https://unpkg.com/alpinejs) for reactive behavior (menus, tabs, accordions) without a build step
+- GSAP 3 (https://cdn.jsdelivr.net/npm/gsap@3) for polished motion — scroll triggers, timeline choreography
+- Lucide icons (https://unpkg.com/lucide@latest) + lucide.createIcons() after DOM ready
+
+${DESIGN_DIRECTIVES}
+
+${QUALITY_BAR}`;
 
 const getSystemPrompt = (tailwind: boolean) => tailwind
-  ? `You are an expert web designer. Generate a complete, beautiful HTML page using Tailwind CSS.
+  ? `You are a senior web designer building a production-quality landing page in a single HTML file using Tailwind CSS.
 
-Rules:
-- Output ONLY the complete HTML code starting with <!DOCTYPE html>
-- Include <script src="https://cdn.tailwindcss.com"></script> in the <head>
-- Use Tailwind utility classes for ALL styling (no custom CSS needed)
-- Use modern Tailwind: flex, grid, space, responsive prefixes (md:, lg:)
-- Use Tailwind's color palette (slate, purple, blue, etc.)
-- Add hover:, focus:, transition classes for interactivity
-- Make it fully responsive with Tailwind breakpoints
-- NO markdown fences, NO explanation text, ONLY the HTML document
-- If the user asks for modifications, return the COMPLETE updated HTML`
+OUTPUT FORMAT
+- Output ONLY complete HTML starting with <!DOCTYPE html> — no markdown fences, no prose
+- Include <script src="https://cdn.tailwindcss.com"></script> in <head>
+- Configure custom theme inline via <script>tailwind.config = { theme: { extend: { fontFamily: {...}, colors: {...} } } }</script> BEFORE the CDN script loads (or via the play CDN's config attribute)
+- If user asks for modifications, return the COMPLETE updated HTML
+
+ALLOWED LIBRARIES
+- Google Fonts via <link> — register a display + body pair, wire them into tailwind.config fontFamily
+- Alpine.js for reactive behavior (menus, tabs, disclosure, carousels) without a build step
+- GSAP 3 for polished motion when the brief warrants it
+- Lucide icons, initialized with lucide.createIcons()
+
+${DESIGN_DIRECTIVES}
+
+TAILWIND-SPECIFIC
+- Use arbitrary values [bg-[oklch(...)]] when a design requires it, not just preset palette
+- Compose with @apply sparingly inside <style> only for tokens re-used 5+ times
+- Prefer group-hover/peer/has-[...] modifiers over JS for simple interactions
+- Container queries via @container + @[size]: variants (Tailwind 3.4+ syntax)
+
+${QUALITY_BAR}`
   : SYSTEM_PROMPT;
 
 /* ── Main Component ── */
@@ -1521,7 +1678,7 @@ Rules:
                   <iframe
                     ref={previewIframeRef}
                     srcDoc={srcdoc}
-                    sandbox="allow-scripts allow-same-origin"
+                    sandbox="allow-scripts"
                     className={`w-full h-full border-none ${DEVICE_FRAMES[device].inner}`}
                     title="Website preview"
                   />

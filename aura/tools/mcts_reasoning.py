@@ -284,9 +284,9 @@ class MCTSResult:
 class TreeCache:
     """Saves/loads MCTS tree state for warm-starting similar problems."""
 
-    CACHE_DIR = Path(os.getenv("AURA_DATA_DIR", "data")) / "mcts_cache"
-
     def __init__(self):
+        from aura.paths import resolve_data_dir
+        self.CACHE_DIR = resolve_data_dir() / "mcts_cache"
         self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     def _problem_hash(self, problem: str) -> str:

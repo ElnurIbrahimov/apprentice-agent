@@ -163,7 +163,8 @@ def _get_fernet_key():
 
         from cryptography.fernet import Fernet
 
-        key_file = Path("data") / ".oauth_key"
+        from aura.paths import user_data_path
+        key_file = user_data_path(".oauth_key")
         key_file.parent.mkdir(parents=True, exist_ok=True)
 
         if key_file.exists():
@@ -198,11 +199,20 @@ def _save_tokens(access: str, refresh: str, expires: int):
     if fernet:
         payload = fernet.encrypt(payload)
     tf.write_bytes(payload)
+    chmod_ok = True
     try:
         import stat
         tf.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600 — owner read/write only
     except (OSError, NotImplementedError):
-        pass  # Windows may not support Unix permissions
+        chmod_ok = False  # Windows may not support Unix permissions
+    # If we failed to encrypt AND failed to restrict file perms, the token
+    # file is plaintext on a shared-permission filesystem. Surface this so
+    # the user can install `cryptography` or use an ACL-protected path.
+    if not fernet and not chmod_ok:
+        logger.warning(
+            "[CHATGPT_AUTH] Tokens written unencrypted with default permissions at %s — "
+            "install `cryptography` to enable at-rest encryption.", tf,
+        )
     logger.info("[CHATGPT_AUTH] Tokens saved to %s (encrypted=%s)", tf, fernet is not None)
 
 

@@ -22,7 +22,8 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(os.getenv("AURA_DATA_DIR", "data")) / "task_events.db"
+from aura.paths import resolve_data_dir as _resolve_data_dir
+DB_PATH = _resolve_data_dir() / "task_events.db"
 _db_lock = threading.Lock()
 DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 

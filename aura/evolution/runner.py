@@ -51,7 +51,7 @@ def create_llm_func(model: str, base_url: str | None = None):
                 data = json.loads(resp.read().decode())
                 return data.get("message", {}).get("content", "")
         except urllib.error.URLError as e:
-            raise RuntimeError(f"Ollama call failed ({model}): {e}")
+            raise RuntimeError(f"Ollama call failed ({model}): {e}") from e
 
     return llm_func
 

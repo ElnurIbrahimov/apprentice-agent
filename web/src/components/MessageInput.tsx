@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect, KeyboardEvent, FormEvent, DragEvent, ClipboardEvent } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, KeyboardEvent, FormEvent, DragEvent, ClipboardEvent } from 'react';
 import {
   PlusIcon, MicrophoneIcon, ChevronDownIcon,
   PhotoIcon, MagnifyingGlassIcon, BeakerIcon, CpuChipIcon, UserGroupIcon, ScaleIcon, GlobeAltIcon,
-  PaperAirplaneIcon, StopCircleIcon,
+  PaperAirplaneIcon, StopCircleIcon, RocketLaunchIcon,
 } from '@heroicons/react/24/outline';
+import { estimateTokens, usageBand, DEFAULT_CONTEXT_WINDOW, METER_VISIBILITY_THRESHOLD } from '../utils/tokenEstimate';
 import { AttachmentList } from './AttachmentPreview';
 import { ActionSheet } from './BottomSheet';
 import { useFileUpload, isSupported } from '../hooks/useFileUpload';
@@ -27,7 +28,7 @@ function useIsMobile() {
 }
 
 // Action modes
-type ActionMode = 'none' | 'search' | 'research' | 'deep_research' | 'swarm' | 'agent' | 'compare';
+type ActionMode = 'none' | 'search' | 'research' | 'deep_research' | 'swarm' | 'agent' | 'compare' | 'delegate';
 
 const MODE_LABELS: Record<ActionMode, string> = {
   none: '',
@@ -37,6 +38,7 @@ const MODE_LABELS: Record<ActionMode, string> = {
   agent: 'Agent',
   swarm: 'Swarm',
   compare: 'Compare',
+  delegate: 'Delegate',
 };
 
 const MODE_COLORS: Record<ActionMode, string> = {
@@ -47,6 +49,7 @@ const MODE_COLORS: Record<ActionMode, string> = {
   agent: 'rgba(168,85,247,0.25)',
   swarm: 'rgba(6,182,212,0.25)',
   compare: 'rgba(249,115,22,0.25)',
+  delegate: 'rgba(124,58,237,0.28)',
 };
 
 const MODE_ICONS: Record<ActionMode, string> = {
@@ -57,6 +60,7 @@ const MODE_ICONS: Record<ActionMode, string> = {
   agent: '\u26A1',
   swarm: '\uD83D\uDC1D',
   compare: '\u2696\uFE0F',
+  delegate: '\uD83C\uDFAF',
 };
 
 interface MessageInputProps {
@@ -82,6 +86,7 @@ export function MessageInput({
   const [actionMode, setActionMode] = useState<ActionMode>('none');
   const [showPlusMenu, setShowPlusMenu] = useState(false);
   const [showModelMenu, setShowModelMenu] = useState(false);
+  const [slashIndex, setSlashIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
@@ -94,9 +99,20 @@ export function MessageInput({
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
 
-  const { selectedModel, availableModels, setSelectedModel, setAvailableModels } = useChatStore();
+  const { messages, selectedModel, availableModels, setSelectedModel, setAvailableModels } = useChatStore();
   const { settings } = useSettingsStore();
   const isMobile = useIsMobile();
+
+  // Context budget meter — computes current estimated token usage to surface
+  // when a conversation is getting close to the model's context window.
+  const contextTokens = estimateTokens(messages);
+  const contextRatio = contextTokens / DEFAULT_CONTEXT_WINDOW;
+  const showMeter = contextRatio >= METER_VISIBILITY_THRESHOLD;
+  const band = usageBand(contextRatio);
+  const meterColor =
+    band === 'danger' ? '#ef4444' :
+    band === 'warn' ? '#f59e0b' :
+    '#10b981';
 
   // Fetch available models on mount
   useEffect(() => {
@@ -121,6 +137,38 @@ export function MessageInput({
     clearAttachments,
     isUploading,
   } = useFileUpload();
+
+  // Slash command menu: triggered when message begins with "/" and has no space yet.
+  const slashMatch = useMemo(() => {
+    const m = /^\/([a-z_]*)$/i.exec(message);
+    return m ? m[1].toLowerCase() : null;
+  }, [message]);
+  const slashCommands: { key: ActionMode; command: string; label: string; desc: string }[] = useMemo(() => [
+    { key: 'research', command: 'research', label: 'Research', desc: 'Multi-source deep research with citations' },
+    { key: 'deep_research', command: 'deep', label: 'Deep Research', desc: '20+ sources, longer synthesis' },
+    { key: 'search', command: 'search', label: 'Search', desc: 'Quick web search' },
+    { key: 'agent', command: 'agent', label: 'Agent', desc: 'Autonomous multi-step with tools' },
+    { key: 'swarm', command: 'swarm', label: 'Swarm', desc: 'Multi-agent parallel' },
+    { key: 'compare', command: 'compare', label: 'Compare', desc: 'Side-by-side model comparison' },
+    { key: 'delegate', command: 'delegate', label: 'Delegate', desc: 'Async task for Aura' },
+  ], []);
+  const filteredSlash = useMemo(() => {
+    if (slashMatch === null) return [];
+    if (!slashMatch) return slashCommands;
+    return slashCommands.filter((c) => c.command.startsWith(slashMatch));
+  }, [slashMatch, slashCommands]);
+  const showSlashMenu = slashMatch !== null && filteredSlash.length > 0;
+
+  useEffect(() => {
+    if (!showSlashMenu) setSlashIndex(0);
+    else if (slashIndex >= filteredSlash.length) setSlashIndex(0);
+  }, [showSlashMenu, filteredSlash.length, slashIndex]);
+
+  const pickSlashCommand = useCallback((cmd: typeof slashCommands[number]) => {
+    setActionMode(cmd.key);
+    setMessage(''); // clear the slash, user continues typing the actual query
+    textareaRef.current?.focus();
+  }, []);
 
   const hasText = message.trim().length > 0;
   const hasAttachments = attachments.length > 0;
@@ -299,6 +347,22 @@ export function MessageInput({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Slash command menu navigation takes priority
+    if (showSlashMenu) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIndex((i) => (i + 1) % filteredSlash.length); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setSlashIndex((i) => (i - 1 + filteredSlash.length) % filteredSlash.length); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const cmd = filteredSlash[slashIndex];
+        if (cmd) pickSlashCommand(cmd);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMessage('');
+        return;
+      }
+    }
     // Submit on Enter (without Shift)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -396,6 +460,100 @@ export function MessageInput({
           className="hidden"
         />
 
+        {/* Slash command menu — floats above the input while the user types /... */}
+        {showSlashMenu && (
+          <div
+            role="listbox"
+            aria-label="Slash commands"
+            className="rounded-xl overflow-hidden mb-2"
+            style={{
+              background: 'var(--surface-1)',
+              border: '1px solid var(--border-default)',
+              boxShadow: '0 12px 36px rgba(0,0,0,0.35)',
+            }}
+          >
+            <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-chat-text-secondary border-b border-white/5">
+              Slash commands · <kbd className="font-mono">↑</kbd> <kbd className="font-mono">↓</kbd> to nav · <kbd className="font-mono">Enter</kbd> to pick · <kbd className="font-mono">Esc</kbd> to cancel
+            </div>
+            {filteredSlash.map((c, i) => (
+              <button
+                key={c.command}
+                type="button"
+                role="option"
+                aria-selected={i === slashIndex}
+                onMouseEnter={() => setSlashIndex(i)}
+                onClick={() => pickSlashCommand(c)}
+                className="w-full flex items-center gap-3 px-3 py-2 text-left transition-colors"
+                style={{
+                  background: i === slashIndex ? 'var(--surface-3)' : 'transparent',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                <span
+                  className="text-[10px] font-mono px-1.5 py-0.5 rounded flex-shrink-0"
+                  style={{ background: MODE_COLORS[c.key], color: 'var(--text-primary)' }}
+                >
+                  /{c.command}
+                </span>
+                <span className="text-sm flex-shrink-0 font-medium">{c.label}</span>
+                <span className="text-xs text-chat-text-secondary truncate">{c.desc}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Context budget meter — hidden until 50% usage, recolors at 75/90% */}
+        {showMeter && (
+          <button
+            type="button"
+            onClick={() => toast.info(
+              `${(contextRatio * 100).toFixed(0)}% of context used`,
+              'Conversation getting long. Fork from an earlier message to start fresh, or continue — older messages may drop.'
+            )}
+            aria-label={`Context usage ${(contextRatio * 100).toFixed(0)} percent — tap for options`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '4px 10px',
+              marginBottom: 6,
+              background: 'var(--surface-1)',
+              border: '1px solid var(--border-default)',
+              borderRadius: 10,
+              fontSize: 10,
+              fontVariantNumeric: 'tabular-nums',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              width: '100%',
+              textAlign: 'left',
+            }}
+          >
+            <span style={{ opacity: 0.7 }}>Context</span>
+            <div
+              style={{
+                flex: 1,
+                height: 3,
+                background: 'var(--border-subtle)',
+                borderRadius: 2,
+                overflow: 'hidden',
+                position: 'relative',
+              }}
+            >
+              <div
+                style={{
+                  width: `${Math.min(100, contextRatio * 100)}%`,
+                  height: '100%',
+                  background: meterColor,
+                  transition: 'width 0.3s ease, background 0.3s ease',
+                }}
+              />
+            </div>
+            <span style={{ color: meterColor, minWidth: 32, textAlign: 'right' }}>
+              {(contextRatio * 100).toFixed(0)}%
+            </span>
+          </button>
+        )}
+
         {/* Glass input wrapper */}
         <div
           style={{
@@ -439,6 +597,7 @@ export function MessageInput({
               actionMode === 'search' ? 'What do you want to search for?' :
               actionMode === 'research' ? 'What topic should I research?' :
               actionMode === 'agent' ? 'Describe the task for the agent...' :
+              actionMode === 'delegate' ? "Delegate a task to Aura — e.g. 'research X and summarize by tomorrow'" :
               placeholder
             }
             disabled={disabled}
@@ -514,6 +673,7 @@ export function MessageInput({
                     { mode: 'agent' as ActionMode, icon: CpuChipIcon, label: 'Agent', desc: 'Autonomous execution' },
                     { mode: 'swarm' as ActionMode, icon: UserGroupIcon, label: 'Swarm', desc: 'Multi-agent parallel' },
                     { mode: 'compare' as ActionMode, icon: ScaleIcon, label: 'Compare', desc: 'Compare 3 models' },
+                    { mode: 'delegate' as ActionMode, icon: RocketLaunchIcon, label: 'Delegate', desc: 'Hand off async to Aura' },
                   ] as const).map(({ mode, icon: Icon, label, desc }) => (
                     <button
                       key={mode}
@@ -554,6 +714,7 @@ export function MessageInput({
                     { mode: 'agent' as ActionMode, icon: <CpuChipIcon className="w-5 h-5" />, label: 'Agent', desc: 'Autonomous execution' },
                     { mode: 'swarm' as ActionMode, icon: <UserGroupIcon className="w-5 h-5" />, label: 'Swarm', desc: 'Multi-agent parallel' },
                     { mode: 'compare' as ActionMode, icon: <ScaleIcon className="w-5 h-5" />, label: 'Compare', desc: 'Compare 3 models' },
+                    { mode: 'delegate' as ActionMode, icon: <RocketLaunchIcon className="w-5 h-5" />, label: 'Delegate', desc: 'Hand off async to Aura' },
                   ]).map(({ mode, icon, label, desc }) => ({
                     icon,
                     label,

@@ -85,6 +85,11 @@ interface ChatState {
   toolPrefill: { toolId: string; query: string } | null;
   setToolPrefill: (p: { toolId: string; query: string } | null) => void;
   clearToolPrefill: () => void;
+
+  // Forked-from-another-conversation tracking (ephemeral — cleared on next send or convo switch)
+  forkedFrom: { conversationId: string | null; atMessageId: string; atMessageTimestamp: number } | null;
+  forkFromMessage: (messageId: string) => boolean;
+  clearForkedFrom: () => void;
 }
 
 const generateId = () => `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
@@ -102,8 +107,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     };
     set((state) => {
       const updated = [...state.messages, newMessage];
-      // Cap at 500 messages to prevent unbounded memory growth
-      const trimmed = updated.length > 500 ? updated.slice(updated.length - 500) : updated;
+      // Cap at 2000 messages to prevent unbounded memory growth
+      const trimmed = updated.length > 2000 ? updated.slice(updated.length - 2000) : updated;
       return { messages: trimmed };
     });
     return id;
@@ -248,4 +253,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
   toolPrefill: null,
   setToolPrefill: (p) => set({ toolPrefill: p }),
   clearToolPrefill: () => set({ toolPrefill: null }),
+
+  // Forked-from tracking
+  forkedFrom: null,
+  forkFromMessage: (messageId) => {
+    const state = get();
+    const idx = state.messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) return false;
+    const sliced = state.messages.slice(0, idx + 1);
+    set({
+      messages: sliced,
+      currentConversationId: null,
+      forkedFrom: {
+        conversationId: state.currentConversationId,
+        atMessageId: messageId,
+        atMessageTimestamp: state.messages[idx].timestamp,
+      },
+      suggestions: [],
+      toolSuggestion: null,
+      researchProgress: null,
+      fleetData: null,
+    });
+    return true;
+  },
+  clearForkedFrom: () => set({ forkedFrom: null }),
 }));

@@ -404,7 +404,8 @@ class CodeExecutorTool:
 
         if self.persist_traces:
             try:
-                persist_dir = Path("data") / "code_traces"
+                from aura.paths import user_data_path
+                persist_dir = user_data_path("code_traces")
                 persist_dir.mkdir(parents=True, exist_ok=True)
                 final_path = persist_dir / f"exec_{int(time.time() * 1000)}.json"
                 shutil.move(trace_path, final_path)

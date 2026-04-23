@@ -162,8 +162,8 @@ def validate_int(value: Any, name: str, min_val: int | None = None, max_val: int
     if not isinstance(value, int):
         try:
             value = int(value)
-        except (ValueError, TypeError):
-            raise ValueError(f"{name} must be an integer")
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"{name} must be an integer") from e
 
     if min_val is not None and value < min_val:
         raise ValueError(f"{name} must be at least {min_val}")

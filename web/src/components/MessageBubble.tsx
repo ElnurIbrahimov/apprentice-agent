@@ -9,13 +9,16 @@ import { useChatStore } from '../store/chatStore';
 import { ModelCompare } from './ModelCompare';
 import { CodeBlock } from './CodeBlock';
 import { SparklesIcon, BoltIcon } from '@heroicons/react/24/solid';
-import { ClipboardDocumentIcon, ClipboardIcon, CheckIcon, ArrowPathIcon, ShareIcon, PencilIcon, StopIcon, HandThumbUpIcon, HandThumbDownIcon } from '@heroicons/react/24/outline';
+import { ClipboardDocumentIcon, ClipboardIcon, CheckIcon, ArrowPathIcon, ShareIcon, PencilIcon, StopIcon, HandThumbUpIcon, HandThumbDownIcon, ArrowsRightLeftIcon, RocketLaunchIcon } from '@heroicons/react/24/outline';
 import { AttachmentList } from './AttachmentPreview';
 import { ToolTrace } from './ToolTrace';
 import { MemoryIndicator } from './MemoryIndicator';
 import { haptic } from '../utils/haptics';
 import { copyText } from '../utils/clipboard';
+import { toast } from './Toast';
 import type { ArtifactType } from '../utils/artifactRenderer';
+import { splitAtSafePoint } from '../utils/streamMarkdown';
+import { detectArtifactType } from '../utils/artifactRenderer';
 
 /* ── Citation tooltip shown on hover of inline [N] badges ── */
 function CitationTooltip({ citation, position }: { citation: Citation; position: { x: number; y: number } }) {
@@ -329,37 +332,34 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
   const prevStreamingRef = useRef(isStreaming);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
-  // Debounced display content — throttle ReactMarkdown re-parses to 80ms during streaming
-  // to avoid rendering partial tokens like `**bo` before `ld**` arrives.
-  const [displayContent, setDisplayContent] = useState(message.content);
-  const pendingContentRef = useRef(message.content);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
+  // Streaming speed tracker — live tokens/sec estimate
+  const [streamTokSec, setStreamTokSec] = useState<number | null>(null);
+  const streamStartRef = useRef<number | null>(null);
   useEffect(() => {
     if (!isStreaming) {
-      // Streaming ended — flush immediately with final content
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-      setDisplayContent(message.content);
+      streamStartRef.current = null;
+      setStreamTokSec(null);
       return;
     }
-    // During streaming: schedule a flush if not already pending
-    pendingContentRef.current = message.content;
-    if (!debounceTimerRef.current) {
-      debounceTimerRef.current = setTimeout(() => {
-        debounceTimerRef.current = null;
-        setDisplayContent(pendingContentRef.current);
-      }, 80);
+    if (!streamStartRef.current && message.content.length > 0) {
+      streamStartRef.current = Date.now();
     }
-  }, [message.content, isStreaming]);
+    const start = streamStartRef.current;
+    if (!start) return;
+    const elapsed = Date.now() - start;
+    if (elapsed < 500) return;
+    const tokensEstimate = message.content.length / 4;
+    setStreamTokSec(Math.round((tokensEstimate / elapsed) * 1000));
+  }, [isStreaming, message.content]);
 
-  useEffect(() => {
-    return () => {
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    };
-  }, []);
+  // Block-aware streaming split. While isStreaming, only fully-completed
+  // markdown blocks are fed to the ReactMarkdown renderer; the incomplete
+  // trailing slice (mid-paragraph, unclosed code fence) renders as plain text
+  // until it reaches a block boundary. Eliminates the `**bo` → `**bold**`
+  // flicker without a blind time-debounce.
+  const { safe: displayContent, trailing: streamingTail } = isStreaming
+    ? splitAtSafePoint(message.content)
+    : { safe: message.content, trailing: '' };
 
   // Edit mode state (user messages only)
   const [isEditing, setIsEditing] = useState(false);
@@ -380,6 +380,29 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
     }
     prevStreamingRef.current = isStreaming;
   }, [isStreaming]);
+
+  // Auto-promote dominant code blocks to the ArtifactsPanel on completion.
+  // Fires once per message: when streaming transitions true → false, scan
+  // fenced code blocks; if the largest is an HTML / React / SVG / mermaid
+  // artifact with enough substance, open it in the side panel automatically.
+  const autoPromotedRef = useRef(false);
+  useEffect(() => {
+    if (!onOpenArtifact || isStreaming || autoPromotedRef.current || !message.content) return;
+    const AUTO_MIN_CHARS = 600;
+    const fenceRe = /```(\w*)\n([\s\S]*?)```/g;
+    let match: RegExpExecArray | null;
+    let best: { code: string; type: ArtifactType; length: number } | null = null;
+    while ((match = fenceRe.exec(message.content)) !== null) {
+      const [, lang, code] = match;
+      const type = detectArtifactType(code, lang);
+      if (!type) continue;
+      if (!best || code.length > best.length) best = { code, type, length: code.length };
+    }
+    if (best && best.length >= AUTO_MIN_CHARS) {
+      autoPromotedRef.current = true;
+      onOpenArtifact(best.code, best.type);
+    }
+  }, [isStreaming, message.content, onOpenArtifact]);
 
   useEffect(() => {
     return () => {
@@ -494,6 +517,15 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
     setContextMenu(null);
   }, [message.content]);
 
+  const handleFork = useCallback(() => {
+    setContextMenu(null);
+    const ok = useChatStore.getState().forkFromMessage(message.id);
+    if (ok) {
+      haptic(30);
+      toast.success('Forked conversation', 'Continue from here — the original is saved in your sidebar.');
+    }
+  }, [message.id]);
+
   const hasCitations = !!(message.citations && message.citations.length > 0);
 
   const staggerClass = animationIndex <= 4 ? `msg-stagger-${animationIndex}` : 'msg-stagger-4';
@@ -567,18 +599,32 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
               </div>
             </div>
           ) : (
-            <div className="user-bubble" style={{
-              padding: '12px 22px',
-              borderRadius: '24px 24px 4px 24px',
-              fontSize: '1rem',
-              fontWeight: 500,
-              maxWidth: '85%',
-              lineHeight: 1.6,
-            }}>
-              {message.attachments && message.attachments.length > 0 && (
-                <AttachmentList attachments={message.attachments} compact />
+            <div className="flex flex-col items-end gap-1" style={{ maxWidth: '85%' }}>
+              {message.actionMode === 'delegate' && (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium"
+                  style={{
+                    background: 'rgba(124,58,237,0.22)',
+                    color: '#c4b5fd',
+                    border: '1px solid rgba(124,58,237,0.35)',
+                  }}
+                >
+                  <RocketLaunchIcon className="w-3 h-3" />
+                  Delegated
+                </span>
               )}
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              <div className="user-bubble" style={{
+                padding: '12px 22px',
+                borderRadius: '24px 24px 4px 24px',
+                fontSize: '1rem',
+                fontWeight: 500,
+                lineHeight: 1.6,
+              }}>
+                {message.attachments && message.attachments.length > 0 && (
+                  <AttachmentList attachments={message.attachments} compact />
+                )}
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              </div>
             </div>
           )}
         </div>
@@ -619,6 +665,10 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
             <button className="ctx-menu-item w-full" onClick={handleCtxShare}>
               <ShareIcon className="w-4 h-4" />
               Share
+            </button>
+            <button className="ctx-menu-item w-full" onClick={handleFork}>
+              <ArrowsRightLeftIcon className="w-4 h-4" />
+              Fork from here
             </button>
           </div>
         </>
@@ -705,8 +755,25 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
                 {displayContent}
               </ReactMarkdown>
             )}
+            {/* Unparsed streaming tail — shown as plain text until the block closes */}
+            {isStreaming && streamingTail && (
+              <span className="whitespace-pre-wrap opacity-90">{streamingTail}</span>
+            )}
             {(isStreaming || cursorExiting) && (
               <span className={`stream-cursor ${cursorExiting ? 'cursor-exiting' : ''}`} />
+            )}
+            {isStreaming && streamTokSec !== null && streamTokSec > 0 && (
+              <span
+                className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono tabular-nums align-middle"
+                style={{
+                  background: 'var(--surface-2)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-subtle)',
+                }}
+                title="Live generation speed (tokens estimated from chars / 4)"
+              >
+                {streamTokSec} tok/s
+              </span>
             )}
           </div>
 
@@ -769,6 +836,14 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
                     <ArrowPathIcon className="w-4 h-4" />
                   </button>
                 )}
+                <button
+                  onClick={handleFork}
+                  aria-label="Fork from here"
+                  className="p-1.5 rounded hover:text-chat-text"
+                  title="Fork from here"
+                >
+                  <ArrowsRightLeftIcon className="w-4 h-4" />
+                </button>
                 <span className="w-px h-3 bg-white/10 mx-0.5" />
                 <button
                   onClick={() => handleReaction('positive')}

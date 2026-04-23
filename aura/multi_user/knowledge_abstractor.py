@@ -53,7 +53,11 @@ class KnowledgeAbstractor:
         data_dir: Optional[Path] = None,
         privacy_guard: Optional[PrivacyGuard] = None,
     ):
-        self._data_dir = data_dir or Path("data/cross_user_insights")
+        if data_dir:
+            self._data_dir = data_dir
+        else:
+            from aura.paths import user_data_path
+            self._data_dir = user_data_path("cross_user_insights")
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self.privacy_guard = privacy_guard or PrivacyGuard()
         self.insights: Dict[str, AbstractInsight] = {}

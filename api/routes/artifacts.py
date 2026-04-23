@@ -109,7 +109,7 @@ async def _broadcast_to_clients(payload: dict) -> None:
 
 def broadcast_event(payload: Dict[str, Any]) -> None:
     """Broadcast an arbitrary event payload to connected artifact clients."""
-    global _event_loop
+    # Read-only access — no `global` needed (ruff PLW0602).
     if _event_loop and not _event_loop.is_closed():
         try:
             _event_loop.call_soon_threadsafe(
@@ -190,6 +190,19 @@ async def artifacts_ws(websocket: WebSocket):
     if not verify_api_key_ws(api_key):
         await websocket.close(code=1008)
         return
+
+    # Cap concurrent WS clients. Even with auth this is worth bounding: a
+    # buggy extension reloading on every tab change can quickly stack 100s
+    # of connections and exhaust asyncio handles. 64 is plenty for a
+    # personal-agent deployment; bump if a real multi-user scenario appears.
+    _MAX_WS_CLIENTS = 64
+    with _ws_lock:
+        if len(_ws_clients) >= _MAX_WS_CLIENTS:
+            logger.warning(
+                "[Artifacts WS] Rejecting new client: cap %d reached", _MAX_WS_CLIENTS,
+            )
+            await websocket.close(code=1013)  # "Try Again Later"
+            return
 
     await websocket.accept()
 

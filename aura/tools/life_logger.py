@@ -25,7 +25,8 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(os.getenv("AURA_DATA_DIR", "data")) / "life_log.db"
+from aura.paths import resolve_data_dir as _resolve_data_dir
+DB_PATH = _resolve_data_dir() / "life_log.db"
 _db_lock = threading.Lock()
 
 SOURCES = ["clipboard", "obsidian", "github", "meeting", "audio", "calendar", "task", "manual"]
@@ -235,7 +236,7 @@ class LifeLogger:
                 logger.debug(f"[LifeLogger] Clipboard pull failed: {e}")
 
         # Meeting records
-        meetings_dir = Path(os.getenv("AURA_DATA_DIR", "data")) / "meetings"
+        meetings_dir = _resolve_data_dir() / "meetings"
         if meetings_dir.exists():
             try:
                 for path in sorted(meetings_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:10]:

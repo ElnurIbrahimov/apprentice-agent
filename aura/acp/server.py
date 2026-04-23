@@ -63,19 +63,34 @@ class AuraACPServer:
         for line in stream:
             if isinstance(line, bytes):
                 line = line.decode("utf-8", errors="ignore")
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                request = json.loads(line)
-            except json.JSONDecodeError as e:
-                self._write_error(None, -32700, f"Parse error: {e}")
-                continue
-            try:
-                self._handle(request)
-            except Exception as exc:
-                logger.exception("[ACP] handler crash")
-                self._write_error(request.get("id"), -32603, f"Internal error: {exc}")
+            self.process_line(line)
+
+    def process_line(self, line: str) -> None:
+        """Parse one JSON-RPC line and dispatch; write errors to stdout.
+
+        Extracted from run() so tests can exercise the validation/dispatch
+        path without patching sys.stdin. No-ops on blank input.
+        """
+        line = line.strip()
+        if not line:
+            return
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError as e:
+            self._write_error(None, -32700, f"Parse error: {e}")
+            return
+        # JSON-RPC requires a request object. Batch (list) requests aren't
+        # supported by this server; reject them explicitly rather than
+        # crashing self._handle on `.get()`. Any non-dict top-level type
+        # (string/number/null/list) gets a clean invalid-request error.
+        if not isinstance(request, dict):
+            self._write_error(None, -32600, "Invalid Request: expected JSON object")
+            return
+        try:
+            self._handle(request)
+        except Exception as exc:
+            logger.exception("[ACP] handler crash")
+            self._write_error(request.get("id"), -32603, f"Internal error: {exc}")
 
     def _handle(self, request: dict) -> None:
         method = request.get("method", "")

@@ -261,7 +261,8 @@ class ChatMixin:
             if _profile_str:
                 context_parts.append(_profile_str)
             else:
-                profile_path = Path("data/memory/user_profile.md")
+                from aura.paths import user_data_path
+                profile_path = user_data_path("memory/user_profile.md")
                 if profile_path.exists():
                     profile_text = profile_path.read_text(encoding='utf-8').strip()
                     if profile_text:

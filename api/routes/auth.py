@@ -223,9 +223,11 @@ async def chatgpt_oauth_callback(
 
     redirect_uri = _pkce_redirect_pop(state)
 
-    # Exchange authorization code for tokens
+    # Exchange authorization code for tokens. httpx.AsyncClient — NOT the
+    # blocking `requests` library — so the 30s token exchange doesn't freeze
+    # the FastAPI event loop and starve every other in-flight request.
     try:
-        import requests as http_requests
+        import httpx
 
         from aura.auth.chatgpt_oauth import (
             CLIENT_ID,
@@ -234,18 +236,18 @@ async def chatgpt_oauth_callback(
             _save_tokens,
         )
 
-        resp = http_requests.post(
-            TOKEN_URL,
-            data={
-                "grant_type": "authorization_code",
-                "client_id": CLIENT_ID,
-                "code": code,
-                "code_verifier": verifier,
-                "redirect_uri": redirect_uri,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=30,
-        )
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                TOKEN_URL,
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": CLIENT_ID,
+                    "code": code,
+                    "code_verifier": verifier,
+                    "redirect_uri": redirect_uri,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
 
         if resp.status_code != 200:
             logging.getLogger(__name__).error(

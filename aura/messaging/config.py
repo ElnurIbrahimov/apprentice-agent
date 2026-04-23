@@ -45,8 +45,10 @@ WHATSAPP_CONFIG = {
     # WebSocket URL for Baileys bridge
     "websocket_url": "ws://localhost:3001",
 
-    # WhatsApp session storage path
-    "session_path": str(Path("data/messaging/whatsapp_session")),
+    # WhatsApp session storage path (anchored under AURA_ROOT).
+    "session_path": str(
+        Path(__file__).resolve().parent.parent.parent / "data" / "messaging" / "whatsapp_session"
+    ),
 
     # Allowed phone numbers (empty = allow all)
     "allowed_numbers": [

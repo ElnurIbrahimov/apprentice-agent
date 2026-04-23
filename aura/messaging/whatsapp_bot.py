@@ -69,7 +69,8 @@ class WhatsAppBot(BasePlatform):
 
     def _load_state(self):
         """Load saved state"""
-        state_file = Path("data/messaging/whatsapp_state.json")
+        from aura.paths import user_data_path
+        state_file = user_data_path("messaging/whatsapp_state.json")
         if state_file.exists():
             try:
                 with open(state_file, encoding="utf-8") as f:
@@ -80,7 +81,8 @@ class WhatsAppBot(BasePlatform):
 
     def _save_state(self):
         """Save state"""
-        state_file = Path("data/messaging/whatsapp_state.json")
+        from aura.paths import user_data_path
+        state_file = user_data_path("messaging/whatsapp_state.json")
         state_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:

@@ -779,7 +779,13 @@ class VerifiedMemory:
     """
 
     def __init__(self, data_dir: Path | None = None, max_traces: int = 500):
-        self.data_dir = Path(data_dir) if data_dir else Path("data/memory")
+        if data_dir:
+            self.data_dir = Path(data_dir)
+        else:
+            # Anchor default under AURA_ROOT — running from any cwd used to
+            # fork the on-disk trace store into orphan directories.
+            from aura.paths import user_data_path
+            self.data_dir = user_data_path("memory")
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.max_traces = max_traces
         self._lock = threading.Lock()

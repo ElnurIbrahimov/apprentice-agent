@@ -14,6 +14,14 @@ from typing import Callable, List, Optional
 from .config import Config
 from .identity import get_identity_prompt
 
+# TTLs for per-prompt caches. Previously assigned as __init__-locals that
+# went nowhere while the check sites hardcoded 300/600 magic numbers;
+# lifted here so tweaking a TTL updates both definition and use.
+_CODEBASE_CTX_TTL = 300   # 5 min — codebase index lookups are expensive
+_EPISODIC_CTX_TTL = 30    # 30s — episodic memory turns over quickly
+_SKILL_CATALOG_TTL = 600  # 10 min — skills rarely change mid-session
+_DEFERRED_TOOLS_TTL = 600 # 10 min
+
 logger = logging.getLogger(__name__)
 
 MAX_SYSTEM_PROMPT_CHARS = 25000
@@ -62,27 +70,23 @@ class SystemPromptBuilder:
         self._project_ctx_ts: float = 0.0
         self._project_ctx_cwd: str = ""
 
-        # Codebase context cache (expensive index search — 5 min TTL)
+        # Codebase context cache (expensive index search — see _CODEBASE_CTX_TTL)
         self._codebase_ctx_cache: Optional[str] = None
         self._codebase_ctx_ts: float = 0.0
         self._codebase_ctx_prompt: str = ""
-        _CODEBASE_CTX_TTL = 300  # 5 minutes
 
-        # Episodic memory cache (semantic + BM25 search — 30s TTL)
+        # Episodic memory cache (semantic + BM25 search — see _EPISODIC_CTX_TTL)
         self._episodic_cache: Optional[str] = None
         self._episodic_cache_ts: float = 0.0
         self._episodic_cache_prompt: str = ""
-        _EPISODIC_CTX_TTL = 30
 
-        # Skill catalog cache (10 min TTL — skills rarely change mid-session)
+        # Skill catalog cache (see _SKILL_CATALOG_TTL)
         self._skill_catalog_cache: Optional[str] = None
         self._skill_catalog_ts: float = 0.0
-        _SKILL_CATALOG_TTL = 600
 
-        # Deferred tools cache (10 min TTL)
+        # Deferred tools cache (see _DEFERRED_TOOLS_TTL)
         self._deferred_tools_cache: Optional[str] = None
         self._deferred_tools_ts: float = 0.0
-        _DEFERRED_TOOLS_TTL = 600
 
         # World model cache (60s TTL — state changes slowly, worth caching longer
         # than the generic subsystem blob). Has its own 2000-char cap.
@@ -387,7 +391,7 @@ class SystemPromptBuilder:
         _now = time.time()
         if (
             self._codebase_ctx_cache is not None
-            and _now - self._codebase_ctx_ts < 300
+            and _now - self._codebase_ctx_ts < _CODEBASE_CTX_TTL
             and self._codebase_ctx_prompt == prompt
         ):
             if self._codebase_ctx_cache:
@@ -396,7 +400,8 @@ class SystemPromptBuilder:
         try:
             from aura.tools.codebase_index import CodebaseIndex
             _cwd = os.getcwd()
-            _idx_db = Path("data/codebase_index/index.db")
+            from aura.paths import user_data_path
+            _idx_db = user_data_path("codebase_index/index.db")
             _idx_db_legacy = Path(_cwd) / ".aura" / "index.db"
             code_section = ""
             if (_idx_db.exists() or _idx_db_legacy.exists()) and len(full) < MAX_SYSTEM_PROMPT_CHARS - 1000:
@@ -433,7 +438,7 @@ class SystemPromptBuilder:
             return full
         # TTL cache: skills rarely change mid-session (10 min)
         _now = time.time()
-        if self._skill_catalog_cache is not None and _now - self._skill_catalog_ts < 600:
+        if self._skill_catalog_cache is not None and _now - self._skill_catalog_ts < _SKILL_CATALOG_TTL:
             if self._skill_catalog_cache:
                 full = f"{full}\n\n{self._skill_catalog_cache}"
             return full
@@ -465,7 +470,7 @@ class SystemPromptBuilder:
             return full
         # TTL cache: deferred tools rarely change (10 min)
         _now = time.time()
-        if self._deferred_tools_cache is not None and _now - self._deferred_tools_ts < 600:
+        if self._deferred_tools_cache is not None and _now - self._deferred_tools_ts < _DEFERRED_TOOLS_TTL:
             if self._deferred_tools_cache:
                 full = f"{full}\n\n{self._deferred_tools_cache}"
             return full
@@ -520,7 +525,7 @@ class SystemPromptBuilder:
         _now = time.time()
         if (
             self._episodic_cache is not None
-            and _now - self._episodic_cache_ts < 30
+            and _now - self._episodic_cache_ts < _EPISODIC_CTX_TTL
             and self._episodic_cache_prompt == prompt
         ):
             if self._episodic_cache:

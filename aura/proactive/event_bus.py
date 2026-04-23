@@ -189,9 +189,9 @@ class RedisBackend(EventBusBackend):
                 import redis.asyncio as redis
                 self._redis = await redis.from_url(self.redis_url)
                 logger.info("[EventBus] Redis connected")
-            except ImportError:
+            except ImportError as e:
                 logger.error("[EventBus] redis package not installed")
-                raise RuntimeError("redis package required for RedisBackend")
+                raise RuntimeError("redis package required for RedisBackend") from e
             except Exception as e:
                 logger.error(f"[EventBus] Redis connection failed: {e}")
                 raise

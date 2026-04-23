@@ -62,10 +62,10 @@ ALLOWED_ORIGINS = {
 }
 ENV_ORIGINS = os.getenv("AURA_MCP_ALLOWED_ORIGINS", "")
 if ENV_ORIGINS:
-    for o in ENV_ORIGINS.split(","):
-        o = o.strip()
-        if o:
-            ALLOWED_ORIGINS.add(o)
+    for raw_origin in ENV_ORIGINS.split(","):
+        origin = raw_origin.strip()
+        if origin:
+            ALLOWED_ORIGINS.add(origin)
 
 
 def _origin_allowed(origin: Optional[str]) -> bool:
@@ -90,7 +90,7 @@ def _get_server() -> Any:
             from aura.core.mcp_server import AuraMCPServer
         except Exception as e:
             logger.error("[MCP/HTTP] Failed to import AuraMCPServer: %s", e)
-            raise HTTPException(503, detail="Aura MCP server unavailable")
+            raise HTTPException(503, detail="Aura MCP server unavailable") from e
         _server_singleton = AuraMCPServer(os.getcwd())
     return _server_singleton
 
@@ -163,8 +163,8 @@ async def mcp_endpoint(
 
     try:
         body = await request.json()
-    except Exception:
-        raise HTTPException(400, detail="Invalid JSON body")
+    except Exception as e:
+        raise HTTPException(400, detail="Invalid JSON body") from e
 
     session_id = mcp_session_id or str(uuid.uuid4())
 
