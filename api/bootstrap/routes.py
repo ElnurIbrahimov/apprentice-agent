@@ -69,6 +69,7 @@ ROUTE_MODULE_SPECS: tuple[RouteModuleSpec, ...] = (
     RouteModuleSpec("lifelog"),
     RouteModuleSpec("mcp_server_http"),
     RouteModuleSpec("mcp_manage"),
+    RouteModuleSpec("companion"),
 )
 
 CRITICAL_ROUTE_MODULES = frozenset({"chat", "status", "auth", "web_auth"})
