@@ -12,8 +12,10 @@ declare const browser: typeof chrome | undefined;
 const ext: typeof chrome =
   typeof browser !== 'undefined' ? (browser as typeof chrome) : chrome;
 
-// Dynamic backend URL — reads from storage, falls back to localhost
-let BACKEND = 'https://aura-elnur.duckdns.org';
+import { DEFAULT_BACKEND_URL } from './src/constants';
+
+// Dynamic backend URL — reads from storage, falls back to DEFAULT_BACKEND_URL
+let BACKEND = DEFAULT_BACKEND_URL;
 let BACKEND_API_KEY = '';
 
 // Load saved backend URL and API key from extension storage
@@ -297,7 +299,7 @@ ext.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // Serve config from the SW (which has access) via message response.
     ext.storage.local.get(['backendUrl', 'apiKey'], (data) => {
       sendResponse({
-        backendUrl: data?.backendUrl || 'https://aura-elnur.duckdns.org',
+        backendUrl: data?.backendUrl || DEFAULT_BACKEND_URL,
         apiKey: data?.apiKey || '',
       });
     });

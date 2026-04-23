@@ -22,6 +22,8 @@
  * socket.
  */
 
+import { DEFAULT_BACKEND_URL } from './src/constants';
+
 const WS_CONNECT_TIMEOUT = 5_000;
 const PING_INTERVAL = 25_000;
 const PING_GRACE = 5_000;
@@ -72,7 +74,7 @@ async function loadConfig(): Promise<void> {
   // `chrome.storage` is not guaranteed to be exposed to offscreen documents
   // across Chrome versions — proxy through the service worker which always
   // has access. Fall through to the default server if anything fails.
-  let httpUrl = 'https://aura-elnur.duckdns.org';
+  let httpUrl: string = DEFAULT_BACKEND_URL;
   let key = '';
   try {
     // Prefer direct access if available (newer Chrome)…

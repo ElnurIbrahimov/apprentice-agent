@@ -1,18 +1,17 @@
 import ext from './ext';
+import { DEFAULT_BACKEND_URL } from './constants';
 
 // ---------------------------------------------------------------------------
 // Backend URL configuration
 //
-// Defaults to localhost:8000 for local development. Users can configure a
-// different URL via the Settings panel, which persists to chrome.storage.local.
-// On startup, initBackendUrl() loads the saved URL and updates HTTP + WS_URL.
+// Defaults to DEFAULT_BACKEND_URL for the hosted Aura server. Users can
+// configure a different URL via the Settings panel, which persists to
+// chrome.storage.local. On startup, initBackendUrl() loads the saved URL
+// and updates HTTP + WS_URL.
 // ---------------------------------------------------------------------------
 
-// Default to the Aura server. Override in Settings panel if running locally.
-const DEFAULT_HTTP = 'https://aura-elnur.duckdns.org';
-
-export let HTTP = DEFAULT_HTTP;
-export let WS_URL = deriveWsUrl(DEFAULT_HTTP);
+export let HTTP: string = DEFAULT_BACKEND_URL;
+export let WS_URL: string = deriveWsUrl(DEFAULT_BACKEND_URL);
 export let API_KEY = '';
 
 /** Derive the WebSocket URL from an HTTP base URL. */
@@ -48,7 +47,7 @@ export function getServerLabel(): string {
 export function initBackendUrl(): Promise<void> {
   return new Promise((resolve) => {
     if (!ext?.storage?.local) {
-      HTTP = DEFAULT_HTTP;
+      HTTP = DEFAULT_BACKEND_URL;
       WS_URL = deriveWsUrl(HTTP);
       API_KEY = '';
       resolve();
@@ -58,7 +57,7 @@ export function initBackendUrl(): Promise<void> {
       const savedUrl = d?.backendUrl?.trim?.();
       const savedKey = d?.apiKey?.trim?.();
 
-      HTTP = savedUrl ? savedUrl.replace(/\/+$/, '') : DEFAULT_HTTP;
+      HTTP = savedUrl ? savedUrl.replace(/\/+$/, '') : DEFAULT_BACKEND_URL;
       WS_URL = deriveWsUrl(HTTP);
       API_KEY = savedKey || '';
       resolve();
@@ -73,8 +72,8 @@ export function initBackendUrl(): Promise<void> {
 export function setBackendUrl(url: string): void {
   const cleaned = url.trim().replace(/\/+$/, '');
   if (!cleaned) {
-    HTTP = DEFAULT_HTTP;
-    WS_URL = deriveWsUrl(DEFAULT_HTTP);
+    HTTP = DEFAULT_BACKEND_URL;
+    WS_URL = deriveWsUrl(DEFAULT_BACKEND_URL);
     ext?.storage?.local?.remove(['backendUrl']);
   } else {
     HTTP = cleaned;

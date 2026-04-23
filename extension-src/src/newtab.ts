@@ -3,8 +3,10 @@
  * Keeps bundle under 50KB.
  */
 
+import { DEFAULT_BACKEND_URL } from './constants';
+
 const CONV_LIST_KEY = 'aura_conversations';
-const BACKEND_URL = 'https://aura-elnur.duckdns.org';
+const BACKEND_URL = DEFAULT_BACKEND_URL;
 const MOOD_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 const QUOTES = [

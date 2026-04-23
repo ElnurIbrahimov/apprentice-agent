@@ -164,12 +164,19 @@
         kind: t.kind,
       }));
 
+      // Cap string lengths on untrusted API fields before dispatching via
+      // CustomEvent — a pathological YouTube response (or MITM'd one) could
+      // otherwise push MBs of text through the event bus and any listener
+      // that stores it.
+      const clip = (s: string, max: number) =>
+        typeof s === 'string' && s.length > max ? s.slice(0, max) : s;
+
       return {
-        videoId: vd.videoId || getVideoId(),
-        title: vd.title || microformat.title?.simpleText || '',
+        videoId: clip(vd.videoId || getVideoId(), 64),
+        title: clip(vd.title || microformat.title?.simpleText || '', 500),
         duration: parseInt(vd.lengthSeconds || '0', 10),
-        description: vd.shortDescription || microformat.description?.simpleText || '',
-        channelName: vd.author || '',
+        description: clip(vd.shortDescription || microformat.description?.simpleText || '', 5000),
+        channelName: clip(vd.author || '', 200),
         chapters,
         captionTracks,
       };

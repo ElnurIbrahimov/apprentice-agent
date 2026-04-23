@@ -6,8 +6,10 @@
  * Self-contained: all helpers live inside the closure, only takes chrome APIs +
  * message-send helper as arguments.
  */
+import { DEFAULT_BACKEND_URL } from '../constants';
+
 export function initGoogleSerp(ext: typeof chrome, safeSend: (msg: any, cb?: (r: any) => void) => void): void {
-  let SERP_BACKEND = 'https://aura-elnur.duckdns.org';
+  let SERP_BACKEND: string = DEFAULT_BACKEND_URL;
   let SERP_API_KEY = '';
 
   /** Read backend URL and API key from chrome.storage.local. */

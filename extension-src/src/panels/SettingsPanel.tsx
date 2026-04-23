@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../store';
 import { User, FileText, Sparkles, RotateCcw, Save, Check, Server, Key, ChevronDown, ChevronRight, Zap, Eye, EyeOff } from 'lucide-react';
 import { getBackendUrl, setBackendUrl, setApiKey, API_KEY } from '../api';
+import { DEFAULT_BACKEND_URL } from '../constants';
 import { connectWS, fetchStatus, resetWsRetry } from '../ws';
 import { getDefaultCreationSettings, loadCreationSettings, saveCreationSettings, type CreationSettings } from '../utils/creationSettings';
 import ext from '../ext';
@@ -225,7 +226,7 @@ export default function SettingsPanel() {
   const handleTestConnection = async () => {
     setConnTesting(true);
     setConnStatus('idle');
-    const testUrl = localBackendUrl.trim().replace(/\/+$/, '') || 'https://aura-elnur.duckdns.org';
+    const testUrl = localBackendUrl.trim().replace(/\/+$/, '') || DEFAULT_BACKEND_URL;
     try {
       const headers: Record<string, string> = {};
       if (localApiKey.trim()) headers['X-API-Key'] = localApiKey.trim();
@@ -449,7 +450,7 @@ export default function SettingsPanel() {
             type="url"
             value={localBackendUrl}
             onChange={(e) => setLocalBackendUrl(e.target.value)}
-            placeholder="https://aura-elnur.duckdns.org (default)"
+            placeholder={`${DEFAULT_BACKEND_URL} (default)`}
             maxLength={200}
             style={inputStyle}
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--pl)')}
