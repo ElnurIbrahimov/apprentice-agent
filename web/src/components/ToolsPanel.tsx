@@ -14,6 +14,7 @@ import { apiFetch } from '../utils/apiFetch';
 import { useChatStore } from '../store/chatStore';
 import { topMatches } from '../utils/toolMatch';
 import { SparklesIcon } from '@heroicons/react/24/outline';
+import { ToolPlayground } from './ToolPlayground';
 
 const PINNED_KEY = 'aura-tools-pinned';
 
@@ -209,6 +210,9 @@ export function ToolsPanel() {
 
   return (
     <div className="space-y-4">
+      {/* Tool Playground — invoke read-only tools directly */}
+      <ToolPlayground />
+
       {/* Voice */}
       <div className="bg-chat-sidebar rounded-lg p-4">
         <h3 className="text-chat-text font-medium flex items-center gap-2 mb-3">

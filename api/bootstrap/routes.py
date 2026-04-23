@@ -34,6 +34,7 @@ ROUTE_MODULE_SPECS: tuple[RouteModuleSpec, ...] = (
     RouteModuleSpec("self_improvement"),
     RouteModuleSpec("thinking_mode"),
     RouteModuleSpec("tools_new"),
+    RouteModuleSpec("tools_invoke"),
     RouteModuleSpec("activity"),
     RouteModuleSpec("multi_model"),
     RouteModuleSpec("knowledge"),
