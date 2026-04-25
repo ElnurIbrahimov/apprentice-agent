@@ -154,6 +154,29 @@ PROVIDER_CONFIGS = {
             "google/gemini-2.5-flash",
         ],
     },
+    "crof": {
+        "base_url": "https://crof.ai/v1",
+        "env_var": "CROF_API_KEY",
+        "display_name": "Crof (nahcrof)",
+        "default_models": [
+            "deepseek-v4-pro",
+            "qwen3.6-27b",
+            "kimi-k2.6",
+            "kimi-k2.6-precision",
+            "glm-5.1",
+            "glm-5.1-precision",
+            "kimi-k2.5",
+            "kimi-k2.5-lightning",
+            "glm-5",
+            "glm-4.7",
+            "glm-4.7-flash",
+            "deepseek-v3.2",
+            "qwen3.5-397b-a17b",
+            "qwen3.5-9b-chat",
+            "minimax-m2.5",
+            "gemma-4-31b-it",
+        ],
+    },
 }
 
 # Providers that use OpenAI-compatible API format
@@ -161,4 +184,5 @@ OPENAI_COMPATIBLE_PROVIDERS = [
     "openai", "grok", "perplexity", "deepseek",
     "minimax", "qwen", "kimi", "glm",
     "mistral", "cohere", "groq", "together", "fireworks", "openrouter",
+    "crof",
 ]
