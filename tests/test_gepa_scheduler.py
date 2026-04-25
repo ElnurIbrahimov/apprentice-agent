@@ -67,9 +67,11 @@ def test_gepa_skipped_if_already_ran_within_interval():
 def test_gepa_fires_when_window_reached_and_stale():
     from aura_daemon import AuraDaemon
     d = _make_daemon()
-    # Ran 10 days ago — well past the interval.
-    d._last_gepa_run_at = time.time() - 10 * 86400
     now = datetime(2026, 4, 22, AuraDaemon.GEPA_HOUR, 0, 0)
+    # Ran 10 days before the (mocked) now — well past the interval. Anchored to
+    # the mock instead of time.time() so the test stays deterministic as the
+    # real wall clock drifts past the hysteresis window.
+    d._last_gepa_run_at = now.timestamp() - 10 * 86400
     with patch("aura_daemon.datetime") as mock_dt, \
          patch.object(type(d), "_spawn_bg") as mock_spawn:
         mock_dt.now.return_value = _fixed_now(now)
