@@ -154,7 +154,7 @@ class SocialMixin:
             if is_light:
                 goal = f"[Use a fast, lightweight model] {last_input}"
 
-            response_text, artifacts = await asyncio.wait_for(
+            response_text, _artifacts = await asyncio.wait_for(
                 asyncio.to_thread(self._run_agent_sync, goal),
                 timeout=self._AGENT_TIMEOUT,
             )

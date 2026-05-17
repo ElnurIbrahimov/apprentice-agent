@@ -270,7 +270,7 @@ class ToolUsingSpecialist(BaseSpecialist):
 
             # Parse and execute tool calls
             tool_calls = self._parse_tool_calls(response)
-            for i, call in enumerate(tool_calls[:self.max_tool_calls]):
+            for _i, call in enumerate(tool_calls[:self.max_tool_calls]):
                 tool_name = call["tool"]
                 action = call["action"]
 

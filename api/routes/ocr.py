@@ -28,7 +28,7 @@ async def ocr_image(body: dict):
             503,
             "Tesseract not found. Install it: winget install UB-Mannheim.TesseractOCR  "
             "(then restart the server)",
-        )
+        ) from None
 
     image_b64 = body.get("image_b64", "")
     if not image_b64:
@@ -57,4 +57,4 @@ async def ocr_image(body: dict):
         text = await loop.run_in_executor(None, _decode_and_ocr)
         return {"text": text}
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "OCR failed"))
+            raise HTTPException(500, safe_error_detail(e, "OCR failed")) from e

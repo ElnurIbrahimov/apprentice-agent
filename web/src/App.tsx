@@ -72,6 +72,7 @@ const GameCreator = lazy(() => import('./components/GameCreator').then(m => ({ d
 const DashboardCreator = lazy(() => import('./components/DashboardCreator').then(m => ({ default: m.DashboardCreator })));
 
 import type { TabId } from './types';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'chat', label: 'Chat', icon: ChatBubbleLeftRightIcon },
@@ -81,9 +82,9 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
   { id: 'settings', label: 'Settings', icon: Cog8ToothIcon },
 ];
 
-type CreateSubTab = 'code' | 'webcreator' | 'app' | 'game' | 'dashboard' | 'slides' | 'image';
+export type CreateSubTab = 'code' | 'webcreator' | 'app' | 'game' | 'dashboard' | 'slides' | 'image';
 type InsightsSubTab = 'monitor' | 'feed' | 'world' | 'briefing' | 'dreams' | 'evolution' | 'activity' | 'memory' | 'knowledge' | 'queue' | 'advanced';
-type ToolsSubTab = 'launcher' | 'system' | ToolId;
+export type ToolsSubTab = 'launcher' | 'system' | ToolId;
 
 function TabSkeleton() {
   return (
@@ -124,8 +125,14 @@ function MainApp() {
   const [insightsSubTab, setInsightsSubTab] = useState<InsightsSubTab>('monitor');
   const [toolsSubTab, setToolsSubTab] = useState<ToolsSubTab>('launcher');
 
-  // Command palette state
-  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const { showCommandPalette, setShowCommandPalette, showMobileSearch, setShowMobileSearch, showShortcutHelp, setShowShortcutHelp } = useKeyboardShortcuts({
+    setActiveTab,
+    toggleSidebar,
+    toggleTheme,
+    newChat,
+  });
+
+  const [mobileSearchQuery, setMobileSearchQuery] = useState('');
 
   // Prefetch all lazy chunks after initial render so tab switches are instant
   useEffect(() => {
@@ -206,53 +213,7 @@ function MainApp() {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [isLoading]);
 
-  // Keyboard shortcuts
-  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable;
-
-      if (e.ctrlKey && e.key === 'n') {
-        e.preventDefault();
-        document.dispatchEvent(new CustomEvent('aura:new-chat'));
-      }
-      if (e.ctrlKey && e.key === '/') {
-        e.preventDefault();
-        setActiveTab('settings');
-      }
-      if (e.ctrlKey && e.key === 'k') {
-        e.preventDefault();
-        setShowCommandPalette(prev => !prev);
-      }
-      if (e.ctrlKey && e.key === 'b') {
-        e.preventDefault();
-        toggleSidebar();
-      }
-      if (e.ctrlKey && e.key >= '1' && e.key <= '5') {
-        e.preventDefault();
-        const idx = parseInt(e.key) - 1;
-        if (TABS[idx]) setActiveTab(TABS[idx].id);
-      }
-      if (e.ctrlKey && e.altKey && (e.key === 't' || e.key === 'T')) {
-        e.preventDefault();
-        toggleTheme();
-      }
-      if (e.key === 'Escape') {
-        if (showCommandPalette) { setShowCommandPalette(false); e.preventDefault(); }
-        else if (showMobileSearch) { setShowMobileSearch(false); setMobileSearchQuery(''); e.preventDefault(); }
-        else if (showShortcutHelp) { setShowShortcutHelp(false); e.preventDefault(); }
-      }
-      if (e.key === '?' && !isInput) {
-        setShowShortcutHelp((prev) => !prev);
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showCommandPalette, showShortcutHelp, showMobileSearch, toggleSidebar, toggleTheme]);
-
-  // Listen for tab switch events (from Sidebar gear button, etc.)
+  // Detect mobile viewport
   useEffect(() => {
     const handler = (e: Event) => {
       const tab = (e as CustomEvent).detail;

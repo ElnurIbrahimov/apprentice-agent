@@ -9,9 +9,8 @@ Benchmark numbers are from each model's publisher release notes as of 2026-04.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-
 
 # Specialty tags — used by the dispatcher to pick the right tool for the job.
 SPECIALTY_REASONING   = "reasoning"     # math, planning, multi-step logic
@@ -335,13 +334,24 @@ OLLAMA_PRO_SWEET_SPOT    = 2
 
 
 __all__ = [
-    "ModelProfile",
+    "LATENCY_FAST",
+    "LATENCY_MEDIUM",
+    "LATENCY_SLOW",
     "MODELS",
-    "SPECIALTY_REASONING", "SPECIALTY_CODE", "SPECIALTY_VISION",
-    "SPECIALTY_LONGCTX", "SPECIALTY_TOOL", "SPECIALTY_FAST",
-    "SPECIALTY_CHEAP", "SPECIALTY_MATH",
-    "LATENCY_FAST", "LATENCY_MEDIUM", "LATENCY_SLOW",
-    "get", "cost_per_1k", "models_by_specialty", "cheapest",
+    "OLLAMA_PRO_MAX_CONCURRENT",
+    "OLLAMA_PRO_SWEET_SPOT",
+    "SPECIALTY_CHEAP",
+    "SPECIALTY_CODE",
+    "SPECIALTY_FAST",
+    "SPECIALTY_LONGCTX",
+    "SPECIALTY_MATH",
+    "SPECIALTY_REASONING",
+    "SPECIALTY_TOOL",
+    "SPECIALTY_VISION",
+    "ModelProfile",
     "all_cloud_names",
-    "OLLAMA_PRO_MAX_CONCURRENT", "OLLAMA_PRO_SWEET_SPOT",
+    "cheapest",
+    "cost_per_1k",
+    "get",
+    "models_by_specialty",
 ]

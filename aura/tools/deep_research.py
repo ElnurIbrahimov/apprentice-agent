@@ -236,7 +236,7 @@ def _cosine_similarity(a: List[float], b: List[float]) -> float:
         return dot / (na * nb)
     except ImportError:
         # Pure-python fallback (slower but works)
-        dot = sum(x * y for x, y in zip(a, b))
+        dot = sum(x * y for x, y in zip(a, b, strict=False))
         na = math.sqrt(sum(x * x for x in a))
         nb = math.sqrt(sum(x * x for x in b))
         if na == 0 or nb == 0:
@@ -764,7 +764,7 @@ class HierarchicalSummarizer:
             return []
 
         # Find all [N] references in the text
-        referenced_ids = sorted(set(int(m) for m in re.findall(r'\[(\d+)\]', text)))
+        referenced_ids = sorted({int(m) for m in re.findall(r'\[(\d+)\]', text)})
 
         citations = []
         for cid in referenced_ids:
@@ -809,9 +809,9 @@ class HierarchicalSummarizer:
                 if not summary_text:
                     continue
                 # Extract meaningful words (3+ chars, lowered)
-                words = set(
+                words = {
                     w.lower() for w in re.findall(r'[a-zA-Z]{3,}', summary_text)
-                )
+                }
                 source_keywords.append({"url": url, "words": words, "text": summary_text})
 
             # Try to get embeddings for source summaries (best-effort)
@@ -829,9 +829,9 @@ class HierarchicalSummarizer:
             claims = []
             for sentence in sentences:
                 # Extract keywords from the claim sentence
-                claim_words = set(
+                claim_words = {
                     w.lower() for w in re.findall(r'[a-zA-Z]{3,}', sentence)
-                )
+                }
                 if not claim_words:
                     claims.append({
                         "claim": sentence,

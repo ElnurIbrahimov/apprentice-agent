@@ -14,7 +14,6 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
-
 FRAMEWORK_MARKERS = {
     "pytest.ini": "pytest",
     "setup.cfg": "pytest",

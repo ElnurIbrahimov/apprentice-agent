@@ -43,7 +43,7 @@ async def transcribe(file: UploadFile = File(...)):
             503,
             "whisper not installed. Run: pip install openai-whisper  "
             "(also requires ffmpeg on PATH)",
-        )
+        ) from None
 
     # Validate file extension BEFORE reading the body to avoid buffering disallowed files
     suffix = os.path.splitext(file.filename or ".webm")[1] or ".webm"
@@ -76,7 +76,7 @@ async def transcribe(file: UploadFile = File(...)):
         result = await loop.run_in_executor(None, _run_whisper)
         return {"text": result["text"]}
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "Whisper error (ensure ffmpeg is on PATH)"))
+        raise HTTPException(500, safe_error_detail(e, "Whisper error (ensure ffmpeg is on PATH)")) from e
     finally:
         try:
             os.unlink(tmp)

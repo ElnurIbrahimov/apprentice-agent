@@ -187,7 +187,7 @@ def _get_tool_instance(tool_name: str) -> Optional[Any]:
     try:
         brain = getattr(agent, "brain", None)
         return ensure_tool(agent.tools, tool_name, brain=brain)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("[TOOLS-INVOKE] ensure_tool(%s) failed: %s", tool_name, exc)
         return None
 
@@ -199,7 +199,7 @@ def _deferred_description(tool_name: str) -> str:
         for entry in deferred_registry.list_all():
             if entry.get("name") == tool_name:
                 return entry.get("description", "") or ""
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return ""
 
@@ -214,9 +214,9 @@ async def tools_registry():
     try:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _build_registry_sync)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("[TOOLS-INVOKE] registry failed: %s", exc, exc_info=True)
-        raise HTTPException(500, safe_error_detail(exc, "Failed to build tool registry"))
+        raise HTTPException(500, safe_error_detail(exc, "Failed to build tool registry")) from exc
 
 
 def _build_registry_sync() -> List[ToolSpec]:
@@ -305,9 +305,9 @@ async def tools_invoke(request: InvokeRequest):
 
     try:
         tool = _get_tool_instance(request.tool)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("[TOOLS-INVOKE] resolve %s failed: %s", request.tool, exc, exc_info=True)
-        raise HTTPException(500, safe_error_detail(exc, "Tool resolution failed"))
+        raise HTTPException(500, safe_error_detail(exc, "Tool resolution failed")) from exc
 
     if tool is None:
         raise HTTPException(503, f"Tool '{request.tool}' is not available")
@@ -348,7 +348,7 @@ async def tools_invoke(request: InvokeRequest):
             error=f"Tool call exceeded {request.timeout}s timeout",
             elapsed_ms=int((_time.monotonic() - t0) * 1000),
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning(
             "[TOOLS-INVOKE] %s.%s failed: %s",
             request.tool, request.method, exc, exc_info=True,

@@ -64,7 +64,7 @@ class GitTool:
 
         try:
             result = subprocess.run(
-                ["git"] + args,
+                ["git", *args],
                 cwd=str(repo_path),
                 capture_output=True,
                 text=True,
@@ -463,7 +463,7 @@ class GitTool:
         else:
             file_list = list(files)
 
-        result = self._run_git(["add"] + file_list, repo_path)
+        result = self._run_git(["add", *file_list], repo_path)
         if not result.get("success"):
             return result
 
@@ -734,7 +734,7 @@ class GitTool:
         """
         # Stage specific paths if provided
         if paths:
-            add_result = self._run_git(["add"] + paths, repo_path)
+            add_result = self._run_git(["add", *paths], repo_path)
             if not add_result.get("success"):
                 return add_result
 

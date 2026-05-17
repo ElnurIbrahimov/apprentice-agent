@@ -23,9 +23,9 @@ import re
 import threading
 import time
 from concurrent.futures import as_completed
+from typing import Callable, Dict, List, Optional, Tuple
 
 from aura.pools import bg_pool
-from typing import Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -492,4 +492,4 @@ def web_search_with_fallback(
     return out
 
 
-__all__ = ["web_search_with_fallback", "set_search_llm"]
+__all__ = ["set_search_llm", "web_search_with_fallback"]

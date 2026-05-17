@@ -12,7 +12,7 @@ from typing import Iterator
 import requests
 
 from aura.reliability.error_classifier import FailoverReason
-from aura.reliability.provider_shim import ProviderGiveUp, record_rate_limit, request_with_retry
+from aura.reliability.provider_shim import ProviderGiveUp, request_with_retry
 
 from .base import BaseProvider
 from .credential_pool import get_pool

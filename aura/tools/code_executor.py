@@ -663,7 +663,8 @@ finally:
         # DANGEROUS_MATH_ATTRS and the exponent guard are the actual CPU bounds
         # that prevent runaway leaks if the worker keeps computing past timeout.
         from concurrent.futures import TimeoutError as _FuturesTimeout
-        from aura.pools import tool_pool, is_shutting_down
+
+        from aura.pools import is_shutting_down, tool_pool
 
         safe_globals = {"__builtins__": {}, "math": _math}
         safe_locals = {f: getattr(__builtins__, f, None) or getattr(_math, f, None)

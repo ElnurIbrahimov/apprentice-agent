@@ -417,7 +417,7 @@ class KnowledgeGraphTool:
         if not query_emb or not candidate_emb:
             return 0.0
         try:
-            dot = sum(a * b for a, b in zip(query_emb, candidate_emb))
+            dot = sum(a * b for a, b in zip(query_emb, candidate_emb, strict=False))
             norm_q = sum(x * x for x in query_emb) ** 0.5
             norm_c = sum(x * x for x in candidate_emb) ** 0.5
             if norm_q == 0 or norm_c == 0:
@@ -481,7 +481,7 @@ class KnowledgeGraphTool:
                 elif label_lower in query_lower:
                     keyword_score = 0.6
                 else:
-                    for key, value in node.properties.items():
+                    for _key, value in node.properties.items():
                         if query_lower in str(value).lower():
                             keyword_score = 0.4
                             break
@@ -1371,7 +1371,7 @@ class KnowledgeGraphTool:
                         label_groups[normalized] = []
                     label_groups[normalized].append(node_id)
 
-                for label, node_ids in label_groups.items():
+                for _label, node_ids in label_groups.items():
                     if time.time() > _deadline:
                         logger.info("[KG] Consolidation hit time budget (%.0fs), stopping merge phase", max_seconds)
                         break
@@ -1886,7 +1886,7 @@ class KnowledgeGraphTool:
                         pass  # Skip incompatible entries
 
                 # Export edges
-                for edge_id, edge in self._edges.items():
+                for _edge_id, edge in self._edges.items():
                     if not edge.is_valid:
                         continue  # Only sync currently-valid edges
                     try:

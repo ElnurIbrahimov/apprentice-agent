@@ -191,7 +191,7 @@ class RedisBackend(EventBusBackend):
                 logger.info("[EventBus] Redis connected")
             except ImportError:
                 logger.error("[EventBus] redis package not installed")
-                raise RuntimeError("redis package required for RedisBackend")
+                raise RuntimeError("redis package required for RedisBackend") from None
             except Exception as e:
                 logger.error(f"[EventBus] Redis connection failed: {e}")
                 raise

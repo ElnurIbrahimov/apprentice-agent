@@ -76,7 +76,7 @@ def list_all_provider_models() -> list[tuple[str, str]]:
     """
     _init_providers()
     result = []
-    for name, provider in sorted(_providers.items()):
+    for _name, provider in sorted(_providers.items()):
         if provider.is_configured():
             for model in provider.list_models():
                 result.append((model, provider.display_name))

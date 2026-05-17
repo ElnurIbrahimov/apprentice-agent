@@ -139,13 +139,13 @@ class BrowserPlanner:
     """
 
     # URL patterns that indicate danger
-    SENSITIVE_URL_PATTERNS = [
+    SENSITIVE_URL_PATTERNS = (
         "login", "signin", "sign-in", "checkout", "payment", "pay.",
         "bank", "banking", "password", "passwd",
-    ]
-    DESTRUCTIVE_URL_PATTERNS = [
+    )
+    DESTRUCTIVE_URL_PATTERNS = (
         "confirm", "delete", "remove", "purchase", "buy", "submit",
-    ]
+    )
 
     def parse(self, raw: Dict[str, Any]) -> PlannedAction:
         """Parse raw LLM action dict → PlannedAction."""

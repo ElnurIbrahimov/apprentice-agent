@@ -114,17 +114,17 @@ def _get_transcript(video_id: str) -> tuple[str, str]:
         raise HTTPException(
             503,
             "youtube-transcript-api not installed. Run: pip install youtube-transcript-api"
-        )
+        ) from None
 
     try:
         entries = YouTubeTranscriptApi.get_transcript(video_id)
     except Exception as e:
         err_str = str(e).lower()
         if "disabled" in err_str or "transcriptsdisabled" in err_str:
-            raise HTTPException(422, "Transcripts are disabled for this video.")
+            raise HTTPException(422, "Transcripts are disabled for this video.") from e
         if "notranscriptfound" in err_str or "no transcript" in err_str:
-            raise HTTPException(422, "No transcript available for this video (may be private or have no captions).")
-        raise HTTPException(500, safe_error_detail(e, "Failed to fetch transcript"))
+            raise HTTPException(422, "No transcript available for this video (may be private or have no captions).") from e
+        raise HTTPException(500, safe_error_detail(e, "Failed to fetch transcript")) from e
 
     full_text = " ".join(e.get("text", "") for e in entries)
     snippet = full_text[:400].strip() + ("…" if len(full_text) > 400 else "")
@@ -169,9 +169,9 @@ KEY POINTS:
         data = r.json()
         raw = data.get("response", "").strip()
     except httpx.ConnectError:
-        raise HTTPException(503, "Ollama is not running. Start it with: ollama serve")
+        raise HTTPException(503, "Ollama is not running. Start it with: ollama serve") from None
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "LLM summarization failed"))
+        raise HTTPException(500, safe_error_detail(e, "LLM summarization failed")) from e
 
     # Parse summary
     summary = ""
@@ -220,7 +220,7 @@ async def get_transcript(request: TranscriptRequest):
             raise HTTPException(
                 501,
                 "youtube-transcript-api not installed. Run: pip install youtube-transcript-api",
-            )
+            ) from None
         try:
             transcript_list = YouTubeTranscriptApi.list_transcripts(request.video_id)
             try:
@@ -239,7 +239,7 @@ async def get_transcript(request: TranscriptRequest):
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(404, f"Transcript not available: {e!s}")
+            raise HTTPException(404, f"Transcript not available: {e!s}") from e
 
     loop = asyncio.get_running_loop()
     try:
@@ -247,7 +247,7 @@ async def get_transcript(request: TranscriptRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "Transcript fetch error"))
+        raise HTTPException(500, safe_error_detail(e, "Transcript fetch error")) from e
 
 
 @router.post("/summarize")
@@ -279,7 +279,7 @@ async def summarize_youtube(body: dict):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "Transcript error"))
+        raise HTTPException(500, safe_error_detail(e, "Transcript error")) from e
 
     # Fetch meta and summarize in parallel
     meta_task = asyncio.create_task(_fetch_video_meta(video_id))

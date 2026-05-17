@@ -1563,7 +1563,7 @@ class BrowserTool:
                 return {"success": False, "error": "LLM not available for planning"}
 
             execution_log = []
-            for replan in range(3):
+            for _replan in range(3):
                 ctx = self._get_page_context()
                 prompt = (
                     f"Goal: {goal}\n\nCurrent page: {ctx['url']} - {ctx['title']}\n"

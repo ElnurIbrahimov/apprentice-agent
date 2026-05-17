@@ -453,7 +453,8 @@ class UnifiedMemory:
         """Compute emotional congruence between memory's PAD and current PAD."""
         if not memory_pad or not current_pad:
             return 0.5
-        _clamp = lambda v: max(-1.0, min(1.0, float(v)))
+        def _clamp(v):
+            return max(-1.0, min(1.0, float(v)))
         m_p = _clamp(memory_pad.get("pleasure", 0.0))
         m_a = _clamp(memory_pad.get("arousal", 0.0))
         m_d = _clamp(memory_pad.get("dominance", 0.0))

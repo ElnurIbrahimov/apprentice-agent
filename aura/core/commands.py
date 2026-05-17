@@ -1,5 +1,6 @@
 import argparse
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,8 @@ def _create_subcommand_permission_manager():
 
 def handle_subcommand(command: str, args: argparse.Namespace) -> int:
     """Dispatch subcommand. Returns exit code."""
-    from aura.cli.commands.daemon_commands import cmd_start as _cmd_start, cmd_stop as _cmd_stop
+    from aura.cli.commands.daemon_commands import cmd_start as _cmd_start
+    from aura.cli.commands.daemon_commands import cmd_stop as _cmd_stop
     from aura.cli.commands.heatmap_commands import cmd_heatmap as _cmd_heatmap
     from aura.cli.commands.log_commands import cmd_log as _cmd_log
     from aura.cli.commands.worktree_commands import cmd_worktree as _cmd_worktree

@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.middleware import (
     APIKeyAuthMiddleware,
+    BodySizeLimitMiddleware,
     RateLimitMiddleware,
     RequestIDMiddleware,
     SecurityHeadersMiddleware,
@@ -66,6 +67,7 @@ def configure_http_middleware(app: "FastAPI", logger: "logging.Logger") -> None:
     cors_origins, cors_origin_regex = _resolve_cors_origins(logger)
 
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(BodySizeLimitMiddleware)
     app.add_middleware(RequestIDMiddleware)
 
     # Read config + run the production guard OUTSIDE the middleware try/except
@@ -97,6 +99,11 @@ def configure_http_middleware(app: "FastAPI", logger: "logging.Logger") -> None:
                 "Production startup aborted: AURA_API_KEY must be set to a strong "
                 "secret (>= 16 chars, not a placeholder) when AURA_ENV=production."
             )
+
+    # Request body size limiting — prevents DoS via oversized payloads
+    # Starlette/FastAPI doesn't enforce this by default. Enforced by
+    # BodySizeLimitMiddleware (configured via AURA_MAX_BODY_SIZE env var,
+    # defaults to 10 MB).
 
     try:
         app.add_middleware(

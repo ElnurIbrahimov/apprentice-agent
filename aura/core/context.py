@@ -31,7 +31,7 @@ def gather_context(project_root: str) -> str:
         parts.append(f"## Agent Instructions (AGENTS.md)\n{agents_md_content}")
 
     # 2. AURA.md content (project-specific, takes precedence)
-    aura_md_content, aura_md_config = _load_aura_md(project_root)
+    aura_md_content, _aura_md_config = _load_aura_md(project_root)
     if aura_md_content:
         parts.append(f"## Project Instructions (AURA.md)\n{aura_md_content}")
 

@@ -108,7 +108,7 @@ class KnowledgeAbstractor:
     ) -> Dict[Tuple[str, str], int]:
         """Find topics that co-occur across users."""
         pair_counts: Counter = Counter()
-        for user_id, model in user_models.items():
+        for _user_id, model in user_models.items():
             topics = list(model.topic_knowledge.keys())
             for i in range(len(topics)):
                 for j in range(i + 1, len(topics)):

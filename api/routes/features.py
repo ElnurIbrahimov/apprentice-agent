@@ -413,6 +413,7 @@ def _trigger_sleep_sync() -> dict:
 async def trigger_sleep():
     """Trigger a sleep cycle."""
     import concurrent.futures
+
     from aura.pools import bg_pool
     try:
         future = bg_pool().submit(_trigger_sleep_sync)
@@ -590,7 +591,7 @@ async def get_available_tools():
             })
         # Sort: by category then name
         tools.sort(key=lambda t: (t["category"], t["name"]))
-        categories = sorted(set(t["category"] for t in tools))
+        categories = sorted({t["category"] for t in tools})
         return {"tools": tools, "count": len(tools), "categories": categories}
     except Exception as e:
         return {"tools": [], "count": 0, "categories": [], "error": safe_error_detail(e)}

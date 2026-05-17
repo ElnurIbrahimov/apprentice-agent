@@ -448,6 +448,19 @@ class SelfImprovementEngine:
                 logger.debug(f"[SelfImprovement] non-critical: {e}")
             return (f"practice attempt for {domain} failed: LLM unavailable", False)
 
+    def _resolve_and_set_param(self, path: str, value: float) -> bool:
+        """Resolve a dotted attribute path and set it to value. Returns True on success."""
+        parts = path.split(".")
+        mod_name = ".".join(parts[:-1])
+        attr_name = parts[-1]
+        try:
+            mod = __import__(mod_name, fromlist=[attr_name])
+            setattr(mod, attr_name, value)
+            return True
+        except Exception as e:
+            logger.debug(f"[SelfImprovement] Failed to set {path}={value}: {e}")
+            return False
+
     def _enhanced_param_tuning(self, goal) -> Tuple[str, bool]:
         """Read current params, analyze recent outcomes, apply adjustments."""
         domain = goal.domain
@@ -492,7 +505,9 @@ class SelfImprovementEngine:
                 old_val = param.current_value
                 param.current_value = round(new_val, 4)
                 param.last_tuned = time.time()
-                adjustments_made.append(f"{param_name}: {old_val:.3f} -> {new_val:.3f}")
+                # Actually apply the change to the runtime module
+                if self._resolve_and_set_param(param.path, param.current_value):
+                    adjustments_made.append(f"{param_name}: {old_val:.3f} -> {new_val:.3f}")
                 self._stats["total_param_adjustments"] += 1
 
         if adjustments_made:
@@ -527,7 +542,7 @@ class SelfImprovementEngine:
         # Compute summary statistics
         avg_response_len = sum(o.response_length for o in successes) / len(successes)
         avg_confidence = sum(o.confidence for o in successes) / len(successes)
-        models_used = set(o.model_used for o in successes if o.model_used)
+        models_used = {o.model_used for o in successes if o.model_used}
 
         patterns = [
             f"domain={domain}",

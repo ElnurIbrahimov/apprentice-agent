@@ -64,7 +64,7 @@ class PDFReaderTool:
                 except ValueError:
                     continue
 
-        return sorted(list(pages))
+        return sorted(pages)
 
     def info(self, path: str) -> dict:
         """Get PDF metadata and page count.
@@ -467,7 +467,7 @@ class PDFReaderTool:
                 for block in blocks:
                     if block.get("type") == 0:
                         x_positions.append(round(block.get("bbox", [0])[0], 0))
-                len(set(x for x in x_positions if x_positions.count(x) >= 2)) if x_positions else 1
+                len({x for x in x_positions if x_positions.count(x) >= 2}) if x_positions else 1
 
                 # Extract inline tables for this page
                 page_tables = []

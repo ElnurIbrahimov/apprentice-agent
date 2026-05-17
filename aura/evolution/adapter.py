@@ -42,7 +42,7 @@ class AuraSkillAdapter:
         """Load all skills from Aura's SkillStore as a seed candidate."""
         components = {}
 
-        for skill_id, info in skill_store.index.items():
+        for skill_id, _info in skill_store.index.items():
             skill = skill_store.load(skill_id)
             if skill:
                 components[skill_id] = skill.procedure
@@ -67,7 +67,7 @@ class AuraSkillAdapter:
         accumulate. The `source_mix` attribute is populated so the run's
         result.json can show how many real vs synthetic examples were used.
         """
-        from .real_trace_dataset import load_mixed_dataset, DatasetMix
+        from .real_trace_dataset import DatasetMix, load_mixed_dataset
 
         per_skill = max(2, num_examples // max(len(candidate.components), 1))
 
@@ -205,7 +205,7 @@ Respond with ONLY the JSON array."""
                 best_score = overlap
                 best_id = skill_id
 
-        return best_id or list(candidate.components.keys())[0]
+        return best_id or next(iter(candidate.components.keys()))
 
     def _score_output(
         self,

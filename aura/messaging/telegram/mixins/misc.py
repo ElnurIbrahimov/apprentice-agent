@@ -347,7 +347,6 @@ class MiscMixin:
                 )
             except Exception:
                 response_text = "Could not expand. Try asking directly."
-                artifacts = []
             chat_id = str(query.message.chat_id)
             await self._edit_or_send_response(placeholder, chat_id, response_text, update)
 
@@ -409,7 +408,7 @@ class MiscMixin:
             chat_id = str(query.message.chat_id)
             typing_task = asyncio.create_task(self._typing_loop(chat_id))
             try:
-                response_text, artifacts = await asyncio.wait_for(
+                response_text, _artifacts = await asyncio.wait_for(
                     asyncio.to_thread(self._run_agent_sync, last_input),
                     timeout=self._AGENT_TIMEOUT,
                 )

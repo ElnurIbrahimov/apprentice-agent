@@ -30,10 +30,18 @@ try:
 except ImportError:
     np = None  # type: ignore[assignment]
 
-# faiss import is skipped — faiss-gpu hangs on CUDA init at import time.
-# The numpy brute-force fallback is used instead.
+# Import faiss-cpu (not faiss-gpu — GPU variant can hang on CUDA init).
+# Falls back to numpy brute-force if neither is available.
 faiss = None  # type: ignore[assignment]
 _FAISS_AVAILABLE = False
+try:
+    import faiss as _faiss_mod
+    # Validate with a no-op call to catch broken installs early
+    _dummy = _faiss_mod.IndexFlatL2(1)
+    faiss = _faiss_mod
+    _FAISS_AVAILABLE = True
+except Exception:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +332,7 @@ class MemoryStore:
             raise ValueError(f"Invalid update fields: {bad_fields}")
         kwargs["updated_at"] = datetime.now().isoformat()
         sets = ", ".join(f"{k}=?" for k in kwargs)
-        vals = list(kwargs.values()) + [memory_id]
+        vals = [*list(kwargs.values()), memory_id]
         sql = f"UPDATE memories SET {sets} WHERE id=?"
         with self._lock:
             conn = self._get_conn()
@@ -761,7 +769,7 @@ class MemoryStore:
         while True:
             with self._lock:
                 rows = self._get_conn().execute(
-                    sql, params_base + [_BRUTE_FORCE_CHUNK_SIZE, offset]
+                    sql, [*params_base, _BRUTE_FORCE_CHUNK_SIZE, offset]
                 ).fetchall()
             if not rows:
                 break
@@ -832,7 +840,7 @@ class MemoryStore:
                   JOIN memories_fts ON memories_fts.rowid = m.rowid
                   WHERE memories_fts MATCH ?
                   AND m.lifecycle_state IN ({state_placeholders})"""
-        params: list = [match_expr] + list(states)
+        params: list = [match_expr, *list(states)]
         if user_id:
             sql += " AND m.user_id=?"
             params.append(user_id)

@@ -206,7 +206,7 @@ class ChatMixin:
                              for r in unified_results if r.content]
                     if texts:
                         unified_context = "MEMORY CONTEXT:\n" + "\n".join(texts)
-                    _srcs = set(r.source for r in unified_results)
+                    _srcs = {r.source for r in unified_results}
                     _record_thought("recalling", f"recalled {len(unified_results)} memories from {_srcs}", 0.7, "memory")
                     logger.debug(f"[UnifiedMemory] {len(unified_results)} results from {_srcs}")
                     try:

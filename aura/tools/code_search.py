@@ -219,7 +219,7 @@ class _SemanticIndex:
 
     @staticmethod
     def _cosine_sim(a: List[float], b: List[float]) -> float:
-        dot = sum(x * y for x, y in zip(a, b))
+        dot = sum(x * y for x, y in zip(a, b, strict=False))
         na = sqrt(sum(x * x for x in a))
         nb = sqrt(sum(x * x for x in b))
         if na == 0 or nb == 0:

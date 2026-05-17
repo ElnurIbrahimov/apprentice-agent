@@ -134,4 +134,4 @@ async def ghost_complete(body: GhostRequest) -> GhostResponse:
         return GhostResponse(continuation=cleaned)
     except Exception as e:
         logger.warning("[Ghost] complete failed: %s", e)
-        raise HTTPException(500, detail=safe_error_detail(e))
+        raise HTTPException(500, detail=safe_error_detail(e)) from e

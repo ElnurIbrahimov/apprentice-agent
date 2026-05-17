@@ -39,35 +39,35 @@ from .persistence import ProactivePersistence, get_persistence
 from .salience_filter import FilteredEvent, SalienceFilter
 
 __all__ = [
+    # Active Inference
+    "ActiveInferenceEngine",
+    "BeliefState",
+    # Phase 4.3: Curiosity Scanner
+    "CuriosityScanner",
+    "CuriosityTarget",
     # Event Bus
     "Event",
     "EventBus",
     "EventPriority",
-    # Salience Filter
-    "SalienceFilter",
     "FilteredEvent",
-    # Active Inference
-    "ActiveInferenceEngine",
-    "ProactiveAction",
-    "ProactiveDecision",
-    "BeliefState",
+    "GapType",
     # Gateway Daemon
     "GatewayDaemon",
-    "ProactiveMessage",
-    "get_gateway_daemon",
-    "start_gateway_daemon",
-    "stop_gateway_daemon",
-    # Persistence
-    "ProactivePersistence",
-    "get_persistence",
     # Phase 4.2: Motivation Accumulator
     "MotivationAccumulator",
     "PotentialMessage",
-    "get_motivation_accumulator",
-    # Phase 4.3: Curiosity Scanner
-    "CuriosityScanner",
-    "CuriosityTarget",
-    "GapType",
+    "ProactiveAction",
+    "ProactiveDecision",
+    "ProactiveMessage",
+    # Persistence
+    "ProactivePersistence",
+    # Salience Filter
+    "SalienceFilter",
     "get_curiosity_scanner",
+    "get_gateway_daemon",
+    "get_motivation_accumulator",
+    "get_persistence",
+    "start_gateway_daemon",
+    "stop_gateway_daemon",
 ]
 

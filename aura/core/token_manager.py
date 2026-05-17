@@ -223,7 +223,7 @@ class ContextWindowManager:
             ),
         }
 
-        return system_msgs + [compaction_msg] + recent_msgs
+        return [*system_msgs, compaction_msg, *recent_msgs]
 
     def usage_report(self, messages: list[dict]) -> dict:
         """Return usage stats."""

@@ -98,7 +98,7 @@ async def ingest_events(batch: LifelogBatch) -> LifelogStoreResponse:
         from aura.memory.unified_memory import get_unified_memory
     except Exception as e:
         logger.warning("[Lifelog] UnifiedMemory unavailable: %s", e)
-        raise HTTPException(503, detail="UnifiedMemory not available")
+        raise HTTPException(503, detail="UnifiedMemory not available") from e
 
     memory = get_unified_memory()
     stored = 0

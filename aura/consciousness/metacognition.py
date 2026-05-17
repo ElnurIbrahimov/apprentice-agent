@@ -408,7 +408,7 @@ class MetacognitiveEngine:
         )).score
 
         # Execute strategy
-        action, success = self._run_strategy(strategy, goal)
+        action, _success = self._run_strategy(strategy, goal)
 
         # Re-assess after improvement attempt
         self.assess_capabilities()

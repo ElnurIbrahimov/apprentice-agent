@@ -246,4 +246,4 @@ def decompose_query(
     return result
 
 
-__all__ = ["decompose_query", "get_planner_stats", "clear_planner_cache"]
+__all__ = ["clear_planner_cache", "decompose_query", "get_planner_stats"]

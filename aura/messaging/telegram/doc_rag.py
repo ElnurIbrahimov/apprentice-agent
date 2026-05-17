@@ -17,9 +17,9 @@ import logging
 import math
 import re
 from concurrent.futures import as_completed
+from typing import Any, Optional
 
 from aura.pools import bg_pool
-from typing import Any, Optional
 
 try:
     import ollama  # type: ignore
@@ -137,7 +137,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
         return 0.0
     if len(a) != len(b):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(x * x for x in b))
     if na == 0 or nb == 0:
@@ -361,10 +361,10 @@ def summarize_document_sync(brain: Any, text: str, max_chars: int = 12000) -> di
 
 
 __all__ = [
+    "EMBEDDING_MODEL",
+    "DocumentIndex",
     "chunk_text",
     "embed_chunks",
     "make_doc_id",
-    "DocumentIndex",
     "summarize_document_sync",
-    "EMBEDDING_MODEL",
 ]
