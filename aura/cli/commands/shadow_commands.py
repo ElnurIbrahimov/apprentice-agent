@@ -23,8 +23,8 @@ def handle_shadow(agent, arg, context) -> Optional[str]:
         return None
 
     try:
-        from aura.routing.dispatcher import dispatch
         from aura.core.shadow_mode import render_shadow_result, run_shadow
+        from aura.routing.dispatcher import dispatch
     except Exception as e:
         console.print(f"  [red]Shadow mode unavailable:[/] {e}")
         return None

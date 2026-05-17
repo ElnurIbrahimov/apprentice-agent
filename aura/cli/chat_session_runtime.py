@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 
 from . import ERROR_SENTINELS as _ERROR_SENTINELS
 
+logger = logging.getLogger(__name__)
+
 
 class SessionRuntimeController:
     """Owns the main runtime loop and adjacent lifecycle behaviors."""
@@ -160,6 +162,11 @@ class SessionRuntimeController:
                 self.submit_background(user_input)
                 continue
 
+            # Shell escape: !<command> — execute and display inline
+            if user_input.startswith("!"):
+                self._handle_shell_escape(user_input[1:])
+                continue
+
             self._send_ipc_heartbeat_if_due()
 
             if user_input.strip() == "?":
@@ -302,6 +309,41 @@ class SessionRuntimeController:
         except OSError:
             pass
         return ""
+
+    def _handle_shell_escape(self, command: str) -> None:
+        """Execute a shell command (!) and display output inline."""
+        import subprocess
+        command = command.strip()
+        if not command:
+            self._session.console.print("[dim]Usage: !<command>[/dim]")
+            return
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=os.getcwd(),
+            )
+            if result.stdout:
+                for line in result.stdout.rstrip("\n").split("\n"):
+                    self._session.console.print(f"  [dim]{line}[/dim]")
+            if result.stderr:
+                for line in result.stderr.rstrip("\n").split("\n"):
+                    self._session.console.print(f"  [dim]{line}[/dim]")
+            if result.returncode == 0:
+                self._session.console.print(
+                    f"  [green]\u2713[/green] [dim]exit {result.returncode}[/dim]"
+                )
+            else:
+                self._session.console.print(
+                    f"  [red]\u2717[/red] [dim]exit {result.returncode}[/dim]"
+                )
+        except subprocess.TimeoutExpired:
+            self._session.console.print("  [red]\u2717[/red] [dim]Command timed out (30s)[/dim]")
+        except OSError as exc:
+            self._session.console.print(f"  [red]\u2717[/red] [dim]{exc}[/dim]")
 
     def _show_channels(self) -> None:
         from .display import show_info

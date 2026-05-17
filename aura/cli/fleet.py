@@ -5,8 +5,6 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import as_completed
-
-from aura.pools import llm_pool
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional
@@ -15,6 +13,8 @@ from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
+
+from aura.pools import llm_pool
 
 
 class SubAgentStatus(str, Enum):

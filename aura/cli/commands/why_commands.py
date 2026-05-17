@@ -261,7 +261,7 @@ def _git_blame_summary(abs_path: str) -> Optional[dict]:
         if authors and total_lines > 0:
             top_name, top_count = max(authors.items(), key=lambda kv: kv[1])
             top_author = top_name
-            top_pct = int(round(100 * top_count / total_lines))
+            top_pct = round(100 * top_count / total_lines)
         result = {**last, "top_author": top_author, "top_author_pct": top_pct}
         if not any(result.values()):
             return None
@@ -276,6 +276,7 @@ def _git_blame_summary(abs_path: str) -> Optional[dict]:
 def _render_why_panel(abs_path: str, sessions: list[dict]) -> None:
     """Render the edit-history timeline as a Rich panel."""
     import time as _t
+
     from rich.text import Text
 
     total_edits = sum(g["edit_count"] for g in sessions)

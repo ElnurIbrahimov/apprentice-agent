@@ -105,7 +105,7 @@ def _pick_session_interactive(sessions: List[Dict], current_session_id: str) -> 
         offset = state["scroll_offset"]
         visible = filtered[offset:offset + max_visible]
 
-        for j, (orig_i, session) in enumerate(visible):
+        for _j, (orig_i, session) in enumerate(visible):
             is_selected = (orig_i == state["idx"])
             is_current = session.get("id", "") == current_session_id
             text = _format_session_line(session, is_current=is_current)

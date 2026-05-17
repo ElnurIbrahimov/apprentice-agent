@@ -341,12 +341,45 @@ def handle_clear(agent, arg, context) -> Optional[str]:
 def handle_compact(agent, arg, context) -> Optional[str]:
     from ..display import console
     focus = arg if arg else None
-    console.print("Compacting conversation history...")
+
+    # Measure tokens before compaction
+    try:
+        from ..context_bar import estimate_messages_tokens
+        ctx = get_ctx()
+        if ctx and ctx.agentic_loop:
+            tokens_before = estimate_messages_tokens(ctx.agentic_loop._conversation_history)
+            msg_count_before = len(ctx.agentic_loop._conversation_history)
+        else:
+            tokens_before = 0
+            msg_count_before = 0
+    except Exception:
+        tokens_before = 0
+        msg_count_before = 0
+
+    console.print("[dim]Compacting conversation history...[/dim]")
     summary = agent.brain.compact_history(focus=focus)
     if summary:
-        console.print(f"Compacted. Summary: {summary[:200]}...")
+        # Measure tokens after compaction
+        try:
+            if ctx and ctx.agentic_loop:
+                tokens_after = estimate_messages_tokens(ctx.agentic_loop._conversation_history)
+                msg_count_after = len(ctx.agentic_loop._conversation_history)
+            else:
+                tokens_after = 0
+                msg_count_after = 0
+        except Exception:
+            tokens_after = 0
+            msg_count_after = 0
+
+        tokens_freed = max(0, tokens_before - tokens_after)
+        msgs_freed = max(0, msg_count_before - msg_count_after)
+
+        console.print(f"[green]\u2713[/green] Compacted {msgs_freed} messages")
+        if tokens_freed > 0:
+            console.print(f"  [dim]{tokens_freed:,} tokens freed ({tokens_before:,} \u2192 {tokens_after:,})[/dim]")
+        console.print(f"  [dim]Summary: {summary[:200]}{'...' if len(summary) > 200 else ''}[/dim]")
     else:
-        console.print("Nothing to compact (history too short).")
+        console.print("[dim]Nothing to compact (history too short).[/dim]")
 
 
 def handle_retry(agent, arg, context) -> Optional[str]:

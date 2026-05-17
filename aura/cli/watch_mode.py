@@ -2,6 +2,7 @@
 """Watch mode — monitor files for AI comments and auto-respond."""
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
@@ -9,6 +10,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set
+
+logger = logging.getLogger(__name__)
 
 # Patterns that trigger watch mode
 WATCH_PATTERNS = [
@@ -19,19 +22,20 @@ WATCH_PATTERNS = [
     re.compile(r'/\*\s*AURA:\s*(.+?)\s*\*/', re.DOTALL),   # /* AURA: fix this */
 ]
 
-# File extensions to watch
-WATCH_EXTENSIONS = {
+# File extensions to watch. frozenset — read-only by design, prevents
+# accidental mutation and keeps lookups O(1).
+WATCH_EXTENSIONS = frozenset({
     ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".go", ".rs",
     ".rb", ".php", ".c", ".cpp", ".h", ".cs", ".swift", ".kt",
     ".sh", ".yaml", ".yml", ".json", ".md", ".html", ".css",
     ".sql", ".r", ".scala", ".lua",
-}
+})
 
 # Directories to skip
-SKIP_DIRS = {
+SKIP_DIRS = frozenset({
     "node_modules", ".git", "__pycache__", ".venv", "venv",
     "dist", "build", ".next", ".aura_checkpoints", "data",
-}
+})
 
 
 @dataclass
@@ -150,7 +154,10 @@ class FileWatcher:
             try:
                 self._check_changed_files()
             except Exception:
-                pass
+                # Don't kill the watcher thread on transient errors (e.g. a file
+                # vanishing mid-walk), but leave a debug trail so repeatable
+                # failures aren't completely silent.
+                logger.debug("watch_poll_iteration_failed", exc_info=True)
             time.sleep(self._poll_interval)
 
     def _check_changed_files(self) -> None:
@@ -187,7 +194,9 @@ class FileWatcher:
                             try:
                                 self._on_hit(hit)
                             except Exception:
-                                pass
+                                # User callback raised — don't break the watch
+                                # loop, but record it so failures aren't silent.
+                                logger.debug("watch_callback_failed", exc_info=True)
 
     def clear(self) -> None:
         """Clear all hits and reset state."""

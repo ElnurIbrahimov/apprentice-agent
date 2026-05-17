@@ -190,6 +190,7 @@ def _handle_evolve_command(agent, arg: str):
                 return
 
     before_procedures = {}
+    store = None
     try:
         from aura.paths import SKILL_LIBRARY_DIR
         store = SkillStore(storage_path=str(SKILL_LIBRARY_DIR))

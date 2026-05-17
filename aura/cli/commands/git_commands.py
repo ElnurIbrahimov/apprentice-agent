@@ -67,7 +67,7 @@ def handle_git(agent, arg, context) -> Optional[str]:
             from ..display import show_error as _git_err
             try:
                 result = _sp.run(
-                    ["git"] + git_tokens,
+                    ["git", *git_tokens],
                     capture_output=True, text=True, cwd=os.getcwd(), timeout=15,
                 )
                 output = result.stdout or result.stderr

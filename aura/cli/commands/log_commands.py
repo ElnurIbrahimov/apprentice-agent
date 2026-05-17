@@ -8,7 +8,6 @@ handle_subcommand() dispatch table. This module restores that symmetry.
 from __future__ import annotations
 
 import argparse
-import sys
 
 from aura.cli.display import console
 

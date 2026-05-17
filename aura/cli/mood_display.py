@@ -23,31 +23,9 @@ _MOOD_EMOJIS = {
 }
 
 
-def get_mood_emoji(pleasure: float, arousal: float, dominance: float) -> str:
-    """Map PAD values (-1 to 1) to an emoji."""
-    if pleasure > 0.3 and arousal > 0.3:
-        return _MOOD_EMOJIS["excited"]
-    elif pleasure > 0.3 and arousal < -0.3:
-        return _MOOD_EMOJIS["calm"]
-    elif pleasure > 0.3:
-        return _MOOD_EMOJIS["happy"]
-    elif pleasure < -0.3 and arousal > 0.3:
-        return _MOOD_EMOJIS["anxious"]
-    elif pleasure < -0.3:
-        return _MOOD_EMOJIS["sad"]
-    elif arousal < -0.3:
-        return _MOOD_EMOJIS["tired"]
-    elif dominance > 0.3:
-        return _MOOD_EMOJIS["confident"]
-    elif arousal > 0.1:
-        return _MOOD_EMOJIS["curious"]
-    elif dominance > 0.1:
-        return _MOOD_EMOJIS["focused"]
-    return _MOOD_EMOJIS["neutral"]
-
-
-def get_mood_label(pleasure: float, arousal: float, dominance: float) -> str:
-    """Map PAD values to a human-readable mood label."""
+def _classify_mood(pleasure: float, arousal: float, dominance: float) -> str:
+    """Map PAD values (-1 to 1) to a mood label. Single source of truth for
+    the PAD→mood mapping used by both ``get_mood_label`` and ``get_mood_emoji``."""
     if pleasure > 0.3 and arousal > 0.3:
         return "excited"
     elif pleasure > 0.3 and arousal < -0.3:
@@ -67,6 +45,17 @@ def get_mood_label(pleasure: float, arousal: float, dominance: float) -> str:
     elif dominance > 0.1:
         return "focused"
     return "neutral"
+
+
+def get_mood_emoji(pleasure: float, arousal: float, dominance: float) -> str:
+    """Map PAD values (-1 to 1) to an emoji."""
+    return _MOOD_EMOJIS.get(_classify_mood(pleasure, arousal, dominance),
+                            _MOOD_EMOJIS["neutral"])
+
+
+def get_mood_label(pleasure: float, arousal: float, dominance: float) -> str:
+    """Map PAD values to a human-readable mood label."""
+    return _classify_mood(pleasure, arousal, dominance)
 
 
 def create_mood_indicator(emotional_state: Optional[Dict] = None) -> str:

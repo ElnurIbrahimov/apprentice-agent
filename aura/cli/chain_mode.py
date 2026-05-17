@@ -36,6 +36,19 @@ class ChainResult:
 CHAINS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "chains"
 
 
+def _sanitize_chain_name(name: str) -> str:
+    """Prevent path traversal in chain names.
+
+    ``name`` is user input that ends up as a filename component.  A name like
+    ``../../etc/foo`` would escape ``CHAINS_DIR`` and write to arbitrary paths.
+    Strip directory separators and reject empty or dot-only results.
+    """
+    safe = Path(name).name
+    if not safe or safe in (".", ".."):
+        raise ValueError("chain name must not be empty or '.'")
+    return safe
+
+
 def parse_chain(raw: str) -> list[ChainStep]:
     """Parse '/chain step1 -> step2 -> step3' syntax.
 
@@ -141,6 +154,7 @@ def run_chain(brain, steps: list[ChainStep], on_step=None) -> ChainResult:
 
 def save_chain(name: str, steps: list[ChainStep]) -> Path:
     """Save a named chain for reuse. Returns the file path."""
+    name = _sanitize_chain_name(name)
     CHAINS_DIR.mkdir(parents=True, exist_ok=True)
     path = CHAINS_DIR / f"{name}.json"
     data = {
@@ -154,6 +168,10 @@ def save_chain(name: str, steps: list[ChainStep]) -> Path:
 
 def load_chain(name: str) -> Optional[Chain]:
     """Load a saved chain by name."""
+    try:
+        name = _sanitize_chain_name(name)
+    except ValueError:
+        return None
     path = CHAINS_DIR / f"{name}.json"
     if not path.exists():
         return None
@@ -178,6 +196,10 @@ def list_chains() -> list[str]:
 
 def delete_chain(name: str) -> bool:
     """Delete a saved chain. Returns True if deleted."""
+    try:
+        name = _sanitize_chain_name(name)
+    except ValueError:
+        return False
     path = CHAINS_DIR / f"{name}.json"
     if path.exists():
         path.unlink()

@@ -5,38 +5,58 @@ Keybindings are loaded from KeybindingsRegistry, which supports user
 customization via ~/.aura/keybindings.json.
 """
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+# Slash commands for autocomplete — single source of truth lives in
+# aura.cli.commands. Re-exported here so prompt_toolkit completers (and
+# the command palette in chat_session_signals.py) import from the CLI
+# entry point without a circular module layout.
+from aura.cli.commands import SLASH_COMMANDS
+
 HISTORY_FILE = Path.home() / ".aura_history"
 
-# Module-level state — safe because CLI runs as a single instance per process.
-# If multiple ChatSession instances were ever needed, these would need to move
-# to instance attributes.
-_session_ok = True
 
-# ---------------------------------------------------------------------------
-# Persistent bottom toolbar (updated by display.show_status_bar)
-# ---------------------------------------------------------------------------
-_bottom_toolbar_content = ""  # Empty string so toolbar renders immediately
+@dataclass
+class _InputState:
+    """Module-level input state — mutable globals consolidated for testability.
 
-# ---------------------------------------------------------------------------
-# Cached git branch (refreshed every 10s to avoid subprocess on every prompt)
-# ---------------------------------------------------------------------------
-_git_branch_cache: str = ""
-_git_branch_ts: float = 0.0
+    The CLI runs as a single instance per process so module-level state is
+    safe for production, but tests that import this module can call
+    ``_input_state.reset()`` to get a clean slate.
+    """
+    session_ok: bool = True
+    bottom_toolbar_content: str = ""
+    git_branch_cache: str = ""
+    git_branch_ts: float = 0.0
+    model_cache: list = field(default_factory=list)
+    model_cache_ts: float = 0.0
+
+    def reset(self) -> None:
+        """Reset all mutable state to defaults (useful for test isolation)."""
+        self.session_ok = True
+        self.bottom_toolbar_content = ""
+        self.git_branch_cache = ""
+        self.git_branch_ts = 0.0
+        self.model_cache = []
+        self.model_cache_ts = 0.0
+
+
+_input_state = _InputState()
+
 _GIT_BRANCH_TTL: float = 10.0
+_MODEL_CACHE_TTL: float = 30.0
 
 
 def set_bottom_toolbar(content):
     """Update the persistent status bar content."""
-    global _bottom_toolbar_content
-    _bottom_toolbar_content = content
+    _input_state.bottom_toolbar_content = content
 
 
 def _get_bottom_toolbar():
     """Called by prompt_toolkit to render the bottom toolbar."""
-    return _bottom_toolbar_content
+    return _input_state.bottom_toolbar_content
 
 
 # Signal constants for keybindings — returned as pseudo-input from prompt_toolkit
@@ -48,20 +68,10 @@ SIGNAL_OPEN_EDITOR = "__OPEN_EDITOR__"
 SIGNAL_REWIND = "__REWIND__"
 SIGNAL_CYCLE_PERMS = "__CYCLE_PERMS__"
 
-# Slash commands for autocomplete — single source of truth lives in
-# aura.cli.commands. Re-exported here so prompt_toolkit completers (and
-# the command palette in chat_session_signals.py) import from the CLI
-# entry point without a circular module layout.
-from aura.cli.commands import SLASH_COMMANDS  # noqa: F401
-
 # ---------------------------------------------------------------------------
 # Dynamic /model completer — reads the live provider registry so the list
 # doesn't drift when models are added or removed. Cached to avoid rebuilding
 # on every keystroke.
-# ---------------------------------------------------------------------------
-_MODEL_CACHE_TTL: float = 30.0
-_model_cache: list[tuple[str, str]] = []
-_model_cache_ts: float = 0.0
 
 
 def _dynamic_models() -> list[tuple[str, str]]:
@@ -70,18 +80,17 @@ def _dynamic_models() -> list[tuple[str, str]]:
     Falls back to a single 'auto' entry on import failure so the completer
     never crashes the prompt.
     """
-    global _model_cache, _model_cache_ts
     import time as _t
     now = _t.time()
-    if _model_cache and (now - _model_cache_ts) < _MODEL_CACHE_TTL:
-        return _model_cache
+    if _input_state.model_cache and (now - _input_state.model_cache_ts) < _MODEL_CACHE_TTL:
+        return _input_state.model_cache
     try:
         from aura.providers import list_all_provider_models
         items: list[tuple[str, str]] = [("auto", "Auto-select best model")]
         for model, display in list_all_provider_models():
             items.append((model, display))
-        _model_cache = items
-        _model_cache_ts = now
+        _input_state.model_cache = items
+        _input_state.model_cache_ts = now
         return items
     except Exception:
         return [("auto", "Auto-select best model")]
@@ -189,7 +198,6 @@ SUBCOMMANDS: dict[str, "SubcommandList | Callable[[], SubcommandList]"] = {
 
 def create_session():
     """Create a prompt_toolkit session with styled prompt, history, completions, and keybindings."""
-    global _session_ok
     try:
         from prompt_toolkit import PromptSession
         from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -242,9 +250,9 @@ def create_session():
 
         class FilePathCompleter(Completer):
             """Complete file paths when not typing a slash command."""
-            _CODE_EXTS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.go', '.rs', '.java',
+            _CODE_EXTS = frozenset({'.py', '.js', '.ts', '.tsx', '.jsx', '.go', '.rs', '.java',
                           '.json', '.yaml', '.yml', '.md', '.toml', '.html', '.css',
-                          '.sh', '.sql', '.c', '.cpp', '.h', '.cfg', '.ini', '.env'}
+                          '.sh', '.sql', '.c', '.cpp', '.h', '.cfg', '.ini', '.env'})
             _MAX = 15
 
             def get_completions(self, document, complete_event):
@@ -301,6 +309,93 @@ def create_session():
                             display_meta="dir" if is_dir else ext,
                         )
                         count += 1
+                except (OSError, PermissionError):
+                    return
+
+        class AtFileCompleter(Completer):
+            """Complete file paths when user types @ anywhere in the input.
+
+            Triggered by @ prefix on the current word. Fuzzy-matches file
+            paths, respects .gitignore-like patterns, and limits to 20 results.
+            """
+            _CODE_EXTS = frozenset({
+                '.py', '.js', '.ts', '.tsx', '.jsx', '.go', '.rs', '.java',
+                '.json', '.yaml', '.yml', '.md', '.toml', '.html', '.css',
+                '.sh', '.sql', '.c', '.cpp', '.h', '.cfg', '.ini', '.env',
+            })
+            _IGNORE_DIRS = frozenset({
+                'node_modules', '.git', '__pycache__', '.venv', 'venv',
+                '.tox', '.mypy_cache', '.pytest_cache', 'dist', 'build',
+                '.next', '.nuxt', 'coverage', '.eggs', '*.egg-info',
+            })
+            _MAX = 20
+
+            def get_completions(self, document, complete_event):
+                import os
+                text = document.text_before_cursor
+                # Find the word being typed — look for @ prefix
+                word = document.get_word_before_cursor(WORD=True)
+                if not word or not word.startswith('@'):
+                    # Check if cursor is right after @ with no word break
+                    before = text[:document.cursor_position]
+                    at_idx = before.rfind('@')
+                    if at_idx < 0:
+                        return
+                    word = before[at_idx:]
+                    if ' ' in word or '\n' in word:
+                        return
+
+                query = word[1:]  # strip the @
+                if len(query) < 1:
+                    return
+
+                try:
+                    cwd = os.getcwd()
+                    query_lower = query.lower()
+                    results = []
+
+                    for root, dirs, files in os.walk(cwd):
+                        # Prune ignored directories in-place
+                        dirs[:] = [
+                            d for d in dirs
+                            if d not in self._IGNORE_DIRS and not d.endswith('.egg-info')
+                        ]
+                        # Limit depth to avoid deep traversal
+                        rel_root = os.path.relpath(root, cwd)
+                        depth = rel_root.count(os.sep) + (0 if rel_root == '.' else 1)
+                        if depth > 4:
+                            dirs.clear()
+                            continue
+
+                        for fname in files:
+                            _, ext = os.path.splitext(fname)
+                            if ext.lower() not in self._CODE_EXTS:
+                                continue
+                            rel_path = os.path.relpath(os.path.join(root, fname), cwd)
+                            # Use forward slashes for consistency
+                            rel_path = rel_path.replace(os.sep, '/')
+                            if query_lower in rel_path.lower():
+                                results.append((rel_path, ext))
+
+                        if len(results) >= self._MAX * 3:
+                            break  # gather enough, sort later
+
+                    # Sort by relevance: starts-with > contains, shorter paths first
+                    def _sort_key(item):
+                        p, _ = item
+                        pl = p.lower()
+                        return (0 if pl.startswith(query_lower) else 1, len(pl), pl)
+
+                    results.sort(key=_sort_key)
+
+                    for rel_path, ext in results[:self._MAX]:
+                        fname = os.path.basename(rel_path)
+                        yield Completion(
+                            rel_path,
+                            start_position=-len(word),
+                            display=fname,
+                            display_meta=ext.lstrip('.'),
+                        )
                 except (OSError, PermissionError):
                     return
 
@@ -408,7 +503,7 @@ def create_session():
         session = PromptSession(
             history=FileHistory(str(HISTORY_FILE)),
             auto_suggest=AutoSuggestFromHistory(),
-            completer=merge_completers([SlashCompleter(), FilePathCompleter()]),
+            completer=merge_completers([SlashCompleter(), AtFileCompleter(), FilePathCompleter()]),
             complete_while_typing=True,
             complete_in_thread=True,
             multiline=True,
@@ -417,31 +512,30 @@ def create_session():
             placeholder=HTML('<style fg="#555555"><i>Message, / commands, ? help, Alt+M model, Alt+Enter newline</i></style>'),
             bottom_toolbar=_get_bottom_toolbar,
         )
-        _session_ok = True
+        _input_state.session_ok = True
         return session
     except Exception:
-        _session_ok = False
+        _input_state.session_ok = False
         return None
 
 
 def _get_git_branch() -> str:
     """Get current git branch with TTL cache to avoid subprocess per prompt."""
-    global _git_branch_cache, _git_branch_ts
     import time
     now = time.monotonic()
-    if now - _git_branch_ts < _GIT_BRANCH_TTL:
-        return _git_branch_cache
-    _git_branch_ts = now
+    if now - _input_state.git_branch_ts < _GIT_BRANCH_TTL:
+        return _input_state.git_branch_cache
+    _input_state.git_branch_ts = now
     try:
         import subprocess
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, timeout=2, cwd=".",
         )
-        _git_branch_cache = result.stdout.strip() if result.returncode == 0 else ""
+        _input_state.git_branch_cache = result.stdout.strip() if result.returncode == 0 else ""
     except Exception:
-        _git_branch_cache = ""
-    return _git_branch_cache
+        _input_state.git_branch_cache = ""
+    return _input_state.git_branch_cache
 
 
 def _get_prompt_prefix() -> list:
@@ -450,7 +544,7 @@ def _get_prompt_prefix() -> list:
     Renders as:
       ╭─
       │ project (branch) ❯
-    """
+    """  # noqa: RUF002 — docstring shows actual prompt visual
     import os
 
     # Show meaningful directory name — collapse home dir.
@@ -458,7 +552,8 @@ def _get_prompt_prefix() -> list:
     # (C:\Users\Asus vs c:\users\asus) and `/` vs `\` differences collapse.
     cwd = os.getcwd()
     home = os.path.expanduser("~")
-    _norm = lambda p: os.path.normcase(os.path.normpath(p))
+    def _norm(p):
+        return os.path.normcase(os.path.normpath(p))
     if _norm(cwd) == _norm(home):
         project = "~"
     else:
@@ -480,7 +575,7 @@ def _get_prompt_prefix() -> list:
 def get_input(session) -> "str | None":
     """Get user input. Returns None on exit, or a SIGNAL_* constant for keybindings."""
     try:
-        if session is not None and _session_ok:
+        if session is not None and _input_state.session_ok:
             result = session.prompt(_get_prompt_prefix()).strip()
             return result
         else:

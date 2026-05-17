@@ -86,11 +86,21 @@ def edit_plan_text(console: Console, plan_text: str) -> str:
     Returns the edited plan text.
     """
     import os
+    import shlex
     import subprocess
     import tempfile
     from pathlib import Path
 
-    editor = os.environ.get("EDITOR", "notepad" if os.name == "nt" else "nano")
+    editor_env = os.environ.get("EDITOR") or ("notepad" if os.name == "nt" else "nano")
+    # Split so $EDITOR="code --wait" or $EDITOR="vim -O" works — previously the
+    # entire string was passed as one argv element and we got ENOENT.
+    try:
+        editor_argv = shlex.split(editor_env, posix=(os.name != "nt"))
+    except ValueError:
+        editor_argv = [editor_env]
+    if not editor_argv:
+        editor_argv = ["notepad" if os.name == "nt" else "nano"]
+
     with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as f:
         f.write(plan_text)
         tmp_path = f.name

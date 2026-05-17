@@ -11,12 +11,12 @@ import logging
 import os
 from typing import Any, Optional
 
-logger = logging.getLogger(__name__)
-
 from .chat_session_execution import SessionExecutionController
 from .chat_session_runtime import SessionRuntimeController
 from .chat_session_signals import SessionSignalController
 from .chat_session_status import SessionStatusController, show_startup_diagnostics
+
+logger = logging.getLogger(__name__)
 
 
 class ChatSession:
@@ -34,41 +34,52 @@ class ChatSession:
         bridge: Any = None,
         preference: Optional[str] = None,
     ) -> None:
-        from aura.core.agentic_loop import AgenticLoop
-        from aura.core.session import AgenticSession
-
-        from .checkpoint import CheckpointManager
-        from .context_bar import get_context_limit
-        from .display import (
-            console,
-            show_banner,
-            show_info,
-            show_welcome_info,
-        )
-        from .input import create_session
-        from .model_picker import update_model_roles_from_config
-        from .session_bootstrap import build_permission_manager, build_session_bootstrap
-
-        # ── Store references to display helpers for use elsewhere ──
+        # ── Store basic references ──
+        from .display import console
         self.agent = agent
         self.console = console
         self.speak = speak
         self.verbose = verbose
         self.bridge = bridge
 
-        # ── Theme ──
+        # ── Phase 1: Display (theme, banner, diagnostics) ──
+        self._init_display(agent)
+
+        # ── Phase 2: Session core (project, bootstrap, permissions, agentic loop) ──
+        boot, aura_config, project_root = self._init_session_core(
+            agent=agent, tier=tier, model=model, trust=trust, preference=preference,
+        )
+
+        # ── Phase 3: Checkpoint, optional subsystems, steering, activity log ──
+        self._init_subsystems_and_steering(
+            aura_config=aura_config, project_root=project_root, verbose=verbose,
+        )
+
+        # ── Phase 4: Context, state, controllers, UI, channels ──
+        self._init_ui_and_state(
+            agent=agent, speak=speak, verbose=verbose,
+            boot=boot, aura_config=aura_config, project_root=project_root,
+            bridge=bridge,
+        )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Initialization phases
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _init_display(self, agent: Any) -> None:
+        """Phase 1: Theme, banner, and startup diagnostics."""
+        from .display import show_banner, show_welcome_info
         from .themes import load_theme_preference, set_theme
+
         saved_theme = load_theme_preference()
         set_theme(saved_theme)
 
         _quiet = os.environ.get("AURA_QUIET") == "1"
         if _quiet:
-            # One-line confirmation that launch succeeded; skip banner,
-            # welcome info, and the Ollama probe.
             try:
                 from aura import __version__ as _v
                 _m = agent.brain._model_override or "auto"
-                console.print(
+                self.console.print(
                     f"  [dim]aura v{_v} · {_m} · {os.getcwd()}[/dim]"
                 )
             except Exception:
@@ -76,9 +87,20 @@ class ChatSession:
         else:
             show_banner()
             show_welcome_info(agent)
+            show_startup_diagnostics(self.console)
 
-            # ── Quick startup diagnostics (non-blocking, <2s) ──
-            show_startup_diagnostics(console)
+    def _init_session_core(
+        self, *, agent: Any, tier: Optional[str], model: Optional[str],
+        trust: bool, preference: Optional[str],
+    ) -> tuple:
+        """Phase 2: Project detection, session bootstrap, permissions, agentic loop.
+
+        Returns (boot, aura_config, project_root).
+        """
+        from aura.core.agentic_loop import AgenticLoop
+        from aura.core.session import AgenticSession
+
+        from .session_bootstrap import build_permission_manager, build_session_bootstrap
 
         # ── Project detection ──
         self._project_type = ""
@@ -112,10 +134,9 @@ class ChatSession:
         # ── Session ──
         self.agentic_session = AgenticSession()
         self._session_initialized = False
-
         atexit.register(self._save_session_if_initialized)
 
-        # ── AgenticLoop (uses router from bootstrap) ──
+        # ── AgenticLoop ──
         self.agentic = AgenticLoop(
             brain=agent.brain,
             project_root=project_root,
@@ -134,6 +155,14 @@ class ChatSession:
         self._routing_preference = _PREF_MAP.get(preference or "balanced", "balanced")
         agent.brain._routing_preference = self._routing_preference
 
+        return boot, aura_config, project_root
+
+    def _init_subsystems_and_steering(
+        self, *, aura_config: Any, project_root: str, verbose: bool,
+    ) -> None:
+        """Phase 3: Checkpoint manager, optional subsystems, steering, activity log."""
+        from .checkpoint import CheckpointManager
+
         # ── Checkpoint ──
         try:
             self.checkpoint_mgr: Optional[Any] = CheckpointManager()
@@ -149,9 +178,6 @@ class ChatSession:
         # ── Steering ──
         from .steering import SteeringQueue
         self.steering = SteeringQueue()
-        # Wire preempt → agentic.cancel() so a steering push(preempt=True)
-        # aborts the currently running iteration; the queued message is then
-        # consumed at the next turn's pop_all() like a normal steering msg.
         self.steering.set_preempt_callback(self.agentic.cancel)
 
         # ── Activity log ──
@@ -165,11 +191,21 @@ class ChatSession:
             logger.warning("ActivityLog failed to initialize (OS error)")
             self.activity_log = None
 
-        # ── Build CLIContext, ConversationManager sync, and resume ──
+    def _init_ui_and_state(
+        self, *, agent: Any, speak: bool, verbose: bool,
+        boot: Any, aura_config: Any, project_root: str, bridge: Any,
+    ) -> None:
+        """Phase 4: Context, state variables, controllers, status bar, prompt, channels."""
+        from .context_bar import get_context_limit
+        from .display import show_info
+        from .input import create_session
+        from .model_picker import update_model_roles_from_config
+
+        # ── Build CLIContext and ConversationManager sync ──
         self._setup_context(agent=agent, speak=speak, verbose=verbose)
 
         # ── State variables ──
-        self.current_model = boot.model or "auto"
+        self.apply_model_override(boot.model)
         self.session_title = ""
         self.msg_count = 0
         self.token_used = 0
@@ -177,11 +213,6 @@ class ChatSession:
 
         self._last_ctrl_c_time = 0.0
         self._last_ipc_heartbeat = 0.0
-        # After a connection failure the heartbeat is skipped until this
-        # timestamp passes — avoids reconnect storms against a dead daemon.
-        # Backoff doubles on consecutive failures, capped at _IPC_BACKOFF_MAX,
-        # and resets to initial on the next successful send so a restarted
-        # daemon reconnects immediately instead of waiting out a stale mute.
         self._daemon_unreachable_until = 0.0
         self._ipc_backoff_seconds = 5.0
         self._injected_input: Optional[str] = None
@@ -207,9 +238,8 @@ class ChatSession:
         self._execution_controller = SessionExecutionController(self)
         self._runtime_controller = SessionRuntimeController(self)
 
+        # ── Permission banner + initial status bar ──
         self._show_perm_banner(self.perm_mode)
-
-        # ── Initial status bar ──
         self._show_bar(
             model=self.current_model, project_type=self._project_type,
             session_title=self.session_title, message_count=self.msg_count,
@@ -229,22 +259,32 @@ class ChatSession:
         if bridge:
             from .chat_loop import _display_channel_message
             show_info(f"Channel bridge active: {', '.join(s['channel'] for s in bridge.status())}")
-
             def _channel_notify(msg: Any) -> None:
-                _display_channel_message(console, msg)
+                _display_channel_message(self.console, msg)
             bridge.set_on_message_callback(_channel_notify)
 
-        # ── Store aura_config for plan-approve check ──
+        # ── Store config references ──
         self._aura_config = aura_config
         self._project_root = project_root
-
-        # H3: Auto-test after each edit
         self._auto_test_enabled = bool(aura_config.get("auto_test", False)) if aura_config else False
 
     # ── Optional subsystem loading ────────────────────────────────────────
 
     def _load_optional_subsystems(self, *, aura_config: Any, project_root: str, verbose: bool) -> None:
         """Load optional subsystem classes (ImportError-safe) and instantiate them."""
+
+        def _unavailable_indicator(name: str):
+            """Return a no-op indicator that logs a one-time warning."""
+            _warned = False
+            def _indicator(*a: Any, **k: Any) -> str:
+                nonlocal _warned
+                if not _warned:
+                    logger.debug(f"{name} indicator called but subsystem unavailable")
+                    _warned = True
+                return ""
+            _indicator.__name__ = f"_{name}_unavailable"
+            return _indicator
+
         try:
             from .background import (
                 BackgroundManager,
@@ -258,7 +298,7 @@ class ChatSession:
             logger.warning("BackgroundManager unavailable — background tasks disabled")
             self._BackgroundManager = None
             self._notify_completion = None
-            self._create_background_indicator = lambda *a, **k: ""
+            self._create_background_indicator = _unavailable_indicator("background")
 
         try:
             from .research_mode import ResearchContext, create_research_indicator
@@ -267,7 +307,7 @@ class ChatSession:
         except ImportError:
             logger.warning("ResearchContext unavailable — /research mode disabled")
             self._ResearchContext = None
-            self._create_research_indicator = lambda *a, **k: ""
+            self._create_research_indicator = _unavailable_indicator("research")
 
         try:
             from .hooks import HookEvent, HookManager
@@ -284,7 +324,7 @@ class ChatSession:
             self._create_mood_indicator = create_mood_indicator
         except ImportError:
             logger.warning("mood_display unavailable — mood indicator disabled")
-            self._create_mood_indicator = lambda *a, **k: ""
+            self._create_mood_indicator = _unavailable_indicator("mood")
 
         self.bg_manager = self._BackgroundManager() if self._BackgroundManager else None
         if self.bg_manager and self._notify_completion:

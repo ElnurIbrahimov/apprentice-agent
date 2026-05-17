@@ -22,7 +22,7 @@ _SPARKS = "▁▂▃▄▅▆▇█"
 def _spark(value: int, maximum: int, width: int = 16) -> str:
     if maximum <= 0:
         return "." * width
-    filled = max(1, int(round((value / maximum) * width)))
+    filled = max(1, round((value / maximum) * width))
     block = _SPARKS[-1]
     return block * filled + " " * (width - filled)
 

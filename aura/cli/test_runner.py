@@ -36,10 +36,14 @@ class TestResult:
     @property
     def summary(self) -> str:
         parts = []
-        if self.passed: parts.append(f"[green]{self.passed} passed[/green]")
-        if self.failed: parts.append(f"[red]{self.failed} failed[/red]")
-        if self.skipped: parts.append(f"[yellow]{self.skipped} skipped[/yellow]")
-        if self.errors: parts.append(f"[red]{self.errors} errors[/red]")
+        if self.passed:
+            parts.append(f"[green]{self.passed} passed[/green]")
+        if self.failed:
+            parts.append(f"[red]{self.failed} failed[/red]")
+        if self.skipped:
+            parts.append(f"[yellow]{self.skipped} skipped[/yellow]")
+        if self.errors:
+            parts.append(f"[red]{self.errors} errors[/red]")
         return ", ".join(parts) if parts else "[dim]no tests[/dim]"
 
 

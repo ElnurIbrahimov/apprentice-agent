@@ -17,8 +17,6 @@ import logging
 import os
 from typing import Any, Optional
 
-logger = logging.getLogger(__name__)
-
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
@@ -28,6 +26,8 @@ from rich.text import Text
 
 from aura.cli.tool_icons import get_tool_icon
 from aura.cli.tool_output import ToolOutputRenderer
+
+logger = logging.getLogger(__name__)
 
 _no_color = os.environ.get("NO_COLOR") is not None
 console: Console = Console(highlight=True, soft_wrap=True, no_color=_no_color)
@@ -386,7 +386,8 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
             if lang:
                 extras.append(lang)
             if extras:
-                console.print(f"{B}[dim]{' \u2502 '.join(extras)}[/dim]")
+                sep = " │ "
+                console.print(f"{B}[dim]{sep.join(extras)}[/dim]")
 
         elif tool_name in ("shell", "shell_executor", "bash", "run", "run_command", "execute"):
             exit_code = parsed.get("exit_code", parsed.get("returncode", 0)) or 0
@@ -490,7 +491,7 @@ def show_permission_prompt(
 
     console.print()
 
-    for i, (key, label) in enumerate(options, 1):
+    for i, (_key, label) in enumerate(options, 1):
         if i == 1:
             console.print(f"    [{colors['permission_accent']}]> {i}. {label}[/{colors['permission_accent']}]")
         else:
@@ -685,30 +686,30 @@ def show_warning(message: str) -> None:
 # ─────────────────────────────────────────────────────────
 # Imported last so the submodules can freely `from aura.cli.display import ...`
 # the names defined above without hitting a partial-module state.
+from .checkpoint_picker import show_checkpoint_picker, show_rewind_result  # noqa: E402
 from .help import show_help  # noqa: E402
 from .streaming import StreamingResponse, _split_for_streaming, _split_into_blocks  # noqa: E402
-from .checkpoint_picker import show_checkpoint_picker, show_rewind_result  # noqa: E402
 
 __all__ = [
-    "console",
-    "show_banner",
-    "show_welcome_info",
-    "show_status_bar",
-    "show_thinking",
-    "get_thinking_label",
-    "show_tool_call",
-    "show_tool_result_inline",
-    "show_permission_prompt",
-    "show_response",
-    "show_response_attribution",
-    "show_context_summary",
-    "show_error",
-    "show_info",
-    "show_warning",
-    "show_help",
     "StreamingResponse",
     "_split_for_streaming",
     "_split_into_blocks",
+    "console",
+    "get_thinking_label",
+    "show_banner",
     "show_checkpoint_picker",
+    "show_context_summary",
+    "show_error",
+    "show_help",
+    "show_info",
+    "show_permission_prompt",
+    "show_response",
+    "show_response_attribution",
     "show_rewind_result",
+    "show_status_bar",
+    "show_thinking",
+    "show_tool_call",
+    "show_tool_result_inline",
+    "show_warning",
+    "show_welcome_info",
 ]
