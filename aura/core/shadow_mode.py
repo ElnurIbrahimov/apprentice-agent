@@ -14,7 +14,7 @@ from __future__ import annotations
 import difflib
 import logging
 from concurrent.futures import as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from aura.pools import llm_pool
@@ -171,8 +171,8 @@ def render_shadow_result(result: ShadowResult) -> None:
 
 
 __all__ = [
-    "ShadowResult",
     "AGREEMENT_THRESHOLD",
-    "run_shadow",
+    "ShadowResult",
     "render_shadow_result",
+    "run_shadow",
 ]

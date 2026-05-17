@@ -30,25 +30,25 @@ from .unified_memory import UnifiedMemory, UnifiedResult, get_unified_memory
 from .user_profile import UserProfile, load_profile, save_profile, update_profile_from_memories
 
 __all__ = [
-    # Embedding
-    "get_embedding",
+    "MemoryRecord",
     # Consolidated store
     "MemoryStore",
-    "MemoryRecord",
-    "get_memory_store",
+    "RetrievalResult",
     # Unified interface
     "UnifiedMemory",
     "UnifiedResult",
-    "get_unified_memory",
-    # Retrieval
-    "retrieve",
-    "RetrievalResult",
-    # FadeMem
-    "batch_decay_and_prune",
-    "reinforce",
     # User profile
     "UserProfile",
+    # FadeMem
+    "batch_decay_and_prune",
+    # Embedding
+    "get_embedding",
+    "get_memory_store",
+    "get_unified_memory",
     "load_profile",
+    "reinforce",
+    # Retrieval
+    "retrieve",
     "save_profile",
     "update_profile_from_memories",
 ]

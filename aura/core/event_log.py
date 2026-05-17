@@ -152,4 +152,4 @@ def log_model_override(
     _async_append(_events_path("model_overrides.jsonl"), rec)
 
 
-__all__ = ["log_edit", "log_verification", "log_model_override"]
+__all__ = ["log_edit", "log_model_override", "log_verification"]

@@ -179,7 +179,7 @@ class ToolUsageTracker:
                 ORDER BY total_uses ASC
             """, (min_age_days,))
             return [
-                dict(zip(['name', 'uses', 'success_rate', 'created', 'last_used'], row))
+                dict(zip(['name', 'uses', 'success_rate', 'created', 'last_used'], row, strict=False))
                 for row in cursor.fetchall()
             ]
         except Exception as e:
@@ -376,7 +376,7 @@ class ToolBuilderTool:
             keywords.add('fahrenheit')
             keywords.add('temp')
 
-        return sorted(list(keywords))
+        return sorted(keywords)
 
     # ------------------------------------------------------------------
     # Code generation helpers (unchanged)
@@ -1053,7 +1053,9 @@ that would make it pass. Return ONLY the corrected tool code between ```python a
                                     logger.warning(f"[AutoTest] LLM fix contained dangerous code: {reason}")
                                     break
                                 try:
-                                    from aura.security.tool_validator import validate_custom_tool_code
+                                    from aura.security.tool_validator import (
+                                        validate_custom_tool_code,
+                                    )
                                     is_valid, val_reason = validate_custom_tool_code(fixed_code, safe_name)
                                     if not is_valid:
                                         logger.warning(f"[AutoTest] LLM fix failed AST validation: {val_reason}")

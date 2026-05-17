@@ -137,9 +137,9 @@ async def save_capture(payload: CapturePayload):
             json.dump(data, f, ensure_ascii=False)
     except Exception as e:
         logger.error(f"[Feed] Save error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save capture: {e}")
-
-    _prune_old_items()
+        raise HTTPException(status_code=500, detail=f"Failed to save capture: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to list captures: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Update failed: {e}") from e
 
     size = filepath.stat().st_size
     logger.info(f"[Feed] Saved {item_id} ({payload.type}, {size:,} bytes) from {payload.source_url}")
@@ -196,7 +196,7 @@ async def get_feed_item(item_id: str):
         data = _read_item(filepath)
         return data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading feed item: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading feed item: {e}") from e
 
 
 @router.delete("/{item_id}")
@@ -211,4 +211,4 @@ async def delete_feed_item(item_id: str):
         logger.info(f"[Feed] Deleted {item_id}")
         return {"ok": True, "id": item_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error deleting feed item: {e}")
+        raise HTTPException(status_code=500, detail=f"Error deleting feed item: {e}") from e

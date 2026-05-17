@@ -65,7 +65,7 @@ def _tool_icon(name: str) -> str:
     return _TOOL_ICONS.get((name or "").lower(), "\U0001f527")
 
 
-def _tool_result_hint(tool_name: str, result: Any) -> str:  # noqa: ANN401
+def _tool_result_hint(tool_name: str, result: Any) -> str:
     """Short, human-readable hint shown next to a completed tool line.
 
     E.g. ``(12 results)``, ``(2.3k chars)``, ``(error)``. Safe on any type.
@@ -101,7 +101,7 @@ def _tool_result_hint(tool_name: str, result: Any) -> str:  # noqa: ANN401
     return ""
 
 
-def _serialize_event_payload(payload: Any) -> dict[str, Any]:  # noqa: ANN401
+def _serialize_event_payload(payload: Any) -> dict[str, Any]:
     """Make a LoopEvent payload JSON-safe for WebSocket broadcast.
 
     Trims oversized strings to keep the Mini App responsive; falls back to

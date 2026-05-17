@@ -709,12 +709,12 @@ class APITestRequest(BaseModel):
             import socket
             try:
                 addrinfos = socket.getaddrinfo(hostname, None)
-                for family, _type, _proto, _canonname, sockaddr in addrinfos:
+                for _family, _type, _proto, _canonname, sockaddr in addrinfos:
                     resolved_ip = ipaddress.ip_address(sockaddr[0])
                     if resolved_ip.is_private or resolved_ip.is_loopback or resolved_ip.is_link_local or resolved_ip.is_reserved:
                         raise ValueError(f"Domain {hostname} resolves to blocked IP {resolved_ip}")
             except socket.gaierror:
-                raise ValueError(f"Cannot resolve hostname: {hostname}")
+                raise ValueError(f"Cannot resolve hostname: {hostname}") from None
         # Block cloud metadata endpoints
         if hostname in ("169.254.169.254", "metadata.google.internal"):
             raise ValueError("Requests to cloud metadata endpoints are blocked")

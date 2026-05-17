@@ -85,7 +85,7 @@ async def generate_image(body: ImageGenRequest):
                 "error": "ComfyUI not running",
                 "install": "cd ComfyUI && python main.py --port 8188",
             },
-        )
+        ) from None
 
     workflow = build_sdxl_workflow(
         body.prompt,
@@ -98,7 +98,7 @@ async def generate_image(body: ImageGenRequest):
             r = await c.post(f"{COMFY}/prompt", json={"prompt": workflow})
             pid = r.json()["prompt_id"]
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "Failed to queue prompt"))
+        raise HTTPException(500, safe_error_detail(e, "Failed to queue prompt")) from e
 
     # Poll for completion (max 120s) — async so event loop is not blocked
     async with httpx.AsyncClient(timeout=10) as c:
@@ -111,7 +111,7 @@ async def generate_image(body: ImageGenRequest):
                     outputs = hist[pid].get("outputs", {})
                     if outputs:
                         from urllib.parse import quote
-                        fname = list(outputs.values())[0]["images"][0]["filename"]
+                        fname = next(iter(outputs.values()))["images"][0]["filename"]
                         img_r = await c.get(f"{COMFY}/view?filename={quote(fname)}")
                         b64 = base64.b64encode(img_r.content).decode()
                         return {"image_b64": b64}

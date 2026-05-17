@@ -349,7 +349,7 @@ async def get_status() -> StatusResponse:
         )
     except Exception as e:
         logger.error(f"[Status] Error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(500, detail=safe_error_detail(e)) from e
 
 
 @router.post("/mood/trigger", dependencies=[Depends(require_api_key)])
@@ -380,10 +380,10 @@ async def trigger_mood(emotion: str, intensity: float = 0.7) -> MoodState:
             dominance=pad.get("dominance", 0.0),
         )
     except ImportError:
-        raise HTTPException(status_code=503, detail="ALMA engine not available")
+        raise HTTPException(status_code=503, detail="ALMA engine not available") from None
     except Exception as e:
         logger.warning(f"[API] Mood trigger failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to trigger emotion")
+        raise HTTPException(status_code=500, detail="Failed to trigger emotion") from e
 
 
 @router.get("/alma/state", dependencies=[Depends(require_api_key)])
@@ -632,9 +632,9 @@ async def update_personality(update: PersonalityUpdate):
         pass
     except Exception as e:
         logger.error(f"[Personality Update] Error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(500, detail=safe_error_detail(e)) from e
 
-    raise HTTPException(status_code=503, detail="ALMA not available")
+        raise HTTPException(status_code=503, detail="ALMA not available") from e
 
 
 @router.post("/alma/personality/reset", dependencies=[Depends(require_api_key)])
@@ -695,4 +695,4 @@ async def get_models_detailed() -> ModelsResponse:
         return ModelsResponse(local_models=[], cloud_models=[], chatgpt_models=[], current_model="loading...")
     except Exception as e:
         logger.error(f"[Models] Error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(500, detail=safe_error_detail(e)) from e

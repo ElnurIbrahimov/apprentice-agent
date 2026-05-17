@@ -1,933 +1,104 @@
-# Apprentice Agent - Technical Documentation
+# AURA Technical Documentation
 
-Complete technical documentation for the Apprentice Agent project.
+This is the canonical reference for AURA's current architecture, subsystems, and operation.
+For a quick health check, see `CURRENT_STATE.md`. For a project overview, see `README.md`.
 
-## Table of Contents
-
-- [Architecture](#architecture)
-- [Phase A: Core Agent](#phase-a-core-agent)
-- [Phase B: Self-Reflection](#phase-b-self-reflection)
-- [Phase C: Voice & Image Tools](#phase-c-voice--image-tools)
-- [API Reference](#api-reference)
-- [Changelog](#changelog)
-- [Roadmap](#roadmap)
-
----
-
-## Architecture
-
-### Project Structure
+## Architecture Overview
 
 ```
-apprentice-agent/
-├── gui.py                    # Gradio web interface
-├── main.py                   # CLI entry point
-├── logs/
-│   ├── metacognition/        # JSONL logs (YYYY-MM-DD.jsonl)
-│   ├── notifications/        # Notification scheduler logs
-│   ├── tool_builder/         # Tool creation logs
-│   └── marketplace/          # Plugin install/uninstall logs
-├── data/
-│   ├── chromadb/             # Memory storage
-│   ├── scheduled_tasks.json  # Notification tasks
-│   ├── custom_tools.json     # Custom tool registry
-│   ├── installed_plugins.json # Marketplace installed plugins
-│   └── marketplace_cache.json # Marketplace registry cache
-├── models/
-│   └── fluxmind_v0751.pt     # FluxMind trained model
-├── tools/
-│   └── fluxmind/             # FluxMind calibrated reasoning
-│       ├── __init__.py
-│       ├── fluxmind_core.py  # Core model implementation
-│       └── fluxmind_tool.py  # Aura integration wrapper
-├── generated_images/         # [Phase C] Stable Diffusion outputs
-└── aura/
-    ├── __init__.py
-    ├── agent.py              # Main agent loop
-    ├── brain.py              # LLM interface (Ollama)
-    ├── memory.py             # Long-term memory system
-    ├── config.py             # Configuration
-    ├── metacognition.py      # [Phase B] Confidence & logging
-    ├── dream.py              # [Phase B] Memory consolidation
-    ├── scheduler.py          # Notification scheduler daemon
-    └── tools/
-        ├── __init__.py
-        ├── filesystem.py     # File operations
-        ├── web_search.py     # DuckDuckGo search
-        ├── code_executor.py  # Sandboxed Python
-        ├── screenshot.py     # Screen capture
-        ├── vision.py         # Image analysis
-        ├── pdf_reader.py     # PDF extraction
-        ├── clipboard.py      # Clipboard access
-        ├── voice.py          # [Phase C] Speech-to-text & TTS
-        ├── image_gen.py      # [Phase C] Stable Diffusion
-        ├── arxiv_search.py   # arXiv paper search
-        ├── browser.py        # Playwright browser automation
-        ├── system_control.py # Volume, brightness, apps
-        ├── notifications.py  # Reminders & scheduled alerts
-        ├── tool_builder.py   # Meta-tool for creating tools
-        ├── tool_template.py  # Templates for generated tools
-        ├── marketplace.py    # Plugin marketplace
-        └── custom/           # Auto-generated custom tools
-            ├── __init__.py
-            └── tests/        # Custom tool tests
+aura/           — Core runtime, brain, agent, memory, tools, CLI
+api/            — FastAPI backend (middleware, routes, auth, services)
+web/            — React frontend (chat, tools, insights, settings)
+extension-src/  — Browser extension (Chrome, 25+ panels)
+deploy/         — Deployment configs (Docker, systemd)
+tests/          — Python test suite (1488 passing)
 ```
 
-### Core Loop
-
-The agent operates on a 5-phase cognitive cycle:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    AGENT LOOP                           │
-├─────────────────────────────────────────────────────────┤
-│  1. OBSERVE  → Gather context, recall relevant memories │
-│  2. PLAN     → Create strategy based on observations    │
-│  3. ACT      → Execute one action from the plan         │
-│  4. EVALUATE → Assess result + confidence scoring       │
-│  5. REMEMBER → Store experience in long-term memory     │
-└─────────────────────────────────────────────────────────┘
-         ↓ (repeat until goal achieved or max iterations)
-```
-
-### Data Flow
-
-```
-User Goal
-    │
-    ▼
-┌─────────┐    ┌─────────┐    ┌─────────┐
-│  Brain  │◄──►│  Tools  │◄──►│ Memory  │
-│ (Ollama)│    │         │    │(ChromaDB│
-└─────────┘    └─────────┘    └─────────┘
-    │                              │
-    ▼                              ▼
-┌─────────────┐            ┌─────────────┐
-│Metacognition│            │   Dream     │
-│   Logger    │───────────►│    Mode     │
-└─────────────┘            └─────────────┘
-    │                              │
-    ▼                              ▼
-  JSONL Logs              Long-term Insights
-```
-
----
-
-## Phase A: Core Agent
-
-### Components
-
-#### OllamaBrain (`brain.py`)
-
-The reasoning engine that interfaces with Ollama for all LLM operations.
-
-**Methods:**
-- `think(prompt, system_prompt, use_history, task_type)` - Generate response with model routing
-- `observe(context)` - Analyze current state
-- `plan(goal, observations, tools)` - Create action plan
-- `decide_action(plan, tools)` - Select next action
-- `evaluate(action, result, goal)` - Assess outcome with confidence
-- `summarize(content, goal)` - Summarize information
-- `_select_model(prompt, task_type)` - Route to appropriate model
-- `get_last_model_used()` - Get model from last call
-
-#### MemorySystem (`memory.py`) — REMOVED
-
-> **Note:** The original `MemorySystem` (JSON-based, later SQLite `agent_memory.db`) has been removed. It was confirmed as dead code — never instantiated at runtime. The primary memory system is now **UnifiedMemory** (SQLite+FTS5, `aura_memory.db`) with Kuzu KG integration, RRF+reranker retrieval, and automatic entity extraction. `MarkdownStore` has also been removed (dead code). See `ENGINEERING_REVIEW_2026-03-19.md` section 15 for the full corrected memory architecture.
-
-**Active memory systems at runtime:**
-- **UnifiedMemory** (SQLite+FTS5) — primary read/write on every chat
-- **MemoryRetriever** — parallel .md writer (being consolidated into UnifiedMemory via write-through)
-- **Episodic Memory** (Qdrant) — auto-recalled into system prompt via `quick_recall()`
-- **A-MEM** (Zettelkasten) — tool-only, queried when LLM invokes the tool
-- **KG Kuzu** — wired into UnifiedMemory as graph retrieval channel
-- **KG NetworkX** — tool-only, separate from Kuzu
-
-#### Tools (15 Total)
-
-| Tool | File | Description |
-|------|------|-------------|
-| `filesystem` | `filesystem.py` | List/read local files |
-| `web_search` | `web_search.py` | DuckDuckGo search |
-| `code_executor` | `code_executor.py` | Sandboxed Python execution |
-| `screenshot` | `screenshot.py` | Screen capture |
-| `vision` | `vision.py` | Image analysis (LLaVA) |
-| `pdf_reader` | `pdf_reader.py` | PDF text extraction |
-| `clipboard` | `clipboard.py` | Clipboard read/write |
-| `voice` | `voice.py` | [Phase C] Speech-to-text (Whisper) & TTS (pyttsx3) |
-| `image_gen` | `image_gen.py` | [Phase C] Image generation (Stable Diffusion 1.5) |
-| `arxiv_search` | `arxiv_search.py` | arXiv paper search & summarization |
-| `browser` | `browser.py` | Playwright browser automation |
-| `system_control` | `system_control.py` | Volume, brightness, apps, system info |
-| `notifications` | `notifications.py` | Reminders, scheduled alerts, conditional triggers |
-| `tool_builder` | `tool_builder.py` | Meta-tool for creating custom tools at runtime |
-| `marketplace` | `marketplace.py` | Plugin marketplace for browsing, installing, and sharing plugins |
-
----
-
-## Phase B: Self-Reflection
-
-Phase B adds metacognitive capabilities for self-monitoring and learning.
-
-### Confidence Scoring
-
-**Location:** `brain.py` (evaluate method), `agent.py` (display)
-
-The agent now outputs a confidence score (0-100%) with each evaluation, indicating how certain it is that the goal has been achieved.
-
-**Prompt format:**
-```
-SUCCESS: yes OR no
-CONFIDENCE: 0-100 (how confident are you the goal is fully achieved)
-PROGRESS: one sentence about progress
-NEXT: continue OR complete OR retry
-```
-
-**Parsed in:** `_parse_evaluation_response()`
-
-**Output example:**
-```
-[EVALUATE] Assessing result...
-Success: True
-Confidence: 85%
-Progress: Found relevant search results for the query.
-```
-
-### Metacognition Logger
-
-**Location:** `aura/metacognition.py`
-
-Logs every action's outcome for later analysis.
-
-**Log format:** JSONL at `logs/metacognition/YYYY-MM-DD.jsonl`
-
-**Log entry structure:**
-```json
-{
-  "timestamp": "2026-01-15T20:19:02.565174",
-  "goal": "What is 2 + 2?",
-  "iteration": 1,
-  "tool": "code_executor",
-  "action": "print(2 + 2)",
-  "confidence": 100,
-  "success": true,
-  "retried": false,
-  "progress": "Calculation successful.",
-  "next_step": "complete",
-  "result_summary": "{'success': True, 'output': '4'}"
-}
-```
-
-**Class: MetacognitionLogger**
-
-| Method | Description |
-|--------|-------------|
-| `start_goal(goal)` | Begin tracking a new goal |
-| `increment_iteration()` | Track iteration count and retries |
-| `log_evaluation(...)` | Write log entry to JSONL |
-| `get_stats(date)` | Get statistics for a date |
-
-**Statistics returned:**
-```python
-{
-  "date": "2026-01-15",
-  "total_actions": 4,
-  "successful": 4,
-  "success_rate": 100.0,
-  "retried": 2,
-  "retry_rate": 50.0,
-  "avg_confidence": 87.5,
-  "tool_usage": {"code_executor": 1, "web_search": 3},
-  "model_usage": {"kimi-k2.6:cloud": 3, "nemotron-3-super:cloud": 1}
-}
-```
-
-### Dream Mode
-
-**Location:** `aura/dream.py`
-
-Memory consolidation system that analyzes logs and generates insights.
-
-**CLI usage:**
-```bash
-python main.py --dream                    # Analyze today's logs
-python main.py --dream-date 2026-01-14    # Analyze specific date
-```
-
-**Class: DreamMode**
-
-| Method | Description |
-|--------|-------------|
-| `dream(date)` | Run full consolidation pipeline |
-| `_load_logs(date)` | Read metacognition JSONL |
-| `_analyze_patterns(logs)` | Extract statistics |
-| `_generate_insights(patterns, logs)` | Use LLM to create insights |
-| `_store_insights(insights, date)` | Save to long-term memory |
-| `recall_insights(query, n)` | Query past insights |
-| `get_all_insights()` | Get all stored insights |
-
-**Pattern analysis includes:**
-- Tool performance (success rate, avg confidence)
-- Confidence distribution (low/medium/high)
-- Retry analysis (first attempt vs needed retry)
-- Goal completion tracking
-
-**Sample insights generated:**
-```
-1. Use code_executor for high-confidence calculation tasks
-2. Prefer web_search for information retrieval
-3. Avoid low-confidence tools when possible
-4. Focus on improving first-attempt success rate
-```
-
-**Insights stored as:** `memory_type: "dream_insight"` in ChromaDB
-
-### Multi-Model Routing
-
-**Location:** `brain.py` (`_select_model` method), `config.py`
-
-Automatically routes tasks to the most appropriate model based on complexity.
-
-**Models configured:**
-
-| Model | Config Key | Use Case |
-|-------|------------|----------|
-| `nemotron-3-super:cloud` | `MODEL_FAST` | Simple tasks, greetings, short answers |
-| `kimi-k2.6:cloud` | `MODEL_REASON` | Reasoning, planning, code, evaluation |
-| `kimi-k2.6:cloud` | `MODEL_VISION` | Image/screenshot analysis |
-
-**Task Types (enum):**
-```python
-class TaskType(Enum):
-    SIMPLE = "simple"       # Greetings, short answers
-    REASONING = "reasoning" # Planning, evaluation
-    CODE = "code"           # Code generation, calculations
-    VISION = "vision"       # Image analysis
-```
-
-**Auto-detection patterns:**
-- **SIMPLE**: "hello", "hi", "thanks", "bye" (short prompts <10 words)
-- **CODE**: "calculate", "factorial", "print(", "import", "python"
-- **VISION**: "image", "picture", "screenshot", "analyze image"
-- **REASONING**: Default for complex tasks
-
-**Usage:**
-```python
-from aura.brain import OllamaBrain, TaskType
-
-brain = OllamaBrain()
-
-# Auto-detect model
-response = brain.think("Hello!")  # Uses nemotron-3-super:cloud
-
-# Explicit task type
-response = brain.think("Plan a strategy", task_type=TaskType.REASONING)
-
-# Check which model was used
-print(brain.get_last_model_used())  # "kimi-k2.6:cloud"
-```
-
-**Metacognition logging:**
-- Model used is logged in `model_used` field
-- `get_stats()` returns `model_usage` breakdown
-
-### Fast-Path Responses
-
-**Location:** `agent.py` (`_is_simple_query`, `_fast_path_response`)
-
-Simple conversational queries skip the full 5-phase agent loop and respond directly using the fast model (`nemotron-3-super:cloud`).
-
-**Triggers (Phase C - Expanded):**
-- **Greetings**: "hello", "hi", "hey", "thanks", "bye", "good morning", etc.
-- **Agent questions**: "who are you", "what can you do", "are you an AI", "what model are you"
-- **Yes/no questions**: "can you", "is it", "do you", "should I", "will it"
-- **Conversational starters**: "what do you think", "explain", "define", "tell me a joke"
-- **General questions**: "what is", "who is", "why is", "how many", "when is"
-- **Short queries**: Less than 8 words without tool keywords
-- **Medium queries**: 8-12 words starting with question words
-
-**Tool keywords that REQUIRE full agent loop:**
-```
-search the web, search online, google, take a screenshot, capture screen,
-read file, open file, list files, run code, execute python, calculate,
-compute, factorial, fibonacci, read pdf, clipboard, analyze image,
-current weather, weather in, news about, stock price, bitcoin price
-```
-
-**Example:**
-```bash
-# Fast-path (direct response)
-python main.py "Hello, how are you?"
-# Output: [FAST-PATH] Using nemotron-3-super:cloud
-
-# Disable fast-path
-python main.py --no-fastpath "Hello!"
-# Output: Runs full 5-phase loop
-```
-
-**How it works:**
-1. `_is_simple_query(goal)` checks if goal is conversational
-2. If true, `_fast_path_response(goal)` responds using `nemotron-3-super:cloud`
-3. Logs to metacognition with `tool="fast_path"`
-4. Returns immediately without observe/plan/act/evaluate
-
-**Result structure for fast-path:**
-```python
-{
-    "goal": "Hello!",
-    "completed": True,
-    "iterations": 0,
-    "fast_path": True,
-    "response": "Hi there! How can I help you?",
-    "final_evaluation": {"success": True, "confidence": 100, ...}
-}
-```
-
-### GUI Integration
-
-**Stats Tab additions:**
-- Metacognition stats table
-- Date selector for historical data
-- "Run Dream Mode" button
-- Dream output display with insights
-
----
-
-## Phase C: Voice & Image Tools
-
-Phase C adds voice interaction and image generation capabilities.
-
-### Voice Interface
-
-**Location:** `aura/tools/voice.py`
-
-**Classes:**
-- `VoiceTool` - Core voice functionality
-- `VoiceConversation` - Continuous voice chat loop
-
-**VoiceTool Methods:**
-
-| Method | Description |
-|--------|-------------|
-| `listen(duration, silence_threshold, silence_duration, max_duration)` | Record and transcribe speech |
-| `speak(text, block)` | Convert text to speech |
-| `set_voice(voice_id, rate, volume)` | Configure TTS settings |
-| `get_voices()` | List available TTS voices |
-| `list_audio_devices()` | List microphone devices |
-
-**Usage:**
-```python
-from aura.tools import VoiceTool
-
-voice = VoiceTool(whisper_model="base")
-
-# Listen and transcribe
-result = voice.listen()
-print(result["text"])  # Transcribed speech
-
-# Speak text
-voice.speak("Hello, how can I help you?")
-```
-
-**CLI Voice Mode:**
-```bash
-python main.py --voice
-```
-
-**GUI Voice Mode:**
-1. Check "Voice Mode" checkbox
-2. Click "Speak" button
-3. Speak into microphone
-4. View transcription in status area
-
-**Dependencies:**
-- `openai-whisper` - Speech-to-text (local)
-- `pyttsx3` - Text-to-speech (offline)
-- `sounddevice` - Audio recording
-- `numpy` - Audio processing
-
-### Image Generation
-
-**Location:** `aura/tools/image_gen.py`
-
-**Class:** `ImageGenerationTool`
-
-**Methods:**
-
-| Method | Description |
-|--------|-------------|
-| `generate(prompt, negative_prompt, width, height, steps, guidance_scale, seed, save)` | Generate image from prompt |
-| `generate_variations(prompt, num_images)` | Generate multiple variations |
-| `get_device_info()` | Check GPU/CPU status |
-
-**Usage:**
-```python
-from aura.tools import ImageGenerationTool
-
-# Initialize (downloads ~4GB model on first use)
-tool = ImageGenerationTool()
-
-# Check device
-print(tool.get_device_info())
-# {'device': 'cuda', 'cuda_available': True, ...}
-
-# Generate image
-result = tool.generate(
-    prompt="a cat sitting on a rainbow",
-    negative_prompt="blurry, low quality",
-    width=512,
-    height=512,
-    num_inference_steps=50,
-    guidance_scale=7.5
-)
-
-print(result["image_path"])  # generated_images/20260116_123456_a_cat_sitting.png
-```
-
-**Quick function:**
-```python
-from aura.tools import generate_image
-
-result = generate_image("a futuristic city at sunset")
-```
-
-**Performance:**
-- GPU (CUDA): ~10-30 seconds per image
-- CPU: ~5-10 minutes per image
-
-**Note:** Python 3.14 does not yet have PyTorch CUDA wheels. Use Python 3.11/3.12 for GPU acceleration.
-
----
-
-## API Reference
-
-### CLI Commands
+## Core Subsystems
+
+### Brain (`aura/brain.py`, ~2000 lines)
+OllamaBrain — the LLM calling engine. Handles:
+- Cloud model calls via Ollama Pro (14 models)
+- ChatGPT OAuth authentication
+- History persistence, token tracking, caching
+- Model routing delegation, circuit breakers
+- Warmup, taint tracking
+
+### Agent (`aura/agent.py`, ~1500 lines)
+ApprenticeAgent — the orchestrator. Built with mixins:
+- ChatMixin, ReactMixin, KGBrainMixin
+- Coordinates tool execution, planning, session persistence
+
+### Agentic Loop (`aura/core/agentic_loop.py`, ~1600 lines)
+CLI dev agentic loop with:
+- ModelStepController, ToolCallCoordinator, LoopOutcome, LoopEventEmitter
+- Adaptive planning, Reflexion failure diagnosis
+- Verification stage with checkpoint/atomic rollback
+
+### Memory (`aura/memory/`)
+UnifiedMemory — consolidated retrieval pipeline:
+- BM25 + semantic + KG retrieval
+- RRF fusion, cross-encoder reranking
+- FadeMem decay (2-week half-life)
+
+### Tools (`aura/tools/`, 85+ files)
+Tool implementation across categories: file, search, code, git, web, vision, telegram
+
+### Hands (`aura/hands/`)
+Tool execution lifecycle management, approval, scheduling
+
+### Security (`aura/security/`)
+- SSRF guard (`ssrf_guard.py`)
+- Audit chain with Merkle trees (`audit_chain.py`)
+- Tool signing (`tool_signing.py`)
+- Taint tracker (`taint_tracker.py`)
+
+## Model Infrastructure
+
+15 cloud models via Ollama Pro ($20/month): kimi-k2.6, qwen3.5, minimax-m2.7, deepseek-v3.2, etc.
+12 ChatGPT models via OAuth (gpt-5.4 through gpt-5.1)
+4 local utility models: embeddings, OCR, edge multimodal
+
+Default assignments: Fast→nemotron-3-super, Reason→kimi-k2.6, Code→minimax-m2.7
+
+## Configuration
+
+All config via `.env` (copy from `.env.example`). Required variables:
+- `OLLAMA_API_KEY` — Ollama Pro subscription key
+- `AURA_API_KEY` — API authentication key (generate with `python -c "import secrets; print(secrets.token_urlsafe(32))"`)
+- `AURA_API_AUTH_ENABLED=true` — Enable before network exposure
+
+See `.env.example` for full list with documentation.
+
+## Running
 
 ```bash
-# Run with goal
-python main.py "Your goal here"
-python main.py "Goal" --max-iterations 5
+# API server
+python run_web.py
 
-# Fast-path (auto for simple queries)
-python main.py "Hello!"              # Uses fast-path
-python main.py --no-fastpath "Hello" # Forces full loop
+# Web UI (separate terminal)
+cd web && npm run dev
 
-# Interactive chat
-python main.py --chat
+# Telegram bot
+python run_telegram.py
 
-# Voice conversation mode [Phase C]
-python main.py --voice
-
-# Dream mode
-python main.py --dream
-python main.py --dream --dream-date 2026-01-14
-
-# GUI
-python gui.py
+# CLI
+python main.py
 ```
 
-### Python API
+## Testing
 
-```python
-from aura import ApprenticeAgent
-from aura.metacognition import MetacognitionLogger
-from aura.dream import DreamMode
-from aura.tools import VoiceTool, ImageGenerationTool
-
-# Run agent
-agent = ApprenticeAgent()
-result = agent.run("Search for Python tutorials")
-
-# Get metacognition stats
-logger = MetacognitionLogger()
-stats = logger.get_stats()  # Today's stats
-stats = logger.get_stats("2026-01-14")  # Specific date
-
-# Run dream mode
-dreamer = DreamMode()
-result = dreamer.dream()  # Analyze today
-insights = dreamer.get_all_insights()  # Get stored insights
-
-# Voice interface [Phase C]
-voice = VoiceTool()
-result = voice.listen()  # Record and transcribe
-voice.speak("Hello!")    # Text-to-speech
-
-# Image generation [Phase C]
-img_tool = ImageGenerationTool()
-result = img_tool.generate("a sunset over mountains")
-print(result["image_path"])
-```
-
----
-
-## Changelog
-
-### FluxMind Calibrated Reasoning - Tool #16 (2026-01-20)
-
-#### Added
-- **FluxMind Tool** (`tools/fluxmind/`)
-  - `step(state, operation, context)` — Execute single reasoning step with calibrated confidence
-  - `execute(initial_state, operations, contexts)` — Execute full reasoning program with trajectory tracking
-  - `get_confidence(state, operation, context)` — Quick confidence check without full execution
-  - `verify_sequence(actions)` — Verify if action sequence is coherent
-  - `status()` — Get FluxMind status and capabilities
-
-- **Core Engine** (`tools/fluxmind/fluxmind_core.py`)
-  - FluxMind v0.75.1: Compositional Programs + OOD Calibration
-  - Multi-DSL learning (additive + multiplicative operations)
-  - Compositional programs (mix DSLs mid-sequence)
-  - Calibrated uncertainty (knows when it doesn't know)
-  - OOD detection (confidence drops on unfamiliar inputs)
-  - Sub-millisecond inference (~393K parameters)
-
-- **Model Training**
-  - Phase 1: DSL A (additive operations) - 2000 iterations
-  - Phase 2: DSL B (multiplicative operations) - 3000 iterations
-  - Phase 3: Compositional + OOD calibration - 2500 iterations
-  - Final accuracy: 99.9% in-distribution, 0.02 confidence on OOD
-
-- **Agent Integration**
-  - `_detect_fluxmind_action()` — Priority detection for FluxMind keywords
-  - `_execute_fluxmind_action()` — Parse and execute FluxMind commands
-  - Keywords: fluxmind, ask fluxmind, confidence check, calibrated, uncertainty, verify sequence
-
-- **Natural Language Commands**
-  - "Ask FluxMind about state [5,3,7,2]" — Get confidence check
-  - "FluxMind step [5,3,7,2] op 0 context 0" — Execute single step
-  - "FluxMind status" — Check tool availability
-
-#### Model File
-- `models/fluxmind_v0751.pt` — Trained model (~1.5 MB)
-
-#### Modified
-- `agent.py`: Added FluxMind tool, detection priority, action handler
-- `tools/__init__.py`: Added FluxMindTool export with conditional loading
-
----
-
-### Plugin Marketplace - Tool #15 (2026-01-18)
-
-#### Added
-- **Marketplace Tool** (`tools/marketplace.py`)
-  - `browse(category, sort_by)` — List plugins by category (utilities/health/finance/productivity/fun/all), sorted by downloads/rating/newest
-  - `search(query)` — Search plugins by keyword in name, description, and tags
-  - `get_info(plugin_id)` — Get full plugin details including functions, author, version
-  - `install(plugin_id)` — Download from GitHub, scan for safety, copy to tools/custom/, enable
-  - `uninstall(plugin_id)` — Remove plugin files and disable
-  - `publish(tool_name)` — Package custom tool for publishing (creates plugin folder structure)
-  - `rate(plugin_id, stars)` — Rate 1-5 stars (stored locally)
-  - `my_plugins()` — List all installed marketplace plugins
-  - `update(plugin_id)` — Check for and install plugin updates
-
-- **Data Files**
-  - `data/installed_plugins.json` — Tracks installed plugins with version and source
-  - `data/marketplace_cache.json` — Cached registry data for offline browsing
-
-- **Logging**
-  - `logs/marketplace/` — Logs all install/uninstall/publish actions
-
-- **Safety Features**
-  - Code scanning using same `BLOCKED_PATTERNS` from tool_template.py
-  - Blocks plugins with dangerous imports (os.system, subprocess, eval, exec, etc.)
-  - Requires confirmation before installing plugins with functions list
-
-- **Agent Integration**
-  - `_detect_marketplace_action()` — Priority detection for marketplace keywords
-  - Marketplace keywords: publish, marketplace, browse plugins, install plugin, my plugins, etc.
-  - Marketplace actions take priority over custom tool detection
-  - Read-only actions (browse, search, my_plugins) complete immediately on success
-
-- **Publishing Workflow**
-  - Creates `plugins/<tool_name>/` folder with:
-    - `<tool_name>.py` — Tool source code
-    - `plugin.json` — Plugin metadata (name, description, functions, keywords)
-    - `README.md` — Auto-generated documentation
-    - `tests/` — Test files if available
-  - Output: Ready to push to github.com/ElnurIbrahimov/aura-plugins
-
-#### Modified
-- `agent.py`: Added MarketplaceTool, marketplace detection priority, read-only action completion
-- `tools/__init__.py`: Added MarketplaceTool export
-
-#### Remote Registry
-```
-https://raw.githubusercontent.com/ElnurIbrahimov/aura-plugins/main/registry.json
-```
-
-#### Usage
-```python
-from aura.tools import MarketplaceTool
-
-mp = MarketplaceTool()
-
-# Browse available plugins
-result = mp.browse(category="health", sort_by="rating")
-
-# Search for plugins
-result = mp.search("calculator")
-
-# Get plugin details
-result = mp.get_info("bmi_calculator")
-
-# Install a plugin
-result = mp.install("bmi_calculator")
-
-# List installed plugins
-result = mp.my_plugins()
-
-# Publish your custom tool
-result = mp.publish("my_custom_tool")
-
-# Rate a plugin
-result = mp.rate("bmi_calculator", 5)
-```
-
-#### Natural Language Commands
 ```bash
-# Via agent
-"Browse plugins in the marketplace"
-"Search for health plugins"
-"Install the bmi_calculator plugin"
-"Show my installed plugins"
-"Publish my temperature_converter tool to the marketplace"
-"Rate bmi_calculator 5 stars"
+# Unit tests
+pytest tests/ -x -q --ignore=tests/integration
+
+# All tests
+pytest tests/ -x -q
+
+# Lint
+ruff check aura/ api/ --select E,W,F
 ```
 
----
+## Archived Documentation
 
-### Self-Tool-Creation - Tool #14 (2026-01-18)
-
-#### Added
-- **Tool Builder** (`tools/tool_builder.py`)
-  - Meta-tool enabling the agent to create new tools at runtime
-  - `create_tool(name, description, functions_spec)` — generates Python file from specification
-  - `test_tool(name)` — runs auto-generated tests in isolated subprocess
-  - `enable_tool(name)` — activates tool for agent use
-  - `disable_tool(name)` — deactivates tool without deletion
-  - `rollback_tool(name)` — deletes tool and removes from registry
-  - `list_custom_tools()` — shows all agent-created tools with status
-
-- **Tool Templates** (`tools/tool_template.py`)
-  - Class templates for generated tools
-  - Method templates with proper typing and docstrings
-  - Test templates for auto-generated unit tests
-  - Blocked patterns list for security scanning
-
-- **Custom Tools Infrastructure**
-  - Custom tools saved in `tools/custom/`
-  - Tests saved in `tools/custom/tests/`
-  - Registry in `data/custom_tools.json`
-  - Logs in `logs/tool_builder/`
-
-- **Safety Features**
-  - Code scanning blocks dangerous imports: `os.system`, `subprocess`, `eval`, `exec`, `__import__`, `compile`, `open`, `socket`, `requests`
-  - Function bodies scanned before file generation
-  - Isolated test execution in subprocess
-
-- **Natural Language Tool Spec Generation** (`agent.py`)
-  - `_generate_tool_spec(user_request)` — uses LLM to parse natural language into structured JSON spec
-  - Enables commands like "Create a tool that calculates BMI"
-
-- **Custom Tool Detection** (`agent.py`)
-  - `custom_tool_keywords` dict maps keywords to tool names
-  - `_detect_custom_tool()` routes goals directly to custom tools
-  - Keywords auto-generated from tool name, description, and functions
-  - Agent bypasses planning phase for clear custom tool matches
-
-- **Example Custom Tools Created**
-  - `bmi_calculator` — calculates BMI from height/weight (metric & imperial)
-  - `temperature_converter` — converts between Celsius and Fahrenheit
-
-#### Modified
-- `agent.py`: Added custom tool loading, keyword detection, direct routing
-- `brain.py`: Added tool_builder keywords and routing
-- `tools/__init__.py`: Added ToolBuilderTool export
-- `README.md`: Updated to 14 tools, added Tool Builder section
-
-#### Usage
-```python
-from aura.tools import ToolBuilderTool
-
-builder = ToolBuilderTool()
-
-# Create a custom tool
-builder.create_tool(
-    name='bmi_calculator',
-    description='Calculate BMI from height and weight',
-    functions_spec=[{
-        'name': 'calculate_bmi',
-        'params': ['weight_kg', 'height_m'],
-        'description': 'Calculate BMI',
-        'body': 'bmi = float(weight_kg) / (float(height_m) ** 2)\nreturn {"success": True, "bmi": round(bmi, 1)}'
-    }]
-)
-
-# Test and enable
-builder.test_tool('bmi_calculator')
-builder.enable_tool('bmi_calculator')
-
-# Use via agent
-# "Calculate my BMI - height 1.75m, weight 70kg" → bmi_calculator
-```
-
-#### Registry Format (`data/custom_tools.json`)
-```json
-{
-    "tools": [{
-        "name": "bmi_calculator",
-        "class_name": "BmiCalculatorTool",
-        "description": "Calculate BMI from height and weight",
-        "status": "active",
-        "created": "2026-01-18T18:34:03",
-        "file": "tools/custom/bmi_calculator.py",
-        "test_file": "tools/custom/tests/test_bmi_calculator.py",
-        "functions": ["calculate_bmi", "calculate_bmi_imperial"],
-        "keywords": ["bmi", "body mass index", "height and weight"]
-    }]
-}
-```
-
----
-
-### Phase C - Voice, Vision & Fast-Path (2026-01-16)
-
-#### Added
-- **Improved Fast-Path Detection** (`agent.py`)
-  - Agent self-questions: "who are you", "what can you do", "are you an AI"
-  - Yes/no question detection: "can you", "is it", "should I"
-  - Conversational starters: "explain", "define", "what do you think"
-  - Increased word threshold (8 words default, 12 for question words)
-  - More specific tool keywords to avoid false positives
-  - Better system prompt with agent identity
-
-- **Voice Interface** (`tools/voice.py`)
-  - `VoiceTool` class with `listen()` and `speak()` methods
-  - Speech-to-text using OpenAI Whisper (local, "base" model)
-  - Text-to-speech using pyttsx3 (offline, no API needed)
-  - Silence detection for automatic recording stop
-  - Direct numpy array to Whisper (bypasses ffmpeg dependency)
-  - `VoiceConversation` class for continuous voice chat
-  - GUI integration: Voice Mode toggle, Speak button
-  - CLI: `python main.py --voice` for voice conversation mode
-
-- **Image Generation** (`tools/image_gen.py`)
-  - `ImageGenerationTool` using Stable Diffusion 1.5
-  - `generate(prompt)` method with customizable parameters
-  - Options: negative_prompt, width, height, steps, guidance_scale, seed
-  - `generate_variations(prompt, num_images)` for multiple outputs
-  - Auto-saves to `generated_images/` folder
-  - Lazy model loading (~4GB download on first use)
-  - GPU/CPU auto-detection
-
-#### Modified
-- `agent.py`: Expanded `_is_simple_query()` with comprehensive patterns
-- `agent.py`: Improved `_fast_path_response()` system prompt
-- `tools/__init__.py`: Added VoiceTool, VoiceConversation, ImageGenerationTool exports
-- `gui.py`: Added Voice Mode checkbox, Speak button, voice status display
-- `main.py`: Added `--voice` CLI flag for voice conversation mode
-
-#### Known Limitations
-- **Python 3.14 + CUDA**: PyTorch CUDA wheels not yet available for Python 3.14
-  - Image generation runs on CPU only (slow: ~5-10 min/image)
-  - Workaround: Use Python 3.11/3.12 venv for GPU acceleration
-- **Voice on Windows**: Requires working microphone; pyttsx3 uses Windows SAPI
-
----
-
-### Phase B - Self-Reflection (2026-01-15)
-
-#### Added
-- **Confidence Scoring**
-  - Agent now outputs confidence (0-100%) with each evaluation
-  - Displayed in CLI and GUI evaluate phase
-  - Parsed from LLM response in `_parse_evaluation_response()`
-
-- **Metacognition Logger** (`metacognition.py`)
-  - Logs all actions to `logs/metacognition/YYYY-MM-DD.jsonl`
-  - Tracks: tool, action, confidence, success, retried, progress
-  - `get_stats()` method for analyzing daily performance
-  - Integrated into agent evaluation phase
-
-- **Dream Mode** (`dream.py`)
-  - Memory consolidation system
-  - Analyzes metacognition logs for patterns
-  - Generates actionable insights using LLM
-  - Stores insights in long-term memory
-  - CLI: `python main.py --dream`
-
-- **Multi-Model Routing** (`brain.py`)
-  - `_select_model()` method for automatic model selection
-  - `TaskType` enum: SIMPLE, REASONING, CODE, VISION
-  - Routes simple tasks to `nemotron-3-super:cloud` (fast)
-  - Routes reasoning/code to `kimi-k2.6:cloud`
-  - Routes vision to `kimi-k2.6:cloud`
-  - Logs `model_used` in metacognition
-
-- **Fast-Path Responses** (`agent.py`)
-  - `_is_simple_query()` detects greetings and short questions
-  - `_fast_path_response()` responds directly using fast model
-  - Skips full 5-phase loop for conversational queries
-  - CLI flag `--no-fastpath` to disable
-
-- **GUI Enhancements**
-  - Stats tab with metacognition statistics
-  - "Run Dream Mode" button
-  - Dream output display with generated insights
-
-#### Modified
-- `config.py`: Added MODEL_FAST, MODEL_REASON, MODEL_VISION settings
-- `brain.py`: Added confidence scoring, multi-model routing, `_select_model()`
-- `agent.py`: Integrated MetacognitionLogger, fast-path, displays confidence and model
-- `metacognition.py`: Added `model_used` tracking and `model_usage` stats
-- `main.py`: Added `--dream`, `--dream-date`, `--no-fastpath` CLI flags
-- `gui.py`: Added Stats tab, dream mode button, model usage display
-
-### Phase A - Core Agent (Initial Release)
-
-#### Added
-- 5-phase agent loop (Observe/Plan/Act/Evaluate/Remember)
-- OllamaBrain for LLM reasoning
-- MemorySystem with JSON persistence
-- Tools: filesystem, web_search, code_executor, screenshot, vision, pdf_reader, clipboard
-- Gradio GUI with real-time thinking visualization
-- CLI with goal and chat modes
-
----
-
-## Roadmap
-
-### Completed Features
-- **Phase A** - Core Agent (5-phase loop, 7 tools, memory, GUI)
-- **Phase B** - Self-Reflection (confidence scoring, metacognition, dream mode, multi-model routing)
-- **Phase C** - Voice & Image Tools (Whisper STT, pyttsx3 TTS, Stable Diffusion)
-- **Tool #14** - Self-Tool-Creation (tool_builder meta-tool, custom tool registry, auto-detection)
-- **Tool #15** - Plugin Marketplace (browse, install, publish, rate plugins from remote registry)
-
-### Phase D - Adaptive Learning (Planned)
-- Use dream insights to adjust planning strategies
-- Tool selection based on historical success rates
-- Confidence-based retry decisions
-- Auto-tune model routing based on task performance
-
-### Phase E - Multi-Agent (Planned)
-- Spawn sub-agents for complex tasks
-- Inter-agent communication
-- Shared memory pool
-- Task delegation and coordination
-
----
-
-## Recent Engineering Improvements
-
-Targeted reliability and security hardening pass (2026-03):
-
-- **Budget enforcement**: Hard `num_predict` cap alongside soft prompt hint
-- **Memory write gate**: Best-match merge target selection (was first-match)
-- **Dream consolidation**: Embedding-based clustering with Jaccard fallback
-- **API security**: Production error sanitization, request ID tracking, file upload hardening
-- **Tool security**: AST validation extended to marketplace and custom tool imports
-- **Centralized thresholds**: Key tunable values (salience, ToM, budget, history) consolidated in `Config` class with env-var overrides
-- **Daemon reliability**: Monotonic time for intervals, PID race condition fix
-- **Memory cleanup**: Removed dead code (`MarkdownStore`, deprecated `MemorySystem`). Corrected memory architecture — UnifiedMemory is the primary system. See `ENGINEERING_REVIEW_2026-03-19.md` section 15.
-- **GEPA Evolution wired in**: `/evolve` chat command for manual trigger, API endpoint for programmatic access, proactive suggestions when skills underperform (>5 uses, <60% success), idle checks every 6 hours for weak skills. Evolution is user-approved only — never autonomous.
+The old `DOCUMENTATION.md` (describing Phase A/B/C, Gradio GUI, etc.) has been archived to `docs/archive/DOCUMENTATION_legacy.md`. This file replaces it.

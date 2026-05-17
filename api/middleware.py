@@ -15,6 +15,11 @@ from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
+# Request body size limit — prevents memory exhaustion DoS attacks.
+# FastAPI/Starlette don't enforce max body size by default.
+# 10 MB is generous enough for file uploads but blocks oversized payloads.
+_MAX_BODY_SIZE = int(os.environ.get("AURA_MAX_BODY_SIZE", str(10 * 1024 * 1024)))
+
 # When True, parse X-Forwarded-For to get the real client IP behind a reverse proxy.
 # NOTE: X-Forwarded-For can be spoofed if not behind a trusted reverse proxy.
 # Only enable this when running behind a trusted proxy (nginx, Cloudflare, etc.).
@@ -68,9 +73,10 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         "/api/telegram/memory/item/pin",
         "/api/telegram/memory/stats",
         "/api/telegram/memory/kg/top",
-        "/docs",
-        "/openapi.json",
-        "/redoc",
+        # API docs removed from public paths (2026-05-10)
+        # Previously: "/docs", "/openapi.json", "/redoc"
+        # These now require authentication. To re-enable in dev:
+        #   set AURA_API_AUTH_ENABLED=false
     }
 
     def __init__(self, app, api_key: str = "", enabled: bool = True):
@@ -257,7 +263,59 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        # Strict-Transport-Security (HSTS) — enforces HTTPS for 1 year
+        # Only set when not in development to avoid bricking localhost dev
+        if os.environ.get("AURA_ENV", "development") != "development":
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        # Content-Security-Policy — prevents XSS, data exfiltration, and clickjacking
+        # Default-src 'self' locks everything to same-origin by default
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self'; "
+            "connect-src 'self' ws: wss: https:; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'"
+        )
         return response
+
+
+class BodySizeLimitMiddleware(BaseHTTPMiddleware):
+    """Reject requests with oversized bodies before they're fully read.
+
+    Uses Content-Length header for pre-read rejection. Chunked transfer
+    encoding without Content-Length cannot be pre-checked but FastAPI
+    eventually rejects if the body exceeds available memory.
+    """
+
+    def __init__(self, app, max_size: int = _MAX_BODY_SIZE):
+        super().__init__(app)
+        self.max_size = max_size
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip WebSocket upgrades — body size is irrelevant
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                size = int(content_length)
+                if size > self.max_size:
+                    return JSONResponse(
+                        status_code=413,
+                        content={
+                            "detail": f"Request body too large. Maximum {self.max_size // 1024 // 1024} MB allowed."
+                        },
+                    )
+            except ValueError:
+                pass  # Invalid content-length — let FastAPI handle it
+
+        return await call_next(request)
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):

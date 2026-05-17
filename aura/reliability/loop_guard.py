@@ -173,8 +173,8 @@ class SessionLoopGuard:
         self._iterations_without_progress = 0
         self._last_progress_time = time.monotonic()
 
-    def configure(self, *, no_progress_iter_limit: int = None,
-                  max_seconds_without_progress: float = None) -> None:
+    def configure(self, *, no_progress_iter_limit: int | None = None,
+                  max_seconds_without_progress: float | None = None) -> None:
         """Override thresholds from AURA.md `lost_detection:` block."""
         if no_progress_iter_limit is not None and no_progress_iter_limit > 0:
             self._no_progress_iter_limit = int(no_progress_iter_limit)

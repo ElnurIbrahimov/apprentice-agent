@@ -20,7 +20,7 @@ async def _run_search(q: str, limit: int) -> dict:
     try:
         from aura.tools.search_fallback import web_search_with_fallback
     except ImportError:
-        raise HTTPException(503, "Search fallback module not available")
+        raise HTTPException(503, "Search fallback module not available") from None
 
     try:
         loop = asyncio.get_running_loop()
@@ -29,7 +29,7 @@ async def _run_search(q: str, limit: int) -> dict:
         )
     except Exception as e:
         logger.error("[Search] Search failed: %s", e)
-        raise HTTPException(500, safe_error_detail(e, "Search failed"))
+        raise HTTPException(500, safe_error_detail(e, "Search failed")) from e
 
     if not resp.get("success", True) and resp.get("error"):
         raise HTTPException(502, resp["error"])

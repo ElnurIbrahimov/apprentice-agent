@@ -24,10 +24,15 @@ from typing import Optional
 
 from aura import models_catalog as catalog
 from aura.models_catalog import (
-    LATENCY_FAST, LATENCY_MEDIUM, LATENCY_SLOW,
+    SPECIALTY_CHEAP,
+    SPECIALTY_CODE,
+    SPECIALTY_FAST,
+    SPECIALTY_LONGCTX,
+    SPECIALTY_MATH,
+    SPECIALTY_REASONING,
+    SPECIALTY_TOOL,
+    SPECIALTY_VISION,
     ModelProfile,
-    SPECIALTY_CHEAP, SPECIALTY_CODE, SPECIALTY_FAST, SPECIALTY_LONGCTX,
-    SPECIALTY_MATH, SPECIALTY_REASONING, SPECIALTY_TOOL, SPECIALTY_VISION,
 )
 
 logger = logging.getLogger(__name__)
@@ -327,12 +332,20 @@ def should_shadow(result: DispatchResult, *, auto_shadow: bool = True) -> bool:
 
 
 __all__ = [
+    "BUDGET_BALANCED",
+    "BUDGET_CHEAP",
+    "BUDGET_FREE",
+    "SHADOW_CONFIDENCE_THRESHOLD",
+    "TASK_CODE",
+    "TASK_GENERAL",
+    "TASK_LONGCTX",
+    "TASK_MATH",
+    "TASK_REASON",
+    "TASK_SIMPLE",
+    "TASK_TOOL",
+    "TASK_VISION",
     "DispatchResult",
     "classify_task",
     "dispatch",
     "should_shadow",
-    "BUDGET_FREE", "BUDGET_BALANCED", "BUDGET_CHEAP",
-    "TASK_CODE", "TASK_REASON", "TASK_MATH", "TASK_VISION",
-    "TASK_LONGCTX", "TASK_TOOL", "TASK_SIMPLE", "TASK_GENERAL",
-    "SHADOW_CONFIDENCE_THRESHOLD",
 ]

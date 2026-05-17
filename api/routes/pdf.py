@@ -24,7 +24,7 @@ async def extract_upload(file: UploadFile = File(...)):
     try:
         import pdfplumber
     except ImportError:
-        raise HTTPException(503, "pdfplumber not installed. Run: pip install pdfplumber")
+        raise HTTPException(503, "pdfplumber not installed. Run: pip install pdfplumber") from None
 
     # 50 MB limit on uploaded PDFs — stream to avoid buffering entire file
     _MAX_UPLOAD_SIZE = 50 * 1024 * 1024
@@ -45,7 +45,7 @@ async def extract_upload(file: UploadFile = File(...)):
         loop = asyncio.get_running_loop()
         pages = await loop.run_in_executor(None, _extract, data)
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "PDF extraction failed"))
+        raise HTTPException(500, safe_error_detail(e, "PDF extraction failed")) from e
 
     text = "\n\n".join(pages)
     return {
@@ -63,7 +63,7 @@ async def extract_url(body: dict):
         import httpx
         import pdfplumber
     except ImportError:
-        raise HTTPException(503, "Missing dependencies. Run: pip install pdfplumber httpx")
+            raise HTTPException(503, "Missing dependencies. Run: pip install pdfplumber httpx") from None
 
     url = body.get("url", "")
     if not url:
@@ -77,7 +77,7 @@ async def extract_url(body: dict):
         from aura.security.ssrf_guard import validate_url_safe
         pinned_url, original_hostname = validate_url_safe(url)
     except ValueError as e:
-        raise HTTPException(400, f"Cannot fetch URL: {e}")
+            raise HTTPException(400, f"Cannot fetch URL: {e}") from e
 
     _MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB
     try:
@@ -98,7 +98,7 @@ async def extract_url(body: dict):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "Failed to fetch PDF"))
+           raise HTTPException(500, safe_error_detail(e, "Failed to fetch PDF")) from e
 
     def _extract_bytes(raw: bytes):
         with pdfplumber.open(io.BytesIO(raw)) as pdf:
@@ -108,7 +108,7 @@ async def extract_url(body: dict):
         loop = asyncio.get_running_loop()
         pages = await loop.run_in_executor(None, _extract_bytes, pdf_bytes)
     except Exception as e:
-        raise HTTPException(500, safe_error_detail(e, "PDF extraction failed"))
+        raise HTTPException(500, safe_error_detail(e, "PDF extraction failed")) from e
 
     text = "\n\n".join(pages)
     return {

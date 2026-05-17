@@ -112,13 +112,13 @@ async def summarize_page(req: SummarizeRequest):
             resp.raise_for_status()
             data = resp.json()
     except httpx.TimeoutException:
-        raise HTTPException(504, "Summarization timed out (45s). Try a shorter page or faster model.")
+        raise HTTPException(504, "Summarization timed out (45s). Try a shorter page or faster model.") from None
     except httpx.HTTPStatusError as e:
         logger.error("[Summarize] Ollama HTTP error: %s", e)
-        raise HTTPException(502, f"Ollama error: {e.response.status_code}")
+        raise HTTPException(502, f"Ollama error: {e.response.status_code}") from e
     except Exception as e:
         logger.error("[Summarize] Unexpected error: %s", e)
-        raise HTTPException(500, safe_error_detail(e, "Summarization failed"))
+        raise HTTPException(500, safe_error_detail(e, "Summarization failed")) from e
 
     summary = data.get("response", "").strip()
     if not summary:

@@ -38,7 +38,6 @@ import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
-from pydantic import BaseModel
 
 from api.auth import require_api_key
 from api.utils import safe_error_detail
@@ -90,7 +89,7 @@ def _get_server() -> Any:
             from aura.core.mcp_server import AuraMCPServer
         except Exception as e:
             logger.error("[MCP/HTTP] Failed to import AuraMCPServer: %s", e)
-            raise HTTPException(503, detail="Aura MCP server unavailable")
+            raise HTTPException(503, detail="Aura MCP server unavailable") from e
         _server_singleton = AuraMCPServer(os.getcwd())
     return _server_singleton
 
@@ -164,7 +163,7 @@ async def mcp_endpoint(
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(400, detail="Invalid JSON body")
+        raise HTTPException(400, detail="Invalid JSON body") from None
 
     session_id = mcp_session_id or str(uuid.uuid4())
 

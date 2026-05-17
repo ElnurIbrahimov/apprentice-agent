@@ -12,17 +12,18 @@ Features:
 """
 
 import ast
-import json
 import hashlib
+import json
 import logging
+import os
 import re
 import tempfile
-import os
 import threading
-from pathlib import Path
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Tuple
-from dataclasses import dataclass, asdict
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 
 try:
@@ -424,7 +425,6 @@ class LocalRAG:
         Args:
             data_dir: Directory for storing index data
         """
-        from ..config import Config
 
         self.data_dir = data_dir or (Path(os.getenv("AURA_DATA_DIR", "data")) / "rag")
         self.data_dir.mkdir(parents=True, exist_ok=True)

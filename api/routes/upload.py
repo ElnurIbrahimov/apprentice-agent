@@ -233,4 +233,4 @@ async def delete_file(file_id: str):
 
     except Exception as e:
         logger.error(f"[Upload] Delete error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(500, detail=safe_error_detail(e)) from e

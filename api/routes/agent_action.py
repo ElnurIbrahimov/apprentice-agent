@@ -135,7 +135,7 @@ async def agent_action(body: dict):
                 response_text = r.json().get("response", "")
     except Exception as e:
         logger.error("[AgentAction] LLM call failed: %s", e)
-        raise HTTPException(500, detail=safe_error_detail(e))
+        raise HTTPException(500, detail=safe_error_detail(e)) from e
 
     latency_ms = (time.monotonic() - t0) * 1000
 
@@ -207,7 +207,7 @@ async def verify_action(req: VerifyRequest):
             "description": planned.description,
         }
     except Exception as e:
-        raise HTTPException(500, detail=safe_error_detail(e))
+        raise HTTPException(500, detail=safe_error_detail(e)) from e
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ async def session_status(session_id: str):
             "trigger_reason": guard._trigger_reason,
         }
     except Exception as e:
-        raise HTTPException(500, detail=safe_error_detail(e))
+        raise HTTPException(500, detail=safe_error_detail(e)) from e
 
 
 @router.post("/session/{session_id}/reset")
@@ -242,4 +242,4 @@ async def reset_session(session_id: str):
         reset_guard(session_id)
         return {"ok": True, "session_id": session_id}
     except Exception as e:
-        raise HTTPException(500, detail=safe_error_detail(e))
+        raise HTTPException(500, detail=safe_error_detail(e)) from e

@@ -24,7 +24,7 @@ def test_bmi_calculator_execute_unknown():
     """Test that unknown actions return error."""
     tool = BmiCalculatorTool()
     result = tool.execute("unknown_action_xyz")
-    assert result.get("success") == False
+    assert not result.get("success")
     assert "error" in result
     print("[PASS] BmiCalculatorTool handles unknown action")
 

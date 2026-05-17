@@ -483,7 +483,7 @@ class ActiveInferenceEngine:
         Returns:
             A_m with shape (num_obs_m, *num_states), normalized over obs axis.
         """
-        full_shape = [num_obs_m] + list(num_states)
+        full_shape = [num_obs_m, *list(num_states)]
         A_m = np.zeros(full_shape)
         for obs_idx in range(num_obs_m):
             for state_idx in range(num_states[target_factor]):

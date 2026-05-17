@@ -300,7 +300,7 @@ class CuriosityScanner:
                 """)
 
                 for row in result:
-                    entity_id, name, etype, desc, importance, conn_count = row
+                    entity_id, name, etype, _desc, importance, conn_count = row
                     urgency = 0.4 + (self.MIN_CONNECTIONS - conn_count) * 0.15
                     urgency = min(0.8, urgency + (importance or 0) * 0.2)
                     targets.append(CuriosityTarget(
@@ -370,7 +370,7 @@ class CuriosityScanner:
             """)
 
             for row in result:
-                entity_id, name, etype, access_count, last_accessed = row
+                entity_id, name, etype, access_count, _last_accessed = row
                 urgency = min(0.7, 0.3 + (access_count or 0) * 0.05)
                 targets.append(CuriosityTarget(
                     entity_name=name or entity_id,

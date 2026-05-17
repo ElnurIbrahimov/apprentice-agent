@@ -194,7 +194,7 @@ class SalienceFilter:
             keywords: Keywords relevant to current user focus
             activity: Current activity description
         """
-        self.context_keywords = set(kw.lower() for kw in keywords)
+        self.context_keywords = {kw.lower() for kw in keywords}
         self.current_activity = activity
         logger.debug(f"[SalienceFilter] Context updated: {len(self.context_keywords)} keywords")
 

@@ -391,7 +391,7 @@ Remove redundancy but preserve unique contributions from each."""
             "mode": routing.mode.value,
             "reasoning": routing.reasoning,
             "confidence": routing.confidence,
-            "all_scores": {name: score for name, score in scores}
+            "all_scores": dict(scores)
         }
 
     def get_status(self) -> Dict[str, Any]:

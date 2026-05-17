@@ -189,7 +189,7 @@ async def multi_agent_chat(request: MultiAgentChatRequest, session_id: str = Que
 
     except Exception as e:
         logger.error(f"[MultiAgent] Chat error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from e
 
 
 def _execute_chat(orchestrator, message: str, context: Optional[Dict] = None) -> dict:
@@ -231,7 +231,7 @@ async def preview_routing(request: RoutePreviewRequest, session_id: str = Query(
 
     except Exception as e:
         logger.error(f"[MultiAgent] Route preview error: {e}")
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from e
 
 
 @router.post("/clear")

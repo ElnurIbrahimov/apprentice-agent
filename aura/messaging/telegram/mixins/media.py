@@ -884,7 +884,7 @@ class MediaMixin:
             ("research_", "\U0001f50d Research", f"Research: {query}",
              f"Give a thorough research summary on: {query}"),
         ]
-        for cat_id, cat_title, cat_desc, cat_prompt in _INLINE_CATEGORIES:
+        for cat_id, cat_title, cat_desc, _cat_prompt in _INLINE_CATEGORIES:
             rid = hashlib.md5(f"{cat_id}{query}".encode()).hexdigest()[:16]
             results.append(InlineQueryResultArticle(
                 id=rid,

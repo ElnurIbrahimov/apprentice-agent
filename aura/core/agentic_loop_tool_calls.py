@@ -253,6 +253,7 @@ class ToolCallCoordinator:
                 # not just a terse fallback message in the assistant turn.
                 try:
                     from rich.panel import Panel
+
                     from aura.cli.display import console as _lg_console
                     files_edited = getattr(guard, "_files_edited", [])[-5:]
                     body_lines = [

@@ -32,7 +32,7 @@ class LocationMixin:
         placeholder = await update.message.reply_text("\U0001f4cd Getting info for your location...")
 
         try:
-            info, results = await self._get_location_info(lat, lon)
+            info, _results = await self._get_location_info(lat, lon)
 
             # Store last known location for /nearby (persisted to SQLite)
             self.store.set_user_location(str(update.effective_user.id), lat, lon)

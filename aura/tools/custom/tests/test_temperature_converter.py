@@ -24,7 +24,7 @@ def test_temperature_converter_execute_unknown():
     """Test that unknown actions return error."""
     tool = TemperatureConverterTool()
     result = tool.execute("unknown_action_xyz")
-    assert result.get("success") == False
+    assert not result.get("success")
     assert "error" in result
     print("[PASS] TemperatureConverterTool handles unknown action")
 

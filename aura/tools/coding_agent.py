@@ -167,7 +167,17 @@ class CodingAgentTool:
 
         cmd = cls._build_command(agent, prompt, extra_args=extra_args)
         run_cwd = cwd or os.getcwd()
-        env = os.environ.copy()
+        try:
+            from aura.tools.shell_executor import _get_sanitized_env
+            env = _get_sanitized_env()
+        except ImportError:
+            env = {k: v for k, v in os.environ.items() if k.upper() in {
+                "PATH", "TEMP", "TMP", "HOME", "SYSTEMROOT",
+                "COMSPEC", "PATHEXT", "LANG", "USERPROFILE",
+                "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+                "WINDIR", "USERNAME", "HOMEDRIVE", "HOMEPATH",
+                "LC_ALL", "LC_CTYPE", "PYTHONIOENCODING", "TERM",
+            }}
         if env_overrides:
             env.update(env_overrides)
 

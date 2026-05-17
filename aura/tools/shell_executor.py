@@ -480,10 +480,7 @@ if os.environ.get("AURA_ALLOW_UNSAFE_COMPILERS") == "1":
         "cargo", "rustc", "go", "java", "javac", "dotnet",
         "cmake", "make", "gcc", "g++", "clang",
     }
-    ALLOWED_COMMANDS_PREFIX = ALLOWED_COMMANDS_PREFIX + [
-        "cargo", "rustc", "go", "java", "javac", "dotnet",
-        "cmake", "make", "gcc", "g++", "clang",
-    ]
+    ALLOWED_COMMANDS_PREFIX = [*ALLOWED_COMMANDS_PREFIX, "cargo", "rustc", "go", "java", "javac", "dotnet", "cmake", "make", "gcc", "g++", "clang"]
 
 
 @dataclass
@@ -799,7 +796,7 @@ class ShellExecutorTool:
             self._cleanup_sessions()
 
             sessions = []
-            for sid, s in self._sessions.items():
+            for _sid, s in self._sessions.items():
                 sessions.append({
                     "id": s.id,
                     "cwd": s.cwd,

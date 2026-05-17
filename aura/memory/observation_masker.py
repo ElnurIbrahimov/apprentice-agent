@@ -332,9 +332,9 @@ def expand_observation(obs_id: str) -> Optional[str]:
 
 
 __all__ = [
-    "ObservationMasker",
     "MaskedOutput",
+    "ObservationMasker",
+    "expand_observation",
     "get_default_masker",
     "mask_tool_output",
-    "expand_observation",
 ]

@@ -127,4 +127,4 @@ async def preview_evolution(request: EvolutionRunRequest):
         result = await loop.run_in_executor(None, _preview)
         return {"status": "ok", "preview": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=safe_error_detail(e))
+        raise HTTPException(status_code=500, detail=safe_error_detail(e)) from e

@@ -68,7 +68,8 @@ class SkillsMixin:
                 if brain is None:
                     brain = getattr(getattr(self.aura, 'agent', None), 'brain', None)
                 if brain and hasattr(brain, 'think'):
-                    llm_func = lambda prompt: brain.think(prompt)
+                    def llm_func(prompt):
+                        return brain.think(prompt)
             except Exception:
                 pass
             self._skill_learner = SkillLearner(
@@ -310,7 +311,7 @@ class SkillsMixin:
         """Show detailed info about a skill."""
         try:
             store = self._get_skill_store()
-            skill, skill_id = self._find_skill_by_id_or_name(store, id_or_name)
+            skill, _skill_id = self._find_skill_by_id_or_name(store, id_or_name)
 
             if not skill:
                 await update.message.reply_text(f"Skill not found: {id_or_name}")

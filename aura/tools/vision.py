@@ -51,7 +51,7 @@ def _get_available_vram_gb() -> Optional[float]:
     try:
         import torch
         if torch.cuda.is_available():
-            free, total = torch.cuda.mem_get_info()
+            free, _total = torch.cuda.mem_get_info()
             return free / (1024 ** 3)
     except Exception:
         pass

@@ -51,11 +51,7 @@ CHATGPT_PLUS_MODELS = [
     "chatgpt:gpt-5.1-codex-mini",
 ]
 
-CHATGPT_PRO_MODELS = CHATGPT_PLUS_MODELS + [
-    "chatgpt:gpt-5.4-pro",
-    "chatgpt:gpt-5.3-codex-spark",
-    "chatgpt:gpt-5.1-codex-max",
-]
+CHATGPT_PRO_MODELS = [*CHATGPT_PLUS_MODELS, "chatgpt:gpt-5.4-pro", "chatgpt:gpt-5.3-codex-spark", "chatgpt:gpt-5.1-codex-max"]
 
 # All ChatGPT models (for listing)
 ALL_CHATGPT_MODELS = CHATGPT_PRO_MODELS

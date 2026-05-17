@@ -19,6 +19,8 @@ from typing import Any, Optional
 
 from . import agentic_loop_support as _loop_support
 from .agentic_loop_events import LoopEventEmitter
+from .agentic_loop_model_step import ModelStepController
+from .agentic_loop_outcomes import LoopOutcome
 from .agentic_loop_support import (
     AGENTIC_SYSTEM_PROMPT,
     _compact_history,
@@ -26,8 +28,6 @@ from .agentic_loop_support import (
     _recall_memories,
     _store_interaction,
 )
-from .agentic_loop_model_step import ModelStepController
-from .agentic_loop_outcomes import LoopOutcome
 from .agentic_loop_tool_calls import ToolCallCoordinator
 from .permissions import PermissionManager
 from .session import AgenticSession
@@ -494,7 +494,7 @@ class AgenticLoop:
 
             if batch_vecs and len(batch_vecs) == len(candidates):
                 prompt_norm = np.linalg.norm(prompt_vec) + 1e-8
-                for fpath, vec in zip(candidates, batch_vecs):
+                for fpath, vec in zip(candidates, batch_vecs, strict=False):
                     try:
                         file_vec = np.array(vec)
                         sim = float(np.dot(prompt_vec, file_vec) / (prompt_norm * (np.linalg.norm(file_vec) + 1e-8)))
@@ -503,7 +503,7 @@ class AgenticLoop:
                         continue
             else:
                 # Fallback: serial per-path (original behavior) if batch response was short/missing
-                for fpath, rel in zip(candidates, rels):
+                for fpath, rel in zip(candidates, rels, strict=False):
                     try:
                         file_resp = ollama.embed(model="nomic-embed-text:latest", input=rel)
                         if file_resp and file_resp.get("embeddings"):
@@ -1063,7 +1063,7 @@ class AgenticLoop:
 
         # Count failures in this iteration's approved list
         had_failure = False
-        for tool_name, args, tool_result in approved:
+        for _tool_name, _args, tool_result in approved:
             if self._tool_result_has_error(tool_result):
                 had_failure = True
                 break

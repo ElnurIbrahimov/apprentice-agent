@@ -21,7 +21,6 @@ from api.auth_session import (
     create_session_token,
     credentials_configured,
     extract_session_username,
-    get_configured_username,
     revoke_session_token,
     verify_credentials,
 )

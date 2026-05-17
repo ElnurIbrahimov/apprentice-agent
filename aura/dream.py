@@ -560,7 +560,7 @@ def _get_embeddings(texts: List[str]) -> Optional[List[List[float]]]:
 
 def _cosine_similarity(a: List[float], b: List[float]) -> float:
     """Cosine similarity between two vectors without numpy dependency."""
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     mag_a = sum(x * x for x in a) ** 0.5
     mag_b = sum(x * x for x in b) ** 0.5
     if mag_a < 1e-8 or mag_b < 1e-8:
@@ -1346,7 +1346,7 @@ class DreamConsolidator:
                     content=summary.compressed_text,
                     title=summary.compressed_text[:80],
                     importance=0.75,
-                    tags=",".join(["dream_summary"] + summary.dominant_tags[:3]),
+                    tags=",".join(["dream_summary", *summary.dominant_tags[:3]]),
                     metadata=json.dumps({
                         "cluster_id": summary.cluster_id,
                         "source_count": len(summary.source_memory_ids),
@@ -1360,7 +1360,7 @@ class DreamConsolidator:
                     source="dream_consolidation",
                     memory_type="insight",
                     importance=0.75,
-                    tags=",".join(["dream_summary"] + summary.dominant_tags[:3]),
+                    tags=",".join(["dream_summary", *summary.dominant_tags[:3]]),
                     lifecycle_state="summary",
                     user_id=user_id,
                     metadata=json.dumps({

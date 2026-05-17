@@ -217,15 +217,15 @@ class TelegramStore:
 
             if existing:
                 sets = ", ".join(f"{k} = ?" for k in kwargs)
-                vals = list(kwargs.values()) + [user_id]
+                vals = [*list(kwargs.values()), user_id]
                 conn.execute(
                     f"UPDATE user_settings SET {sets}, updated_at = datetime('now') WHERE user_id = ?",
                     vals,
                 )
             else:
-                cols = ["user_id"] + list(kwargs.keys())
+                cols = ["user_id", *list(kwargs.keys())]
                 placeholders = ", ".join("?" for _ in cols)
-                vals = [user_id] + list(kwargs.values())
+                vals = [user_id, *list(kwargs.values())]
                 conn.execute(
                     f"INSERT INTO user_settings ({', '.join(cols)}) VALUES ({placeholders})",
                     vals,
@@ -455,7 +455,7 @@ class TelegramStore:
                 sets = ", ".join(f"{k} = ?" for k in serialized)
                 conn.execute(
                     f"UPDATE skill_state SET {sets} WHERE user_id = ?",
-                    list(serialized.values()) + [user_id],
+                    [*list(serialized.values()), user_id],
                 )
             else:
                 defaults = {"last_exchange": "{}", "pending_action": "{}", "create_state": "{}"}

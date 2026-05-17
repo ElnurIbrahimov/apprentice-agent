@@ -141,7 +141,7 @@ async def solve_math(body: dict):
         response_text = r.json().get("response", "")
     except Exception as e:
         logger.error("[MathSolver] LLM call failed: %s", e)
-        raise HTTPException(500, safe_error_detail(e, "LLM call failed"))
+        raise HTTPException(500, safe_error_detail(e, "LLM call failed")) from e
 
     if not response_text:
         raise HTTPException(500, "Empty response from LLM")

@@ -713,7 +713,7 @@ class APITesterTool:
         target = None
         search_in = {collection: self._collections.get(collection, [])} if collection else self._collections
 
-        for coll_name, items in search_in.items():
+        for _coll_name, items in search_in.items():
             for r in items:
                 if r.get("name") == name:
                     target = r

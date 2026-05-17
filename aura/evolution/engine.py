@@ -106,7 +106,7 @@ class GEPAEngine:
         logger.info("Evaluating seed candidate...")
         seed_scores = self._evaluate_cached(seed_candidate, val_examples)
         seed_candidate.scores = {
-            ex.id: score for ex, score in zip(val_examples, seed_scores)
+            ex.id: score for ex, score in zip(val_examples, seed_scores, strict=False)
         }
         self.pareto.update(seed_candidate)
         self._best_score = seed_candidate.avg_score
@@ -169,7 +169,7 @@ class GEPAEngine:
             iterations_run=iteration,
             total_evals=self.adapter.total_evals,
             pareto_front={
-                ex_id: list(cids)[0] if cids else -1
+                ex_id: next(iter(cids)) if cids else -1
                 for ex_id, cids in self.pareto.frontier_candidates.items()
             },
             improvement=best.avg_score - seed_candidate.avg_score,
@@ -274,7 +274,7 @@ class GEPAEngine:
         # 7. Full validation
         full_scores = self._evaluate_cached(new_candidate, val_examples)
         new_candidate.scores = {
-            ex.id: score for ex, score in zip(val_examples, full_scores)
+            ex.id: score for ex, score in zip(val_examples, full_scores, strict=False)
         }
 
         # Register candidate
@@ -313,7 +313,7 @@ class GEPAEngine:
         # Full validation
         scores = self._evaluate_cached(merged, val_examples)
         merged.scores = {
-            ex.id: score for ex, score in zip(val_examples, scores)
+            ex.id: score for ex, score in zip(val_examples, scores, strict=False)
         }
 
         # Dual acceptance: must beat both parents
@@ -375,7 +375,7 @@ class GEPAEngine:
 
         if uncached_examples:
             new_scores, _ = self.adapter.evaluate(candidate, uncached_examples)
-            for idx, score in zip(uncached_indices, new_scores):
+            for idx, score in zip(uncached_indices, new_scores, strict=False):
                 scores[idx] = score
                 self.cache.put(cand_hash, examples[idx].cache_key(), score)
 

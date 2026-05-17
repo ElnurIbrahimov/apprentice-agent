@@ -154,7 +154,7 @@ async def share_project(request: ShareRequest) -> ShareResponse:
     try:
         _safe_path(SHARED_DIR / "test", request.entry_point)
     except ValueError:
-        raise HTTPException(400, f"Invalid entry_point: {request.entry_point}")
+        raise HTTPException(400, f"Invalid entry_point: {request.entry_point}") from None
 
     # Limits
     if len(request.files) > MAX_FILES:
@@ -185,7 +185,7 @@ async def share_project(request: ShareRequest) -> ShareResponse:
         # Clean up partial writes
         import shutil
         shutil.rmtree(share_dir, ignore_errors=True)
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
     # Record in DB
     with _db_lock:
@@ -286,7 +286,7 @@ async def serve_shared_file(share_id: str, path: str = ""):
     try:
         file_path = _safe_path(share_dir, path)
     except ValueError:
-        raise HTTPException(400, "Invalid path")
+        raise HTTPException(400, "Invalid path") from None
 
     if not file_path.exists():
         raise HTTPException(404, "File not found")

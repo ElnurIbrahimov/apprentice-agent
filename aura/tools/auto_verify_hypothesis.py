@@ -14,7 +14,6 @@ AssertionError, internal crashes, unhandled exceptions — is a real signal.
 from __future__ import annotations
 
 import ast
-import hashlib
 import logging
 import os
 import shutil

@@ -33,13 +33,13 @@ import time
 import uuid
 from collections import deque
 from concurrent.futures import as_completed
-
-from aura.pools import tool_pool
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from aura.pools import tool_pool
 
 logger = logging.getLogger(__name__)
 
@@ -1222,7 +1222,7 @@ Provide your reflection as JSON:
             pass
 
         # Structured output retry via LLM
-        for attempt in range(self.config.max_json_retries):
+        for _attempt in range(self.config.max_json_retries):
             try:
                 fix_prompt = f"The following text should be valid JSON but has errors. Fix it and return ONLY valid JSON:\n{raw}"
                 fixed = self.llm(fix_prompt, "Return only valid JSON, no explanation.")

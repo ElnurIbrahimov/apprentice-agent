@@ -12,10 +12,8 @@ Features:
 - Changed-function matching: map modified functions to test names
 """
 
-import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -23,9 +21,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from .test_detection import (
-    FRAMEWORK_MARKERS,
     detect_framework as _detect_framework,
+)
+from .test_detection import (
     parse_individual_tests as _parse_individual_tests,
+)
+from .test_detection import (
     parse_test_output as _parse_test_output,
 )
 
@@ -103,7 +104,7 @@ def _build_test_command(framework: str, project_root: str,
                     rel = os.path.relpath(pkg_dir, project_root)
                     packages.add(f"./{rel}/...")
             if packages:
-                return ["go", "test"] + list(packages)
+                return ["go", "test", *list(packages)]
         return ["go", "test", "./..."]
 
     if framework == "node":
@@ -353,7 +354,7 @@ def _run_property_tests(
         return None
 
     try:
-        from .auto_verify_hypothesis import generate_property_tests, cleanup_tempdir
+        from .auto_verify_hypothesis import cleanup_tempdir, generate_property_tests
     except ImportError as e:
         logger.info(f"[AutoVerify] hypothesis generator unavailable: {e}")
         return None
@@ -573,8 +574,8 @@ def run_changed_tests(
 
     Returns: {success, skipped, output, duration_s, failures, framework, reason}.
     """
-    import time as _t
     import shlex as _shlex
+    import time as _t
 
     start = _t.monotonic()
 

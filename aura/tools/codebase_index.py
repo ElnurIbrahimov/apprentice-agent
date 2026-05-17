@@ -315,7 +315,7 @@ class EmbeddingCache:
 
 
 def _cosine(a: list, b: list) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(x * x for x in b))
     return dot / (na * nb) if na * nb > 0.0 else 0.0
@@ -1683,7 +1683,7 @@ class CodebaseIndex:
         # Score all chunks
         scored = []
         for i, row in enumerate(rows):
-            row_id, fpath, name, kind, line_start, line_end, content, docstring, emb_str, mtime, importance, is_test = row
+            _row_id, fpath, name, kind, line_start, line_end, content, _docstring, emb_str, mtime, importance, _is_test = row
 
             # 1) BM25 keyword score
             search_text = all_texts[i]
@@ -1852,8 +1852,8 @@ class CodebaseIndex:
                 "total_chunks": total_chunks,
                 "test_files": test_count,
                 "source_files": total_files - test_count,
-                "by_type": {t: c for t, c in type_counts},
-                "by_kind": {k: c for k, c in kind_counts},
+                "by_type": dict(type_counts),
+                "by_kind": dict(kind_counts),
             },
             "top_files": [{"path": r[0], "importance": r[1], "type": r[2]} for r in top_files],
             "most_imported": [{"module": r[0], "count": r[1]} for r in top_imports],
@@ -2011,13 +2011,13 @@ class CodebaseIndex:
 
         # Build file→symbols map
         file_symbols: Dict[str, List[str]] = defaultdict(list)
-        for fpath, name, kind in chunk_rows:
+        for fpath, name, _kind in chunk_rows:
             if name and name not in file_symbols[fpath]:
                 file_symbols[fpath].append(name)
 
         # Build repo map lines
         lines = []
-        for rel_path, importance, is_entry in file_rows:
+        for rel_path, _importance, _is_entry in file_rows:
             symbols = file_symbols.get(rel_path, [])
             if symbols:
                 # Cap at 10 symbols per file, prioritize classes/functions
@@ -2061,7 +2061,7 @@ class CodebaseIndex:
         return {
             "total_chunks": total_chunks,
             "files_indexed": total_files,
-            "by_kind": {k: c for k, c in kinds},
+            "by_kind": dict(kinds),
             "chunks_with_embeddings": with_embeddings,
             "embedding_cache": self._embedding_cache.get_stats(),
             "db_path": str(self._db_path),
