@@ -139,12 +139,18 @@ class StreamingResponse:
             renderable = self._wrap_for_render(new_content)
             try:
                 md = Markdown(renderable, code_theme=_display._get_code_theme())
+                colors = _display._get_theme_colors()
+                accent = colors.get('accent', '#D777AF')
                 if self._fade_frames_remaining > 0:
                     self._fade_frames_remaining -= 1
                     padded = Padding(md, (0, 2), style="dim")
                 else:
                     padded = Padding(md, (0, 2))
-                self._live.update(padded)
+                from rich.console import Group
+                self._live.update(Group(
+                    Text("  \u258f", style=accent),
+                    padded,
+                ))
             except Exception:
                 # Any Rich render error (MarkupError, LiveError, etc.) must
                 # NOT kill the stream callback. Fall back to plain text and
@@ -164,7 +170,13 @@ class StreamingResponse:
                 renderable = self._wrap_for_render(new_content)
                 try:
                     md = Markdown(renderable, code_theme=_display._get_code_theme())
-                    self._live.update(Padding(md, (0, 2)))
+                    colors = _display._get_theme_colors()
+                    accent = colors.get('accent', '#D777AF')
+                    from rich.console import Group
+                    self._live.update(Group(
+                        Text("  \u258f", style=accent),
+                        Padding(md, (0, 2)),
+                    ))
                 except Exception:
                     try:
                         self._live.update(Padding(Text(new_content), (0, 2)))
@@ -235,7 +247,13 @@ class StreamingResponse:
                     renderable = self._wrap_for_render(new_content)
                     try:
                         md = Markdown(renderable, code_theme=_display._get_code_theme())
-                        final = Padding(md, (0, 2))
+                        colors = _display._get_theme_colors()
+                        accent = colors.get('accent', '#D777AF')
+                        from rich.console import Group
+                        final = Group(
+                            Text("  \u258f", style=accent),
+                            Padding(md, (0, 2)),
+                        )
                     except Exception:
                         final = Padding(Text(new_content), (0, 2))
                     try:
@@ -269,28 +287,37 @@ class StreamingResponse:
                 token_estimate = int(len(self._accumulated) / 3.5)
             if elapsed > 0.1 and token_estimate > 5:
                 tok_per_sec = token_estimate / elapsed
-                extras: list[str] = []
+                # Build the consolidated status line:
+                # model · X.Xs · $X.XXXX · XXXX tokens · XX% ctx (XX.XK/XXXK)
+                parts: list[str] = []
+                if self._model:
+                    parts.append(self._model)
+                parts.append(f"{elapsed:.1f}s")
                 try:
                     delta = float(getattr(self, "_last_turn_cost", 0.0) or 0.0)
                     if delta > 0.0:
-                        extras.append(f"${delta:.4f}")
+                        parts.append(f"${delta:.4f}")
                 except (TypeError, ValueError):
                     pass
+                parts.append(f"{token_estimate} tokens")
+                parts.append(f"{tok_per_sec:.1f} tok/s")
+
+                # Context gauge: XX% ctx (XX.XK/XXXK)
                 try:
                     used = int(getattr(self, "_ctx_used", 0) or 0)
                     limit = int(getattr(self, "_ctx_limit", 0) or 0)
                     if used > 0 and limit > 0:
                         pct = int(100 * used / max(limit, 1))
-                        extras.append(f"{pct}% ctx")
+                        used_k = f"{used / 1000:.1f}K"
+                        limit_k = f"{limit / 1000:.0f}K"
+                        parts.append(f"{pct}% ctx ({used_k}/{limit_k})")
                 except (TypeError, ValueError):
                     pass
-                suffix = (" \u00b7 " + " \u00b7 ".join(extras)) if extras else ""
-                _display.console.print(
-                    f"  [dim]({token_estimate} tokens \u00b7 {tok_per_sec:.1f} tok/s{suffix})[/dim]"
-                )
 
-        if self._model and self._displayed:
-            _display.console.print(f"  [dim]{self._model}[/dim]")
+                status_line = " \u00b7 ".join(parts)
+                _display.console.print(
+                    f"  [dim]{status_line}[/dim]"
+                )
 
         _display.console.print()
 

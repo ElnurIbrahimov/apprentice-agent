@@ -7,9 +7,9 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-logger = logging.getLogger(__name__)
-
 from ._constants import ERROR_SENTINELS as _ERROR_SENTINELS
+
+logger = logging.getLogger(__name__)
 
 _IMAGE_TOKEN_RE = re.compile(r"\[image:\s*([^\]\n]+?)\s*\]")
 
@@ -120,8 +120,9 @@ class SessionExecutionController:
         """Run the agentic loop for a user prompt."""
         import time as _exec_time
 
-        from .display import StreamingResponse, show_error, show_response_attribution
         from aura.core.agentic_loop_events import LoopEvent
+
+        from .display import StreamingResponse, show_error, show_response_attribution
 
         streamer = StreamingResponse(model=self._session.current_model)
         streamer.start()
@@ -580,9 +581,11 @@ class SessionExecutionController:
                     f"  [dim]Files touched: {files_display}{extra} | {parts_str}[/dim]"
                 )
             else:
-                self._session.console.print(f"  [dim]{' \u00b7 '.join(summary_parts)}[/dim]")
+                sep = " · "
+                self._session.console.print(f"  [dim]{sep.join(summary_parts)}[/dim]")
         except Exception:
-            self._session.console.print(f"  [dim]{' \u00b7 '.join(summary_parts)}[/dim]")
+            sep = " · "
+            self._session.console.print(f"  [dim]{sep.join(summary_parts)}[/dim]")
 
     def _build_context_summary(self, result: dict) -> tuple[int, str, int]:
         memory_count = 0

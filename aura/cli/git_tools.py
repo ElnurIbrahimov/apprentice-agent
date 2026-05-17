@@ -12,7 +12,7 @@ def git_run(args: List[str], cwd: Optional[str] = None, timeout: int = 30) -> Di
     """Run a git command and return result dict."""
     try:
         result = subprocess.run(
-            ["git"] + args,
+            ["git", *args],
             capture_output=True, text=True, timeout=timeout,
             cwd=cwd or ".",
         )
@@ -52,7 +52,12 @@ def get_recent_log(n: int = 5) -> str:
 
 def create_branch(name: str) -> Dict:
     """Create and switch to a new branch."""
-    safe_name = re.sub(r'[^\w\-/.]', '-', name)[:60]
+    # Sanitize: strip leading dashes/slashes, collapse repeated separators, and
+    # reject path-traversal-like sequences. Git is fairly permissive about what
+    # it accepts as a branch name, so we tighten this ourselves.
+    safe_name = re.sub(r'[^\w\-/.]', '-', name).strip('-/')[:60]
+    if not safe_name or ".." in safe_name:
+        return {"success": False, "branch": "", "message": "invalid branch name"}
     result = git_run(["checkout", "-b", safe_name])
     return {
         "success": result["success"],
@@ -89,7 +94,9 @@ def create_pr(title: str, body: str, base: str = "main") -> Dict:
 
 def get_blame(file_path: str, line_num: int) -> Dict:
     """Get git blame for a specific line."""
-    result = git_run(["blame", "-L", f"{line_num},{line_num}", "--porcelain", file_path])
+    # "--" separator prevents file_path from being parsed as a flag (e.g.
+    # if a user passes "-c" or "--help" git would interpret it as an option).
+    result = git_run(["blame", "-L", f"{line_num},{line_num}", "--porcelain", "--", file_path])
     if not result["success"]:
         return result
 
@@ -116,7 +123,8 @@ def get_blame(file_path: str, line_num: int) -> Dict:
 
 def auto_commit_edit(file_path: str, description: str = "") -> Dict:
     """Auto-commit a single file edit with AI-ready message."""
-    git_run(["add", file_path])
+    # "--" separator so a path that starts with "-" isn't treated as a flag.
+    git_run(["add", "--", file_path])
     msg = description[:72] if description else f"aura: edit {Path(file_path).name}"
     return git_run(["commit", "-m", msg])
 

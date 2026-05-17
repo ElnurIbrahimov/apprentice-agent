@@ -10,10 +10,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
-
 from rich.console import Console
 from rich.table import Table
+
+logger = logging.getLogger(__name__)
 
 
 class TaskState(str, Enum):
@@ -158,7 +158,7 @@ class BackgroundManager:
     def shutdown(self, timeout: float = 5.0) -> None:
         """Cancel all running tasks and clean up."""
         with self._lock:
-            for task_id, task in list(self._tasks.items()):
+            for _task_id, task in list(self._tasks.items()):
                 if task.state == TaskState.RUNNING:
                     task._cancelled = True
                     task.state = TaskState.FAILED
@@ -167,7 +167,7 @@ class BackgroundManager:
 
         # Give threads a moment to finish
         deadline = time.monotonic() + timeout
-        for task_id, task in list(self._tasks.items()):
+        for _task_id, task in list(self._tasks.items()):
             remaining = deadline - time.monotonic()
             if remaining > 0 and task.thread and task.thread.is_alive():
                 task.thread.join(timeout=remaining)

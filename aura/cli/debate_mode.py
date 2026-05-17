@@ -4,17 +4,16 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
-
-from aura.pools import llm_pool
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-DEBATER_TIMEOUT = 60  # seconds per model call
-
+from rich.console import Console  # kept at module scope for test mockability
 from rich.live import Live
 from rich.panel import Panel
 
-from rich.console import Console  # kept at module scope for test mockability
+from aura.pools import llm_pool
+
+DEBATER_TIMEOUT = 60  # seconds per model call
 
 try:
     from .display import console

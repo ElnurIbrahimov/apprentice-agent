@@ -13,7 +13,10 @@ from .agent_commands import (
     handle_interrupt,
     handle_plan,
 )
+from .bench_commands import handle_bench
 from .copy_command import handle_copy
+from .doctor_commands import handle_doctor
+from .fix_commands import handle_fix
 from .git_commands import (
     handle_blame,
     handle_branch,
@@ -22,6 +25,8 @@ from .git_commands import (
     handle_pr,
     handle_stash,
 )
+from .heatmap_commands import handle_heatmap
+from .history_commands import handle_history
 from .research_commands import (
     handle_browse,
     handle_export,
@@ -43,6 +48,8 @@ from .session_commands import (
     handle_sessions,
     handle_trace,
 )
+from .shadow_commands import handle_shadow
+from .skill_commands import handle_skill
 from .snippet_command import handle_snippet
 from .system_commands import (
     handle_audit,
@@ -50,21 +57,17 @@ from .system_commands import (
     handle_hook,
     handle_mcp,
 )
-from .verify_commands import handle_verify
-from .why_commands import handle_why
 from .tool_commands import (
     handle_edit,
     handle_grep,
     handle_project,
+    handle_redo,
     handle_search,
     handle_shell,
     handle_test,
-    handle_redo,
     handle_undo,
     handle_watch,
 )
-from .heatmap_commands import handle_heatmap
-from .shadow_commands import handle_shadow
 from .ui_commands import (
     handle_help,
     handle_model,
@@ -76,6 +79,8 @@ from .ui_commands import (
     handle_theme,
     handle_trust,
 )
+from .verify_commands import handle_verify
+from .why_commands import handle_why
 
 
 def _handle_voice(agent, args, context=None, **kwargs):
@@ -115,6 +120,7 @@ COMMANDS: list[tuple[str, str, Callable[..., Any], list[str], str]] = [
     ("/goal",     "Run a goal",                                      handle_goal,     [],                TIER_BETA),
     ("/trust",    "Enable trust mode (auto-approve all tools)",      handle_trust,    [],                TIER_STABLE),
     ("/cost",     "Show session cost breakdown",                     handle_cost,     [],                TIER_STABLE),
+    ("/history",  "Scannable conversation timeline",                 handle_history,  [],                TIER_STABLE),
     ("/context",  "Show context window usage",                       handle_context,  [],                TIER_STABLE),
     ("/trace",    "Show structured session trace and run summaries", handle_trace,    [],                TIER_BETA),
     ("/rewind",   "Rewind file changes to a checkpoint",             handle_rewind,   [],                TIER_STABLE),
@@ -138,6 +144,8 @@ COMMANDS: list[tuple[str, str, Callable[..., Any], list[str], str]] = [
     ("/git",      "Run read-only git commands",                      handle_git,      [],                TIER_STABLE),
     ("/mcp",      "Manage MCP server connections",                   handle_mcp,      [],                TIER_BETA),
     ("/audit",    "Inspect Merkle audit chain",                      handle_audit,    [],                TIER_BETA),
+    ("/doctor",   "Run full system diagnostic",                       handle_doctor,   [],                TIER_STABLE),
+    ("/fix",      "Auto-fix failing tests (run → fix → verify loop)",  handle_fix,      [],                TIER_BETA),
     ("/hand",     "Manage autonomous Hands",                         handle_hand,     [],                TIER_EXPERIMENTAL),
     ("/undo",     "Undo last file edit",                             handle_undo,     [],                TIER_STABLE),
     ("/redo",     "Redo the last /undo",                             handle_redo,     [],                TIER_STABLE),
@@ -152,8 +160,10 @@ COMMANDS: list[tuple[str, str, Callable[..., Any], list[str], str]] = [
     ("/changes",  "Show files modified in this session",             handle_changes,  [],                TIER_BETA),
     ("/routing",  "Show/set routing preference",                     handle_routing,  [],                TIER_BETA),
     ("/copy",     "Copy last response or code block to clipboard",   handle_copy,     [],                TIER_STABLE),
+    ("/bench",    "Benchmark prompt across multiple models",          handle_bench,    [],                TIER_BETA),
     ("/voice",    "Voice mode (speech input/output)",                _handle_voice,   [],                TIER_BETA),
     ("/snippet",  "Manage prompt templates/snippets",                handle_snippet,  [],                TIER_BETA),
+    ("/skill",    "Browse and load skills",                            handle_skill,    [],                TIER_BETA),
     ("/interrupt","Abort running iteration with optional correction",handle_interrupt,["/stop"],         TIER_STABLE),
 ]
 

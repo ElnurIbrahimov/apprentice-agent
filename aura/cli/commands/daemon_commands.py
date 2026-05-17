@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from aura_daemon import PID_FILE, AuraDaemon
 
 try:
     from aura.cli.display import console
@@ -21,7 +21,7 @@ except ImportError:
     from rich.console import Console
     console = Console()
 
-from aura_daemon import AuraDaemon, PID_FILE
+logger = logging.getLogger(__name__)
 
 
 def _daemon_entrypoint() -> str:

@@ -1,10 +1,10 @@
 """Keyboard signal handling for the interactive chat session."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-import os
 
 
 @dataclass
@@ -69,15 +69,26 @@ class SessionSignalController:
             return SignalHandlingResult(should_continue_loop=True)
 
         if user_input == SIGNAL_OPEN_EDITOR:
+            import shlex
             import subprocess as _sp
             import tempfile
 
-            editor = os.environ.get("EDITOR", "notepad" if os.name == "nt" else "nano")
+            editor_env = os.environ.get("EDITOR") or ("notepad" if os.name == "nt" else "nano")
+            # Split so $EDITOR="code --wait" or $EDITOR="vim -O" works — a bare
+            # subprocess.call([editor_env, path]) passes the entire string as
+            # one argv element and gets ENOENT.
+            try:
+                editor_argv = shlex.split(editor_env, posix=(os.name != "nt"))
+            except ValueError:
+                editor_argv = [editor_env]
+            if not editor_argv:
+                editor_argv = ["notepad" if os.name == "nt" else "nano"]
+
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w") as f:
                 f.write("")
                 tmp_path = f.name
             try:
-                _sp.call([editor, tmp_path])
+                _sp.call([*editor_argv, tmp_path])
                 edited = Path(tmp_path).read_text().strip()
             except (FileNotFoundError, OSError) as exc:
                 self._session.console.print(f"[red]Editor failed: {exc}[/red]")

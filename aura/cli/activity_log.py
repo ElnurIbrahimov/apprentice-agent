@@ -227,7 +227,7 @@ class ActivityLog:
                 row_emb = struct.unpack(f'{n}f', emb_blob)
 
                 # Cosine similarity
-                dot = sum(a * b for a, b in zip(query_emb, row_emb))
+                dot = sum(a * b for a, b in zip(query_emb, row_emb, strict=False))
                 norm_q = math.sqrt(sum(a * a for a in query_emb))
                 norm_r = math.sqrt(sum(a * a for a in row_emb))
                 sim = dot / (norm_q * norm_r + 1e-8)
@@ -235,7 +235,7 @@ class ActivityLog:
                 if sim > 0.3:
                     scored.append((dict(zip(
                         ["id", "timestamp", "session_id", "prompt", "response", "model"],
-                        row[:6]
+                        row[:6], strict=False
                     )), sim))
 
             scored.sort(key=lambda x: -x[1])
@@ -264,17 +264,21 @@ class ActivityLog:
         """Get aggregate statistics. Optionally filter to one session."""
         conn = sqlite3.connect(str(self._db_path), timeout=10)
         try:
-            where = "WHERE session_id = ?" if session_id else ""
-            params = (session_id,) if session_id else ()
-            row = conn.execute(f"""
-                SELECT COUNT(*) as total,
-                       SUM(tokens_in) as total_tokens_in,
-                       SUM(tokens_out) as total_tokens_out,
-                       SUM(cost) as total_cost,
-                       SUM(tool_calls) as total_tool_calls
-                FROM interactions
-                {where}
-            """, params).fetchone()
+            if session_id:
+                row = conn.execute(
+                    "SELECT COUNT(*) as total, SUM(tokens_in) as total_tokens_in,"
+                    " SUM(tokens_out) as total_tokens_out, SUM(cost) as total_cost,"
+                    " SUM(tool_calls) as total_tool_calls"
+                    " FROM interactions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT COUNT(*) as total, SUM(tokens_in) as total_tokens_in,"
+                    " SUM(tokens_out) as total_tokens_out, SUM(cost) as total_cost,"
+                    " SUM(tool_calls) as total_tool_calls"
+                    " FROM interactions",
+                ).fetchone()
             return {
                 "total_interactions": row[0] or 0,
                 "total_tokens_in": row[1] or 0,
@@ -324,19 +328,23 @@ class ActivityLog:
         """Aggregate stats grouped by model."""
         conn = sqlite3.connect(str(self._db_path), timeout=10)
         try:
-            where = "WHERE session_id = ?" if session_id else ""
-            params = (session_id,) if session_id else ()
-            rows = conn.execute(f"""
-                SELECT model,
-                       COUNT(*) as interactions,
-                       SUM(tokens_in) as tokens_in,
-                       SUM(tokens_out) as tokens_out,
-                       SUM(cost) as cost
-                FROM interactions
-                {where}
-                GROUP BY model
-                ORDER BY cost DESC NULLS LAST
-            """, params).fetchall()
+            if session_id:
+                rows = conn.execute(
+                    "SELECT model, COUNT(*) as interactions,"
+                    " SUM(tokens_in) as tokens_in, SUM(tokens_out) as tokens_out,"
+                    " SUM(cost) as cost"
+                    " FROM interactions WHERE session_id = ?"
+                    " GROUP BY model ORDER BY cost DESC NULLS LAST",
+                    (session_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT model, COUNT(*) as interactions,"
+                    " SUM(tokens_in) as tokens_in, SUM(tokens_out) as tokens_out,"
+                    " SUM(cost) as cost"
+                    " FROM interactions"
+                    " GROUP BY model ORDER BY cost DESC NULLS LAST",
+                ).fetchall()
             return [
                 {
                     "model": r[0] or "(unknown)",

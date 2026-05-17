@@ -32,11 +32,9 @@ class PipeOutput:
         """Write structured result. Format depends on mode."""
         if self._format == "json":
             sys.stdout.write(json.dumps(data, indent=2) + "\n")
-        elif self._format == "markdown":
-            # Clean markdown — no Rich formatting
-            content = data.get("response", data.get("content", ""))
-            sys.stdout.write(content + "\n")
         else:
+            # 'text' and 'markdown' both output raw content (markdown is plain
+            # text from the LLM's perspective — no Rich formatting).
             content = data.get("response", data.get("content", ""))
             sys.stdout.write(content + "\n")
         sys.stdout.flush()

@@ -52,6 +52,7 @@ def show_help(show_experimental: bool = False) -> None:
             ("/model [name]", "Pick or set model"),
             ("/routing", "Show neural routing status"),
             ("/sessions", "Manage sessions"),
+            ("/history [n]", "Conversation timeline"),
             ("/trace [count|last|runs|failures]", "Show session trace and run summaries"),
             ("/compact", "Compress conversation"),
             ("/clear", "Clear conversation"),
@@ -71,6 +72,7 @@ def show_help(show_experimental: bool = False) -> None:
         ("Parallel & Background", [
             ("/fleet <task>", "Run parallel sub-agents"),
             ("/chain step1 -> step2", "Run prompt pipeline"),
+            ("/bench [tier] <prompt>", "Benchmark models"),
             ("& <prompt>", "Run as background task"),
             ("/tasks", "Show background tasks"),
         ]),
@@ -95,6 +97,7 @@ def show_help(show_experimental: bool = False) -> None:
             ("/browse <url>", "Browse web pages"),
             ("/speak <text>", "Text-to-speech"),
             ("/recall <query>", "Search memories"),
+            ("/skill [name]", "Browse and load skills"),
             ("/context", "Show context usage"),
             ("/rewind", "Rewind to checkpoint"),
             ("/theme [name]", "Switch color theme"),
@@ -112,6 +115,7 @@ def show_help(show_experimental: bool = False) -> None:
         ("MCP & Audit", [
             ("/mcp [cmd]", "Manage MCP servers"),
             ("/audit [cmd]", "Inspect audit chain"),
+            ("/doctor", "Run full system diagnostic"),
         ]),
         ("Autonomous", [
             ("/hand [cmd]", "Manage autonomous Hands"),
