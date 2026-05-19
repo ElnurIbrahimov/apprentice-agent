@@ -25,10 +25,11 @@ def gather_context(project_root: str) -> str:
     """
     parts = []
 
-    # 1. AGENTS.md content (cross-tool standard, loaded first so AURA.md overrides)
+    # 1. AGENTS.md / CLAUDE.md content (cross-tool standard, loaded first so AURA.md overrides)
     agents_md_content = _load_agents_md(project_root)
     if agents_md_content:
-        parts.append(f"## Agent Instructions (AGENTS.md)\n{agents_md_content}")
+        # Could be AGENTS.md, CLAUDE.md, or .agents.md — use generic label
+        parts.append(f"## Agent Instructions (AGENTS.md/CLAUDE.md)\n{agents_md_content}")
 
     # 2. AURA.md content (project-specific, takes precedence)
     aura_md_content, _aura_md_config = _load_aura_md(project_root)
@@ -67,17 +68,17 @@ def get_aura_md_config(project_root: str) -> dict:
 
 
 def _load_agents_md(project_root: str) -> Optional[str]:
-    """Load AGENTS.md or .agents.md from the project root.
+    """Load AGENTS.md, CLAUDE.md, or .agents.md from the project root.
 
     This is the cross-tool configuration standard used by Claude Code, Codex,
     Cursor, Goose, Copilot, etc. (https://agents.md/)
 
-    Checks AGENTS.md first, then .agents.md (hidden variant).
+    Checks AGENTS.md first, then CLAUDE.md, then .agents.md (hidden variant).
     Capped at 32KB. Returns None if not found.
     """
     _MAX_AGENTS_MD_SIZE = 32 * 1024
 
-    for filename in ("AGENTS.md", ".agents.md"):
+    for filename in ("AGENTS.md", "CLAUDE.md", ".agents.md"):
         filepath = os.path.join(project_root, filename)
         if not os.path.isfile(filepath):
             continue

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from aura.agent import ApprenticeAgent
     from aura.cli.background import BackgroundManager
+    from aura.cli.blocks import BlockManager
     from aura.cli.chat_session import ChatSession
     from aura.cli.hooks import HookManager
     from aura.cli.research_mode import ResearchContext
@@ -40,6 +41,9 @@ class CLIContext:
     # Set by ChatSession.__init__ after set_ctx. Optional because non-interactive
     # entry points (ACP, MCP, oneshot) build a CLIContext without a ChatSession.
     chat_session: Optional[ChatSession] = None
+    # Block-based output registry — created by ChatSession, accessible from
+    # command handlers via get_ctx().blocks for /blocks, /copy, etc.
+    blocks: Optional[BlockManager] = None
 
 
 # Module-level reference so handlers can access the context without

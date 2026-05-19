@@ -18,8 +18,16 @@ except ImportError:
 
 
 def _resolve_worktree_path(name: str) -> Path:
+    # Reject path separators and traversal sequences to prevent writing
+    # worktrees outside .aura-worktrees/. The actual shell injection
+    # protection is at the call site (cwd= on Windows, shlex.quote on Unix).
+    _SANITIZED = name.strip().replace("\\", "/")
+    if any(c in _SANITIZED for c in ("/", "\x00")) or ".." in _SANITIZED:
+        raise ValueError(f"invalid worktree name: {name!r}")
+    if not _SANITIZED or _SANITIZED in (".", ".."):
+        raise ValueError(f"invalid worktree name: {name!r}")
     root = Path(os.getcwd())
-    return root / ".aura-worktrees" / name
+    return root / ".aura-worktrees" / _SANITIZED
 
 
 def cmd_worktree(args: argparse.Namespace) -> int:
@@ -51,7 +59,11 @@ def cmd_worktree(args: argparse.Namespace) -> int:
         console.print(t)
         return 0
 
-    path = _resolve_worktree_path(name)
+    try:
+        path = _resolve_worktree_path(name)
+    except ValueError as e:
+        console.print(f"  [red]Invalid name:[/] {e}")
+        return 1
 
     if remove:
         r = git_tool.worktree_remove(str(path), force=bool(getattr(args, "worktree_force", False)))

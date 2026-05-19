@@ -54,6 +54,7 @@ from .research_commands import (
     handle_sources,
 )
 from .session_commands import (
+    handle_blocks,
     handle_branches,
     handle_changes,
     handle_checkout,
@@ -207,6 +208,7 @@ COMMANDS: list[tuple[str, str, Callable[..., Any], list[str], str]] = [
     ("/chain",    "Run prompt pipelines (step1 -> step2 -> ...)",    handle_chain,    [],                TIER_BETA),
     ("/changes",  "Show files modified in this session",             handle_changes,  [],                TIER_BETA),
     ("/routing",  "Show/set routing preference",                     handle_routing,  [],                TIER_BETA),
+    ("/blocks",    "List recent output blocks (/blocks N to expand)",   handle_blocks,   [],                TIER_BETA),
     ("/copy",     "Copy last response or code block to clipboard",   handle_copy,     [],                TIER_STABLE),
     ("/bench",    "Benchmark prompt across multiple models",          handle_bench,    [],                TIER_BETA),
     ("/voice",    "Voice mode (speech input/output)",                _handle_voice,   [],                TIER_BETA),

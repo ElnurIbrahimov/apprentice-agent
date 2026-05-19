@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
@@ -82,7 +83,13 @@ def cmd_heatmap(args: argparse.Namespace) -> int:
 
         target: Optional[Path]
         if session:
-            target = heatmap_dir / f"{session}.json"
+            # Sanitize: only allow safe filename characters to prevent
+            # path traversal via session argument (e.g. "../../etc").
+            safe = re.sub(r'[^\w\-]', '_', session).strip('_')[:64]
+            if not safe:
+                console.print("  [yellow]Invalid session name[/]")
+                return 1
+            target = heatmap_dir / f"{safe}.json"
             if not target.exists():
                 console.print(f"  [yellow]No heatmap for session {session}[/]")
                 return 1
@@ -116,7 +123,9 @@ def persist_heatmap(loop) -> Optional[Path]:
         session_id = "default"
         if getattr(loop, "session", None) is not None:
             session_id = getattr(loop.session, "session_id", "default") or "default"
-        path = heatmap_dir / f"{session_id}.json"
+        # Sanitize against path traversal in session_id
+        safe_id = re.sub(r'[^\w\-]', '_', session_id).strip('_')[:64] or "default"
+        path = heatmap_dir / f"{safe_id}.json"
         import json as _json
         payload = {
             "tokens_by_tool": dict(getattr(loop, "_tokens_by_tool", {}) or {}),

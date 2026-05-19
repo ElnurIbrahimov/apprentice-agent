@@ -269,11 +269,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         # Content-Security-Policy — prevents XSS, data exfiltration, and clickjacking
         # Default-src 'self' locks everything to same-origin by default
+        # NOTE: 'unsafe-inline' and 'unsafe-eval' weaken CSP significantly.
+        # Set AURA_CSP_STRICT=1 to remove them (may break inline scripts/styles).
+        if os.environ.get("AURA_CSP_STRICT") == "1":
+            _script_src = "'self'"
+            _style_src = "'self'"
+        else:
+            _script_src = "'self' 'unsafe-inline' 'unsafe-eval'"
+            _style_src = "'self' 'unsafe-inline'"
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-            "style-src 'self' 'unsafe-inline'; "
+            f"script-src {_script_src}; "
+            f"style-src {_style_src}; "
             "img-src 'self' data: https:; "
             "font-src 'self'; "
             "connect-src 'self' ws: wss: https:; "

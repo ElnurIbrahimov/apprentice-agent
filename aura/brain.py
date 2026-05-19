@@ -1094,7 +1094,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             self.client.generate(
                 model=target_model,
                 prompt="",
-                keep_alive="0"  # Unload immediately
+                keep_alive="0s"  # Unload immediately
             )
             logger.info(f"[BRAIN] Reset context for {target_model}")
         except Exception as e:

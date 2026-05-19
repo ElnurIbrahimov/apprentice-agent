@@ -321,6 +321,15 @@ class StreamingResponse:
 
         _display.console.print()
 
+        # Register the streaming response as a block for /blocks and /copy
+        if self._displayed and self._accumulated:
+            try:
+                from aura.cli.display import _register_block
+                title = self._accumulated[:80].replace("\n", " ").strip()
+                _register_block("response", title, self._accumulated)
+            except Exception:
+                pass
+
     def set_turn_stats(self, cost_delta: float = 0.0, ctx_used: int = 0, ctx_limit: int = 0) -> None:
         """Attach per-turn stats so finish() can include them in the summary."""
         self._last_turn_cost = cost_delta

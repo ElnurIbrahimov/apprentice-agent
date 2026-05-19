@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import subprocess
 from typing import Optional
 
@@ -65,7 +66,9 @@ def handle_export_session(agent, arg, context) -> "str | None":
     import time
     from pathlib import Path
     ext = "json" if fmt == "json" else "md"
-    filename = f"session_{session_id[:12]}_{int(time.time())}.{ext}"
+    # Sanitize: session_id may contain characters unsafe for filenames.
+    safe_id = re.sub(r'[^\w\-]', '_', session_id).strip('_')[:24] or "session"
+    filename = f"session_{safe_id}_{int(time.time())}.{ext}"
     outpath = Path.cwd() / filename
     outpath.write_text(content, encoding="utf-8")
     show_info(f"Exported to {outpath.name} ({len(content)} chars)")
@@ -333,6 +336,8 @@ def handle_clear(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if ctx and ctx.agentic_loop:
         ctx.agentic_loop.clear_history()
+    if ctx and ctx.blocks is not None:
+        ctx.blocks.clear()
     from ..display import console
     console.print("Conversation history cleared.")
 
@@ -684,3 +689,62 @@ def handle_merge(agent, arg, context) -> Optional[str]:
         f"  [green]Merged[/green] {merged_count} messages from "
         f"[cyan]'{from_name}'[/cyan] into [bold cyan]'{target_name}'[/bold cyan]"
     )
+
+
+def handle_blocks(agent, arg, context) -> Optional[str]:
+    """List recent output blocks. /blocks N expands block N."""
+    from ..context import get_ctx as _get_ctx
+    from ..display import console
+
+    ctx = _get_ctx()
+    if ctx is None or ctx.blocks is None:
+        console.print("  [dim]No blocks (chat mode only).[/dim]")
+        return
+
+    bm = ctx.blocks
+
+    # /blocks <N> — show full content of block N
+    if arg and arg.strip():
+        stripped = arg.strip()
+        if not stripped.isdigit() or int(stripped) <= 0:
+            console.print(f"  [yellow]Invalid block ID: {arg!r}. Use /blocks <N> with a positive number.[/yellow]")
+            return
+        bid = int(stripped)
+        block = bm.get(bid)
+        if block is None:
+            console.print(f"  [yellow]Block #{bid} not found.[/yellow]")
+            return
+        from rich.markup import escape as _rich_escape
+        from rich.panel import Panel
+        from rich.text import Text as _RichText
+        type_icon = {"response": "\u25b9", "tool_call": "\u2503", "tool_result": "\u2514",
+                      "error": "\u2717", "info": "\u2139", "diff": "\u00b1"}
+        icon = type_icon.get(block.block_type, "?")
+        # Wrap content in Text() to prevent accidental Rich markup injection
+        safe_content = _RichText(block.content[:5000])
+        # Proper Rich escaping (backslash, not bracket-doubling)
+        safe_title = _rich_escape(block.title[:60])
+        console.print(Panel(
+            safe_content,
+            title=f"[bold]#{block.id}[/bold] {icon} {safe_title}",
+            border_style="dim", padding=(0, 1),
+        ))
+        return
+
+    # /blocks — list recent blocks
+    recent = bm.get_recent(15)
+    if not recent:
+        console.print("  [dim]No output blocks yet.[/dim]")
+        return
+
+    console.print(f"\n  [bold]Recent blocks[/bold] ({bm.count} total)\n")
+    type_icon = {"response": "\u25b9", "tool_call": "\u2503", "tool_result": "\u2514",
+                  "error": "\u2717", "info": "\u2139", "diff": "\u00b1"}
+    for b in recent:
+        icon = type_icon.get(b.block_type, "?")
+        # Escape title to prevent Rich markup injection from LLM content
+        escaped_title = _rich_escape(b.title[:70] + "\u2026" if len(b.title) > 70 else b.title)
+        console.print(
+            f"  [dim]#{b.id:>3}[/dim] [{icon}] [bold]{b.block_type:<12}[/bold] {escaped_title}"
+        )
+    console.print("\n  [dim]/blocks <N> to expand a block[/dim]")

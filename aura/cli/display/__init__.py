@@ -329,6 +329,9 @@ def show_tool_call(
         line.append(time_str, style="dim")
     console.print(line)
 
+    # Register as a numbered block so /blocks and /copy can reference it
+    _register_block("tool_call", f"{label} {description}", description or label)
+
 
 def show_tool_result_inline(tool_name: str, result: Any) -> None:
     """Show a compact inline tool result — just enough to see what happened."""
@@ -434,6 +437,18 @@ def show_tool_result_inline(tool_name: str, result: Any) -> None:
     except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
         pass
 
+    # Register tool result as a block for /blocks navigation
+    try:
+        result_str = json.dumps(result) if not isinstance(result, str) else result
+        title = f"{tool_name} result"
+        if isinstance(result, dict):
+            summary = result.get("output", result.get("content", result.get("result", "")))
+            if isinstance(summary, str) and summary:
+                title = summary[:80].replace("\n", " ").strip()
+        _register_block("tool_result", title, result_str[:5000])
+    except Exception:
+        pass
+
 
 def _step_prefix(step: int, max_steps: int, colors: dict) -> str:
     """Build a step counter prefix string."""
@@ -454,6 +469,28 @@ def _get_status_dot(status: str, colors: dict) -> tuple[str, str]:
         return "\u25cb", colors["text_muted"]
     else:
         return "\u25cf", colors["tool_success"]
+
+
+# ─────────────────────────────────────────────────────────
+# Block Output Helpers
+# ─────────────────────────────────────────────────────────
+
+def _register_block(block_type: str, title: str, content: str, metadata: dict | None = None) -> int | None:
+    """Register an output block and return its ID, or None if no BlockManager is active."""
+    try:
+        from aura.cli.context import get_ctx
+        ctx = get_ctx()
+        if ctx is None or ctx.blocks is None:
+            return None
+        return ctx.blocks.add(block_type, title, content, metadata=metadata)
+    except Exception:
+        return None
+
+
+def _show_block_id(block_id: int | None) -> None:
+    """Print a dim block ID marker after the output line."""
+    if block_id is not None:
+        console.print(f"  [dim]#{block_id}[/dim]")
 
 
 # ─────────────────────────────────────────────────────────
@@ -550,6 +587,9 @@ def show_response(text: str, model: str = "", stream: bool = True) -> None:
         console.print(f"  [dim]{model}[/dim]")
 
     console.print()
+
+    # Register the response as a numbered block
+    _register_block("response", text[:80].replace("\n", " ").strip(), text)
 
 
 def show_response_attribution(model: str, elapsed: float, tokens: int = 0) -> None:
@@ -668,17 +708,20 @@ def show_error(message, *, hint: str | None = None) -> None:
     console.print(f"  [{colors['error']}]\u2717[/{colors['error']}] {message}")
     if hint:
         console.print(f"    [dim]{hint}[/dim]")
+    _register_block("error", str(message)[:120], str(message))
 
 
 def show_info(message: str) -> None:
     """Display info message — minimal dim text."""
     console.print(f"  [dim]{message}[/dim]")
+    _register_block("info", str(message)[:120], str(message))
 
 
 def show_warning(message: str) -> None:
     """Display warning with triangle icon."""
     colors = _get_theme_colors()
     console.print(f"  [{colors['warning']}]\u25b3[/{colors['warning']}] {message}")
+    _register_block("info", str(message)[:120], str(message))
 
 
 # ─────────────────────────────────────────────────────────

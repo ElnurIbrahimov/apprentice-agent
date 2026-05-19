@@ -312,15 +312,27 @@ class SessionRuntimeController:
 
     def _handle_shell_escape(self, command: str) -> None:
         """Execute a shell command (!) and display output inline."""
+        import shlex
         import subprocess
         command = command.strip()
         if not command:
             self._session.console.print("[dim]Usage: !<command>[/dim]")
             return
         try:
+            # Tokenize with shlex so `!echo "hello world"` works, but
+            # `!echo hello; rm -rf /` cannot inject — only the first
+            # token is the command, the rest are args. shell=False
+            # eliminates the injection surface entirely.
+            if os.name == "nt":
+                cmd_args = shlex.split(command, posix=False)
+            else:
+                cmd_args = shlex.split(command)
+            if not cmd_args:
+                self._session.console.print("[dim]Usage: !<command>[/dim]")
+                return
             result = subprocess.run(
-                command,
-                shell=True,
+                cmd_args,
+                shell=False,
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -342,6 +354,8 @@ class SessionRuntimeController:
                 )
         except subprocess.TimeoutExpired:
             self._session.console.print("  [red]\u2717[/red] [dim]Command timed out (30s)[/dim]")
+        except ValueError:
+            self._session.console.print("  [red]\u2717[/red] [dim]Could not parse command (unmatched quotes?)[/dim]")
         except OSError as exc:
             self._session.console.print(f"  [red]\u2717[/red] [dim]{exc}[/dim]")
 

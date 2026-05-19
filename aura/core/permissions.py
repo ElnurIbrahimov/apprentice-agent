@@ -64,14 +64,17 @@ _WORKSPACE_WRITE_ESCALATE: set[str] = {
     "git.pull",
 }
 
+import threading as _threading_sandbox
 
 _current_sandbox_tier: SandboxTier = SandboxTier.UNRESTRICTED
+_sandbox_lock = _threading_sandbox.Lock()
 
 
 def set_sandbox_tier(tier: SandboxTier) -> None:
-    """Set the process-wide sandbox tier.  Called once from CLI entrypoint."""
+    """Set the process-wide sandbox tier. Thread-safe."""
     global _current_sandbox_tier
-    _current_sandbox_tier = tier
+    with _sandbox_lock:
+        _current_sandbox_tier = tier
     logger.info(f"[Permissions] Sandbox tier: {tier.value}")
 
 

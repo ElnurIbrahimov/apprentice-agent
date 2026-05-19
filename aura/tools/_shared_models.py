@@ -29,9 +29,18 @@ def get_florence2():
         if not os.getenv("FLORENCE2_ENABLED", "true").lower() == "true":
             return None, None
         try:
+            import os as _os
+
             import torch
             from transformers import AutoModelForCausalLM, AutoProcessor
             model_name = "microsoft/Florence-2-base"
+            _trust_remote = _os.environ.get("AURA_TRUST_REMOTE_CODE", "0") == "1"
+            if not _trust_remote:
+                logger.warning(
+                    "[SharedModels] Florence-2 requires trust_remote_code=True. "
+                    "Set AURA_TRUST_REMOTE_CODE=1 to enable. Skipping load."
+                )
+                return None, None
             logger.info(f"[SharedModels] Loading Florence-2: {model_name}")
             _florence2_processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
             _florence2_model = AutoModelForCausalLM.from_pretrained(

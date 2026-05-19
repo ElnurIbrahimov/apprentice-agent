@@ -211,6 +211,11 @@ class ChatSession:
         self.token_used = 0
         self.token_limit = get_context_limit(self.current_model)
 
+        # ── Block-based output registry ──
+        from .blocks import BlockManager
+        self._blocks = BlockManager()
+        self._cli_ctx.blocks = self._blocks
+
         self._last_ctrl_c_time = 0.0
         self._last_ipc_heartbeat = 0.0
         self._daemon_unreachable_until = 0.0

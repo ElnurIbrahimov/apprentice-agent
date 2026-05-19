@@ -142,8 +142,10 @@ class CheckpointManager:
             return list(self._index)
 
     def get_checkpoint(self, checkpoint_id: str) -> Optional[Dict]:
-        """Get a specific checkpoint's metadata."""
-        return next((e for e in self._index if e["id"] == checkpoint_id), None)
+        """Get a specific checkpoint's metadata (returns a copy for thread safety)."""
+        with self._lock:
+            entry = next((e for e in self._index if e["id"] == checkpoint_id), None)
+            return dict(entry) if entry is not None else None
 
     def clear(self):
         """Remove all checkpoints."""

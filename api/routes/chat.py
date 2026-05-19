@@ -615,11 +615,10 @@ async def websocket_chat(websocket: WebSocket):
     # 1. Session cookie from the web UI login (browsers send it on same-origin WS)
     # 2. X-API-Key header (desktop clients / extension)
     # 3. First-message auth: {"type": "auth", "api_key": "..."}
-    # 4. ?api_key= query param (fallback — appears in access logs)
     _auth_deferred = False
     if not verify_websocket_auth(websocket):
         # Only defer when nothing was presented; reject if a bad key was given.
-        provided = websocket.headers.get("X-API-Key") or websocket.query_params.get("api_key")
+        provided = websocket.headers.get("X-API-Key")
         if provided or not _auth_is_enabled():
             await websocket.close(code=1008)
             return

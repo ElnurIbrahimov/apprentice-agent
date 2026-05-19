@@ -50,6 +50,12 @@ class SessionSignalController:
                 self._session.checkpoint_mgr.clear()
             self._session.msg_count = 0
             self._session.token_used = 0
+            # Clear block registry for the new session
+            try:
+                if getattr(self._session, '_blocks', None) is not None:
+                    self._session._blocks.clear()
+            except Exception:
+                pass
             self._session.console.print("[dim]New session started[/dim]")
             self._refresh_bar()
             return SignalHandlingResult(should_continue_loop=True)

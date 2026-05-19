@@ -252,7 +252,7 @@ def _schedule_broadcast(coro) -> None:
     """
     import asyncio as _asyncio
     try:
-        loop = _asyncio.get_event_loop()
+        loop = _asyncio.get_running_loop()
         if loop.is_running():
             _asyncio.run_coroutine_threadsafe(coro, loop)
             return
