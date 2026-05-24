@@ -267,7 +267,7 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
         if self.monologue and "evoemo" in self.tools:
             self.monologue.connect_evoemo(self.tools["evoemo"])
         self.state = AgentState()
-        self.max_iterations = 10
+        self.max_iterations = 100
         self.metacognition = MetacognitionLogger()
         self.use_fastpath = True  # Enable fast-path by default
         self.identity = load_identity()  # Load agent identity

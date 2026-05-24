@@ -137,6 +137,12 @@ interface AuraStore {
   handLiveTrace: HandLiveTrace[];
   handsLoaded: boolean;
   handsError: string | null;
+  handsPollingActive: boolean;
+  handsLastLoaded: number | null;
+  handsPollingInterval: number;
+  setHandsPollingActive: (active: boolean) => void;
+  setHandsLastLoaded: (ts: number | null) => void;
+  setHandsPollingInterval: (ms: number) => void;
   loadHands: () => Promise<void>;
   loadHandApprovals: () => Promise<void>;
   loadHandHistory: (limit?: number) => Promise<void>;
@@ -347,6 +353,9 @@ export const useStore = create<AuraStore>((set, get) => {
     handLiveTrace: [] as HandLiveTrace[],
     handsLoaded: false,
     handsError: null as string | null,
+    handsPollingActive: false,
+    handsLastLoaded: null,
+    handsPollingInterval: 15000,
     mcpServers: [] as McpServerInfo[],
     mcpLoaded: false,
     mcpError: null as string | null,
@@ -424,6 +433,9 @@ export const useStore = create<AuraStore>((set, get) => {
       ext?.storage?.local?.set({ routingPreference });
     },
     setLastRoutingResult: (lastRoutingResult) => set({ lastRoutingResult }),
+    setHandsPollingActive: (handsPollingActive) => set({ handsPollingActive }),
+    setHandsLastLoaded: (handsLastLoaded) => set({ handsLastLoaded }),
+    setHandsPollingInterval: (handsPollingInterval) => set({ handsPollingInterval }),
 
     setCustomInstructions: (customInstructions) => {
       set({ customInstructions });
@@ -521,6 +533,14 @@ export const useStore = create<AuraStore>((set, get) => {
         pendingCtx: null,
         thinkingMode: false,
         deepResearch: false,
+        hands: [] as HandStats[],
+        handsLoaded: false,
+        handsError: null,
+        handApprovals: [] as HandApprovalRequest[],
+        handHistory: [] as HandHistoryEntry[],
+        handsPollingActive: false,
+        handsLastLoaded: null,
+        handLiveTrace: [] as HandLiveTrace[],
       });
       // Tell backend to clear
       if (s.wsReady && s.ws?.readyState === WebSocket.OPEN) {

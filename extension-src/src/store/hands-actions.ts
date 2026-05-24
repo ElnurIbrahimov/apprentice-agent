@@ -9,17 +9,31 @@ import type {
 
 const HAND_LIVE_TRACE_MAX = 20;
 
+async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T | null> {
+  let lastErr: any;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < retries) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+  return null;
+}
+
 type SetFn = (partial: any) => void;
 type GetFn = () => any;
 
 export function createHandsActions(set: SetFn, get: GetFn) {
   return {
     loadHands: async () => {
-      try {
-        const data = await apiFetch(`${HTTP}/api/hands`);
+      set({ handsError: null });
+      const data = await withRetry(() => apiFetch(`${HTTP}/api/hands`));
+      if (data) {
         set({ hands: (data?.hands || []) as HandStats[], handsLoaded: true, handsError: null });
-      } catch (err: any) {
-        set({ handsError: err?.message || 'Failed to load hands', handsLoaded: true });
+      } else {
+        set({ handsError: 'Failed to load hands after retries', handsLoaded: true });
       }
     },
 
@@ -46,27 +60,27 @@ export function createHandsActions(set: SetFn, get: GetFn) {
 
     runHand: async (name: string) => {
       await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/run`, { method: 'POST' });
-      get().loadHands();
+      await get().loadHands();
     },
 
     pauseHand: async (name: string) => {
       await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/pause`, { method: 'POST' });
-      get().loadHands();
+      await get().loadHands();
     },
 
     activateHand: async (name: string) => {
       await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/activate`, { method: 'POST' });
-      get().loadHands();
+      await get().loadHands();
     },
 
     deactivateHand: async (name: string) => {
       await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/deactivate`, { method: 'POST' });
-      get().loadHands();
+      await get().loadHands();
     },
 
     deleteHand: async (name: string) => {
       await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}`, { method: 'DELETE' });
-      set((s: any) => ({ hands: s.hands.filter((h: HandStats) => h.name !== name) }));
+      await get().loadHands();
     },
 
     approveHand: async (name: string, _requestId: string, approved: boolean) => {
@@ -75,7 +89,7 @@ export function createHandsActions(set: SetFn, get: GetFn) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved }),
       });
-      set((s: any) => ({ handApprovals: s.handApprovals.filter((a: HandApprovalRequest) => a.hand_name !== name) }));
+      set((s: any) => ({ handApprovals: s.handApprovals.filter((a: HandApprovalRequest) => a.request_id !== _requestId) }));
     },
 
     createHand: async (description: string) => {
@@ -84,7 +98,7 @@ export function createHandsActions(set: SetFn, get: GetFn) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description }),
       });
-      get().loadHands();
+      await get().loadHands();
     },
 
     createHandFromTemplate: async (templateName: string, variables?: Record<string, string>) => {
@@ -93,7 +107,7 @@ export function createHandsActions(set: SetFn, get: GetFn) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ template_name: templateName, variables: variables || {} }),
       });
-      get().loadHands();
+      await get().loadHands();
     },
 
     applyHandEvent: (ev: any) => {

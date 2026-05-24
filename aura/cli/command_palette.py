@@ -22,12 +22,51 @@ class PaletteItem:
 
 # ── Frecency tracking ───────────────────────────────────────────────────
 
+import json
+from pathlib import Path
+
+_FRECENCY_PATH = Path.home() / ".aura" / "frecency.json"
+
 _usage_data: Dict[str, tuple[int, float]] = {}  # action -> (count, last_used_time)
 _usage_counts: Dict[str, tuple[int, float]] = _usage_data  # alias for tests
+
+
+def _load_frecency() -> None:
+    """Restore frecency from disk so it survives sessions."""
+    global _usage_data
+    if not _FRECENCY_PATH.exists():
+        return
+    try:
+        with open(_FRECENCY_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            for action, entry in raw.items():
+                if isinstance(entry, list) and len(entry) == 2:
+                    _usage_data[action] = (int(entry[0]), float(entry[1]))
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+
+
+def _save_frecency() -> None:
+    """Persist frecency to disk atomically."""
+    try:
+        _FRECENCY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _tmp = _FRECENCY_PATH.with_suffix(".tmp")
+        serializable = {action: [count, ts] for action, (count, ts) in _usage_data.items()}
+        with open(_tmp, "w", encoding="utf-8") as f:
+            json.dump(serializable, f, indent=2)
+        _tmp.replace(_FRECENCY_PATH)
+    except OSError:
+        pass
+
 
 def record_usage(action: str) -> None:
     count, _ = _usage_data.get(action, (0, 0.0))
     _usage_data[action] = (count + 1, _time.time())
+    _save_frecency()
+
+# Restore persisted frecency on first import so rankings survive sessions.
+_load_frecency()
 
 def _frecency_score(action: str) -> float:
     count, last_used = _usage_data.get(action, (0, 0.0))

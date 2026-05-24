@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, Pause, Power, PowerOff, Trash2, ChevronDown } from 'lucide-react';
+import { Play, Pause, Power, PowerOff, Trash2, ChevronDown, Loader2, AlertCircle } from 'lucide-react';
 import type { HandStats } from '../../types';
 
 const STATE_COLORS: Record<string, string> = {
@@ -22,6 +22,7 @@ function relTime(ts: number | null): string {
 
 interface Props {
   hand: HandStats;
+  handsError?: string | null;
   onRun: (name: string) => void;
   onPause: (name: string) => void;
   onActivate: (name: string) => void;
@@ -29,21 +30,41 @@ interface Props {
   onDelete: (name: string) => void;
 }
 
-export default function HandStatusCard({ hand, onRun, onPause, onActivate, onDeactivate, onDelete }: Props) {
+export default function HandStatusCard({ hand, handsError, onRun, onPause, onActivate, onDeactivate, onDelete }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [optimisticState, setOptimisticState] = useState<string | null>(null);
   const color = STATE_COLORS[hand.state] || STATE_COLORS.inactive;
   const isRunning = hand.state === 'running';
   const isActive = hand.state === 'active' || hand.state === 'running' || hand.state === 'cooldown';
+  const handError = handsError && handsError.includes(hand.name) ? handsError : null;
+  const displayState = optimisticState || hand.state;
+  const isPending = pendingAction !== null;
 
   return (
     <div
       style={{
         borderRadius: 10,
         background: 'var(--s2)',
-        border: '1px solid var(--b1)',
+        border: `1px solid ${handError ? 'var(--rd)' : 'var(--b1)'}`,
         overflow: 'hidden',
+        position: 'relative',
       }}
     >
+      {isPending && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(0,0,0,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10,
+          borderRadius: 10,
+        }}>
+          <Loader2 size={16} style={{ color: 'var(--tx)', animation: 'spin 1s linear infinite' }} />
+        </div>
+      )}
       <button
         onClick={() => setExpanded(e => !e)}
         style={{
@@ -63,9 +84,10 @@ export default function HandStatusCard({ hand, onRun, onPause, onActivate, onDea
           width: 8,
           height: 8,
           borderRadius: '50%',
-          background: color,
+          background: STATE_COLORS[displayState] || STATE_COLORS.inactive,
           flexShrink: 0,
-          boxShadow: isRunning ? `0 0 6px ${color}` : 'none',
+          boxShadow: displayState === 'running' || optimisticState === 'running' ? `0 0 6px ${STATE_COLORS[displayState] || STATE_COLORS.inactive}` : 'none',
+          animation: optimisticState === 'running' ? 'pulse 1.5s ease-in-out infinite' : 'none',
         }} />
         <span style={{ flex: 1, minWidth: 0 }}>
           <div style={{
@@ -80,6 +102,7 @@ export default function HandStatusCard({ hand, onRun, onPause, onActivate, onDea
           </div>
           <div style={{ fontSize: 10.5, color: 'var(--mu)' }}>
             {relTime(hand.last_run_ts)} · {hand.total_runs} runs
+            {handError && <span style={{ color: 'var(--rd)', marginLeft: 6 }}><AlertCircle size={10} style={{ verticalAlign: 'middle' }} /> error</span>}
           </div>
         </span>
         <ChevronDown
@@ -105,31 +128,52 @@ export default function HandStatusCard({ hand, onRun, onPause, onActivate, onDea
             </div>
           )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            <button onClick={() => onRun(hand.name)} disabled={isRunning} style={btnStyle('var(--pl)')}>
-              <Play size={10} /> Run
+            <button
+              onClick={() => { setPendingAction('run'); setOptimisticState('running'); onRun(hand.name); setTimeout(() => setPendingAction(null), 3000); }}
+              disabled={isRunning || isPending}
+              style={{ ...btnStyle('var(--pl)'), opacity: (isRunning || isPending) ? 0.6 : 1, cursor: (isRunning || isPending) ? 'not-allowed' : 'pointer' }}
+            >
+              {pendingAction === 'run' ? <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={10} />} Run
             </button>
             {isActive ? (
               <>
-                <button onClick={() => onPause(hand.name)} style={btnStyle('var(--yl, #f59e0b)')}>
+                <button
+                  onClick={() => { setPendingAction('pause'); onPause(hand.name); setTimeout(() => setPendingAction(null), 3000); }}
+                  disabled={isPending}
+                  style={{ ...btnStyle('var(--yl, #f59e0b)'), opacity: isPending ? 0.6 : 1, cursor: isPending ? 'not-allowed' : 'pointer' }}
+                >
                   <Pause size={10} /> Pause
                 </button>
-                <button onClick={() => onDeactivate(hand.name)} style={btnStyle('var(--mu)')}>
+                <button
+                  onClick={() => { setPendingAction('deactivate'); onDeactivate(hand.name); setTimeout(() => setPendingAction(null), 3000); }}
+                  disabled={isPending}
+                  style={{ ...btnStyle('var(--mu)'), opacity: isPending ? 0.6 : 1, cursor: isPending ? 'not-allowed' : 'pointer' }}
+                >
                   <PowerOff size={10} /> Stop
                 </button>
               </>
             ) : (
-              <button onClick={() => onActivate(hand.name)} style={btnStyle('var(--gr, #22c55e)')}>
+              <button
+                onClick={() => { setPendingAction('activate'); onActivate(hand.name); setTimeout(() => setPendingAction(null), 3000); }}
+                disabled={isPending}
+                style={{ ...btnStyle('var(--gr, #22c55e)'), opacity: isPending ? 0.6 : 1, cursor: isPending ? 'not-allowed' : 'pointer' }}
+              >
                 <Power size={10} /> Activate
               </button>
             )}
             {hand.is_custom && (
-              <button onClick={() => onDelete(hand.name)} style={btnStyle('var(--rd)')}>
+              <button
+                onClick={() => { setPendingAction('delete'); onDelete(hand.name); setTimeout(() => setPendingAction(null), 3000); }}
+                disabled={isPending}
+                style={{ ...btnStyle('var(--rd)'), opacity: isPending ? 0.6 : 1, cursor: isPending ? 'not-allowed' : 'pointer' }}
+              >
                 <Trash2 size={10} /> Delete
               </button>
             )}
-          </div>
-        </div>
-      )}
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+      `}</style>
     </div>
   );
 }

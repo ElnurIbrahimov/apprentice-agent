@@ -79,6 +79,7 @@ def build_status_bar(
     bg_indicator: str = "",
     research_indicator: str = "",
     watch_indicator: str = "",
+    mood_indicator: str = "",
     steering_queue: object = None,
     session_title: str = "",
     message_count: int = 0,
@@ -197,6 +198,8 @@ def build_status_bar(
         candidates.append((3, "research", len(research_indicator)))
     if watch_indicator:
         candidates.append((3, "watch", len(watch_indicator)))
+    if mood_indicator:
+        candidates.append((3, "mood", len(mood_indicator)))
     if steer_str:
         candidates.append((3, "steer", len(steer_str)))
 
@@ -290,6 +293,11 @@ def build_status_bar(
             _ansi_sep()
             parts.append(("ansibrightyellow", watch_indicator))
 
+        # Mood (P3)
+        if "mood" in included:
+            _ansi_sep()
+            parts.append(("", mood_indicator))
+
         # Steering queue (P3)
         if "steer" in included:
             _ansi_sep()
@@ -354,6 +362,10 @@ def build_status_bar(
     # Watch indicator (P3)
     if "watch" in included:
         rich_parts.append(Text(watch_indicator, style="yellow"))
+
+    # Mood indicator (P3)
+    if "mood" in included:
+        rich_parts.append(Text(mood_indicator, style="dim"))
 
     # Steering queue (P3)
     if "steer" in included:

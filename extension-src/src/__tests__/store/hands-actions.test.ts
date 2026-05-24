@@ -15,7 +15,7 @@ import { apiFetch } from '../../api';
 
 const mockApiFetch = apiFetch as jest.MockedFunction<typeof apiFetch>;
 
-function makeState() {
+function makeState(overrides: any = {}) {
   const state: any = {
     hands: [],
     handApprovals: [],
@@ -24,6 +24,7 @@ function makeState() {
     handLiveTrace: [],
     handsLoaded: false,
     handsError: null,
+    ...overrides,
   };
   const set = (partial: any) => {
     const patch = typeof partial === 'function' ? partial(state) : partial;
@@ -49,33 +50,37 @@ describe('hands-actions', () => {
     expect(state.handsError).toBeNull();
   });
 
-  test('loadHands records error when apiFetch throws', async () => {
-    const { state, set, get } = makeState();
-    mockApiFetch.mockRejectedValueOnce(new Error('boom'));
+test('loadHands records error when apiFetch throws', async () => {
+    (apiFetch as jest.Mock).mockRejectedValue(new Error('boom'));
+    let state: any = {};
+    const set = jest.fn((u) => { state = typeof u === 'function' ? u(state) : { ...state, ...u }; });
+    const get = jest.fn(() => ({ loadHands: jest.fn() }));
     const actions = createHandsActions(set, get);
     await actions.loadHands();
-    expect(state.handsError).toBe('boom');
     expect(state.handsLoaded).toBe(true);
+    expect(state.handsError).toBe('Failed to load hands after retries');
   });
 
   test('runHand posts to /run and refreshes list', async () => {
     const { set, get } = makeState();
     mockApiFetch.mockResolvedValueOnce({}).mockResolvedValueOnce({ hands: [] });
     const actions = createHandsActions(set, get);
-    // loadHands is pulled off get() so we attach actions to the same state
     Object.assign(get(), actions);
     await actions.runHand('demo hand');
     expect(mockApiFetch).toHaveBeenNthCalledWith(1, 'http://mock/api/hands/demo%20hand/run', { method: 'POST' });
     expect(mockApiFetch).toHaveBeenNthCalledWith(2, 'http://mock/api/hands');
   });
 
-  test('deleteHand removes the hand optimistically without waiting for reload', async () => {
+  test('deleteHand posts to delete endpoint and reloads', async () => {
     const { state, set, get } = makeState();
     state.hands = [{ name: 'h1' }, { name: 'h2' }];
     mockApiFetch.mockResolvedValueOnce({});
-    const actions = createHandsActions(set, get);
+    const loadHands = jest.fn().mockResolvedValue(undefined);
+    const getMock = jest.fn(() => ({ loadHands }));
+    const actions = createHandsActions(set, getMock);
     await actions.deleteHand('h1');
-    expect(state.hands).toEqual([{ name: 'h2' }]);
+    expect(mockApiFetch).toHaveBeenCalledWith('http://mock/api/hands/h1', { method: 'DELETE' });
+    expect(loadHands).toHaveBeenCalled();
   });
 
   test('applyHandApprovalRequest de-duplicates by request_id', () => {
@@ -108,15 +113,62 @@ describe('hands-actions', () => {
     expect(state.handHistory[0].action_data.duration_ms).toBe(1500);
   });
 
-  test('approveHand posts boolean and drops that hand from pending approvals', async () => {
+  test('approveHand posts boolean and drops the specific approval by request_id', async () => {
     const { state, set, get } = makeState();
-    state.handApprovals = [{ request_id: 'r1', hand_name: 'h1' }, { request_id: 'r2', hand_name: 'h2' }];
+    state.handApprovals = [
+      { request_id: 'r1', hand_name: 'h1' },
+      { request_id: 'r2', hand_name: 'h1' },
+    ];
     mockApiFetch.mockResolvedValueOnce({});
     const actions = createHandsActions(set, get);
     await actions.approveHand('h1', 'r1', true);
     const call = mockApiFetch.mock.calls[0];
     expect(call[0]).toBe('http://mock/api/hands/h1/approve');
     expect(JSON.parse((call[1] as any).body)).toEqual({ approved: true });
-    expect(state.handApprovals.map((a: any) => a.hand_name)).toEqual(['h2']);
+    expect(state.handApprovals.map((a: any) => a.request_id)).toEqual(['r2']);
+  });
+});
+
+describe('hands-actions regression tests', () => {
+  beforeEach(() => {
+    mockApiFetch.mockReset();
+  });
+
+  test('approveHand removes the specific approval by request_id, not hand_name', async () => {
+    const { state, set, get } = makeState({
+      handApprovals: [
+        { request_id: 'req-1', hand_name: 'hand-a', tool_name: 'tool1', args: {}, timestamp: Date.now(), age_seconds: 10 },
+        { request_id: 'req-2', hand_name: 'hand-a', tool_name: 'tool2', args: {}, timestamp: Date.now(), age_seconds: 20 },
+      ],
+    });
+    mockApiFetch.mockResolvedValueOnce({});
+    const actions = createHandsActions(set, get);
+
+    await actions.approveHand('hand-a', 'req-1', true);
+
+    expect(state.handApprovals).toHaveLength(1);
+    expect(state.handApprovals[0].request_id).toBe('req-2');
+  });
+
+  test('loadHands sets handsLoaded=true even when fetch fails', async () => {
+    const { state, set, get } = makeState();
+    mockApiFetch.mockRejectedValue(null);
+    const actions = createHandsActions(set, get);
+
+    await actions.loadHands();
+
+    expect(state.handsLoaded).toBe(true);
+    expect(state.handsError).toBe('Failed to load hands after retries');
+  });
+
+test('deleteHand calls loadHands after successful delete', async () => {
+    (apiFetch as jest.Mock).mockResolvedValue(undefined);
+    const loadHands = jest.fn().mockResolvedValue(undefined);
+    let state: any = { hands: [{ name: 'hand-to-delete', state: 'idle', total_runs: 0, last_run_ts: 0 }] };
+    const set = jest.fn((u) => { state = typeof u === 'function' ? u(state) : { ...state, ...u }; });
+    const get = jest.fn(() => ({ loadHands }));
+    const actions = createHandsActions(set, get);
+    await actions.deleteHand('hand-to-delete');
+    expect(loadHands).toHaveBeenCalled();
   });
 });

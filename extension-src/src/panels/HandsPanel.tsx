@@ -15,6 +15,13 @@ export default function HandsPanel() {
   const history = useStore(s => s.handHistory);
   const loaded = useStore(s => s.handsLoaded);
   const error = useStore(s => s.handsError);
+  const handsError = useStore(s => s.handsError);
+  const handsLoaded = useStore(s => s.handsLoaded);
+  const handsPollingActive = useStore(s => s.handsPollingActive);
+  const handsPollingInterval = useStore(s => s.handsPollingInterval);
+  const handsLastLoaded = useStore(s => s.handsLastLoaded);
+  const wsReady = useStore(s => s.wsReady);
+  const backendStatus = useStore(s => s.backendStatus);
 
   const loadHands = useStore(s => s.loadHands);
   const loadApprovals = useStore(s => s.loadHandApprovals);
@@ -39,6 +46,44 @@ export default function HandsPanel() {
     loadHistory(30);
   }, [loadHands, loadApprovals, loadTemplates, loadHistory]);
 
+  // Polling lifecycle - start interval on mount
+  useEffect(() => {
+    const wsReady = useStore.getState().wsReady;
+    const backendStatus = useStore.getState().backendStatus;
+    const interval = (wsReady && backendStatus === 'online') ? 15000 : 60000;
+    useStore.getState().setHandsPollingInterval(interval);
+    useStore.getState().setHandsPollingActive(true);
+    useStore.getState().loadHands();
+    useStore.getState().loadHandApprovals();
+    useStore.getState().loadHandHistory();
+
+    const id = setInterval(() => {
+      useStore.getState().loadHands();
+      useStore.getState().loadHandApprovals();
+      useStore.getState().loadHandHistory();
+    }, interval);
+
+    return () => {
+      clearInterval(id);
+      useStore.getState().setHandsPollingActive(false);
+    };
+  }, []);
+
+  // React to wsReady/backendStatus changes and restart the interval if it changes
+  useEffect(() => {
+    const unsubscribe = useStore.subscribe(
+      (state) => [state.wsReady, state.backendStatus] as const,
+      ([wsReady, backendStatus], prev) => {
+        if (wsReady === prev[0] && backendStatus === prev[1]) return;
+        const isActive = useStore.getState().handsPollingActive;
+        if (!isActive) return;
+        const interval = (wsReady && backendStatus === 'online') ? 15000 : 60000;
+        useStore.getState().setHandsPollingInterval(interval);
+      }
+    );
+    return unsubscribe;
+  }, []);
+
   const { activeCount, successRate } = useMemo(() => {
     const active = hands.filter(h => h.state === 'active' || h.state === 'running' || h.state === 'cooldown').length;
     const completed = history.length;
@@ -53,7 +98,7 @@ export default function HandsPanel() {
   const pauseAll = async () => {
     for (const h of hands) {
       if (h.state === 'active' || h.state === 'running') {
-        await pauseHand(h.name).catch(() => {});
+        await pauseHand(h.name);
       }
     }
   };
@@ -61,7 +106,7 @@ export default function HandsPanel() {
   const resumeAll = async () => {
     for (const h of hands) {
       if (h.state === 'paused') {
-        await activateHand(h.name).catch(() => {});
+        await activateHand(h.name);
       }
     }
   };
@@ -91,6 +136,38 @@ export default function HandsPanel() {
           </button>
         </div>
 
+        {/* Inline error banner */}
+        {handsError && (
+          <div style={{
+            margin: '0 0 12px 0',
+            padding: '8px 12px',
+            background: 'rgba(239,68,68,0.1)',
+            border: '1px solid rgba(239,68,68,0.3)',
+            borderRadius: 6,
+            color: '#ef4444',
+            fontSize: 12,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <span>⚠ {handsError}</span>
+            <button
+              onClick={() => loadHands()}
+              style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 12, padding: '2px 6px' }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* Connection status indicator */}
+        {handsLoaded && !handsError && handsPollingActive && (
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', textAlign: 'center', padding: '2px 0', marginBottom: 8 }}>
+            {handsPollingInterval >= 60000 ? '◌ Polling (degraded)' : '◎ Polling'}
+            {handsLastLoaded ? ` · Last updated ${new Date(handsLastLoaded).toLocaleTimeString()}` : ''}
+          </div>
+        )}
+
         {/* Sticky approvals */}
         {approvals.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
@@ -98,8 +175,8 @@ export default function HandsPanel() {
               <ApprovalCard
                 key={a.request_id}
                 approval={a}
-                onApprove={(name, rid) => approveHand(name, rid, true).catch(() => {})}
-                onDeny={(name, rid) => approveHand(name, rid, false).catch(() => {})}
+                onApprove={(name, rid) => approveHand(name, rid, true)}
+                onDeny={(name, rid) => approveHand(name, rid, false)}
               />
             ))}
           </div>
@@ -177,6 +254,7 @@ export default function HandsPanel() {
               <HandStatusCard
                 key={h.name}
                 hand={h}
+                handsError={handsError}
                 onRun={(n) => runHand(n).catch(() => {})}
                 onPause={(n) => pauseHand(n).catch(() => {})}
                 onActivate={(n) => activateHand(n).catch(() => {})}

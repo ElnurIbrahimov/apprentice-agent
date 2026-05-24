@@ -62,13 +62,14 @@ class SessionStatusController:
         from .display import show_status_bar
 
         # mood_indicator was previously computed and passed through, but the
-        # status bar stopped rendering it. Dropped from the tuple now that
-        # build_status_bar no longer accepts the kwarg.
-        bg_ind, res_ind, _mood_unused, watch_ind = self._phase3_indicators()
+        # status bar stopped rendering it. Wired back in — it's a personality
+        # signal that makes the CLI feel alive.
+        bg_ind, res_ind, mood_ind, watch_ind = self._phase3_indicators()
         show_status_bar(
             bg_indicator=bg_ind,
             research_indicator=res_ind,
             watch_indicator=watch_ind,
+            mood_indicator=mood_ind,
             steering_queue=self._steering,
             **kwargs,
         )

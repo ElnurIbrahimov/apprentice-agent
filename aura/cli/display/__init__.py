@@ -205,11 +205,12 @@ def show_status_bar(
     bg_indicator: str = "",
     research_indicator: str = "",
     watch_indicator: str = "",
+    mood_indicator: str = "",
     steering_queue: object = None,
     session_title: str = "",
     message_count: int = 0,
     project_type: str = "",
-    **_unused: object,  # swallow legacy kwargs (mood_indicator) for back-compat
+    **_unused: object,  # swallow legacy kwargs for back-compat
 ) -> None:
     """Update the persistent bottom toolbar."""
     from ..input import set_bottom_toolbar
@@ -224,6 +225,7 @@ def show_status_bar(
         bg_indicator=bg_indicator,
         research_indicator=research_indicator,
         watch_indicator=watch_indicator,
+        mood_indicator=mood_indicator,
         steering_queue=steering_queue,
         session_title=session_title,
         message_count=message_count,

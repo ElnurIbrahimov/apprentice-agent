@@ -331,13 +331,9 @@ def create_session():
             _MAX = 20
 
             def get_completions(self, document, complete_event):
-                import os
-                text = document.text_before_cursor
-                # Find the word being typed — look for @ prefix
                 word = document.get_word_before_cursor(WORD=True)
                 if not word or not word.startswith('@'):
-                    # Check if cursor is right after @ with no word break
-                    before = text[:document.cursor_position]
+                    before = document.text[:document.cursor_position]
                     at_idx = before.rfind('@')
                     if at_idx < 0:
                         return
@@ -349,55 +345,62 @@ def create_session():
                 if len(query) < 1:
                     return
 
+                import os
+                cwd = os.getcwd()
                 try:
-                    cwd = os.getcwd()
-                    query_lower = query.lower()
-                    results = []
+                    from ..file_index import get_file_index
+                    idx = get_file_index(
+                        code_exts=self._CODE_EXTS,
+                        ignore_dirs=self._IGNORE_DIRS,
+                    )
+                    results = idx.get(cwd, query, max_results=self._MAX)
+                except Exception:
+                    # Fallback to the old synchronous walk on any indexing failure
+                    try:
+                        results = self._fallback_walk(cwd, query)
+                    except Exception:
+                        return
 
-                    for root, dirs, files in os.walk(cwd):
-                        # Prune ignored directories in-place
-                        dirs[:] = [
-                            d for d in dirs
-                            if d not in self._IGNORE_DIRS and not d.endswith('.egg-info')
-                        ]
-                        # Limit depth to avoid deep traversal
-                        rel_root = os.path.relpath(root, cwd)
-                        depth = rel_root.count(os.sep) + (0 if rel_root == '.' else 1)
-                        if depth > 4:
-                            dirs.clear()
+                for rel_path, ext in results:
+                    fname = os.path.basename(rel_path)
+                    yield Completion(
+                        rel_path,
+                        start_position=-len(word),
+                        display=fname,
+                        display_meta=ext.lstrip('.'),
+                    )
+
+            def _fallback_walk(self, cwd: str, query: str) -> list[tuple[str, str]]:
+                """Old synchronous walk for graceful degradation."""
+                import os
+                query_lower = query.lower()
+                results = []
+                for root, dirs, files in os.walk(cwd):
+                    dirs[:] = [
+                        d for d in dirs
+                        if d not in self._IGNORE_DIRS and not d.endswith('.egg-info')
+                    ]
+                    rel_root = os.path.relpath(root, cwd)
+                    depth = rel_root.count(os.sep) + (0 if rel_root == '.' else 1)
+                    if depth > 4:
+                        dirs.clear()
+                        continue
+                    for fname in files:
+                        _, ext = os.path.splitext(fname)
+                        if ext.lower() not in self._CODE_EXTS:
                             continue
-
-                        for fname in files:
-                            _, ext = os.path.splitext(fname)
-                            if ext.lower() not in self._CODE_EXTS:
-                                continue
-                            rel_path = os.path.relpath(os.path.join(root, fname), cwd)
-                            # Use forward slashes for consistency
-                            rel_path = rel_path.replace(os.sep, '/')
-                            if query_lower in rel_path.lower():
-                                results.append((rel_path, ext))
-
-                        if len(results) >= self._MAX * 3:
-                            break  # gather enough, sort later
-
-                    # Sort by relevance: starts-with > contains, shorter paths first
-                    def _sort_key(item):
-                        p, _ = item
-                        pl = p.lower()
-                        return (0 if pl.startswith(query_lower) else 1, len(pl), pl)
-
-                    results.sort(key=_sort_key)
-
-                    for rel_path, ext in results[:self._MAX]:
-                        fname = os.path.basename(rel_path)
-                        yield Completion(
-                            rel_path,
-                            start_position=-len(word),
-                            display=fname,
-                            display_meta=ext.lstrip('.'),
-                        )
-                except (OSError, PermissionError):
-                    return
+                        rel_path = os.path.relpath(os.path.join(root, fname), cwd)
+                        rel_path = rel_path.replace(os.sep, '/')
+                        if query_lower in rel_path.lower():
+                            results.append((rel_path, ext))
+                    if len(results) >= self._MAX * 3:
+                        break
+                def _sort_key(item):
+                    p, _ = item
+                    pl = p.lower()
+                    return (0 if pl.startswith(query_lower) else 1, len(pl), pl)
+                results.sort(key=_sort_key)
+                return results[:self._MAX]
 
         # Get theme accent for prompt styling
         try:
