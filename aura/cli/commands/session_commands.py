@@ -4,7 +4,7 @@ import subprocess
 from typing import Optional
 
 from ..context import get_ctx
-from ._permissions import confirm_action
+from .common import confirm_action
 
 logger = logging.getLogger(__name__)
 
