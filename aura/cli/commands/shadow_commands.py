@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,9 @@ try:
 except ImportError:
     from rich.console import Console
     console = Console()
+
+
+@command("/shadow",   "Run prompt against 2 models in parallel (diff)",    tier=TIER_BETA)
 
 
 def handle_shadow(agent, arg, context) -> Optional[str]:

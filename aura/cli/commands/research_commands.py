@@ -3,8 +3,12 @@ from pathlib import Path
 from typing import Optional
 
 from ..context import get_ctx
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 logger = logging.getLogger(__name__)
+
+
+@command("/research","Start research mode",                              tier=TIER_BETA)
 
 
 def handle_research(agent, arg, context) -> Optional[str]:
@@ -28,6 +32,9 @@ def handle_research(agent, arg, context) -> Optional[str]:
     _research_console.print(f"[magenta]Research mode: {topic}[/magenta]")
 
 
+@command("/sources",  "Show research sources",                            tier=TIER_BETA)
+
+
 def handle_sources(agent, arg, context) -> Optional[str]:
     from ..display import console as _sources_console
     ctx = get_ctx()
@@ -37,6 +44,9 @@ def handle_sources(agent, arg, context) -> Optional[str]:
         render_sources(_sources_console, research_ctx)
     else:
         _sources_console.print("[dim]No research session active.[/dim]")
+
+
+@command("/export",   "Export research to Markdown",                      tier=TIER_BETA)
 
 
 def handle_export(agent, arg, context) -> Optional[str]:
@@ -55,12 +65,18 @@ def handle_export(agent, arg, context) -> Optional[str]:
         _export_console.print("[dim]No active research session to export.[/dim]")
 
 
+@command("/browse",   "Browse web pages",                                 tier=TIER_BETA)
+
+
 def handle_browse(agent, arg, context) -> Optional[str]:
     if not arg:
         from ..display import console
         console.print("Usage: /browse <url> | /browse search <query> | /browse text | /browse screenshot | /browse click <selector> | /browse links")
     else:
         _handle_browse_command(agent, arg)
+
+
+@command("/recall",   "Search memories",                                  aliases=["/memory"], tier=TIER_BETA)
 
 
 def handle_recall(agent, arg, context) -> Optional[str]:

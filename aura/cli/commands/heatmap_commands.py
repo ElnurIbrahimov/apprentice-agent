@@ -5,6 +5,7 @@ import argparse
 import logging
 from pathlib import Path
 from typing import Optional
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ def _render(title: str, rows: list[tuple[str, int]], *, top_n: int = 20) -> None
             _spark(val, max_val),
         )
     console.print(t)
+
+
+@command("/heatmap",  "Show cognitive heatmap (tokens by tool/file)",     tier=TIER_BETA)
 
 
 def handle_heatmap(agent, arg, context) -> Optional[str]:

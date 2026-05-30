@@ -18,8 +18,12 @@ from pathlib import Path
 from typing import Optional
 
 from ..display import console
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 logger = logging.getLogger(__name__)
+
+
+@command("/why",      "Show edit history + triggering prompts for a file", tier=TIER_EXPERIMENTAL)
 
 
 def handle_why(agent, arg, context) -> Optional[str]:

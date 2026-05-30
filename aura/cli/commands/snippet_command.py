@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from typing import Optional
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
+
+
+@command("/snippet",  "Manage prompt templates/snippets",                 tier=TIER_BETA)
 
 
 def handle_snippet(agent, arg: str, context: dict) -> Optional[str]:

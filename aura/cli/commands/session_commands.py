@@ -5,6 +5,7 @@ from typing import Optional
 
 from ..context import get_ctx
 from .common import confirm_action
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,9 @@ class ErrorTracker:
 
     def clear(self):
         self._recent.clear()
+
+
+@command("/export","Export research to Markdown",                    tier=TIER_BETA)
 
 
 def handle_export_session(agent, arg, context) -> "str | None":
@@ -164,6 +168,9 @@ def _render_trace_run_summaries(console, session_id: str, runs: list[list[dict]]
         console.print(f"    {summary}")
 
 
+@command("/trace",    "Show structured session trace and run summaries", tier=TIER_BETA)
+
+
 def handle_trace(agent, arg, context) -> Optional[str]:
     from ..display import console, show_error
 
@@ -230,6 +237,9 @@ def handle_trace(agent, arg, context) -> Optional[str]:
     recent = events[-limit:]
     _render_trace_events(console, session_id, recent, len(events), "recent")
     return
+
+
+@command("/sessions", "Manage sessions",                               tier=TIER_STABLE)
 
 
 def handle_sessions(agent, arg, context) -> Optional[str]:
@@ -313,6 +323,9 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
                 _sessions_console.print("  Failed to delete session.")
 
 
+@command("/clear",    "Clear conversation history",                      tier=TIER_STABLE)
+
+
 def handle_clear(agent, arg, context) -> Optional[str]:
     if arg.strip() != "--force":
         from ..display import console
@@ -331,6 +344,9 @@ def handle_clear(agent, arg, context) -> Optional[str]:
         ctx.agentic_loop.clear_history()
     from ..display import console
     console.print("Conversation history cleared.")
+
+
+@command("/compact",  "Compact conversation history",                    tier=TIER_STABLE)
 
 
 def handle_compact(agent, arg, context) -> Optional[str]:
@@ -394,6 +410,9 @@ def handle_retry(agent, arg, context) -> Optional[str]:
             show_response(response, model=result.get("model", ""), stream=False)
 
 
+@command("/context",  "Show context window usage",                       tier=TIER_STABLE)
+
+
 def handle_context(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if ctx and ctx.agentic_loop:
@@ -424,6 +443,9 @@ def handle_context(agent, arg, context) -> Optional[str]:
         console.print("  Context tracking not available.")
 
 
+@command("/cost",     "Show session cost breakdown",                     tier=TIER_STABLE)
+
+
 def handle_cost(agent, arg, context) -> Optional[str]:
     from ..display import console
     stats = agent.brain.get_session_stats()
@@ -434,6 +456,9 @@ def handle_cost(agent, arg, context) -> Optional[str]:
     console.print(f"    Estimated cost: ${stats['cost_usd']:.4f}")
     console.print(f"    Queries: {stats['queries']}")
     console.print()
+
+
+@command("/rewind",   "Rewind file changes to a checkpoint",             tier=TIER_STABLE)
 
 
 def handle_rewind(agent, arg, context) -> Optional[str]:
@@ -469,6 +494,9 @@ def _get_tree(agent):
     return loop._conv_tree
 
 
+@command("/fork",    "Fork conversation into a new branch",             tier=TIER_EXPERIMENTAL)
+
+
 def handle_fork(agent, arg, context) -> Optional[str]:
     """Fork current conversation into a new branch."""
     from ..display import console as _fork_console
@@ -501,6 +529,9 @@ def handle_fork(agent, arg, context) -> Optional[str]:
     )
 
 
+@command("/branches", "List conversation branches",                        tier=TIER_EXPERIMENTAL)
+
+
 def handle_branches(agent, arg, context) -> Optional[str]:
     """List all conversation branches as a tree."""
     from ..display import console as _br_console
@@ -526,6 +557,9 @@ def handle_branches(agent, arg, context) -> Optional[str]:
     for line in graph_lines:
         _br_console.print(f"  {line}")
     _br_console.print()
+
+
+@command("/checkout","Switch to a conversation branch",                 tier=TIER_EXPERIMENTAL)
 
 
 def handle_checkout(agent, arg, context) -> Optional[str]:
@@ -567,6 +601,9 @@ def handle_checkout(agent, arg, context) -> Optional[str]:
     )
 
 
+@command("/changes", "Show files modified in this session",              tier=TIER_BETA)
+
+
 def handle_changes(agent, arg, context) -> Optional[str]:
     """Show files modified in the current session with diffs."""
     from ..context import get_ctx
@@ -601,6 +638,9 @@ def handle_changes(agent, arg, context) -> Optional[str]:
         except Exception:
             console.print(f"  [cyan]{basename}[/cyan]")
     console.print()
+
+
+@command("/merge",   "Merge branch back to parent",                       tier=TIER_EXPERIMENTAL)
 
 
 def handle_merge(agent, arg, context) -> Optional[str]:

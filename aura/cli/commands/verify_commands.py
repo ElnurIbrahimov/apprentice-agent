@@ -18,8 +18,12 @@ from typing import Optional
 
 from ..context import get_ctx
 from ..display import console
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 logger = logging.getLogger(__name__)
+
+
+@command("/verify",   "Verify this session's edits (typecheck/tests)",     tier=TIER_STABLE)
 
 
 def handle_verify(agent, arg, context) -> Optional[str]:
