@@ -53,8 +53,8 @@ def _calendar_today_sync() -> dict:
 
 @router.get("/calendar/upcoming")
 async def calendar_upcoming(days: int = 7):
-    days = max(1, min(days, 365))  # Clamp to prevent abuse
     """Get upcoming events."""
+    days = max(1, min(days, 365))  # Clamp to prevent abuse
     try:
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, lambda: _calendar_upcoming_sync(days))
