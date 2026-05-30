@@ -7,6 +7,7 @@ Priority tiers (always shown first → dropped first):
   P2 (>= 120): session title, message count
   P3 (conditional): bg/research/watch/steering indicators — shown if content AND width permits
 """
+from __future__ import annotations
 
 import os
 

@@ -1,4 +1,5 @@
 """Tool icons and status indicators for AURA CLI."""
+from __future__ import annotations
 
 # Per-tool text labels (Claude Code style — readable at a glance)
 TOOL_ICONS = {
