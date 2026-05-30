@@ -9,8 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 @command("/hook",     "Manage hooks",                                     tier=TIER_BETA)
-
-
 def handle_hook(agent, arg, context) -> Optional[str]:
     from ..display import console as _hook_console
     ctx = get_ctx()
@@ -44,8 +42,6 @@ def handle_hook(agent, arg, context) -> Optional[str]:
 
 
 @command("/mcp",      "Manage MCP server connections",                    tier=TIER_BETA)
-
-
 def handle_mcp(agent, arg, context) -> Optional[str]:
     """Dispatch /mcp subcommands. Supports: list (default), status, reconnect <name>."""
     ctx = get_ctx()
@@ -116,15 +112,11 @@ def handle_mcp(agent, arg, context) -> Optional[str]:
 
 
 @command("/audit",    "Inspect Merkle audit chain",                       tier=TIER_BETA)
-
-
 def handle_audit(agent, arg, context) -> Optional[str]:
     _handle_audit_command(arg)
 
 
 @command("/evolve",   "Evolve skills with GEPA",                          tier=TIER_EXPERIMENTAL)
-
-
 def handle_evolve(agent, arg, context) -> Optional[str]:
     _handle_evolve_command(agent, arg)
 

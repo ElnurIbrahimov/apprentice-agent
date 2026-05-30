@@ -53,8 +53,6 @@ def _render(title: str, rows: list[tuple[str, int]], *, top_n: int = 20) -> None
 
 
 @command("/heatmap",  "Show cognitive heatmap (tokens by tool/file)",     tier=TIER_BETA)
-
-
 def handle_heatmap(agent, arg, context) -> Optional[str]:
     """Slash command: /heatmap — show the current session's heatmap."""
     from aura.cli.context import get_ctx

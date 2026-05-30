@@ -6,8 +6,6 @@ from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 
 @command("/snippet",  "Manage prompt templates/snippets",                 tier=TIER_BETA)
-
-
 def handle_snippet(agent, arg: str, context: dict) -> Optional[str]:
     """Manage prompt snippets. /snippet save <name> <text>, /snippet <name>, /snippet list, /snippet delete <name>."""
     from ..display import console, show_error, show_info

@@ -6,8 +6,6 @@ from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 
 @command("/copy",     "Copy last response or code block to clipboard",    tier=TIER_STABLE)
-
-
 def handle_copy(agent, arg, context) -> Optional[str]:
     """Copy last response or a specific code block to clipboard.
 

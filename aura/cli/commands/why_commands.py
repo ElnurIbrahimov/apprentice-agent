@@ -24,8 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 @command("/why",      "Show edit history + triggering prompts for a file", tier=TIER_EXPERIMENTAL)
-
-
 def handle_why(agent, arg, context) -> Optional[str]:
     """Show the edit history of a file with triggering prompts."""
     file = (arg or "").strip()

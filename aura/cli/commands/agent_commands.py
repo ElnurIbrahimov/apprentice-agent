@@ -21,8 +21,6 @@ def print_result(result, is_fastpath: bool = False):
 
 
 @command("/interrupt","Abort running iteration with optional correction",aliases=["/stop"], tier=TIER_STABLE)
-
-
 def handle_interrupt(agent, arg, context) -> Optional[str]:
     """`/interrupt [correction]` — abort the running iteration and queue a note.
 
@@ -60,8 +58,6 @@ def handle_interrupt(agent, arg, context) -> Optional[str]:
 
 
 @command("/goal",    "Run a goal",                                     tier=TIER_BETA)
-
-
 def handle_goal(agent, arg, context) -> Optional[str]:
     if arg:
         from ..display import show_error as _goal_err
@@ -90,8 +86,6 @@ def handle_goal(agent, arg, context) -> Optional[str]:
 
 
 @command("/plan",    "Create and execute a plan",                      tier=TIER_STABLE)
-
-
 def handle_plan(agent, arg, context) -> Optional[str]:
     if arg:
         from ..display import console as _plan_console
@@ -163,8 +157,6 @@ def handle_plan(agent, arg, context) -> Optional[str]:
 
 
 @command("/fleet",   "Run parallel sub-agents",                        tier=TIER_BETA)
-
-
 def handle_fleet(agent, arg, context) -> Optional[str]:
     task = arg.strip()
     if not task:
@@ -226,15 +218,11 @@ def handle_fleet(agent, arg, context) -> Optional[str]:
 
 
 @command("/agent",   "Run specialist agent",                           tier=TIER_BETA)
-
-
 def handle_agent(agent, arg, context) -> Optional[str]:
     _handle_agent_command(agent, arg)
 
 
 @command("/hand",    "Manage autonomous Hands",                        tier=TIER_EXPERIMENTAL)
-
-
 def handle_hand(agent, arg, context) -> Optional[str]:
     _handle_hand_command(agent, arg)
 
@@ -317,8 +305,6 @@ def _handle_agent_command(agent, arg: str):
 
 
 @command("/debate",  "Multi-model debate on a question",                 tier=TIER_EXPERIMENTAL)
-
-
 def handle_debate(agent, arg, context) -> Optional[str]:
     from ..debate_mode import parse_debate_args, run_debate
     from ..display import console as _debate_console
@@ -339,8 +325,6 @@ def handle_debate(agent, arg, context) -> Optional[str]:
 
 
 @command("/chain",   "Run prompt pipelines (step1 -> step2 -> ...)",    tier=TIER_BETA)
-
-
 def handle_chain(agent, arg, context) -> Optional[str]:
     """Run, save, load, or list prompt chains."""
     from aura.cli.chain_mode import (

@@ -9,8 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 @command("/research","Start research mode",                              tier=TIER_BETA)
-
-
 def handle_research(agent, arg, context) -> Optional[str]:
     from ..display import console as _research_console
     ctx = get_ctx()
@@ -33,8 +31,6 @@ def handle_research(agent, arg, context) -> Optional[str]:
 
 
 @command("/sources",  "Show research sources",                            tier=TIER_BETA)
-
-
 def handle_sources(agent, arg, context) -> Optional[str]:
     from ..display import console as _sources_console
     ctx = get_ctx()
@@ -47,8 +43,6 @@ def handle_sources(agent, arg, context) -> Optional[str]:
 
 
 @command("/export",   "Export research to Markdown",                      tier=TIER_BETA)
-
-
 def handle_export(agent, arg, context) -> Optional[str]:
     import re as _re_export
 
@@ -66,8 +60,6 @@ def handle_export(agent, arg, context) -> Optional[str]:
 
 
 @command("/browse",   "Browse web pages",                                 tier=TIER_BETA)
-
-
 def handle_browse(agent, arg, context) -> Optional[str]:
     if not arg:
         from ..display import console
@@ -77,8 +69,6 @@ def handle_browse(agent, arg, context) -> Optional[str]:
 
 
 @command("/recall",   "Search memories",                                  aliases=["/memory"], tier=TIER_BETA)
-
-
 def handle_recall(agent, arg, context) -> Optional[str]:
     from ..display import console
     if not arg:

@@ -9,36 +9,26 @@ logger = logging.getLogger(__name__)
 
 
 @command("/shell",    "Execute shell command",                            aliases=["/bash","/run"], tier=TIER_STABLE)
-
-
 def handle_shell(agent, arg, context) -> Optional[str]:
     _handle_shell_command(agent, arg)
 
 
 @command("/grep",     "Search code content",                              tier=TIER_STABLE)
-
-
 def handle_grep(agent, arg, context) -> Optional[str]:
     _handle_grep_command(agent, arg)
 
 
 @command("/search",   "Search files by pattern",                          aliases=["/find"], tier=TIER_STABLE)
-
-
 def handle_search(agent, arg, context) -> Optional[str]:
     _handle_search_command(agent, arg)
 
 
 @command("/edit",     "View file contents with line numbers",             tier=TIER_STABLE)
-
-
 def handle_edit(agent, arg, context) -> Optional[str]:
     _handle_edit_command(agent, arg)
 
 
 @command("/test",     "Run tests",                                        tier=TIER_STABLE)
-
-
 def handle_test(agent, arg, context) -> Optional[str]:
     from ..display import console as _test_console
     from ..display import show_response as _test_show
@@ -82,15 +72,11 @@ def handle_test(agent, arg, context) -> Optional[str]:
 
 
 @command("/project",  "Project info/context/index",                       tier=TIER_STABLE)
-
-
 def handle_project(agent, arg, context) -> Optional[str]:
     _handle_project_command(agent, arg)
 
 
 @command("/watch",    "Watch files for AI comments",                      tier=TIER_BETA)
-
-
 def handle_watch(agent, arg, context) -> Optional[str]:
     """`/watch [start|stop|status|clear]` — file watcher for AURA:/AI: comments.
 
@@ -200,8 +186,6 @@ def handle_watch(agent, arg, context) -> Optional[str]:
 
 
 @command("/undo",     "Undo last file edit",                              tier=TIER_STABLE)
-
-
 def handle_undo(agent, arg, context) -> Optional[str]:
     from ..context import get_ctx
     from ..display import console
@@ -267,8 +251,6 @@ def handle_undo(agent, arg, context) -> Optional[str]:
 
 
 @command("/redo",     "Redo the last /undo",                              tier=TIER_STABLE)
-
-
 def handle_redo(agent, arg, context) -> Optional[str]:
     """Reverse the last /undo by restoring the snapshot taken before the undo."""
     from ..context import get_ctx

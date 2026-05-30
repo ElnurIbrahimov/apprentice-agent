@@ -22,8 +22,6 @@ def _set_model(ctx, agent, choice: Optional[str]) -> None:
 
 
 @command("/model",    "View/set model (auto, <name>)",                  tier=TIER_STABLE)
-
-
 def handle_model(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if not arg:
@@ -49,8 +47,6 @@ def handle_model(agent, arg, context) -> Optional[str]:
 
 
 @command("/theme",    "Switch color theme",                             tier=TIER_STABLE)
-
-
 def handle_theme(agent, arg, context) -> Optional[str]:
     from ..display import console as _theme_console
     from ..themes import get_theme as _get_theme
@@ -72,8 +68,6 @@ def handle_theme(agent, arg, context) -> Optional[str]:
 
 
 @command("/mood",     "Show emotional state",                             tier=TIER_BETA)
-
-
 def handle_mood(agent, arg, context) -> Optional[str]:
     from ..display import console as _mood_console
     from ..mood_display import render_mood_detail
@@ -91,8 +85,6 @@ def handle_mood(agent, arg, context) -> Optional[str]:
 
 
 @command("/speak",    "Text-to-speech",                                 tier=TIER_BETA)
-
-
 def handle_speak(agent, arg, context) -> Optional[str]:
     if arg:
         agent._speak(arg)
@@ -102,8 +94,6 @@ def handle_speak(agent, arg, context) -> Optional[str]:
 
 
 @command("/trust",    "Enable trust mode (auto-approve all tools)",     tier=TIER_STABLE)
-
-
 def handle_trust(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if not ctx or not ctx.permissions:
@@ -119,8 +109,6 @@ def handle_trust(agent, arg, context) -> Optional[str]:
 
 
 @command("/help",     "Show help",                                        tier=TIER_STABLE)
-
-
 def handle_help(agent, arg, context) -> Optional[str]:
     """Show help. Use /help <command> for detailed help on a specific command.
     `/help all` also shows experimental commands."""
@@ -187,8 +175,6 @@ def handle_help(agent, arg, context) -> Optional[str]:
 
 
 @command("/quit",     "Exit AURA",                                      tier=TIER_STABLE)
-
-
 def handle_quit(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     hook_mgr = ctx.hook_manager if ctx else None
@@ -202,8 +188,6 @@ def handle_quit(agent, arg, context) -> Optional[str]:
 
 
 @command("/routing",  "Show/set routing preference",                      tier=TIER_BETA)
-
-
 def handle_routing(agent, arg, context) -> Optional[str]:
     """Show current neural routing status and the last ModelRouter decision."""
     from ..display import console as _routing_console
@@ -262,8 +246,6 @@ def handle_routing(agent, arg, context) -> Optional[str]:
 
 
 @command("/tasks",    "Show background tasks",                            tier=TIER_BETA)
-
-
 def handle_tasks(agent, arg, context) -> Optional[str]:
     from ..display import console as _tasks_console
     ctx = get_ctx()

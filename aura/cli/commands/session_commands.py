@@ -166,8 +166,6 @@ def _render_trace_run_summaries(console, session_id: str, runs: list[list[dict]]
 
 
 @command("/trace",    "Show structured session trace and run summaries", tier=TIER_BETA)
-
-
 def handle_trace(agent, arg, context) -> Optional[str]:
     from ..display import console, show_error
 
@@ -237,8 +235,6 @@ def handle_trace(agent, arg, context) -> Optional[str]:
 
 
 @command("/sessions", "Manage sessions",                               tier=TIER_STABLE)
-
-
 def handle_sessions(agent, arg, context) -> Optional[str]:
     from aura.core.session import AgenticSession
     session_mgr = AgenticSession()
@@ -321,8 +317,6 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
 
 
 @command("/clear",    "Clear conversation history",                      tier=TIER_STABLE)
-
-
 def handle_clear(agent, arg, context) -> Optional[str]:
     if arg.strip() != "--force":
         from ..display import console
@@ -344,8 +338,6 @@ def handle_clear(agent, arg, context) -> Optional[str]:
 
 
 @command("/compact",  "Compact conversation history",                    tier=TIER_STABLE)
-
-
 def handle_compact(agent, arg, context) -> Optional[str]:
     from ..display import console
     focus = arg if arg else None
@@ -408,8 +400,6 @@ def handle_retry(agent, arg, context) -> Optional[str]:
 
 
 @command("/context",  "Show context window usage",                       tier=TIER_STABLE)
-
-
 def handle_context(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if ctx and ctx.agentic_loop:
@@ -441,8 +431,6 @@ def handle_context(agent, arg, context) -> Optional[str]:
 
 
 @command("/cost",     "Show session cost breakdown",                     tier=TIER_STABLE)
-
-
 def handle_cost(agent, arg, context) -> Optional[str]:
     from ..display import console
     stats = agent.brain.get_session_stats()
@@ -456,8 +444,6 @@ def handle_cost(agent, arg, context) -> Optional[str]:
 
 
 @command("/rewind",   "Rewind file changes to a checkpoint",             tier=TIER_STABLE)
-
-
 def handle_rewind(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if ctx and ctx.agentic_loop and hasattr(ctx.agentic_loop, '_checkpoint_mgr'):
@@ -492,8 +478,6 @@ def _get_tree(agent):
 
 
 @command("/fork",    "Fork conversation into a new branch",             tier=TIER_EXPERIMENTAL)
-
-
 def handle_fork(agent, arg, context) -> Optional[str]:
     """Fork current conversation into a new branch."""
     from ..display import console as _fork_console
@@ -527,8 +511,6 @@ def handle_fork(agent, arg, context) -> Optional[str]:
 
 
 @command("/branches", "List conversation branches",                        tier=TIER_EXPERIMENTAL)
-
-
 def handle_branches(agent, arg, context) -> Optional[str]:
     """List all conversation branches as a tree."""
     from ..display import console as _br_console
@@ -557,8 +539,6 @@ def handle_branches(agent, arg, context) -> Optional[str]:
 
 
 @command("/checkout","Switch to a conversation branch",                 tier=TIER_EXPERIMENTAL)
-
-
 def handle_checkout(agent, arg, context) -> Optional[str]:
     """Switch to a different conversation branch."""
     from ..display import console as _co_console
@@ -599,8 +579,6 @@ def handle_checkout(agent, arg, context) -> Optional[str]:
 
 
 @command("/changes", "Show files modified in this session",              tier=TIER_BETA)
-
-
 def handle_changes(agent, arg, context) -> Optional[str]:
     """Show files modified in the current session with diffs."""
     from ..context import get_ctx
@@ -638,8 +616,6 @@ def handle_changes(agent, arg, context) -> Optional[str]:
 
 
 @command("/merge",   "Merge branch back to parent",                       tier=TIER_EXPERIMENTAL)
-
-
 def handle_merge(agent, arg, context) -> Optional[str]:
     """Merge current branch back to parent."""
     from ..display import console as _mg_console

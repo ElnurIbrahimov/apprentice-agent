@@ -24,8 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 @command("/verify",   "Verify this session's edits (typecheck/tests)",     tier=TIER_STABLE)
-
-
 def handle_verify(agent, arg, context) -> Optional[str]:
     """Re-run verification on the current session's edited files."""
     ctx = get_ctx()

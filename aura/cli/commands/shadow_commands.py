@@ -15,8 +15,6 @@ except ImportError:
 
 
 @command("/shadow",   "Run prompt against 2 models in parallel (diff)",    tier=TIER_BETA)
-
-
 def handle_shadow(agent, arg, context) -> Optional[str]:
     """`/shadow <prompt>` — dispatch against 2 models in parallel, show diff."""
     prompt = (arg or "").strip()

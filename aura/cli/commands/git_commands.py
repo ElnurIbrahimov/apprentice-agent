@@ -9,8 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 @command("/diff",     "Show git diff with syntax highlighting",           tier=TIER_STABLE)
-
-
 def handle_diff(agent, arg, context) -> Optional[str]:
     import subprocess as _sp
 
@@ -46,8 +44,6 @@ def handle_diff(agent, arg, context) -> Optional[str]:
 
 
 @command("/git",      "Run read-only git commands",                       tier=TIER_STABLE)
-
-
 def handle_git(agent, arg, context) -> Optional[str]:
     if not arg:
         console.print("[yellow]Usage: /git <command> (e.g., /git status, /git log, /git diff)[/yellow]")
@@ -93,8 +89,6 @@ def handle_git(agent, arg, context) -> Optional[str]:
 
 
 @command("/pr",       "Create pull request",                              tier=TIER_BETA)
-
-
 def handle_pr(agent, arg, context) -> Optional[str]:
     from ..display import console as _pr_console
     from ..git_tools import (
@@ -129,8 +123,6 @@ def handle_pr(agent, arg, context) -> Optional[str]:
 
 
 @command("/branch",   "Create git branch",                                tier=TIER_BETA)
-
-
 def handle_branch(agent, arg, context) -> Optional[str]:
     from ..display import console as _branch_console
     from ..git_tools import create_branch
@@ -147,8 +139,6 @@ def handle_branch(agent, arg, context) -> Optional[str]:
 
 
 @command("/stash",    "Smart git stash",                                  tier=TIER_BETA)
-
-
 def handle_stash(agent, arg, context) -> Optional[str]:
     from ..display import console as _stash_console
     from ..git_tools import smart_stash
@@ -162,8 +152,6 @@ def handle_stash(agent, arg, context) -> Optional[str]:
 
 
 @command("/blame",    "Git blame with context",                           tier=TIER_BETA)
-
-
 def handle_blame(agent, arg, context) -> Optional[str]:
     from ..display import console as _blame_console
     from ..git_tools import get_blame
