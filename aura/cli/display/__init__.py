@@ -69,21 +69,23 @@ def _get_theme_colors() -> dict:
             "text_muted": theme.text_muted,
         }
     except (ImportError, AttributeError):
+        from aura.cli.themes import AuraTheme
+        _f = AuraTheme(name="fallback")
         return {
-            "accent": "#D777AF",
-            "accent_dim": "#B0578F",
-            "success": "#4EBA65",
-            "error": "#FF6B80",
-            "warning": "#FFC107",
-            "info": "#87AFFF",
-            "tool": "#E6DB74",
-            "tool_success": "#4EBA65",
-            "tool_error": "#FF6B80",
-            "tool_pending": "#87AFFF",
-            "permission_border": "#FFC107",
-            "permission_accent": "#B1B9F9",
-            "text_secondary": "#999999",
-            "text_muted": "#555555",
+            "accent": _f.accent,
+            "accent_dim": _f.accent_dim,
+            "success": _f.success,
+            "error": _f.error,
+            "warning": _f.warning,
+            "info": _f.info,
+            "tool": _f.tool_color,
+            "tool_success": _f.tool_success,
+            "tool_error": _f.tool_error,
+            "tool_pending": _f.tool_pending,
+            "permission_border": _f.permission_border,
+            "permission_accent": _f.permission_accent,
+            "text_secondary": _f.text_secondary,
+            "text_muted": _f.text_muted,
         }
 
 
@@ -102,7 +104,9 @@ def show_banner() -> None:
         from aura.cli.themes import get_theme
         gradient = get_theme().gradient
     except (ImportError, AttributeError):
-        gradient = ["#D777AF", "#B1B9F9", "#87D7D7"]
+        from aura.cli.themes import AuraTheme
+        _fb = AuraTheme(name="fallback")
+        gradient = _fb.gradient
 
     content = Text()
     for line in _LOGO_LINES:

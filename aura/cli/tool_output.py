@@ -50,8 +50,8 @@ class ToolOutputRenderer:
         # which bypassed theme switching and always rendered pink/green).
         from aura.cli.display import _get_theme_colors as _tc
         _c = _tc()
-        success_c = _c.get("success", "#4EBA65")
-        error_c = _c.get("error", "#FF6B80")
+        success_c = _c.get("success", AuraTheme(name="fallback").success)
+        error_c = _c.get("error", AuraTheme(name="fallback").error)
         if exit_code == 0:
             icon = f"[{success_c}]\u2713[/{success_c}]"
         else:
