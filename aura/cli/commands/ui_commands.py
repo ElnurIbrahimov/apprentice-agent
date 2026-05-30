@@ -84,7 +84,7 @@ def handle_mood(agent, arg, context) -> Optional[str]:
         _mood_console.print("[dim]Emotional state not available.[/dim]")
 
 
-@command("/speak",    "Text-to-speech",                                 tier=TIER_BETA)
+@command("/speak",    "Text-to-speech",         aliases=["/say"],                tier=TIER_BETA)
 def handle_speak(agent, arg, context) -> Optional[str]:
     if arg:
         agent._speak(arg)
@@ -174,7 +174,7 @@ def handle_help(agent, arg, context) -> Optional[str]:
     return None
 
 
-@command("/quit",     "Exit AURA",                                      tier=TIER_STABLE)
+@command("/quit",     "Exit AURA",              aliases=["/exit"],               tier=TIER_STABLE)
 def handle_quit(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     hook_mgr = ctx.hook_manager if ctx else None

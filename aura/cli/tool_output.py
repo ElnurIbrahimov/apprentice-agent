@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from typing import List
 
+from aura.cli.themes import AuraTheme
+
 # File reads: show first/last N lines
 _FILE_HEAD = 20
 _FILE_TAIL = 20

@@ -22,6 +22,79 @@ from . import (  # noqa: F401
     verify_commands,
     why_commands,
 )
+from .agent_commands import (
+    handle_agent,
+    handle_chain,
+    handle_debate,
+    handle_fleet,
+    handle_goal,
+    handle_hand,
+    handle_interrupt,
+    handle_plan,
+)
+from .copy_command import handle_copy
+from .git_commands import (
+    handle_blame,
+    handle_branch,
+    handle_diff,
+    handle_git,
+    handle_pr,
+    handle_stash,
+)
+from .research_commands import (
+    handle_browse,
+    handle_export,
+    handle_recall,
+    handle_research,
+    handle_sources,
+)
+from .session_commands import (
+    handle_branches,
+    handle_changes,
+    handle_checkout,
+    handle_clear,
+    handle_compact,
+    handle_context,
+    handle_cost,
+    handle_fork,
+    handle_merge,
+    handle_rewind,
+    handle_sessions,
+    handle_trace,
+)
+from .snippet_command import handle_snippet
+from .system_commands import (
+    handle_audit,
+    handle_evolve,
+    handle_hook,
+    handle_mcp,
+)
+from .verify_commands import handle_verify
+from .why_commands import handle_why
+from .tool_commands import (
+    handle_edit,
+    handle_grep,
+    handle_project,
+    handle_search,
+    handle_shell,
+    handle_test,
+    handle_redo,
+    handle_undo,
+    handle_watch,
+)
+from .heatmap_commands import handle_heatmap
+from .shadow_commands import handle_shadow
+from .ui_commands import (
+    handle_help,
+    handle_model,
+    handle_mood,
+    handle_quit,
+    handle_routing,
+    handle_speak,
+    handle_tasks,
+    handle_theme,
+    handle_trust,
+)
 from .common import (
     TIER_BETA,
     TIER_EXPERIMENTAL,
@@ -43,6 +116,22 @@ __all__: list[str] = [
     "RUNTIME_ONLY_COMMANDS",
     "handle_command",
     "command",
+    # Handlers
+    "handle_agent", "handle_chain", "handle_debate", "handle_fleet",
+    "handle_goal", "handle_hand", "handle_interrupt", "handle_plan",
+    "handle_copy", "handle_blame", "handle_branch", "handle_diff",
+    "handle_git", "handle_pr", "handle_stash", "handle_browse",
+    "handle_export", "handle_recall", "handle_research", "handle_sources",
+    "handle_branches", "handle_changes", "handle_checkout", "handle_clear",
+    "handle_compact", "handle_context", "handle_cost", "handle_fork",
+    "handle_merge", "handle_rewind", "handle_sessions", "handle_trace",
+    "handle_snippet", "handle_audit", "handle_evolve", "handle_hook",
+    "handle_mcp", "handle_verify", "handle_why", "handle_edit",
+    "handle_grep", "handle_project", "handle_search", "handle_shell",
+    "handle_test", "handle_redo", "handle_undo", "handle_watch",
+    "handle_heatmap", "handle_shadow", "handle_help", "handle_model",
+    "handle_mood", "handle_quit", "handle_routing", "handle_speak",
+    "handle_tasks", "handle_theme", "handle_trust",
 ]
 
 # Local handler defined here rather than in a submodule.
