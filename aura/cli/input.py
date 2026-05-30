@@ -311,8 +311,10 @@ def create_session():
             _accent = _theme.accent
             _accent_dim = _theme.accent_dim
         except (ImportError, AttributeError):
-            _accent = "#D777AF"
-            _accent_dim = "#B0578F"
+            from aura.cli.themes import AuraTheme
+            _fb = AuraTheme(name="fallback")
+            _accent = _fb.accent
+            _accent_dim = _fb.accent_dim
 
         _style = Style.from_dict({
             "prompt": f"bold {_accent}",

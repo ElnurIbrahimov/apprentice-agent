@@ -31,7 +31,9 @@ def _get_accent_colors() -> tuple[str, str]:
         theme = get_theme()
         return theme.accent, theme.accent_dim
     except (ImportError, AttributeError):
-        return "#D777AF", "#B0578F"
+        from aura.cli.themes import AuraTheme
+        _fb = AuraTheme(name="fallback")
+        return _fb.accent, _fb.accent_dim
 
 
 def _get_stall_colors() -> tuple[str, str]:
@@ -41,7 +43,9 @@ def _get_stall_colors() -> tuple[str, str]:
         theme = get_theme()
         return theme.error, theme.error
     except (ImportError, AttributeError):
-        return "#FF6B80", "#FF6B80"
+        from aura.cli.themes import AuraTheme
+        _fb = AuraTheme(name="fallback")
+        return _fb.error, _fb.error
 
 
 def _shimmer_text(text: str, elapsed: float, base_color: str, shimmer_color: str) -> Text:

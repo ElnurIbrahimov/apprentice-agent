@@ -43,7 +43,9 @@ def get_banner(width: int = 80) -> Text:
         from aura.cli.themes import get_theme
         colors = get_theme().gradient
     except (ImportError, AttributeError):
-        colors = ["#D777AF", "#B1B9F9", "#87D7D7"]
+        from aura.cli.themes import AuraTheme
+        _fb = AuraTheme(name="fallback")
+        colors = _fb.gradient
 
     result = Text()
     for line in _LOGO_LINES:
@@ -68,8 +70,10 @@ def get_welcome_line(version: str | None = None) -> Text:
         colors = theme.gradient
         accent = theme.accent
     except (ImportError, AttributeError):
-        colors = ["#D777AF", "#B1B9F9", "#87D7D7"]
-        accent = "#D777AF"
+        from aura.cli.themes import AuraTheme
+        _fb = AuraTheme(name="fallback")
+        colors = _fb.gradient
+        accent = _fb.accent
 
     result = Text()
 
