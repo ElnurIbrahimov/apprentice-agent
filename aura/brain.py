@@ -388,7 +388,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                     if f:
                         loop._tokens_by_file[f] = loop._tokens_by_file.get(f, 0) + total
         except Exception:
-            pass
+            logger.debug("cognitive_heatmap_tracking_failed", exc_info=True)
 
     def _consume_compaction_notice(self) -> bool:
         """Atomically test-and-clear the compaction-pending flag.

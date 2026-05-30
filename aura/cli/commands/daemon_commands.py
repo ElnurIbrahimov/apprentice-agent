@@ -103,6 +103,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
             proc.kill()
             console.print(f"  [yellow]Force-killed[/] (PID {pid})")
     except Exception:
+        logger.debug("daemon_stop_psutil_fallback", exc_info=True)
         try:
             if sys.platform.startswith("win"):
                 subprocess.run(["taskkill", "/F", "/PID", str(pid)], check=False,

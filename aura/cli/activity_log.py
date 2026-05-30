@@ -130,7 +130,7 @@ class ActivityLog:
                 try:
                     conn.close()
                 except Exception:
-                    pass
+                    logger.debug("activity_log_conn_close_failed", exc_info=True)
 
         # Defer the embedding compute to bg_pool so chat turns don't block
         # waiting for Ollama. A separate connection is opened in the worker

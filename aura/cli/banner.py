@@ -107,6 +107,6 @@ def get_welcome_line(version: str | None = None) -> Text:
             result.append("\u2622", style=f"bold {warn_color}")
             result.append(f" sandbox: {label}", style=warn_color)
     except Exception:
-        pass
+        logger.debug("banner_sandbox_tier_render_failed", exc_info=True)
 
     return result
