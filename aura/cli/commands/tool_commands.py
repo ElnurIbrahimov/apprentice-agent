@@ -120,7 +120,6 @@ def handle_watch(agent, arg, context) -> Optional[str]:
 
         w.set_callback(_on_watch_hit)
         if path_arg:
-            from .common import resolve_user_path
             try:
                 w.root = str(resolve_user_path(path_arg))  # FileWatcher supports attribute reassignment
             except AttributeError:
@@ -358,7 +357,6 @@ def _handle_grep_command(agent, arg: str):
             context = int(parts[i + 1])
             i += 2
         else:
-            from .common import resolve_user_path
             path = str(resolve_user_path(parts[i]))
             i += 1
 
@@ -432,7 +430,6 @@ def _handle_search_command(agent, arg: str):
             _search_console.print(f"  Error: {result.get('error')}")
 
     elif subcmd == "structure" or subcmd == "tree":
-        from .common import resolve_user_path
         raw_path = parts[1] if len(parts) > 1 else "."
         path = str(resolve_user_path(raw_path))
         result = tool.project_structure(path=path)
@@ -472,7 +469,6 @@ def _handle_edit_command(agent, arg: str):
         tool = CodeEditTool()
         agent.tools["code_edit"] = tool
 
-    from .common import resolve_user_path
     parts = arg.split()
     path = str(resolve_user_path(parts[0]))
     offset = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
