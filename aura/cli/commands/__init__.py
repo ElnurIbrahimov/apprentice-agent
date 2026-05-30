@@ -173,21 +173,21 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
 ] + RUNTIME_ONLY_COMMANDS
 
 
-def handle_command(agent: Any, command: str, speak: bool = False) -> None:
-    parts: list[str] = command.split(maxsplit=1)
-    cmd: str = parts[0].lower()
+def handle_command(agent: Any, cmd: str, speak: bool = False) -> None:
+    parts: list[str] = cmd.split(maxsplit=1)
+    cmd_str: str = parts[0].lower()
     arg: str = parts[1] if len(parts) > 1 else ""
 
     # Special case: /export research needs to route to handle_export
-    if cmd == "/export" and arg.strip().startswith("research"):
+    if cmd_str == "/export" and arg.strip().startswith("research"):
         handler = COMMAND_REGISTRY.get("/export")
     else:
-        handler = COMMAND_REGISTRY.get(cmd)
+        handler = COMMAND_REGISTRY.get(cmd_str)
 
     if handler is None:
         from aura.cli.display import console
-        console.print(f"[red]Unknown command:[/red] {cmd}")
-        matches = difflib.get_close_matches(cmd, COMMAND_REGISTRY.keys(), n=1, cutoff=0.6)
+        console.print(f"[red]Unknown command:[/red] {cmd_str}")
+        matches = difflib.get_close_matches(cmd_str, COMMAND_REGISTRY.keys(), n=1, cutoff=0.6)
         if matches:
             console.print(f"  [dim]Did you mean[/dim] [cyan]{matches[0]}[/cyan]?")
         return
