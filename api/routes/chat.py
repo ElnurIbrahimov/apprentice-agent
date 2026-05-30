@@ -387,7 +387,7 @@ async def search_messages(q: str, limit: int = 20):
         return {"results": [], "query": q}
     if len(q) > 500:
         return {"results": [], "query": q, "error": "query too long (max 500 chars)"}
-    limit = min(limit, 100)  # cap to prevent unbounded iteration
+    limit = max(1, min(limit, 100))  # clamp to [1, 100] to prevent abuse
     try:
         svc = _get_agent_service()
         if not svc.is_ready:
