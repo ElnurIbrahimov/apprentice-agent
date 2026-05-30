@@ -681,7 +681,12 @@ class MiscMixin:
         if not self._is_user_allowed(update.effective_user.id):
             return
         args = context.args or []
-        backend = os.getenv("AURA_BACKEND_URL", "http://89.167.107.134")
+        backend = os.getenv("AURA_BACKEND_URL")
+        if not backend:
+            await update.message.reply_text(
+                "Backend URL not configured. Set AURA_BACKEND_URL in your environment."
+            )
+            return
 
         if not args:
             text = (

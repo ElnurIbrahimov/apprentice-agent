@@ -6,7 +6,9 @@ NOTE: You can now set the token via the API instead:
    POST /api/auth/chatgpt/set-token  {"refresh": "rt_...", "account_id": "..."}
    Or use the extension Settings panel > ChatGPT Token section.
 """
-import json, os
+import json
+import os
+import subprocess
 
 TOKEN_DIR = "/opt/aura/.aura"
 TOKEN_FILE = os.path.join(TOKEN_DIR, "chatgpt_auth.json")
@@ -18,10 +20,14 @@ token_data = {
 }
 
 os.makedirs(TOKEN_DIR, exist_ok=True)
-with open(TOKEN_FILE, "w") as f:
+with open(TOKEN_FILE, "w", encoding="utf-8") as f:
     json.dump(token_data, f, indent=2)
 
-# Fix ownership
-os.system("chown -R aura:aura /opt/aura/.aura 2>/dev/null")
+# Fix ownership (avoid os.system for security)
+subprocess.run(
+    ["chown", "-R", "aura:aura", "/opt/aura/.aura"],
+    stderr=subprocess.DEVNULL,
+    check=False,
+)
 print(f"ChatGPT token written to {TOKEN_FILE}")
 print("Restart aura: systemctl restart aura")
