@@ -72,12 +72,19 @@ def cmd_worktree(args: argparse.Namespace) -> int:
     if open_new:
         try:
             if sys.platform.startswith("win"):
+                path_str = str(path)
+                # Block cmd metacharacters that could inject commands
+                if any(c in path_str for c in "&|;<>\"'^%()"):
+                    console.print("  [yellow]Open failed:[/] path contains invalid characters")
+                    return 0
                 subprocess.Popen(
-                    ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path} && aura"],
-                    cwd=str(path), close_fds=True,
+                    ["cmd", "/c", "start", "cmd", "/k", f"cd /d {path_str} && aura"],
+                    cwd=path_str, close_fds=True,
                 )
             else:
-                subprocess.Popen([os.environ.get("SHELL", "/bin/sh"), "-lc", f"cd '{path}' && aura"])
+                shell = os.environ.get("SHELL", "/bin/sh")
+                # SECURITY: use cwd= to avoid shell string interpolation of path
+                subprocess.Popen([shell, "-lc", "aura"], cwd=str(path), close_fds=True)
             console.print(f"  [dim]Opened a new session in {path}[/]")
         except Exception as e:
             console.print(f"  [yellow]Open failed:[/] {e}")
