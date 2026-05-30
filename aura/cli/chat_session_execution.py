@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-from ._constants import ERROR_SENTINELS as _ERROR_SENTINELS
+from . import ERROR_SENTINELS as _ERROR_SENTINELS
 
 _IMAGE_TOKEN_RE = re.compile(r"\[image:\s*([^\]\n]+?)\s*\]")
 

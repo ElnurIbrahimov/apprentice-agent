@@ -7,7 +7,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from ._constants import ERROR_SENTINELS as _ERROR_SENTINELS
+from . import ERROR_SENTINELS as _ERROR_SENTINELS
 
 
 class SessionRuntimeController:
