@@ -5,8 +5,40 @@ tilde expansion / path normalization with slightly different bugs).
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+TIER_STABLE = "stable"
+TIER_BETA = "beta"
+TIER_EXPERIMENTAL = "experimental"
+
+_COMMAND_REGISTRY: list[
+    tuple[str, str, Callable[..., Any], list[str], str]
+] = []
+
+
+def command(
+    name: str,
+    description: str,
+    aliases: list[str] | None = None,
+    tier: str = TIER_STABLE,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Register a slash-command handler in the central registry.
+
+    Usage::
+
+        @command("/help", "Show help")
+        def handle_help(agent, arg, context):
+            ...
+
+    The decorated function is returned unchanged so it can still be imported
+    and called directly.
+    """
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        _COMMAND_REGISTRY.append((name, description, func, aliases or [], tier))
+        return func
+    return decorator
 
 
 def resolve_user_path(raw: str) -> Path:
