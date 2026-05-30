@@ -32,9 +32,6 @@ class ErrorTracker:
         self._recent.clear()
 
 
-@command("/export","Export research to Markdown",                    tier=TIER_BETA)
-
-
 def handle_export_session(agent, arg, context) -> "str | None":
     """Export the current session to a markdown or JSON file."""
     from ..context import get_ctx
