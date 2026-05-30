@@ -4,6 +4,7 @@ from typing import Optional
 
 from ..context import get_ctx
 from ..display import console
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,9 @@ def _set_model(ctx, agent, choice: Optional[str]) -> None:
     agent.brain.set_model_override(choice)
     if ctx and ctx.agentic_loop:
         ctx.agentic_loop.model_override = choice
+
+
+@command("/model",    "View/set model (auto, <name>)",                  tier=TIER_STABLE)
 
 
 def handle_model(agent, arg, context) -> Optional[str]:
@@ -44,6 +48,9 @@ def handle_model(agent, arg, context) -> Optional[str]:
         console.print(f"[green]Model locked to: [cyan]{arg}[/cyan][/green]")
 
 
+@command("/theme",    "Switch color theme",                             tier=TIER_STABLE)
+
+
 def handle_theme(agent, arg, context) -> Optional[str]:
     from ..display import console as _theme_console
     from ..themes import get_theme as _get_theme
@@ -64,6 +71,9 @@ def handle_theme(agent, arg, context) -> Optional[str]:
         _theme_console.print(f"[bold]Available:[/bold] {', '.join(available)}")
 
 
+@command("/mood",     "Show emotional state",                             tier=TIER_BETA)
+
+
 def handle_mood(agent, arg, context) -> Optional[str]:
     from ..display import console as _mood_console
     from ..mood_display import render_mood_detail
@@ -80,12 +90,18 @@ def handle_mood(agent, arg, context) -> Optional[str]:
         _mood_console.print("[dim]Emotional state not available.[/dim]")
 
 
+@command("/speak",    "Text-to-speech",                                 tier=TIER_BETA)
+
+
 def handle_speak(agent, arg, context) -> Optional[str]:
     if arg:
         agent._speak(arg)
         console.print(f"[dim][Spoke: {arg}][/dim]")
     else:
         console.print("[yellow]Usage: /speak <text to speak>[/yellow]")
+
+
+@command("/trust",    "Enable trust mode (auto-approve all tools)",     tier=TIER_STABLE)
 
 
 def handle_trust(agent, arg, context) -> Optional[str]:
@@ -100,6 +116,9 @@ def handle_trust(agent, arg, context) -> Optional[str]:
     else:
         ctx.permissions.set_trust_mode(True)
         console.print("  [green]Trust mode enabled — all tool calls auto-approved.[/green]")
+
+
+@command("/help",     "Show help",                                        tier=TIER_STABLE)
 
 
 def handle_help(agent, arg, context) -> Optional[str]:
@@ -167,6 +186,9 @@ def handle_help(agent, arg, context) -> Optional[str]:
     return None
 
 
+@command("/quit",     "Exit AURA",                                      tier=TIER_STABLE)
+
+
 def handle_quit(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     hook_mgr = ctx.hook_manager if ctx else None
@@ -177,6 +199,9 @@ def handle_quit(agent, arg, context) -> Optional[str]:
         hook_mgr.fire(_HE.SESSION_END, {"reason": "quit_command"}, wait=True)
     console.print("[dim]Goodbye![/dim]")
     sys.exit(0)
+
+
+@command("/routing",  "Show/set routing preference",                      tier=TIER_BETA)
 
 
 def handle_routing(agent, arg, context) -> Optional[str]:
@@ -234,6 +259,9 @@ def handle_routing(agent, arg, context) -> Optional[str]:
     except Exception as e:
         _routing_console.print(f"  [red]ModelRouter info unavailable: {e}[/red]")
     _routing_console.print()
+
+
+@command("/tasks",    "Show background tasks",                            tier=TIER_BETA)
 
 
 def handle_tasks(agent, arg, context) -> Optional[str]:

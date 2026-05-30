@@ -3,8 +3,12 @@ from typing import Optional
 
 from ..context import get_ctx
 from ..display import console
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 logger = logging.getLogger(__name__)
+
+
+@command("/hook",     "Manage hooks",                                     tier=TIER_BETA)
 
 
 def handle_hook(agent, arg, context) -> Optional[str]:
@@ -37,6 +41,9 @@ def handle_hook(agent, arg, context) -> Optional[str]:
         else:
             from ..display import show_error as _hook_err2
             _hook_err2(f"Hook not found: {sub[1]}")
+
+
+@command("/mcp",      "Manage MCP server connections",                    tier=TIER_BETA)
 
 
 def handle_mcp(agent, arg, context) -> Optional[str]:
@@ -108,8 +115,14 @@ def handle_mcp(agent, arg, context) -> Optional[str]:
     )
 
 
+@command("/audit",    "Inspect Merkle audit chain",                       tier=TIER_BETA)
+
+
 def handle_audit(agent, arg, context) -> Optional[str]:
     _handle_audit_command(arg)
+
+
+@command("/evolve",   "Evolve skills with GEPA",                          tier=TIER_EXPERIMENTAL)
 
 
 def handle_evolve(agent, arg, context) -> Optional[str]:

@@ -3,8 +3,12 @@ import os
 from typing import Optional
 
 from ..display import console
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 logger = logging.getLogger(__name__)
+
+
+@command("/diff",     "Show git diff with syntax highlighting",           tier=TIER_STABLE)
 
 
 def handle_diff(agent, arg, context) -> Optional[str]:
@@ -39,6 +43,9 @@ def handle_diff(agent, arg, context) -> Optional[str]:
             _diff_console.print("  [dim]No changes.[/dim]")
     except (OSError, _sp.SubprocessError, ValueError) as e:
         _diff_err(str(e))
+
+
+@command("/git",      "Run read-only git commands",                       tier=TIER_STABLE)
 
 
 def handle_git(agent, arg, context) -> Optional[str]:
@@ -85,6 +92,9 @@ def handle_git(agent, arg, context) -> Optional[str]:
                 _git_err(str(e))
 
 
+@command("/pr",       "Create pull request",                              tier=TIER_BETA)
+
+
 def handle_pr(agent, arg, context) -> Optional[str]:
     from ..display import console as _pr_console
     from ..git_tools import (
@@ -118,6 +128,9 @@ def handle_pr(agent, arg, context) -> Optional[str]:
         _pr_err(result['error'])
 
 
+@command("/branch",   "Create git branch",                                tier=TIER_BETA)
+
+
 def handle_branch(agent, arg, context) -> Optional[str]:
     from ..display import console as _branch_console
     from ..git_tools import create_branch
@@ -133,6 +146,9 @@ def handle_branch(agent, arg, context) -> Optional[str]:
         _branch_err(result['message'])
 
 
+@command("/stash",    "Smart git stash",                                  tier=TIER_BETA)
+
+
 def handle_stash(agent, arg, context) -> Optional[str]:
     from ..display import console as _stash_console
     from ..git_tools import smart_stash
@@ -143,6 +159,9 @@ def handle_stash(agent, arg, context) -> Optional[str]:
     else:
         from ..display import show_error as _stash_err
         _stash_err(result.get('stderr', 'Stash failed'))
+
+
+@command("/blame",    "Git blame with context",                           tier=TIER_BETA)
 
 
 def handle_blame(agent, arg, context) -> Optional[str]:

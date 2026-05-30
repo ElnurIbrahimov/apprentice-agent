@@ -4,6 +4,7 @@ from typing import Optional
 
 from ..context import get_ctx
 from .common import confirm_action
+from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,9 @@ def print_result(result, is_fastpath: bool = False):
     else:
         mode = "Fast-path" if is_fastpath else f"{result.get('iterations', '?')} iterations"
         console.print(f"[dim]Completed ({mode})[/dim]")
+
+
+@command("/interrupt","Abort running iteration with optional correction",aliases=["/stop"], tier=TIER_STABLE)
 
 
 def handle_interrupt(agent, arg, context) -> Optional[str]:
@@ -55,6 +59,9 @@ def handle_interrupt(agent, arg, context) -> Optional[str]:
     return None
 
 
+@command("/goal",    "Run a goal",                                     tier=TIER_BETA)
+
+
 def handle_goal(agent, arg, context) -> Optional[str]:
     if arg:
         from ..display import show_error as _goal_err
@@ -80,6 +87,9 @@ def handle_goal(agent, arg, context) -> Optional[str]:
     else:
         from ..display import console
         console.print("Usage: /goal <your goal>")
+
+
+@command("/plan",    "Create and execute a plan",                      tier=TIER_STABLE)
 
 
 def handle_plan(agent, arg, context) -> Optional[str]:
@@ -152,6 +162,9 @@ def handle_plan(agent, arg, context) -> Optional[str]:
         _plan_console.print("Usage: /plan <task description>")
 
 
+@command("/fleet",   "Run parallel sub-agents",                        tier=TIER_BETA)
+
+
 def handle_fleet(agent, arg, context) -> Optional[str]:
     task = arg.strip()
     if not task:
@@ -212,8 +225,14 @@ def handle_fleet(agent, arg, context) -> Optional[str]:
     run_fleet_live(_fleet_console, fleet, executor, _fleet_task_fn)
 
 
+@command("/agent",   "Run specialist agent",                           tier=TIER_BETA)
+
+
 def handle_agent(agent, arg, context) -> Optional[str]:
     _handle_agent_command(agent, arg)
+
+
+@command("/hand",    "Manage autonomous Hands",                        tier=TIER_EXPERIMENTAL)
 
 
 def handle_hand(agent, arg, context) -> Optional[str]:
@@ -297,6 +316,9 @@ def _handle_agent_command(agent, arg: str):
         _agent_console.print(f"  Available: {', '.join(specialists)}, parallel")
 
 
+@command("/debate",  "Multi-model debate on a question",                 tier=TIER_EXPERIMENTAL)
+
+
 def handle_debate(agent, arg, context) -> Optional[str]:
     from ..debate_mode import parse_debate_args, run_debate
     from ..display import console as _debate_console
@@ -314,6 +336,9 @@ def handle_debate(agent, arg, context) -> Optional[str]:
     except Exception as e:
         from ..display import show_error as _debate_err2
         _debate_err2(f"Debate failed: {e}")
+
+
+@command("/chain",   "Run prompt pipelines (step1 -> step2 -> ...)",    tier=TIER_BETA)
 
 
 def handle_chain(agent, arg, context) -> Optional[str]:
