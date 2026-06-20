@@ -4,13 +4,14 @@ Covers the critical endpoints identified in ENGINEERING_REVIEW_2026-04-02.
 Uses FastAPI TestClient (httpx-based) so no real server is needed.
 """
 
+from typing import ClassVar
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -27,7 +28,6 @@ def client():
 
     # Prevent heavy agent init and missing ollama import failure
     import sys
-    from unittest.mock import MagicMock
     sys.modules["ollama"] = MagicMock()
     sys.modules["api.services.agent_service"] = MagicMock()
     sys.modules["api.services.agent_service"].agent_service = MagicMock()
@@ -45,7 +45,7 @@ def client():
 class TestConversationIDValidation:
     """Conversation endpoints must reject invalid IDs."""
 
-    INVALID_IDS = [
+    INVALID_IDS: ClassVar[list] = [
         "",                          # empty
         "../../../etc/passwd",       # path traversal
         "a" * 200,                   # too long
@@ -167,8 +167,9 @@ class TestValidators:
         assert validate_id("a-b-c") == "a-b-c"
 
     def test_validate_id_rejects_invalid(self):
-        from api.utils import validate_id
         from fastapi import HTTPException
+
+        from api.utils import validate_id
         with pytest.raises(HTTPException):
             validate_id("")
         with pytest.raises(HTTPException):
@@ -185,8 +186,9 @@ class TestValidators:
         assert validate_model_name("nemotron-3-super:cloud") == "nemotron-3-super:cloud"
 
     def test_validate_model_name_rejects_invalid(self):
-        from api.utils import validate_model_name
         from fastapi import HTTPException
+
+        from api.utils import validate_model_name
         with pytest.raises(HTTPException):
             validate_model_name("")
         with pytest.raises(HTTPException):
@@ -201,8 +203,9 @@ class TestValidators:
         assert validate_emotion("  Neutral  ") == "neutral"
 
     def test_validate_emotion_rejects_invalid(self):
-        from api.utils import validate_emotion
         from fastapi import HTTPException
+
+        from api.utils import validate_emotion
         with pytest.raises(HTTPException):
             validate_emotion("__import__('os')")
         with pytest.raises(HTTPException):
@@ -257,7 +260,7 @@ class TestSSRFGuard:
 
     def test_allows_public_url(self):
         from aura.security.ssrf_guard import validate_url_safe
-        pinned, hostname = validate_url_safe("http://1.1.1.1/test")
+        pinned, _hostname = validate_url_safe("http://1.1.1.1/test")
         assert pinned  # Should return without raising
 
 
@@ -275,7 +278,7 @@ class TestSessionSerializer:
         # Create a mock Pydantic-like ToolCall
         class MockFunction:
             name = "web_search"
-            arguments = {"query": "test"}
+            arguments: ClassVar[dict] = {"query": "test"}
         class MockToolCall:
             id = "call_abc123"
             function = MockFunction()

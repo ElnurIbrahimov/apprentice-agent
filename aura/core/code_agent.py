@@ -401,7 +401,7 @@ class CodeAgentMode:
         # --- execute_code ---
         def execute_code(code: str) -> dict:
             # SECURITY: AST-validate LLM-generated code before execution
-            from aura.agent import validate_script_code
+            from aura.security.tool_validator import validate_script_code
             is_valid, validation_msg = validate_script_code(code, "<code_agent_execute>")
             if not is_valid:
                 logger.warning(f"[CodeAgent] Blocked unsafe code in execute_code(): {validation_msg}")

@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import os
 import time as _t
-from pathlib import Path
-from typing import Iterable, Optional
-
+from typing import Optional
 
 # Same rules as AtFileCompleter in input.py — keep in sync
 default_ignore_dirs = frozenset({
@@ -27,7 +25,7 @@ default_code_exts = frozenset({
 
 class FileIndex:
     """Lazy, TTL-cached file tree index for code files.
-    
+
     Builds on first use, reuses for up to *ttl_seconds* or until the
     root directory mtime changes (simple "something may have changed" signal).
     Thread-safe for single-producer (build) / concurrent-consumer (search)
@@ -119,12 +117,12 @@ class FileIndex:
 
     def search(self, query: str, max_results: int = 20) -> list[tuple[str, str]]:
         """Return up to *max_results* (rel_path, ext) matching *query*.
-        
+
         Sorting: starts-with > contains > shorter paths first.
         """
         ql = query.lower()
         matches: list[tuple[int, int, str, str]] = []  # (rank, len, rel_path, ext)
-        for rel_path, fname, ext in self._entries:
+        for rel_path, _fname, ext in self._entries:
             pl = rel_path.lower()
             if ql in pl:
                 rank = 0 if pl.startswith(ql) else 1

@@ -13,7 +13,7 @@ import re
 import time
 from typing import Callable
 
-from aura.agent import validate_script_code
+from aura.security.tool_validator import validate_script_code
 
 from ..base_agent import ToolUsingSpecialist
 from ..protocol import AgentMessage, AgentResult
