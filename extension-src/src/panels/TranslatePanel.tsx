@@ -99,39 +99,15 @@ export default function TranslatePanel() {
     }));
   }, [inputText, from, to, wsReady, ws, activeStream, setActiveStream, getModel]);
 
-  // Full page translate — sends PAGE_TRANSLATE to content script via background
+  // Full page translate — routes through background for stale-tab fallback
   const translateFullPage = async () => {
     setPageTranslating(true);
     setPageTranslateActive(false);
     setOutput('');
 
     try {
-      // Get active tab and send message to content script
-      const tabResp = await sendMsg({ type: 'GET_CURRENT_TAB' });
-      if (!tabResp?.ok) {
-        setOutput('No active tab found.');
-        setPageTranslating(false);
-        return;
-      }
-
-      // Send PAGE_TRANSLATE to the content script of the active tab
-      const resp = await new Promise<any>((resolve) => {
-        ext.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
-          const tab = tabs?.[0];
-          if (!tab?.id) {
-            resolve({ ok: false, error: 'No active tab' });
-            return;
-          }
-          ext.tabs.sendMessage(tab.id, { type: 'PAGE_TRANSLATE', targetLang: to }, (r: any) => {
-            if (ext.runtime.lastError) {
-              resolve({ ok: false, error: ext.runtime.lastError.message });
-            } else {
-              resolve(r || { ok: false, error: 'No response' });
-            }
-          });
-        });
-      });
-
+      // Send PAGE_TRANSLATE via background — it injects content.js if tab is stale
+      const resp = await sendMsg({ type: 'PAGE_TRANSLATE', targetLang: to });
       if (resp?.ok) {
         setPageTranslateActive(true);
         setPageTranslateMode('bilingual');

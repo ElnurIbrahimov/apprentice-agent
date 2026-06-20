@@ -8,6 +8,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { buildSrcdoc } from '../utils/artifactRenderer';
 import { highlightCode } from '../utils/codeHighlighter';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type DeviceSize = 'desktop' | 'tablet' | 'mobile';
@@ -463,7 +464,7 @@ export function WebCreator({ creatorMode: _mode = 'web', customTemplates, custom
 
   // Fetch available models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [

@@ -7,6 +7,7 @@ import {
   DocumentDuplicateIcon,
   CheckIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type Action = 'analyze' | 'extract_text' | 'explain_code' | 'describe_ui' | 'find_issues';
@@ -74,7 +75,7 @@ export function CapturePanel() {
 
   // Fetch models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [

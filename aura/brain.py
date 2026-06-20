@@ -76,7 +76,7 @@ def _get_response_cache():
             try:
                 from aura.core.response_cache import ResponseCache
                 _response_cache_singleton = ResponseCache()
-            except Exception:
+            except (ImportError, OSError, ValueError):
                 logger.debug("response_cache_init_failed", exc_info=True)
                 return None
     return _response_cache_singleton
@@ -141,7 +141,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             else:
                 self._local_ollama_ok = False
                 logger.info("[BRAIN] Local Ollama has no chat models — using cloud for all requests")
-        except Exception:
+        except (ConnectionError, OSError):
             self._local_ollama_ok = False
             logger.info("[BRAIN] Local Ollama not reachable — using cloud for all requests")
 
@@ -167,7 +167,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 from aura.providers.credential_pool import get_pool
                 get_pool().register("ollama_cloud", "OLLAMA_API_KEY")
                 pooled_key = get_pool().acquire("ollama_cloud") or api_key
-            except Exception:
+            except (OSError, ConnectionError, TimeoutError, ValueError):
                 pooled_key = api_key
 
             # Cloud models: 90s read timeout (cloud can be slower than local)
@@ -326,7 +326,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             else:
                 # Stale — clean it up
                 self._cb_state_file.unlink(missing_ok=True)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.debug(f"[BRAIN] Could not load circuit breaker state: {e}")
 
     def _save_cb_state(self) -> None:
@@ -341,7 +341,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             }
             from aura.paths import atomic_write_json
             atomic_write_json(self._cb_state_file, payload, indent=0)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.debug(f"[BRAIN] Could not save circuit breaker state: {e}")
 
     def close(self) -> None:
@@ -349,17 +349,17 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         try:
             if hasattr(self, 'client') and self.client is not None:
                 self.client._client.close()
-        except Exception as e:
+        except (OSError, AttributeError) as e:
             logger.debug(f"[BRAIN] Local client close failed: {e}")
         try:
             if hasattr(self, '_cloud_client') and self._cloud_client is not None:
                 self._cloud_client._client.close()
-        except Exception as e:
+        except (OSError, AttributeError) as e:
             logger.debug(f"[BRAIN] Cloud client close failed: {e}")
         try:
             if hasattr(self, '_chatgpt_client'):
                 self._chatgpt_client = None
-        except Exception as e:
+        except (OSError, AttributeError) as e:
             logger.debug(f"[BRAIN] ChatGPT client cleanup failed: {e}")
         logger.debug("[BRAIN] HTTP clients closed")
 
@@ -470,7 +470,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 timeout=timeout,
                 default=None,
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"[BRAIN] Tool call error ({actual_model}): {e}")
             return None, actual_model
 
@@ -501,7 +501,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                     if response is not None:
                         actual_model = fb_actual
                         break
-                except Exception as e:
+                except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                     logger.warning(f"[BRAIN] Fallback model {fb_actual} failed: {e}")
                     continue
 
@@ -590,7 +590,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 timeout=120,
                 default=None,
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"[BRAIN] ChatGPT tool call failed: {e}")
             return {"error": str(e)}
 
@@ -665,7 +665,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             if not in_tool_call and display_buffer:
                 yield ("content", display_buffer)
 
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"[BRAIN] ChatGPT stream error: {e}")
             yield ("error", {"error": str(e)})
             return
@@ -962,7 +962,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 "output_tokens": output_tokens,
             })
 
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             error_msg = _user_facing_llm_error(e, model=actual_model)
             yield ("error", {"error": error_msg})
 
@@ -983,7 +983,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                     default=None
                 )
                 logger.info(f"[BRAIN] Warmed up local model: {model}")
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.warning(f"[BRAIN] Warmup failed for {model}: {e}")
 
     def _load_history(self) -> None:
@@ -1097,7 +1097,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 keep_alive="0s"  # Unload immediately
             )
             logger.info(f"[BRAIN] Reset context for {target_model}")
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[BRAIN] Context reset failed (ok if model not loaded): {e}")
 
     def full_reset(self):
@@ -1124,7 +1124,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             from aura.pools import is_shutting_down
             if is_shutting_down():
                 return ""
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             logger.debug("Shutdown check failed in _quick_generate", exc_info=True)
 
         # Yield to user inference — poll briefly in case it finishes soon.
@@ -1149,13 +1149,13 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                     )
                 )
                 response = future.result(timeout=timeout)
-            except Exception:
+            except (OSError, ConnectionError, TimeoutError, ValueError):
                 response = None
             if response is None:
                 logger.warning(f"[BRAIN] Quick generate timed out after {timeout}s")
                 return ""
             return _resp_content(response)
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.error(f"[BRAIN] Quick generate failed: {e}")
             return ""
 
@@ -1256,7 +1256,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 from aura.pools import is_shutting_down
                 if is_shutting_down():
                     return None
-            except Exception:
+            except (OSError, ConnectionError, TimeoutError, ValueError):
                 logger.debug("Shutdown check failed in _run_with_retry", exc_info=True)
             try:
                 future = _llm_pool_fn().submit(func)
@@ -1270,7 +1270,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             except RuntimeError:
                 # Pool shut down during interpreter teardown
                 return None
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 if attempt < max_retries and _is_rate_limit_error(e):
                     delay = min(base_delay * (2 ** attempt), 3.0)
                     logger.warning(f"[BRAIN] Rate limited (attempt {attempt+1}/{max_retries}), retrying in {delay:.1f}s")
@@ -1315,7 +1315,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         # Submit compaction to background executor (non-blocking)
         try:
             _bg_submit(self.compact_history)
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.warning(f"[BRAIN] Auto-compact submission failed: {e}")
 
     @staticmethod
@@ -1453,7 +1453,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         if self._alma_enabled and use_history:
             try:
                 process_user_message(prompt)
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.debug(f"[BRAIN] ALMA message processing failed: {e}")
 
         # Model selection
@@ -1463,7 +1463,8 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         else:
             model = self._select_model(prompt, task_type)
             model = self._routing_stats_override(model, task_type)
-        self._last_model_used = model
+        with self._state_lock:
+            self._last_model_used = model
         self._touch_warm_slot(model)
 
         full_system_prompt = self._build_full_system_prompt(prompt, system_prompt, tone_modifier)
@@ -1554,7 +1555,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                 get_self_improvement_engine().record_chat_outcome,
                 prompt, assistant_message, actual_model
             )
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[Brain] non-critical: {e}")
 
         self._trigger_world_model_extraction(list(recent))
@@ -1583,7 +1584,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             from aura.pools import is_shutting_down
             if is_shutting_down():
                 return _user_facing_llm_error(model="shutdown")
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             logger.debug("Shutdown check failed in think()", exc_info=True)
 
         # Circuit breaker: if too many consecutive failures, return degraded response
@@ -1621,7 +1622,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                         if msg.get("role") == "user" and msg.get("content") == prompt:
                             msg["content"] = redacted_prompt
                             break
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.warning(f"[BRAIN] Taint tracker failed — secrets may pass through undetected: {e}")
 
             # Record neuromodulator influence on thinking panel
@@ -1640,7 +1641,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                         f"neuromodulators influencing response: {', '.join(neuro_effects)}",
                         0.4, "emotion"
                     )
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.debug(f"[Brain] non-critical: {e}")
 
             # Response cache — skip the LLM entirely on a hit. Only safe when
@@ -1689,7 +1690,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                             self._last_model_used = actual_model
                             logger.info(f"[BRAIN] Fallback succeeded with: {actual_model}")
                             break
-                    except Exception as e:
+                    except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                         logger.warning(f"[BRAIN] Fallback model failed: {e}")
                         continue
 
@@ -1747,7 +1748,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
             if _cache_key_ok and assistant_message and _cache is not None:
                 try:
                     _cache.put(prompt, full_system_prompt or "", actual_model, assistant_message)
-                except Exception:
+                except (OSError, ConnectionError, TimeoutError, ValueError):
                     logger.debug("response_cache_put_failed", exc_info=True)
 
             return assistant_message
@@ -1849,7 +1850,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                     actual_model = _try_actual
                     self._last_model_used = actual_model
                     break
-                except Exception as e:
+                except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                     if _try_model == _models_to_try[-1]:
                         import traceback
                         _tb = traceback.format_exc()
@@ -1886,7 +1887,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                         get_self_improvement_engine().record_chat_outcome,
                         prompt, full_response, actual_model
                     )
-                except Exception as e:
+                except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                     logger.debug(f"[Brain] non-critical: {e}")
                 recent = [
                     {"role": "user", "content": prompt},
@@ -1930,7 +1931,7 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
                     pass  # Fall through to the shared pool path.
             from aura.pools import bg_submit
             bg_submit(_run_world_model_extraction, conv_id, recent, self._user_inference_active)
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[Brain] non-critical: {e}")
 
     def summarize(self, content: str, goal: str) -> str:
@@ -1969,7 +1970,7 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             try:
                 trigger_emotion(emotion, intensity, reason)
                 logger.debug(f"[BRAIN] Triggered emotion: {emotion} ({intensity})")
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.warning(f"[BRAIN] Failed to trigger emotion: {e}")
 
     def get_emotional_state(self) -> Optional[dict]:
@@ -1982,7 +1983,7 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
             return None
         try:
             return alma_engine.get_emotional_state()
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.warning(f"[BRAIN] Failed to get emotional state: {e}")
             return None
 
@@ -1995,7 +1996,7 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
         if self._alma_enabled:
             try:
                 return get_mood_emoji()
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.debug(f"[Brain] non-critical: {e}")
         return "🤖"
 
@@ -2009,5 +2010,5 @@ Write a clear, concise summary (3-5 sentences) of the key points relevant to the
         if self._alma_enabled:
             try:
                 process_response_outcome(success, user_satisfied)
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.debug(f"[BRAIN] Failed to update emotional state: {e}")

@@ -14,6 +14,7 @@ import {
   ClockIcon,
   ArrowPathIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface KGNode {
   id: string;
@@ -65,7 +66,7 @@ export function WorldModelPanel() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/knowledge-graph');
+      const res = await apiFetch('/api/knowledge-graph');
       if (!res.ok) { setError('Could not load knowledge graph'); setLoading(false); return; }
       const data = await res.json();
       const nodes: KGNode[] = data.nodes || [];

@@ -4,6 +4,7 @@ import { highlightCode } from '../utils/codeHighlighter';
 import { sanitizeHtml } from '../utils/sanitize';
 import { execute, resetRuntime, subscribe, isReady, type OutputBlock, type VariableInfo } from '../utils/pyodideExecutor';
 import { executeJS } from '../utils/jsExecutor';
+import { apiFetch } from '../utils/apiFetch';
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 
@@ -276,7 +277,7 @@ export function CodeInterpreter() {
 
   // Fetch models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [

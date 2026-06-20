@@ -16,6 +16,15 @@ import type {
   McpServerInfo,
   McpServerCreate,
 } from './types';
+
+const VALID_PANELS = new Set<PanelId>([
+  'chat', 'search', 'translate', 'grammar', 'wisebase', 'ask', 'summary',
+  'tools', 'pdf', 'voice', 'record', 'ocr', 'youtube', 'research', 'math',
+  'artifacts', 'image', 'compare', 'capture', 'agent', 'hands', 'aura-status',
+  'models', 'mcp', 'settings', 'reasoning-tree', 'multi-agent', 'bandit',
+  'context-heatmap', 'memory-browser', 'activity', 'evolution', 'calendar',
+  'flashcards', 'email', 'feed', 'share',
+]);
 import { HTTP, apiFetch } from './api';
 import { chat as chatApi, proactive as proactiveApi, models as modelsApi, conversations as conversationsApi } from './api/client';
 import ext from './ext';
@@ -373,7 +382,13 @@ export const useStore = create<AuraStore>((set, get) => {
       // (set via registerReconnectHandler to avoid circular imports)
       if (_reconnectHandler) _reconnectHandler();
     },
-    setPanel: (activePanel) => set({ activePanel }),
+    setPanel: (activePanel: PanelId) => {
+      if (VALID_PANELS.has(activePanel)) {
+        set({ activePanel });
+      } else {
+        set({ activePanel: 'chat' as PanelId });
+      }
+    },
     _pendingHandoff: null,
     handoffToPanel: (panel, data) => set({ activePanel: panel, _pendingHandoff: data }),
     consumePanelHandoff: () => {

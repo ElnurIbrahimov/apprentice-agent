@@ -171,9 +171,8 @@ export default function HomeScreen({ onChip }: Props) {
           color: 'var(--mu)',
           lineHeight: 1.6,
         }}>
-          {modKey}+K
-        </kbd>
-        <span>to start typing</span>
+          {modKey}+K  </kbd>
+        <span>to switch panel</span>
       </div>
 
       {/* Footer — model + connection status */}

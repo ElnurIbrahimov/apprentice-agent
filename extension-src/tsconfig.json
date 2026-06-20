@@ -16,5 +16,6 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "background.ts", "newtab.html"]
+  "include": ["src", "background.ts", "newtab.html"],
+  "exclude": ["src/__tests__/background"]
 }

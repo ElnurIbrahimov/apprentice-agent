@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import type { AuraStatus } from '../types';
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 const MOOD_EMOJIS: Record<string, string> = {
   excited: '🌟',
@@ -30,12 +31,12 @@ export function AuraPanel() {
   const fetchStatus = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/aura');
+      const res = await apiFetch('/api/aura');
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to fetch AURA status:', e);
     } finally {
       setLoading(false);
@@ -47,7 +48,7 @@ export function AuraPanel() {
   const handleRemember = async () => {
     if (!rememberText.trim()) return;
     try {
-      const res = await fetch('/api/aura/remember', {
+      const res = await apiFetch('/api/aura/remember', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fact: rememberText }),
@@ -59,7 +60,7 @@ export function AuraPanel() {
       } else {
         setRememberResult(`✗ ${data.error || 'Failed'}`);
       }
-    } catch (e) {
+    } catch (e: any) {
       setRememberResult('✗ Error storing memory');
     }
     if (timerRef.current) clearTimeout(timerRef.current);

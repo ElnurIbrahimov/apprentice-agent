@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { PlusIcon, PlayIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface Task {
   id: string;
@@ -43,7 +44,7 @@ export function TaskQueuePanel() {
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: 'running' } : t));
 
       try {
-        const res = await fetch('/api/chat', {
+        const res = await apiFetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: task.text }),

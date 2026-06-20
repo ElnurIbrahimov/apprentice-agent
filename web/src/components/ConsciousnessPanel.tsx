@@ -9,6 +9,7 @@ import { useState, useCallback } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import type { DriveState, CognitiveLoad, ToMSummary } from '../types';
 import { EMOTION_COLORS } from '../utils/emotionConstants';
+import { apiFetch } from '../utils/apiFetch';
 
 // ─── Drive config ───
 const DRIVES: { key: keyof DriveState; label: string; color: string; icon: string }[] = [
@@ -141,10 +142,10 @@ export function ConsciousnessPanel() {
 
   const fetchAll = useCallback(async () => {
     const results = await Promise.allSettled([
-      fetch('/api/motivation/drives').then(r => r.ok ? r.json() : null),
-      fetch('/api/alma/state').then(r => r.ok ? r.json() : null),
-      fetch('/api/theory-of-mind/model').then(r => r.ok ? r.json() : null),
-      fetch('/api/idle-presence/cognitive-load').then(r => r.ok ? r.json() : null),
+      apiFetch('/api/motivation/drives').then(r => r.ok ? r.json() : null),
+      apiFetch('/api/alma/state').then(r => r.ok ? r.json() : null),
+      apiFetch('/api/theory-of-mind/model').then(r => r.ok ? r.json() : null),
+      apiFetch('/api/idle-presence/cognitive-load').then(r => r.ok ? r.json() : null),
     ]);
     if (results[0].status === 'fulfilled' && results[0].value) setDrives(results[0].value.drives || results[0].value);
     if (results[1].status === 'fulfilled' && results[1].value) setAlma(results[1].value);

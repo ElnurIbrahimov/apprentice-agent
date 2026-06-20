@@ -66,7 +66,7 @@ export function useIdleBehaviors(enabled: boolean = true) {
     activityTimeoutRef.current = setTimeout(async () => {
       try {
         await apiFetch('/api/idle/activity', { method: 'POST' });
-      } catch (e) {
+      } catch (e: any) {
         // Silently ignore
       }
     }, 30000); // Only record after 30 seconds of no activity
@@ -76,19 +76,28 @@ export function useIdleBehaviors(enabled: boolean = true) {
   useEffect(() => {
     if (!enabled) return;
 
+    let throttleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const throttledRecordActivity = () => {
+      if (throttleTimer) return;
+      throttleTimer = setTimeout(() => {
+        throttleTimer = null;
+        recordActivity();
+      }, 500);
+    };
+
     const handleActivity = () => {
       recordActivity();
     };
 
-    // Track various activity types
-    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('mousemove', throttledRecordActivity);
     window.addEventListener('keydown', handleActivity);
     window.addEventListener('click', handleActivity);
     window.addEventListener('scroll', handleActivity);
     window.addEventListener('touchstart', handleActivity);
 
     return () => {
-      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('mousemove', throttledRecordActivity);
       window.removeEventListener('keydown', handleActivity);
       window.removeEventListener('click', handleActivity);
       window.removeEventListener('scroll', handleActivity);
@@ -96,6 +105,9 @@ export function useIdleBehaviors(enabled: boolean = true) {
 
       if (activityTimeoutRef.current) {
         clearTimeout(activityTimeoutRef.current);
+      }
+      if (throttleTimer) {
+        clearTimeout(throttleTimer);
       }
     };
   }, [enabled, recordActivity]);
@@ -110,7 +122,7 @@ export function useIdleBehaviors(enabled: boolean = true) {
         const data = await response.json();
         setIdleState(data);
       }
-    } catch (e) {
+    } catch (e: any) {
       // Silently ignore
     }
   }, [enabled]);
@@ -125,7 +137,7 @@ export function useIdleBehaviors(enabled: boolean = true) {
         const data = await response.json();
         setAnimationParams(data);
       }
-    } catch (e) {
+    } catch (e: any) {
       // Silently ignore
     }
   }, [enabled]);

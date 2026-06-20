@@ -54,7 +54,7 @@ export function ThoughtStream() {
       await apiFetch('/api/thoughts/clear', { method: 'POST' });
       setThoughts([]);
       setThoughtCount(0);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to clear thoughts:', e);
     }
   };

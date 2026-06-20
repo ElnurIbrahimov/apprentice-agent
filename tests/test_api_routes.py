@@ -25,12 +25,17 @@ def client():
     # Remove API key so auth middleware disables itself
     os.environ.pop("AURA_API_KEY", None)
 
-    # Mock the agent service to avoid heavy init
-    with patch("api.services.agent_service.agent_service") as mock_svc:
-        mock_svc.is_ready = True
-        mock_svc.start_background_init = MagicMock()
-        from api.main import app
-        yield TestClient(app, raise_server_exceptions=False)
+    # Prevent heavy agent init and missing ollama import failure
+    import sys
+    from unittest.mock import MagicMock
+    sys.modules["ollama"] = MagicMock()
+    sys.modules["api.services.agent_service"] = MagicMock()
+    sys.modules["api.services.agent_service"].agent_service = MagicMock()
+    sys.modules["api.services.agent_service"].agent_service.is_ready = True
+    sys.modules["api.services.agent_service"].agent_service.start_background_init = MagicMock()
+
+    from api.main import app
+    yield TestClient(app, raise_server_exceptions=False)
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +76,9 @@ class TestConversationIDValidation:
     def test_valid_id_format_accepted(self, client):
         """Valid ID format should not be rejected by validation (may 404 if not found)."""
         r = client.put("/api/chat/conversations/conv_abc123", json={"title": "test"})
-        # Should not be 400 (validation error) — 404/500 is OK (not found / no agent)
+        # Should not be 400 (validation error) — 404 is OK (not found), 200 is fine with mocks.
+        # 500 is NOT OK (server crash).
+        assert r.status_code in (200, 401, 404, 422), f"Got {r.status_code} — 500 means server crash, not expected"
         assert r.status_code != 400 or "Invalid" not in r.text
 
 

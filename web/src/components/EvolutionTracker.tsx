@@ -17,6 +17,7 @@ import {
   XCircleIcon,
   BeakerIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface Candidate {
   id: number;
@@ -88,7 +89,7 @@ export function EvolutionTracker() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/evolution/status');
+      const res = await apiFetch('/api/evolution/status');
       if (res.ok) setEvoStatus(await res.json());
     } catch { /* silent */ }
     setLoading(false);
@@ -100,7 +101,7 @@ export function EvolutionTracker() {
     haptics.medium();
     setStarting(true);
     try {
-      await fetch('/api/evolution/run', {
+      await apiFetch('/api/evolution/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ max_iterations: 5, timeout_seconds: 300 }),

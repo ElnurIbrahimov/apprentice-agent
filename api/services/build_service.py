@@ -345,8 +345,10 @@ class BuildService:
             record.cancel_requested = True
             record.updated_at = time.time()
             loop = record.loop
-        if loop is not None:
-            loop.cancel()
+            # Cancel while still holding the lock so record.loop can't
+            # transition to None between the read and the cancel() call.
+            if loop is not None:
+                loop.cancel()
         broadcast_event({
             "type": "build_cancel_requested",
             "task_id": task_id,

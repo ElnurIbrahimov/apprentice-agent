@@ -5,6 +5,7 @@ import {
   ClockIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 const SEARCH_SYSTEM_PROMPT_BASE = `You are a web search assistant. Answer the user's query using ONLY the web search results provided below. Rules:
 - Cite sources inline using [1], [2], etc. matching the result numbers
@@ -138,7 +139,7 @@ export function SearchPanel() {
 
   // Fetch models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [

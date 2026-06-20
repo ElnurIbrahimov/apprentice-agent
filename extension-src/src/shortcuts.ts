@@ -61,17 +61,8 @@ export function initShortcuts(store: Store) {
       return;
     }
 
-    // --- Ctrl/Cmd+K: Focus chat input ---
-    if (mod && !e.shiftKey && key === 'k') {
-      e.preventDefault();
-      const ta = document.querySelector('textarea') as HTMLTextAreaElement | null;
-      if (ta) {
-        ta.focus();
-        // Move cursor to end
-        ta.setSelectionRange(ta.value.length, ta.value.length);
-      }
-      return;
-    }
+    // --- Ctrl/Cmd+K is handled by CommandPalette.tsx (opens palette + focuses input) ---
+    // Removed to avoid conflict with the command palette capture-phase listener.
 
     // --- Ctrl/Cmd+L: Clear conversation ---
     if (mod && !e.shiftKey && key === 'l') {

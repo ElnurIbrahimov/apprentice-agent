@@ -69,7 +69,7 @@ export function useWebSocket() {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         try {
           wsRef.current.send(JSON.stringify({ type: 'ping' }));
-        } catch (e) {
+        } catch (e: any) {
           console.warn('[WebSocket] Heartbeat failed');
         }
       }
@@ -127,7 +127,7 @@ export function useWebSocket() {
           try {
             const audio = new Audio(data.audio_url);
             audio.play().catch((e) => console.warn('[TTS] Audio play failed:', e));
-          } catch (e) {
+          } catch (e: any) {
             console.warn('[TTS] Failed to create Audio:', e);
           }
         }
@@ -306,7 +306,7 @@ export function useWebSocket() {
           const data: WebSocketMessage = JSON.parse(event.data);
           if (data.type === 'pong') return;
           handleMessage(data);
-        } catch (e) {
+        } catch (e: any) {
           console.error('[WebSocket] Parse error:', e);
         }
       };
@@ -346,7 +346,7 @@ export function useWebSocket() {
 
       wsRef.current = ws;
 
-    } catch (e) {
+    } catch (e: any) {
       console.error('[WebSocket] Failed to create WebSocket:', e);
       setConnectionStatus('error');
       setError('Failed to create WebSocket connection');

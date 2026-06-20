@@ -9,6 +9,7 @@ import {
   StopIcon,
   PresentationChartBarIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 interface ChatMessage {
@@ -225,7 +226,7 @@ export function SlidesPanel() {
 
   /* ── Fetch models ── */
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [

@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { ChevronDownIcon, ChevronUpIcon, ChatBubbleLeftEllipsisIcon } from '@heroicons/react/24/outline';
 import { usePolling } from '../hooks/usePolling';
+import { apiFetch } from '../utils/apiFetch';
 
 interface StarterStats {
   total_generated: number;
@@ -20,12 +21,12 @@ export function ConversationStarterPanel() {
   // Fetch stats
   const fetchStats = useCallback(async () => {
     try {
-      const response = await fetch('/api/conversation/starter/stats');
+      const response = await apiFetch('/api/conversation/starter/stats');
       if (response.ok) {
         const data = await response.json();
         setStats(data);
       }
-    } catch (e) {
+    } catch (e: any) {
       // Silently ignore
     }
   }, []);
@@ -37,7 +38,7 @@ export function ConversationStarterPanel() {
   const triggerStarter = async () => {
     setIsGenerating(true);
     try {
-      const response = await fetch('/api/conversation/starter/generate', {
+      const response = await apiFetch('/api/conversation/starter/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force: true }),
@@ -50,7 +51,7 @@ export function ConversationStarterPanel() {
           fetchStats();
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to generate starter:', e);
     } finally {
       setIsGenerating(false);

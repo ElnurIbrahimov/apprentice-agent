@@ -14,6 +14,7 @@ import { haptic } from '../utils/haptics';
 import { sounds } from '../utils/sounds';
 import { toast } from './Toast';
 import type { FileAttachment } from '../types';
+import { apiFetch } from '../utils/apiFetch';
 
 // Mobile detection hook
 function useIsMobile() {
@@ -99,8 +100,12 @@ export function MessageInput({
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
 
-  const { messages, selectedModel, availableModels, setSelectedModel, setAvailableModels } = useChatStore();
-  const { settings } = useSettingsStore();
+  const messages = useChatStore(s => s.messages);
+  const selectedModel = useChatStore(s => s.selectedModel);
+  const availableModels = useChatStore(s => s.availableModels);
+  const setSelectedModel = useChatStore(s => s.setSelectedModel);
+  const setAvailableModels = useChatStore(s => s.setAvailableModels);
+  const settings = useSettingsStore(s => s.settings);
   const isMobile = useIsMobile();
 
   // Context budget meter — computes current estimated token usage to surface
@@ -116,7 +121,7 @@ export function MessageInput({
 
   // Fetch available models on mount
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [

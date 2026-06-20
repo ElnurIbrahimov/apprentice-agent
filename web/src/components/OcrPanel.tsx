@@ -7,6 +7,7 @@ import {
   StopIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type Action = 'extract' | 'describe' | 'data';
@@ -80,7 +81,7 @@ export function OcrPanel() {
 
   // Fetch available models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then((res) => res.json())
       .then((data) => {
         const all = [

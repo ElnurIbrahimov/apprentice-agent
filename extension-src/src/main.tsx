@@ -13,19 +13,10 @@ import { initShortcuts } from './shortcuts';
 // default prefs / empty model list) that used to appear while chrome.storage
 // callbacks resolved in parallel with the first fetchStatus() call.
 async function init() {
-  ext?.runtime?.sendMessage({ type: 'SIDEBAR_READY' });
   window.addEventListener('beforeunload', () => {
     ext?.runtime?.sendMessage({ type: 'SIDEBAR_CLOSED' });
   });
   await Promise.all([initBackendUrl(), storeHydrated]);
-  if (!API_KEY) {
-    useStore.getState().addProactiveMessage({
-      id: 'first-run-api-key',
-      text: 'Paste your Aura API key in Settings → Connection to start chatting.',
-      timestamp: Date.now(),
-    });
-    useStore.getState().setPanel('settings');
-  }
   fetchStatus();
   setInterval(fetchStatus, 30_000);
   connectWS();

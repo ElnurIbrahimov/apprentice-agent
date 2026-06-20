@@ -7,6 +7,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useChatStore } from '../store/chatStore';
 import { SendToMenu } from './SendToMenu';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type InputMode = 'text' | 'url';
@@ -120,7 +121,7 @@ export function SummaryPanel() {
 
   /* ── Fetch models ── */
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all: string[] = [

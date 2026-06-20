@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { apiFetch } from '../utils/apiFetch';
 
 export interface UseModelSelectorReturn {
   selectedModel: string | null;
@@ -17,7 +18,7 @@ export function useModelSelector(): UseModelSelectorReturn {
 
   // Fetch models on mount
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [

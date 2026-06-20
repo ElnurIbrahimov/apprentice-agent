@@ -72,7 +72,7 @@ async function loadConfig(): Promise<void> {
   // `chrome.storage` is not guaranteed to be exposed to offscreen documents
   // across Chrome versions — proxy through the service worker which always
   // has access. Fall through to the default server if anything fails.
-  let httpUrl = 'https://aura-elnur.duckdns.org';
+  let httpUrl = 'http://localhost:8000';
   let key = '';
   try {
     // Prefer direct access if available (newer Chrome)…
@@ -131,7 +131,7 @@ function connect(): void {
     stopPing();
     consecutiveFailures++;
     broadcastStatus();
-    broadcast({ type: 'AURA_WS_CLOSED' });
+    broadcast({ type: 'AURA_WS_CLOSED', consecutiveFailures });
     if (consecutiveFailures <= 8) {
       scheduleReconnect();
     } else {

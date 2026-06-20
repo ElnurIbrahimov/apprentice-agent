@@ -225,7 +225,7 @@ export default function SettingsPanel() {
   const handleTestConnection = async () => {
     setConnTesting(true);
     setConnStatus('idle');
-    const testUrl = localBackendUrl.trim().replace(/\/+$/, '') || 'https://aura-elnur.duckdns.org';
+    const testUrl = localBackendUrl.trim().replace(/\/+$/, '') || 'http://localhost:8000';
     try {
       const headers: Record<string, string> = {};
       if (localApiKey.trim()) headers['X-API-Key'] = localApiKey.trim();
@@ -449,7 +449,7 @@ export default function SettingsPanel() {
             type="url"
             value={localBackendUrl}
             onChange={(e) => setLocalBackendUrl(e.target.value)}
-            placeholder="https://aura-elnur.duckdns.org (default)"
+            placeholder="http://localhost:8000 (default)"
             maxLength={200}
             style={inputStyle}
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--pl)')}

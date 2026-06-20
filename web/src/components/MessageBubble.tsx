@@ -19,6 +19,7 @@ import { toast } from './Toast';
 import type { ArtifactType } from '../utils/artifactRenderer';
 import { splitAtSafePoint } from '../utils/streamMarkdown';
 import { detectArtifactType } from '../utils/artifactRenderer';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Citation tooltip shown on hover of inline [N] badges ── */
 function CitationTooltip({ citation, position }: { citation: Citation; position: { x: number; y: number } }) {
@@ -424,7 +425,7 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
     if (!next) return;
     try {
       const store = useChatStore.getState();
-      await fetch('/api/chat/messages/feedback', {
+      await apiFetch('/api/chat/messages/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -505,7 +506,7 @@ export const MessageBubble = memo(function MessageBubble({ message, animateIn = 
     if (navigator.share) {
       try {
         await navigator.share({ text: message.content });
-      } catch (e) {
+      } catch (e: any) {
         // User cancelled or share failed — not an error
         if ((e as DOMException).name !== 'AbortError') {
           console.warn('[CtxMenu Share] Failed:', e);

@@ -24,8 +24,13 @@ REDIRECT_URI = "http://localhost:1455/auth/callback"
 SCOPE = "openid profile email offline_access"
 CALLBACK_PORT = 1455
 
-# Your AURA server — configure via environment variables
-AURA_SERVER = os.environ.get("AURA_SERVER", "https://aura-elnur.duckdns.org")
+# Your AURA server — configure via environment variables (no default to avoid
+# accidentally sending tokens to the wrong endpoint).
+AURA_SERVER = os.environ.get("AURA_SERVER", "").strip()
+if not AURA_SERVER:
+    print("ERROR: Set AURA_SERVER environment variable before running.")
+    print("  export AURA_SERVER='https://your-aura-instance.example.com'")
+    sys.exit(1)
 AURA_API_KEY = os.environ.get("AURA_API_KEY", "")
 if not AURA_API_KEY:
     print("ERROR: Set AURA_API_KEY environment variable before running.")

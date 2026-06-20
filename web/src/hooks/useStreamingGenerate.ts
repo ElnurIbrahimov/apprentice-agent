@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { apiFetch } from '../utils/apiFetch';
 
 export interface GenerateOptions {
   model?: string;
@@ -44,7 +45,7 @@ export function useStreamingGenerate(): UseStreamingGenerateReturn {
         if (options.model) body.model = options.model;
         if (options.images?.length) body.images = options.images;
 
-        const res = await fetch('/api/generate/raw', {
+        const res = await apiFetch('/api/generate/raw', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),

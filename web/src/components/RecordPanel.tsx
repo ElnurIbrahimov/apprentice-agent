@@ -8,6 +8,7 @@ import {
   ClipboardDocumentIcon,
   SparklesIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type ProcessAction = 'cleanup' | 'summarize' | 'actions';
@@ -82,7 +83,7 @@ export function RecordPanel() {
 
   /* Fetch models */
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(r => r.json())
       .then(data => {
         const all = [

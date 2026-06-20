@@ -6,6 +6,7 @@ import {
   CheckIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 const ASK_SYSTEM_PROMPT = `Answer the user's question directly and concisely. Be accurate and helpful. If the question is ambiguous, give the most likely interpretation. Format with markdown for readability.`;
 
@@ -148,7 +149,7 @@ export function AskPanel() {
 
   // Fetch models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [

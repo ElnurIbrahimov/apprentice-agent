@@ -1,15 +1,15 @@
 """API endpoints for new AURA tools: Calendar, Spaced Repetition, Email, Screen Reader, Shell."""
 
-import asyncio
 import logging
 import os
+import re as _re_module
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
 from api.auth import require_api_key
-from api.utils import call_tool, get_agent
+from api.utils import call_tool, get_agent, run_sync
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +40,7 @@ class AddEventRequest(BaseModel):
 async def calendar_today():
     """Get today's events."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _calendar_today_sync)
-        return result
+        return await run_sync(_calendar_today_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "calendar_today")}
 
@@ -56,9 +54,7 @@ async def calendar_upcoming(days: int = 7):
     """Get upcoming events."""
     days = max(1, min(days, 365))  # Clamp to prevent abuse
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _calendar_upcoming_sync(days))
-        return result
+        return await run_sync(_calendar_upcoming_sync, days)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "calendar_upcoming")}
 
@@ -71,9 +67,7 @@ def _calendar_upcoming_sync(days: int) -> dict:
 async def calendar_add(request: AddEventRequest):
     """Add a calendar event."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _calendar_add_sync(request))
-        return result
+        return await run_sync(_calendar_add_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "calendar_add")}
 
@@ -96,13 +90,10 @@ def _calendar_add_sync(request: AddEventRequest) -> dict:
 @router.delete("/calendar/{event_id}")
 async def calendar_remove(event_id: str):
     """Remove a calendar event."""
-    import re as _re
-    if not event_id or not _re.match(r'^[a-zA-Z0-9_\-\.]{1,128}$', event_id):
+    if not event_id or not _re_module.match(r'^[a-zA-Z0-9_\-\.]{1,128}$', event_id):
         return {"success": False, "error": "Invalid event_id format"}
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _calendar_remove_sync(event_id))
-        return result
+        return await run_sync(_calendar_remove_sync, event_id)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "calendar_remove")}
 
@@ -134,9 +125,7 @@ class AnswerRequest(BaseModel):
 async def flashcards_due():
     """Get due cards count and next card."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _flashcards_due_sync)
-        return result
+        return await run_sync(_flashcards_due_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "flashcards_due")}
 
@@ -152,9 +141,7 @@ def _flashcards_due_sync() -> dict:
 async def flashcards_answer(request: AnswerRequest):
     """Submit answer quality for a flashcard."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _flashcards_answer_sync(request))
-        return result
+        return await run_sync(_flashcards_answer_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "flashcards_answer")}
 
@@ -170,9 +157,7 @@ def _flashcards_answer_sync(request: AnswerRequest) -> dict:
 async def flashcards_stats():
     """Get deck statistics."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _flashcards_stats_sync)
-        return result
+        return await run_sync(_flashcards_stats_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "flashcards_stats")}
 
@@ -188,9 +173,7 @@ def _flashcards_stats_sync() -> dict:
 async def flashcards_add(request: AddCardRequest):
     """Add a flashcard."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _flashcards_add_sync(request))
-        return result
+        return await run_sync(_flashcards_add_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "flashcards_add")}
 
@@ -223,9 +206,7 @@ class SendEmailRequest(BaseModel):
 async def email_status():
     """Check email configuration status."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _email_status_sync)
-        return result
+        return await run_sync(_email_status_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "email_status")}
 
@@ -242,9 +223,7 @@ async def email_inbox(limit: int = 10):
     """Get recent emails."""
     limit = max(1, min(limit, 100))  # Clamp to prevent abuse
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _email_inbox_sync(limit))
-        return result
+        return await run_sync(_email_inbox_sync, limit)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "email_inbox")}
 
@@ -260,9 +239,7 @@ def _email_inbox_sync(limit: int) -> dict:
 async def email_send(request: SendEmailRequest):
     """Send an email."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _email_send_sync(request))
-        return result
+        return await run_sync(_email_send_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "email_send")}
 
@@ -288,9 +265,7 @@ def _email_send_sync(request: SendEmailRequest) -> dict:
 async def screen_read():
     """Read current screen via OCR."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _screen_read_sync)
-        return result
+        return await run_sync(_screen_read_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "screen_read")}
 
@@ -306,9 +281,7 @@ def _screen_read_sync() -> dict:
 async def screen_active_window():
     """Get active window info."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _screen_active_window_sync)
-        return result
+        return await run_sync(_screen_active_window_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "screen_active_window")}
 
@@ -335,9 +308,7 @@ class ShellRunRequest(BaseModel):
 async def shell_run(request: ShellRunRequest):
     """Execute a shell command."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _shell_run_sync(request))
-        return result
+        return await run_sync(_shell_run_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "shell_run")}
 
@@ -364,6 +335,8 @@ _SHELL_ALLOWED_COMMANDS = {
 
 # Extra patterns that are ALWAYS blocked even if the base command is allowed
 _SHELL_DANGER_PATTERNS = [
+    # Normalize whitespace for substring checks — e.g. "r m" won't match "rm "
+    # but we keep the literal patterns as the first line of defense.
     "rm ", "rm\t", "rmdir", "rm -rf /", "rm -rf /*", "mkfs.", "dd if=", ":(){", "fork bomb",
     "chmod -R 777 /", "shutdown", "reboot", "init 0", "init 6",
     "taskkill //F //IM node", "pkill -f node", "killall node",
@@ -510,9 +483,7 @@ def _shell_run_sync(request: ShellRunRequest) -> dict:
 async def shell_sessions():
     """List active shell sessions."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _shell_sessions_sync)
-        return result
+        return await run_sync(_shell_sessions_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "shell_sessions")}
 
@@ -549,9 +520,7 @@ class UpdateTaskRequest(BaseModel):
 async def tasks_list(status: Optional[str] = None, project: Optional[str] = None):
     """List tasks, optionally filtered by status or project."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _tasks_list_sync(status, project))
-        return result
+        return await run_sync(_tasks_list_sync, status, project)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "tasks_list")}
 
@@ -567,9 +536,7 @@ def _tasks_list_sync(status: Optional[str], project: Optional[str]) -> dict:
 async def tasks_board():
     """Get kanban board view."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _tasks_board_sync)
-        return result
+        return await run_sync(_tasks_board_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "tasks_board")}
 
@@ -585,9 +552,7 @@ def _tasks_board_sync() -> dict:
 async def tasks_add(request: AddTaskRequest):
     """Add a new task."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _tasks_add_sync(request))
-        return result
+        return await run_sync(_tasks_add_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "tasks_add")}
 
@@ -610,9 +575,7 @@ def _tasks_add_sync(request: AddTaskRequest) -> dict:
 async def tasks_update(request: UpdateTaskRequest):
     """Update a task."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _tasks_update_sync(request))
-        return result
+        return await run_sync(_tasks_update_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "tasks_update")}
 
@@ -637,9 +600,7 @@ def _tasks_update_sync(request: UpdateTaskRequest) -> dict:
 async def tasks_remove(task_id: str):
     """Remove a task."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _tasks_remove_sync(task_id))
-        return result
+        return await run_sync(_tasks_remove_sync, task_id)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "tasks_remove")}
 
@@ -655,9 +616,7 @@ def _tasks_remove_sync(task_id: str) -> dict:
 async def tasks_overdue():
     """Get overdue tasks."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _tasks_overdue_sync)
-        return result
+        return await run_sync(_tasks_overdue_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "tasks_overdue")}
 
@@ -733,9 +692,7 @@ class APITestRequest(BaseModel):
 async def api_tester_run(request: APITestRequest):
     """Execute an HTTP request."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _api_tester_run_sync(request))
-        return result
+        return await run_sync(_api_tester_run_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "api_tester_run")}
 
@@ -758,9 +715,7 @@ async def api_tester_history(limit: int = 20):
     """Get API request history."""
     limit = max(1, min(limit, 100))  # Clamp to prevent abuse
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _api_tester_history_sync(limit))
-        return result
+        return await run_sync(_api_tester_history_sync, limit)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "api_tester_history")}
 
@@ -811,9 +766,7 @@ async def database_query(request: SQLQueryRequest):
     if _sql_words & _DML_KEYWORDS:
         return {"success": False, "error": "DML statements (INSERT/UPDATE/DELETE/DROP/etc.) are not allowed"}
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _database_query_sync(request))
-        return result
+        return await run_sync(_database_query_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "database_query")}
 
@@ -829,9 +782,7 @@ def _database_query_sync(request: SQLQueryRequest) -> dict:
 async def database_schema(db: str = "default", table: Optional[str] = None):
     """Get database schema."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _database_schema_sync(db, table))
-        return result
+        return await run_sync(_database_schema_sync, db, table)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "database_schema")}
 
@@ -847,9 +798,7 @@ def _database_schema_sync(db: str, table: Optional[str]) -> dict:
 async def database_import_csv(request: CSVImportRequest):
     """Import CSV into a database table."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _database_import_sync(request))
-        return result
+        return await run_sync(_database_import_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "database_import_csv")}
 
@@ -890,9 +839,7 @@ class TranscribeRequest(BaseModel):
 async def audio_transcribe(request: TranscribeRequest):
     """Transcribe an audio/video file."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _audio_transcribe_sync(request))
-        return result
+        return await run_sync(_audio_transcribe_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "audio_transcribe")}
 
@@ -924,9 +871,7 @@ def _audio_transcribe_sync(request: TranscribeRequest) -> dict:
 async def audio_transcripts():
     """List saved transcripts."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _audio_transcripts_sync)
-        return result
+        return await run_sync(_audio_transcripts_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "audio_transcripts")}
 
@@ -942,9 +887,7 @@ def _audio_transcripts_sync() -> dict:
 async def audio_status():
     """Check Whisper availability."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _audio_status_sync)
-        return result
+        return await run_sync(_audio_status_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "audio_status")}
 
@@ -965,9 +908,7 @@ async def clipboard_history(limit: int = 20, category: Optional[str] = None):
     """Get clipboard history."""
     limit = max(1, min(limit, 100))  # Clamp to prevent memory exhaustion
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _clipboard_history_sync(limit, category))
-        return result
+        return await run_sync(_clipboard_history_sync, limit, category)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "clipboard_history")}
 
@@ -983,9 +924,7 @@ def _clipboard_history_sync(limit: int, category: Optional[str]) -> dict:
 async def clipboard_capture():
     """Capture current clipboard content."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _clipboard_capture_sync)
-        return result
+        return await run_sync(_clipboard_capture_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "clipboard_capture")}
 
@@ -1001,9 +940,7 @@ def _clipboard_capture_sync() -> dict:
 async def clipboard_search(query: str):
     """Search clipboard history."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _clipboard_search_sync(query))
-        return result
+        return await run_sync(_clipboard_search_sync, query)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "clipboard_search")}
 
@@ -1019,9 +956,7 @@ def _clipboard_search_sync(query: str) -> dict:
 async def clipboard_stats():
     """Clipboard usage statistics."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _clipboard_stats_sync)
-        return result
+        return await run_sync(_clipboard_stats_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "clipboard_stats")}
 
@@ -1049,9 +984,7 @@ class SaveResearchRequest(BaseModel):
 async def research_list(category: Optional[str] = None):
     """List research files."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _research_list_sync(category))
-        return result
+        return await run_sync(_research_list_sync, category)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "research_list")}
 
@@ -1067,9 +1000,7 @@ def _research_list_sync(category: Optional[str]) -> dict:
 async def research_save(request: SaveResearchRequest):
     """Save a research note."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _research_save_sync(request))
-        return result
+        return await run_sync(_research_save_sync, request)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "research_save")}
 
@@ -1091,9 +1022,7 @@ def _research_save_sync(request: SaveResearchRequest) -> dict:
 async def research_search(query: str, category: Optional[str] = None):
     """Search research files."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: _research_search_sync(query, category))
-        return result
+        return await run_sync(_research_search_sync, query, category)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "research_search")}
 
@@ -1109,9 +1038,7 @@ def _research_search_sync(query: str, category: Optional[str]) -> dict:
 async def research_stats():
     """Research statistics."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _research_stats_sync)
-        return result
+        return await run_sync(_research_stats_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "research_stats")}
 
@@ -1127,9 +1054,7 @@ def _research_stats_sync() -> dict:
 async def research_skills():
     """List saved skills."""
     try:
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _research_skills_sync)
-        return result
+        return await run_sync(_research_skills_sync)
     except Exception as e:
         return {"success": False, "error": _safe_error(e, "research_skills")}
 

@@ -1,5 +1,7 @@
 import ext from './ext';
 
+import { DEFAULT_BACKEND_URL } from './defaults';
+
 // ---------------------------------------------------------------------------
 // Backend URL configuration
 //
@@ -8,8 +10,8 @@ import ext from './ext';
 // On startup, initBackendUrl() loads the saved URL and updates HTTP + WS_URL.
 // ---------------------------------------------------------------------------
 
-// Default to the Aura server. Override in Settings panel if running locally.
-const DEFAULT_HTTP = 'https://aura-elnur.duckdns.org';
+// Default to localhost. Override in Settings panel if running remotely.
+const DEFAULT_HTTP = DEFAULT_BACKEND_URL;
 
 export let HTTP = DEFAULT_HTTP;
 export let WS_URL = deriveWsUrl(DEFAULT_HTTP);

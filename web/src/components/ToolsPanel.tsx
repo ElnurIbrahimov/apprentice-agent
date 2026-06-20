@@ -10,11 +10,11 @@ import {
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarOutline } from '@heroicons/react/24/outline';
 import { StarIcon as StarSolid } from '@heroicons/react/24/solid';
-import { apiFetch } from '../utils/apiFetch';
 import { useChatStore } from '../store/chatStore';
 import { topMatches } from '../utils/toolMatch';
 import { SparklesIcon } from '@heroicons/react/24/outline';
 import { ToolPlayground } from './ToolPlayground';
+import { apiFetch } from '../utils/apiFetch';
 
 const PINNED_KEY = 'aura-tools-pinned';
 
@@ -129,7 +129,7 @@ export function ToolsPanel() {
           setReloadMsg(`Error: ${data.error}`);
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       setReloadMsg('Reload failed');
     } finally {
       setReloading(false);

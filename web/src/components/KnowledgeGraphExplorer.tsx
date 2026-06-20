@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { MagnifyingGlassIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -243,11 +244,11 @@ export function KnowledgeGraphExplorer() {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch('/api/knowledge-graph');
+      const res = await apiFetch('/api/knowledge-graph');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRawData(data);
-    } catch (e) {
+    } catch (e: any) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
       setLoading(false);

@@ -52,7 +52,7 @@ export function AMEMPanel() {
         const data = await res.json();
         setStats(data);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to fetch A-MEM stats:', e);
     }
   };
@@ -65,7 +65,7 @@ export function AMEMPanel() {
         const data = await res.json();
         setNotes(data.notes || []);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to fetch A-MEM notes:', e);
     } finally {
       setLoading(false);

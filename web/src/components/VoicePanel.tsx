@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { StopIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type SpeakState = 'idle' | 'speaking' | 'paused';
@@ -52,7 +53,7 @@ export function VoicePanel() {
 
   // Fetch models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [

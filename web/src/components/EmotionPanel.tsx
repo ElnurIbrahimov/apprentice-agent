@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 import { EMOTION_COLORS, NEURO_INFO, PERSONALITY_INFO } from '../utils/emotionConstants';
+import { apiFetch } from '../utils/apiFetch';
 
 interface ALMAState {
   available: boolean;
@@ -47,7 +48,7 @@ export function EmotionPanel() {
   // Fetch ALMA state periodically (10s - emotional state doesn't change that fast)
   const fetchState = useCallback(async () => {
     try {
-      const response = await fetch('/api/alma/state');
+      const response = await apiFetch('/api/alma/state');
       if (response.ok) {
         const data = await response.json();
         setAlmaState(data);

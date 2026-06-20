@@ -1,4 +1,5 @@
 import { useState, FormEvent, useEffect } from 'react';
+import { apiFetch } from '../utils/apiFetch';
 
 interface LoginPageProps {
   onLoggedIn: (username: string) => void;
@@ -28,7 +29,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch('/api/auth/web/login', {
+      const res = await apiFetch('/api/auth/web/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',

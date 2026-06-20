@@ -4,7 +4,10 @@
  */
 
 const CONV_LIST_KEY = 'aura_conversations';
-const BACKEND_URL = 'https://aura-elnur.duckdns.org';
+import { DEFAULT_BACKEND_URL } from './defaults';
+
+const DEFAULT_BACKEND = DEFAULT_BACKEND_URL;
+let _backendUrl = DEFAULT_BACKEND;
 const MOOD_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 const QUOTES = [
@@ -96,7 +99,7 @@ async function fetchAndApplyMood(): Promise<void> {
   if (!apiKey) return;
   try {
     const headers: Record<string, string> = { 'X-API-Key': apiKey };
-    const r = await fetch(`${BACKEND_URL}/api/status`, {
+    const r = await fetch(`${_backendUrl}/api/status`, {
       signal: AbortSignal.timeout(4000),
       headers,
     });
@@ -527,7 +530,8 @@ function mount() {
   // ── Quick action buttons ──
   document.querySelectorAll<HTMLButtonElement>('.nt-action[data-panel]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const panel = btn.dataset.panel;
+      let panel = btn.dataset.panel || '';
+      if (panel === 'write' || panel === 'code') panel = 'artifacts';
       if (panel) sendToBackground({ type: 'OPEN_SIDEBAR', panel });
     });
   });
@@ -550,16 +554,16 @@ function mount() {
     list.innerHTML = convs
       .map(
         (c) =>
-          `<button class="nt-recent-item" data-conv-id="${esc(c.id)}">
+          `<div class="nt-recent-item" data-conv-id="${esc(c.id)}">
             <span class="nt-recent-item-icon">${ICONS.chatBubble}</span>
             <span class="nt-recent-item-text">${esc(c.title)}</span>
             <span class="nt-recent-item-time">${esc(timeAgo(c.timestamp))}</span>
             <button class="nt-recent-item-delete" title="Remove">${ICONS.x}</button>
-          </button>`
+          </div>`
       )
       .join('');
 
-    list.querySelectorAll<HTMLButtonElement>('.nt-recent-item').forEach((item) => {
+    list.querySelectorAll<HTMLElement>('.nt-recent-item').forEach((item) => {
       item.addEventListener('click', (e) => {
         if ((e.target as HTMLElement).closest('.nt-recent-item-delete')) return;
         const convId = item.dataset.convId;
@@ -593,7 +597,7 @@ function mount() {
 
   // ── Backend health check (lightweight, no blocking) ──
   const ctrl = new AbortController();
-  fetch(`${BACKEND_URL}/api/health`, { signal: ctrl.signal, method: 'GET' })
+  fetch(`${_backendUrl}/api/health`, { signal: ctrl.signal, method: 'GET' })
     .then((r) => {
       if (r.ok) {
         const statusEl = document.getElementById('status-indicator');
@@ -634,7 +638,7 @@ async function fetchJson<T>(path: string, timeoutMs = 4000): Promise<T | null> {
     const headers = await authHeaders();
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    const r = await fetch(`${BACKEND_URL}${path}`, { headers, signal: ctrl.signal });
+    const r = await fetch(`${_backendUrl}${path}`, { headers, signal: ctrl.signal });
     clearTimeout(t);
     if (!r.ok) return null;
     return (await r.json()) as T;
@@ -792,7 +796,7 @@ async function refreshStarter(): Promise<void> {
   document.getElementById('starter-dismiss')?.addEventListener('click', async () => {
     if (topic) {
       const headers = await authHeaders();
-      fetch(`${BACKEND_URL}/api/conversation/starter/dismiss?topic=${encodeURIComponent(topic)}`, {
+      fetch(`${_backendUrl}/api/conversation/starter/dismiss?topic=${encodeURIComponent(topic)}`, {
         method: 'POST',
         headers,
       }).catch(() => {});
@@ -908,9 +912,30 @@ async function refreshFeed(): Promise<void> {
   });
 }
 
-// ── Init ──
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', mount);
-} else {
-  mount();
+// ── Config resolution ──────────────────────────────────────────────────────
+// Resolve backend URL from storage (honour user override), then keep it in
+// sync if the user changes it while a new-tab page is open.
+
+async function resolveBackendUrl(): Promise<void> {
+  const d = await storageGet(['backendUrl']);
+  const saved = d?.backendUrl?.trim?.();
+  if (saved) _backendUrl = saved.replace(/\/+$/, '');
 }
+
+ext?.storage?.onChanged?.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (changes.backendUrl) {
+    const nv = changes.backendUrl.newValue;
+    _backendUrl = (typeof nv === 'string' && nv.trim()) ? nv.trim().replace(/\/+$/, '') : DEFAULT_BACKEND;
+  }
+});
+
+// ── Init ──
+(async () => {
+  await resolveBackendUrl();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mount);
+  } else {
+    mount();
+  }
+})();

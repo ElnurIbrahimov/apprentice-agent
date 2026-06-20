@@ -129,7 +129,7 @@ export default function HandStatusCard({ hand, handsError, onRun, onPause, onAct
           )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             <button
-              onClick={() => { setPendingAction('run'); setOptimisticState('running'); onRun(hand.name); setTimeout(() => setPendingAction(null), 3000); }}
+              onClick={() => { setPendingAction('run'); setOptimisticState('running'); onRun(hand.name); setTimeout(() => { setPendingAction(null); setOptimisticState(null); }, 3000); }}
               disabled={isRunning || isPending}
               style={{ ...btnStyle('var(--pl)'), opacity: (isRunning || isPending) ? 0.6 : 1, cursor: (isRunning || isPending) ? 'not-allowed' : 'pointer' }}
             >
@@ -170,6 +170,10 @@ export default function HandStatusCard({ hand, handsError, onRun, onPause, onAct
                 <Trash2 size={10} /> Delete
               </button>
             )}
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import type { TabId } from '../types';
-import type { CreateSubTab, ToolsSubTab } from '../App';
 
 const TABS: TabId[] = ['chat', 'create', 'tools', 'insights', 'settings'];
 

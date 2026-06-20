@@ -26,7 +26,7 @@ export function NeuroDreamPanel() {
         setStatus(data);
         setFetchError(null);
       }
-    } catch (e) {
+    } catch (e: any) {
       setFetchError('Failed to connect to NeuroDream');
       console.error('Failed to fetch NeuroDream status:', e);
     }
@@ -40,7 +40,7 @@ export function NeuroDreamPanel() {
     try {
       await apiFetch('/api/neurodream/sleep', { method: 'POST' });
       await fetchStatus();
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to trigger sleep:', e);
     }
     setActionLoading(false);
@@ -51,7 +51,7 @@ export function NeuroDreamPanel() {
     try {
       await apiFetch('/api/neurodream/wake', { method: 'POST' });
       await fetchStatus();
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to wake up:', e);
     }
     setActionLoading(false);

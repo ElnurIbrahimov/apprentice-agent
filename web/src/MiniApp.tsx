@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm';
 import { EMOTION_COLORS, NEURO_INFO, PERSONALITY_INFO } from './utils/emotionConstants';
 import { ToolCardRenderer } from './components/ToolCards/ToolCardRenderer';
 import type { ToolResult, ToolStatus, ProactiveCard, ProactiveCardAction, MemoryItem, MemoryKgNode } from './types';
+import { apiFetch } from './utils/apiFetch';
 
 // ─── Telegram WebApp type declarations ───
 declare global {
@@ -1682,14 +1683,14 @@ function StrategiesTab() {
 
   const refetch = useCallback(async () => {
     try {
-      const resp = await fetch('/api/bandit/state');
+      const resp = await apiFetch('/api/bandit/state');
       if (!resp.ok) {
         throw new Error(`HTTP ${resp.status}`);
       }
       const data = await resp.json();
       setState(data);
       setError(null);
-    } catch (e) {
+    } catch (e: any) {
       setError((e as Error).message || 'Failed to load bandit state');
     }
   }, []);
@@ -1848,7 +1849,7 @@ function BrainTab({ tg }: { tg?: NonNullable<Window['Telegram']>['WebApp'] }) {
     try {
       const data = await miniFetch('memory/stats', {});
       setStats(data);
-    } catch (e) {
+    } catch (e: any) {
       setError((e as Error).message);
     }
   }, [miniFetch]);
@@ -1863,7 +1864,7 @@ function BrainTab({ tg }: { tg?: NonNullable<Window['Telegram']>['WebApp'] }) {
       setItems(prev => nextOffset === 0 ? (data.items || []) : [...prev, ...(data.items || [])]);
       setTotal(data.total || 0);
       setOffset(nextOffset + (data.items?.length || 0));
-    } catch (e) {
+    } catch (e: any) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
@@ -1904,7 +1905,7 @@ function BrainTab({ tg }: { tg?: NonNullable<Window['Telegram']>['WebApp'] }) {
           ? [...(m.tags || []), 'pinned']
           : (m.tags || []).filter(t => t !== 'pinned'),
       } : m));
-    } catch (e) {
+    } catch (e: any) {
       setError((e as Error).message);
     }
   };
@@ -1916,7 +1917,7 @@ function BrainTab({ tg }: { tg?: NonNullable<Window['Telegram']>['WebApp'] }) {
       await miniFetch('memory/item/delete', { memory_id: item.id });
       setItems(prev => prev.filter(m => m.id !== item.id));
       setTotal(prev => Math.max(0, prev - 1));
-    } catch (e) {
+    } catch (e: any) {
       setError((e as Error).message);
     }
   };
@@ -1934,7 +1935,7 @@ function BrainTab({ tg }: { tg?: NonNullable<Window['Telegram']>['WebApp'] }) {
       setItems(prev => prev.map(m => m.id === editingId ? { ...m, content: editText } : m));
       setEditingId(null);
       setEditText('');
-    } catch (e) {
+    } catch (e: any) {
       setError((e as Error).message);
     }
   };

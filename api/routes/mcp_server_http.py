@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import uuid
 from typing import Any, Dict, Optional
 
@@ -53,12 +54,7 @@ SERVER_NAME = "aura"
 SERVER_VERSION = "1.0.0"
 
 # Allowed origins for DNS-rebinding defense. Extended via env.
-ALLOWED_ORIGINS = {
-    "https://aura-elnur.duckdns.org",
-    "http://localhost",
-    "http://127.0.0.1",
-    "chrome-extension://*",  # matched via prefix below
-}
+ALLOWED_ORIGINS: set[str] = {"http://localhost", "http://127.0.0.1", "chrome-extension://*"}
 ENV_ORIGINS = os.getenv("AURA_MCP_ALLOWED_ORIGINS", "")
 if ENV_ORIGINS:
     for o in ENV_ORIGINS.split(","):
@@ -80,17 +76,20 @@ def _origin_allowed(origin: Optional[str]) -> bool:
 
 # Lazy-loaded server instance (reuses existing AuraMCPServer machinery).
 _server_singleton: Any = None
+_server_singleton_lock = threading.Lock()
 
 
 def _get_server() -> Any:
     global _server_singleton
     if _server_singleton is None:
-        try:
-            from aura.core.mcp_server import AuraMCPServer
-        except Exception as e:
-            logger.error("[MCP/HTTP] Failed to import AuraMCPServer: %s", e)
-            raise HTTPException(503, detail="Aura MCP server unavailable") from e
-        _server_singleton = AuraMCPServer(os.getcwd())
+        with _server_singleton_lock:
+            if _server_singleton is None:
+                try:
+                    from aura.core.mcp_server import AuraMCPServer
+                except Exception as e:
+                    logger.error("[MCP/HTTP] Failed to import AuraMCPServer: %s", e)
+                    raise HTTPException(503, detail="Aura MCP server unavailable") from e
+                _server_singleton = AuraMCPServer(os.getcwd())
     return _server_singleton
 
 

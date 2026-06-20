@@ -124,7 +124,7 @@ test('loadHands records error when apiFetch throws', async () => {
     await actions.approveHand('h1', 'r1', true);
     const call = mockApiFetch.mock.calls[0];
     expect(call[0]).toBe('http://mock/api/hands/h1/approve');
-    expect(JSON.parse((call[1] as any).body)).toEqual({ approved: true });
+    expect(JSON.parse((call[1] as any).body)).toEqual({ approved: true, request_id: 'r1' });
     expect(state.handApprovals.map((a: any) => a.request_id)).toEqual(['r2']);
   });
 });

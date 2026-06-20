@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { ArrowPathIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ function importanceDots(importance: number): string {
 
 async function fetchEpisodic(): Promise<UnifiedMemoryEntry[]> {
   try {
-    const res = await fetch('/api/memory/recalls/recent?limit=50');
+    const res = await apiFetch('/api/memory/recalls/recent?limit=50');
     if (!res.ok) return [];
     const data = await res.json();
     const items: unknown[] = data.recalls ?? data.memories ?? data.results ?? (Array.isArray(data) ? data : []);
@@ -119,10 +120,10 @@ async function fetchEpisodic(): Promise<UnifiedMemoryEntry[]> {
 
 async function fetchAMEM(): Promise<UnifiedMemoryEntry[]> {
   try {
-    const res = await fetch('/api/features/amem/notes?limit=50');
+    const res = await apiFetch('/api/features/amem/notes?limit=50');
     if (!res.ok) {
       // Fall back to old endpoint
-      const res2 = await fetch('/api/amem/notes?limit=50');
+      const res2 = await apiFetch('/api/amem/notes?limit=50');
       if (!res2.ok) return [];
       const data2 = await res2.json();
       const notes2: unknown[] = data2.notes ?? [];
@@ -154,7 +155,7 @@ function mapAMEMNotes(notes: unknown[]): UnifiedMemoryEntry[] {
 
 async function fetchKnowledge(): Promise<UnifiedMemoryEntry[]> {
   try {
-    const res = await fetch('/api/knowledge-graph');
+    const res = await apiFetch('/api/knowledge-graph');
     if (!res.ok) return [];
     const data = await res.json();
     const nodes: unknown[] = data.nodes ?? [];

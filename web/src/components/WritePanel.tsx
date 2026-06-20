@@ -8,6 +8,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useChatStore } from '../store/chatStore';
 import { SendToMenu } from './SendToMenu';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type WriteFormat = 'Essay' | 'Email' | 'Blog Post' | 'Report' | 'Story' | 'Social Post' | 'Letter';
@@ -76,7 +77,7 @@ export function WritePanel() {
 
   // Fetch models on mount
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [

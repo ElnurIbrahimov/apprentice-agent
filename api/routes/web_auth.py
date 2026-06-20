@@ -8,6 +8,7 @@ APIKeyAuthMiddleware (alongside the existing X-API-Key header path).
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import defaultdict, deque
 from threading import Lock
@@ -38,8 +39,13 @@ _attempts_lock = Lock()
 
 
 def _client_ip(request: Request) -> str:
+    """Return the client IP, respecting X-Forwarded-Only when behind a proxy."""
+    # Only trust X-Forwarded-For when AURA_TRUST_PROXY is enabled (same logic
+    # as api.middleware.APIKeyAuthMiddleware).  Direct internet exposure without
+    # a reverse proxy makes this header trivially spoofable.
+    trust_proxy = os.getenv("AURA_TRUST_PROXY", "").lower() in ("1", "true", "yes")
     fwd = request.headers.get("x-forwarded-for")
-    if fwd:
+    if trust_proxy and fwd:
         return fwd.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
 

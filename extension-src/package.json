@@ -6,10 +6,9 @@
   "scripts": {
     "dev": "vite",
     "prebuild": "node scripts/clean-extension.mjs",
-    "build": "tsc --noEmit && vite build && vite build --config vite.config.background.ts && vite build --config vite.config.content.ts && vite build --config vite.config.youtube.ts && vite build --config vite.config.netflix.ts && vite build --config vite.config.newtab.ts && vite build --config vite.config.ai-worker.ts && vite build --config vite.config.offscreen.ts && cp newtab.html ../extension/newtab.html && cp offscreen.html ../extension/offscreen.html",
-    "build:ai-worker": "vite build --config vite.config.ai-worker.ts",
+    "build": "tsc --noEmit && vite build && vite build --config vite.config.background.ts && vite build --config vite.config.content.ts && vite build --config vite.config.youtube.ts && vite build --config vite.config.netflix.ts && vite build --config vite.config.newtab.ts && vite build --config vite.config.offscreen.ts && node -e \"require('fs').copyFileSync('newtab.html','../extension/newtab.html');require('fs').copyFileSync('offscreen.html','../extension/offscreen.html')\"",
     "build:netflix": "vite build --config vite.config.netflix.ts",
-    "build:newtab": "vite build --config vite.config.newtab.ts && cp newtab.html ../extension/newtab.html",
+    "build:newtab": "vite build --config vite.config.newtab.ts && node -e \"require('fs').copyFileSync('newtab.html','../extension/newtab.html')\"",
     "build:bg": "vite build --config vite.config.background.ts",
     "build:content": "vite build --config vite.config.content.ts",
     "build:youtube": "vite build --config vite.config.youtube.ts",

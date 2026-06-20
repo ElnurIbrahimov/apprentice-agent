@@ -72,7 +72,7 @@ export function ProactiveDaemonPanel() {
         setStatus(data);
         setError(null);
       }
-    } catch (e) {
+    } catch (e: any) {
       setError('Failed to fetch daemon status');
       console.error('Daemon status error:', e);
     }
@@ -99,7 +99,7 @@ export function ProactiveDaemonPanel() {
           }
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Messages fetch error:', e);
     }
   }, [status?.running]);

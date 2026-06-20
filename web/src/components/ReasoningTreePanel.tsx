@@ -8,6 +8,7 @@ import {
   CheckCircleIcon,
   QuestionMarkCircleIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface ThoughtNode {
   id: string;
@@ -270,7 +271,7 @@ export function ReasoningTreePanel() {
     setTree(null);
 
     try {
-      const res = await fetch('/api/reasoning-tree/think', {
+      const res = await apiFetch('/api/reasoning-tree/think', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -302,7 +303,7 @@ export function ReasoningTreePanel() {
       }
 
       setActiveTab('result');
-    } catch (e) {
+    } catch (e: any) {
       console.error('[ReasoningTree] Error:', e);
       setError(e instanceof Error ? e.message : 'Unknown error');
     } finally {

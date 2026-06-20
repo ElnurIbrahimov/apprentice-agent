@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface DriveData {
   drive_type: string;
@@ -37,7 +38,7 @@ export function MotivationDrivesPanel() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const response = await fetch('/api/motivation/status');
+      const response = await apiFetch('/api/motivation/status');
       if (response.ok) {
         const data = await response.json();
         setStatus(data);

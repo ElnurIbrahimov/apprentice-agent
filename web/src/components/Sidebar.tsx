@@ -8,6 +8,7 @@ import {
   PlusIcon,
 } from '@heroicons/react/24/outline';
 import pkg from '../../package.json';
+import { apiFetch } from '../utils/apiFetch';
 
 interface SidebarProps {
   onClose?: () => void;
@@ -22,7 +23,7 @@ export function Sidebar({ onClose }: SidebarProps) {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const response = await fetch('/api/status');
+      const response = await apiFetch('/api/status');
       if (response.ok) {
         const data = await response.json();
         setStatus(data);

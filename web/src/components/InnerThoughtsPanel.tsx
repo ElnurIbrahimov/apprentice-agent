@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface Thought {
   type: string;
@@ -38,7 +39,7 @@ export function InnerThoughtsPanel() {
   // Fetch thoughts from API
   const fetchThoughts = useCallback(async () => {
     try {
-      const response = await fetch('/api/introspection/recent?limit=5');
+      const response = await apiFetch('/api/introspection/recent?limit=5');
       if (response.ok) {
         const data = await response.json();
         const items = data.results || data.thoughts || [];
@@ -47,7 +48,7 @@ export function InnerThoughtsPanel() {
           setCurrentThought(items[items.length - 1]);
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       // Silently ignore - not critical
     }
   }, []);

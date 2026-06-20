@@ -25,7 +25,14 @@
     "storage",
     "activeTab",
     "tabs",
-    "scripting"
+    "scripting",
+    "alarms",
+    "downloads",
+    "offscreen",
+    "unlimitedStorage",
+    "topSites",
+    "notifications",
+    "debugger"
   ],
   "optional_permissions": [
     "tabCapture"

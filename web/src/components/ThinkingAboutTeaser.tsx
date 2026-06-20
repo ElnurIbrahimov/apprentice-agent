@@ -86,7 +86,7 @@ export function ThinkingAboutTeaser() {
           setTeaser(null);
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       // Silently ignore
     }
   }, []);
@@ -100,7 +100,7 @@ export function ThinkingAboutTeaser() {
     try {
       await apiFetch('/api/thinking/generate?force=true', { method: 'POST' });
       fetchAll();
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to generate thought:', e);
     }
   };

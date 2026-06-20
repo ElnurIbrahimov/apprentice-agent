@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface IdleBehavior {
   type: string;
@@ -55,8 +56,8 @@ export function IdleBehaviorPanel() {
   const fetchAll = useCallback(async () => {
     try {
       const [stateRes, statsRes] = await Promise.all([
-        fetch('/api/idle/state'),
-        fetch('/api/idle/stats'),
+        apiFetch('/api/idle/state'),
+        apiFetch('/api/idle/stats'),
       ]);
 
       if (stateRes.ok) {
@@ -67,7 +68,7 @@ export function IdleBehaviorPanel() {
         const data = await statsRes.json();
         setStats(data);
       }
-    } catch (e) {
+    } catch (e: any) {
       // Silently ignore
     }
   }, []);

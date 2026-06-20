@@ -121,7 +121,7 @@ class AgenticLoop:
         try:
             from .adaptive_planner import AdaptivePlanner
             self._planner = AdaptivePlanner(brain=brain)
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[AgenticLoop] AdaptivePlanner init failed (non-fatal): {e}")
 
         # MCP client for external tool servers
@@ -133,7 +133,7 @@ class AgenticLoop:
         if aura_config:
             try:
                 self._mcp_client.load_from_config(aura_config)
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.debug(f"[AgenticLoop] MCP client init failed (non-fatal): {e}")
         self.executor._mcp_client = self._mcp_client
 
@@ -159,7 +159,7 @@ class AgenticLoop:
                 and self._mcp_client
             ):
                 self._mcp_client.disconnect_all()
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             # Can't use logger in __del__ reliably, but at least bind the exception
             pass  # MCP cleanup during GC — best-effort
 
@@ -301,7 +301,7 @@ class AgenticLoop:
                             for r in relevant
                         )
                         system_prompt += f"\n\n## Relevant codebase context\n{chunks}"
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[AgenticLoop] Codebase context injection failed: {e}")
 
         # Pre-load files mentioned in the prompt
@@ -321,7 +321,7 @@ class AgenticLoop:
                         file_contents.append(f"### {fp}\n```\n{content}\n```")
                 if file_contents and len(system_prompt) < 22000:
                     system_prompt += "\n\n## Pre-loaded files from prompt\n" + "\n".join(file_contents)
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[AgenticLoop] File pre-load failed: {e}")
 
         # Adaptive plan context: inject current plan so LLM knows what to do next
@@ -330,7 +330,7 @@ class AgenticLoop:
                 plan_ctx = self._planner.current_plan.to_prompt_context()
                 if plan_ctx:
                     system_prompt += "\n\n" + plan_ctx
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[AgenticLoop] Plan context injection failed: {e}")
 
         # Hot files: inject recently touched file paths so LLM remembers
@@ -397,7 +397,7 @@ class AgenticLoop:
                             break
                         lines.append(line.rstrip())
                     self._hot_file_contents[path] = "\n".join(lines)
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.debug(f"[AgenticLoop] Hot file read failed for {path}: {e}")
 
     def _estimate_cost(self, prompt: str) -> dict:
@@ -422,7 +422,7 @@ class AgenticLoop:
 
             est_cost = est_iters * _COST_PER_ITER
             return {"estimated_cost": est_cost, "estimated_iterations": int(est_iters), "category": category}
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             return {"estimated_cost": 0, "estimated_iterations": 0, "category": "unknown"}
 
     # Keywords that suggest a code-task prompt (as opposed to conversation)
@@ -489,7 +489,7 @@ class AgenticLoop:
             try:
                 batch_resp = ollama.embed(model="nomic-embed-text:latest", input=rels)
                 batch_vecs = batch_resp.get("embeddings") if batch_resp else None
-            except Exception:
+            except (OSError, ConnectionError, TimeoutError, ValueError):
                 batch_vecs = None
 
             if batch_vecs and len(batch_vecs) == len(candidates):
@@ -499,7 +499,7 @@ class AgenticLoop:
                         file_vec = np.array(vec)
                         sim = float(np.dot(prompt_vec, file_vec) / (prompt_norm * (np.linalg.norm(file_vec) + 1e-8)))
                         scored.append((fpath, sim))
-                    except Exception:
+                    except (OSError, ConnectionError, TimeoutError, ValueError):
                         continue
             else:
                 # Fallback: serial per-path (original behavior) if batch response was short/missing
@@ -510,7 +510,7 @@ class AgenticLoop:
                             file_vec = np.array(file_resp["embeddings"][0])
                             sim = float(np.dot(prompt_vec, file_vec) / (np.linalg.norm(prompt_vec) * np.linalg.norm(file_vec) + 1e-8))
                             scored.append((fpath, sim))
-                    except Exception:
+                    except (OSError, ConnectionError, TimeoutError, ValueError):
                         continue
 
             scored.sort(key=lambda x: -x[1])
@@ -526,7 +526,7 @@ class AgenticLoop:
                         content = f.read(8000)
                     rel = os.path.relpath(fpath, self.project_root)
                     parts.append(f"### {rel} (relevance={score:.2f})\n```\n{content}\n```")
-                except Exception:
+                except (OSError, ConnectionError, TimeoutError, ValueError):
                     continue
 
             if parts and len(system_prompt) < 30000:
@@ -623,19 +623,19 @@ class AgenticLoop:
         # Let ToolExecutor read back-refs (for ledger, heatmap, etc.)
         try:
             self.executor._agentic_loop = self
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             pass
         # Let brain find the active loop so _record_tokens can update heatmap
         try:
             self.brain._active_agentic_loop = self
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             pass
 
         # Capture baseline cost for per-turn cost tracking (C2)
         _prev_cost = 0.0
         try:
             _prev_cost = self.brain.get_session_stats().get("cost_usd", 0.0)
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             logger.debug("Failed to read baseline cost for per-turn tracking", exc_info=True)
 
         # Reset cancellation for this run
@@ -687,7 +687,7 @@ class AgenticLoop:
                     if routed_model:
                         self.model_override = routed_model
                         logger.info(f"[AgenticLoop] Model routed to: {routed_model}")
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[AgenticLoop] Intent classification failed (non-fatal): {e}")
 
         # ── Adaptive planning: classify task and generate plan if complex ──
@@ -705,9 +705,9 @@ class AgenticLoop:
                                 f"  [dim cyan]plan[/dim cyan] {len(plan.steps)} steps generated",
                                 highlight=False,
                             )
-                        except Exception as e:
+                        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                             logger.debug(f"[AgenticLoop] Plan console print failed: {e}")
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[AgenticLoop] Adaptive planning failed (non-fatal): {e}")
 
         system_prompt = self._build_system_prompt(prompt)
@@ -722,7 +722,7 @@ class AgenticLoop:
             _corrections = _ct.to_system_prompt_fragment(prompt)
             if _corrections:
                 system_prompt += "\n\n" + _corrections
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             logger.debug("CorrectionTracker injection failed", exc_info=True)
 
         # H1: Cost estimation before execution
@@ -771,7 +771,7 @@ class AgenticLoop:
                             self.session.save()
                         try:
                             _store_interaction(prompt, final_response)
-                        except Exception as e:
+                        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                             logger.debug(f"[AgenticLoop] Store interaction failed: {e}")
                         self._current_action_mode = None
                         result = LoopOutcome.visual_feedback(final_response).to_result_dict(
@@ -788,7 +788,7 @@ class AgenticLoop:
                             tool_calls=0,
                         )
                         return result
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.warning(f"[AgenticLoop] Visual feedback failed, falling back to normal: {e}")
 
         while self.iteration < self.max_iterations:
@@ -811,7 +811,7 @@ class AgenticLoop:
                         # Rebuild system prompt with updated plan
                         system_prompt = self._build_system_prompt(prompt)
                         messages[0] = {"role": "system", "content": system_prompt}
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.debug(f"[AgenticLoop] Planner tick/replan failed (non-fatal): {e}")
 
             # Budget check with intermediate warnings (C1)
@@ -966,7 +966,7 @@ class AgenticLoop:
                         sid = getattr(self.session, "session_id", "") if self.session else ""
                         if sid:
                             get_guard(sid).note_progress()
-                    except Exception:
+                    except (OSError, ConnectionError, TimeoutError, ValueError):
                         logger.debug("loop_guard note_progress failed", exc_info=True)
 
         else:
@@ -1007,7 +1007,7 @@ class AgenticLoop:
         # Store in persistent memory (background, non-blocking)
         try:
             _store_interaction(prompt, final_response)
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[AgenticLoop] non-critical: {e}")
         # Determine success via explicit flag rather than string prefix matching.
         # The loop sets _loop_error when it hits a real failure (LLM error, budget, guard trip).
@@ -1019,7 +1019,7 @@ class AgenticLoop:
         try:
             _end_cost = self.brain.get_session_stats().get("cost_usd", 0.0)
             self.last_turn_cost = _end_cost - _prev_cost
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             self.last_turn_cost = 0.0
 
         result = outcome.to_result_dict(
@@ -1055,7 +1055,7 @@ class AgenticLoop:
             from aura.config import Config
             if not getattr(Config, "REFLEXION_ENABLED", False):
                 return
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             return
 
         if self._reflexion_fired_this_run:
@@ -1129,7 +1129,7 @@ class AgenticLoop:
         if event_emitter is not None and hasattr(event_emitter, "emit"):
             try:
                 event_emitter.emit("reflexion", text=reflection[:500])
-            except Exception:
+            except (OSError, ConnectionError, TimeoutError, ValueError):
                 logger.debug("Failed to emit reflexion event", exc_info=True)
 
         logger.info(f"[Reflexion] fired after {self._tool_failure_streak} failures")
@@ -1146,8 +1146,9 @@ class AgenticLoop:
                 return True
             return False
         except (json.JSONDecodeError, TypeError, ValueError):
-            # Fallback: string matching for non-JSON results
-            return '"error"' in tool_result
+            # Fallback: heuristic for non-JSON results.  Don't fire on every
+            # occurrence of the word "error" inside a code snippet or doc.
+            return tool_result.strip().startswith("Error:") or tool_result.strip().startswith("Traceback")
 
     def _verify_task_completion(self, original_task: str, agent_response: str) -> Optional[str]:
         """Quick LLM check: did the agent actually complete the task?
@@ -1193,7 +1194,7 @@ class AgenticLoop:
                 logger.info("[AgenticLoop] Verification: COMPLETE")
                 return None
 
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             # Verification failure must not break the loop
             logger.debug(f"[AgenticLoop] Completion verification failed (non-fatal): {e}")
             return None
@@ -1215,7 +1216,7 @@ class AgenticLoop:
             self._turn_checkpoint_ids.append(cp_id)
             for p in new_paths:
                 self._turn_snapshotted_paths.add(p)
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             logger.debug("_ensure_turn_checkpoint failed", exc_info=True)
 
     def _rollback_turn(self, event_emitter: Any = None) -> dict:
@@ -1246,7 +1247,7 @@ class AgenticLoop:
                     result["restored"] += 1
                 else:
                     result["failed"] += 1
-            except Exception:
+            except (OSError, ConnectionError, TimeoutError, ValueError):
                 logger.debug("_rollback_turn restore failed for %s", cp_id, exc_info=True)
                 result["failed"] += 1
         result["partial"] = result["failed"] > 0
@@ -1265,7 +1266,7 @@ class AgenticLoop:
                     paths=result["paths"],
                     partial=result["partial"],
                 )
-            except Exception:
+            except (OSError, ConnectionError, TimeoutError, ValueError):
                 logger.debug("turn_rolled_back emit failed", exc_info=True)
         return result
 
@@ -1321,7 +1322,7 @@ class AgenticLoop:
                         f"  [red]verification[/red] failed · {outcome.mode} · {dur}",
                         highlight=False,
                     )
-            except Exception:
+            except (OSError, ConnectionError, TimeoutError, ValueError):
                 logger.debug("verification console print failed", exc_info=True)
 
             if outcome.success:
@@ -1341,7 +1342,7 @@ class AgenticLoop:
                     .get("verification", {})
                     .get("rollback_on_failure", True)
                 )
-            except Exception:
+            except (OSError, ConnectionError, TimeoutError, ValueError):
                 pass
             if rollback_enabled and self._turn_checkpoint_ids:
                 rb = self._rollback_turn(event_emitter=event_emitter)
@@ -1363,7 +1364,7 @@ class AgenticLoop:
                 )
                 msg = msg + "\n" + "\n".join(suffix_lines)
             return msg
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[AgenticLoop] Verification stage error (non-fatal): {e}")
             return None
 
@@ -1421,7 +1422,7 @@ class AgenticLoop:
                 "output": "\n\n".join(fail_blocks)[:3000],
                 "instruction": "Lint or type errors after your edit. Please fix them.",
             })
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.debug(f"[AgenticLoop] Auto-test error (non-fatal): {e}")
             return None
 
@@ -1585,7 +1586,7 @@ def run_agentic(
     if resume_session_id:
         try:
             loop.load_session(resume_session_id)
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError, ValueError):
             logger.debug("resume_session_load_failed", exc_info=True)
 
     if on_response is None:

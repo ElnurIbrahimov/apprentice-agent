@@ -87,7 +87,7 @@ export function createHandsActions(set: SetFn, get: GetFn) {
       await apiFetch(`${HTTP}/api/hands/${encodeURIComponent(name)}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved }),
+        body: JSON.stringify({ approved, request_id: _requestId }),
       });
       set((s: any) => ({ handApprovals: s.handApprovals.filter((a: HandApprovalRequest) => a.request_id !== _requestId) }));
     },

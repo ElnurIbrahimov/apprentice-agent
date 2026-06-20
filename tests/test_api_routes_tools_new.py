@@ -275,9 +275,10 @@ class TestApiTesterRoutes:
             "/api/api-tester/run",
             json={"method": "GET", "url": "https://example.com"},
         )
-        # Either 200 with success from the mocked tool, or the SSRF validator
-        # resolves example.com in a restricted env and 422s — both acceptable.
+        # The SSRF validator may 422 if it can't resolve example.com in a restricted env.
         assert response.status_code in (200, 422)
+        if response.status_code == 200:
+            assert response.json().get("success") is True
 
     def test_api_tester_run_rejects_localhost(self, client, patched_tools):
         response = client.post(

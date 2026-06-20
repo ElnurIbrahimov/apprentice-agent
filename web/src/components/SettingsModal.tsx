@@ -183,7 +183,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         setPersonality(data.traits);
         setTraitDescriptions(data.descriptions || {});
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to fetch personality:', e);
     }
   };
@@ -205,7 +205,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       } else {
         toast.error('Failed to save', 'Could not update personality');
       }
-    } catch (e) {
+    } catch (e: any) {
       toast.error('Error', 'Failed to save personality');
     } finally {
       setPersonalityLoading(false);
@@ -221,7 +221,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         setPersonality(data.traits);
         toast.info('Personality reset', 'Restored to AURA defaults');
       }
-    } catch (e) {
+    } catch (e: any) {
       toast.error('Error', 'Failed to reset personality');
     } finally {
       setPersonalityLoading(false);

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, FileText, Pause, Play, RefreshCw, Hand as HandIcon } from 'lucide-react';
 import { useStore } from '../store';
 import ApprovalCard from '../components/hands/ApprovalCard';
@@ -39,50 +39,48 @@ export default function HandsPanel() {
   const [createOpen, setCreateOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
 
-  useEffect(() => {
-    loadHands();
-    loadApprovals();
-    loadTemplates();
-    loadHistory(30);
-  }, [loadHands, loadApprovals, loadTemplates, loadHistory]);
+  const loadedOnMount = useRef(false);
 
-  // Polling lifecycle - start interval on mount
+  // Unified polling: starts on mount, respects connection state, restarts interval on ws/backend changes
   useEffect(() => {
-    const wsReady = useStore.getState().wsReady;
-    const backendStatus = useStore.getState().backendStatus;
-    const interval = (wsReady && backendStatus === 'online') ? 15000 : 60000;
-    useStore.getState().setHandsPollingInterval(interval);
-    useStore.getState().setHandsPollingActive(true);
-    useStore.getState().loadHands();
-    useStore.getState().loadHandApprovals();
-    useStore.getState().loadHandHistory();
+    if (loadedOnMount.current) return;
+    loadedOnMount.current = true;
 
-    const id = setInterval(() => {
+    const loadFns = () => {
       useStore.getState().loadHands();
       useStore.getState().loadHandApprovals();
       useStore.getState().loadHandHistory();
-    }, interval);
+    };
+
+    const getInterval = () => {
+      const ws = useStore.getState().wsReady;
+      const be = useStore.getState().backendStatus;
+      return (ws && be === 'online') ? 15000 : 60000;
+    };
+
+    useStore.getState().setHandsPollingActive(true);
+    const interval = getInterval();
+    useStore.getState().setHandsPollingInterval(interval);
+    loadFns();
+    loadTemplates();
+
+    let id = setInterval(loadFns, interval);
+
+    const handleChange = () => {
+      const newInterval = getInterval();
+      useStore.getState().setHandsPollingInterval(newInterval);
+      clearInterval(id);
+      id = setInterval(loadFns, newInterval);
+    };
+
+    const unsubscribe = useStore.subscribe(handleChange);
 
     return () => {
       clearInterval(id);
+      unsubscribe();
       useStore.getState().setHandsPollingActive(false);
     };
-  }, []);
-
-  // React to wsReady/backendStatus changes and restart the interval if it changes
-  useEffect(() => {
-    const unsubscribe = useStore.subscribe(
-      (state) => [state.wsReady, state.backendStatus] as const,
-      ([wsReady, backendStatus], prev) => {
-        if (wsReady === prev[0] && backendStatus === prev[1]) return;
-        const isActive = useStore.getState().handsPollingActive;
-        if (!isActive) return;
-        const interval = (wsReady && backendStatus === 'online') ? 15000 : 60000;
-        useStore.getState().setHandsPollingInterval(interval);
-      }
-    );
-    return unsubscribe;
-  }, []);
+  }, [loadHands, loadApprovals, loadTemplates, loadHistory]);
 
   const { activeCount, successRate } = useMemo(() => {
     const active = hands.filter(h => h.state === 'active' || h.state === 'running' || h.state === 'cooldown').length;

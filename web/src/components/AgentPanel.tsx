@@ -48,6 +48,7 @@ import {
 } from '../utils/agentRecipes';
 import { BookmarkSquareIcon, TrashIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import { downloadRunMarkdown } from '../utils/agentRunExport';
+import { apiFetch } from '../utils/apiFetch';
 
 type Phase = 'idle' | 'planning' | 'reviewing' | 'executing' | 'done' | 'error';
 type SubTab = 'run' | 'recipes' | 'history' | 'hands';
@@ -115,7 +116,7 @@ export function AgentPanel() {
   // Fetch models once for the dropdown.
   useEffect(() => {
     if (availableModels.length > 0) return;
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then((r) => r.json())
       .then((data) => {
         const all = [

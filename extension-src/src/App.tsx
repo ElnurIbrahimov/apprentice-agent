@@ -240,6 +240,8 @@ export default function App() {
 
     ext?.runtime?.onMessage?.addListener(handler);
 
+    ext?.runtime?.sendMessage({ type: 'SIDEBAR_READY' });
+
     // Check for pending image data URL (from content script hover toolbar)
     ext?.storage?.local?.get(['pendingImageDataUrl'], (data: any) => {
       if (data?.pendingImageDataUrl) {

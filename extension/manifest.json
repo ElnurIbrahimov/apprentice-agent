@@ -3,7 +3,7 @@
   "name": "AURA",
   "version": "4.3.0",
   "description": "Your private AI assistant — always present, never clouds.",
-  "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "tabs", "scripting", "unlimitedStorage", "topSites", "offscreen", "notifications", "debugger"],
+  "permissions": ["sidePanel", "contextMenus", "storage", "activeTab", "tabs", "scripting", "unlimitedStorage", "topSites", "offscreen", "notifications", "debugger", "alarms", "downloads"],
   "optional_permissions": ["tabCapture"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
@@ -48,10 +48,6 @@
     {
       "resources": ["netflix-inject.js"],
       "matches": ["*://www.netflix.com/*"]
-    },
-    {
-      "resources": ["ai-worker.js"],
-      "matches": ["<all_urls>"]
     }
   ],
   "chrome_url_overrides": {

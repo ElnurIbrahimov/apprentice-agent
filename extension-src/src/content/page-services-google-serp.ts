@@ -1,3 +1,5 @@
+import { DEFAULT_BACKEND_URL } from '../defaults';
+
 /**
  * Google SERP "AI Answer" card — floats a shadow-DOM card on google.com/search
  * pages with an AURA-generated answer above the native results.
@@ -7,7 +9,8 @@
  * message-send helper as arguments.
  */
 export function initGoogleSerp(ext: typeof chrome, safeSend: (msg: any, cb?: (r: any) => void) => void): void {
-  let SERP_BACKEND = 'https://aura-elnur.duckdns.org';
+  const SERP_DEFAULT_BACKEND = DEFAULT_BACKEND_URL;
+  let SERP_BACKEND = SERP_DEFAULT_BACKEND;
   let SERP_API_KEY = '';
 
   /** Read backend URL and API key from chrome.storage.local. */
@@ -30,11 +33,12 @@ export function initGoogleSerp(ext: typeof chrome, safeSend: (msg: any, cb?: (r:
   if (ext?.storage?.onChanged) {
     ext.storage.onChanged.addListener((changes: any, area: string) => {
       if (area !== 'local') return;
-      if (changes.backendUrl?.newValue) {
-        SERP_BACKEND = changes.backendUrl.newValue.trim().replace(/\/+$/, '');
+      if (changes.backendUrl) {
+        const nv = changes.backendUrl.newValue;
+        SERP_BACKEND = (typeof nv === 'string' && nv.trim()) ? nv.trim().replace(/\/+$/, '') : SERP_DEFAULT_BACKEND;
       }
-      if (changes.apiKey?.newValue !== undefined) {
-        SERP_API_KEY = changes.apiKey.newValue?.trim() || '';
+      if (changes.apiKey) {
+        SERP_API_KEY = changes.apiKey.newValue?.trim() ?? '';
       }
     });
   }

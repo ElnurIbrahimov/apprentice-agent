@@ -133,7 +133,7 @@ export class VirtualFS {
       const all = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
       all[this.project.id] = data;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-    } catch (e) {
+    } catch (e: any) {
       console.warn('[VirtualFS] Save failed:', e);
     }
   }

@@ -11,6 +11,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useChatStore } from '../store/chatStore';
 import { SendToMenu } from './SendToMenu';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type Depth = 'quick' | 'standard' | 'deep';
@@ -114,7 +115,7 @@ export function ResearchPanel() {
 
   // Fetch models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then((r) => r.json())
       .then((data) => {
         const all = [

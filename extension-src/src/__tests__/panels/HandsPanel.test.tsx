@@ -3,16 +3,31 @@ import { render, act } from '@testing-library/react';
 import { useStore } from '../../store';
 import HandsPanel from '../../panels/HandsPanel';
 
+let mockState: any = null;
+let capturedCallback: ((prev: any) => void) | null = null;
+
 jest.mock('../../store', () => {
   const actual = jest.requireActual('../../store');
-  return {
-    ...actual,
-    useStore: Object.assign(jest.fn(), {
-      getState: actual.useStore.getState,
-      setState: actual.useStore.setState,
-      subscribe: actual.useStore.subscribe,
-    }),
+  const stub: any = (selector: any) => {
+    return selector(mockState);
   };
+  stub._state = null;
+  stub.getState = () => mockState || actual.useStore.getState();
+  stub.setState = actual.useStore.setState;
+  stub.subscribe = (cb: (prev: any) => void) => {
+    capturedCallback = cb;
+    return () => { capturedCallback = null; };
+  };
+  stub.mockImplementation = (fn: any) => {
+    mockState = fn(actual.useStore.getState());
+    return stub;
+  };
+  stub.mockReturnValue = (state: any) => {
+    mockState = state;
+    return stub;
+  };
+  stub.mockClear = () => { mockState = null; };
+  return { ...actual, useStore: stub };
 });
 
 function makeMockState(overrides = {}) {
@@ -36,14 +51,7 @@ function makeMockState(overrides = {}) {
     setHandsPollingActive: jest.fn(),
     setHandsLastLoaded: jest.fn(),
     setHandsPollingInterval: jest.fn(),
-    runHand: jest.fn().mockResolvedValue(undefined),
-    pauseHand: jest.fn().mockResolvedValue(undefined),
-    activateHand: jest.fn().mockResolvedValue(undefined),
-    deactivateHand: jest.fn().mockResolvedValue(undefined),
-    deleteHand: jest.fn().mockResolvedValue(undefined),
-    approveHand: jest.fn().mockResolvedValue(undefined),
-    createHand: jest.fn().mockResolvedValue(undefined),
-    createHandFromTemplate: jest.fn().mockResolvedValue(undefined),
+    history: [] as any[],
     ...overrides,
   };
 }
@@ -51,142 +59,90 @@ function makeMockState(overrides = {}) {
 describe('HandsPanel polling lifecycle', () => {
   beforeEach(() => {
     jest.useFakeTimers();
-    (useStore as jest.Mock).mockClear();
+    mockState = null;
+    capturedCallback = null;
+    (useStore as unknown as jest.Mock).mockClear();
   });
 
   afterEach(() => {
     jest.useRealTimers();
+    mockState = null;
+    capturedCallback = null;
   });
 
-  test('loads hands immediately on mount', async () => {
+  test('loads hands, approvals, history, and templates exactly once on mount', () => {
     const loadHands = jest.fn().mockResolvedValue(undefined);
     const loadHandApprovals = jest.fn().mockResolvedValue(undefined);
     const loadHandHistory = jest.fn().mockResolvedValue(undefined);
+    const loadHandTemplates = jest.fn().mockResolvedValue(undefined);
+
+    (useStore as unknown as jest.Mock).mockReturnValue(makeMockState({
+      loadHands,
+      loadHandApprovals,
+      loadHandHistory,
+      loadHandTemplates,
+    }));
+
+    render(<HandsPanel />);
+
+    expect(loadHands).toHaveBeenCalledTimes(1);
+    expect(loadHandApprovals).toHaveBeenCalledTimes(1);
+    expect(loadHandHistory).toHaveBeenCalledTimes(1);
+    expect(loadHandTemplates).toHaveBeenCalledTimes(1);
+  });
+
+  test('sets polling active and configures interval on mount', () => {
     const setHandsPollingActive = jest.fn();
     const setHandsPollingInterval = jest.fn();
 
-    (useStore as jest.Mock).mockImplementation((selector) => {
-      return selector(makeMockState({
-        loadHands,
-        loadHandApprovals,
-        loadHandHistory,
-        setHandsPollingActive,
-        setHandsPollingInterval,
-      }));
-    });
+    (useStore as unknown as jest.Mock).mockReturnValue(makeMockState({
+      setHandsPollingActive,
+      setHandsPollingInterval,
+    }));
 
     render(<HandsPanel />);
-
-    await act(async () => {
-      jest.runAllTimers();
-    });
-
-    expect(loadHands).toHaveBeenCalled();
-  });
-
-  test('sets polling active on mount', async () => {
-    const setHandsPollingActive = jest.fn();
-
-    (useStore as jest.Mock).mockImplementation((selector) => {
-      return selector(makeMockState({ setHandsPollingActive }));
-    });
-
-    render(<HandsPanel />);
-
-    await act(async () => {
-      jest.runAllTimers();
-    });
 
     expect(setHandsPollingActive).toHaveBeenCalledWith(true);
-  });
-});
-
-describe('HandsPanel polling lifecycle', () => {
-  beforeEach(() => {
-    jest.useFakeTimers();
-    (useStore as jest.Mock).mockClear();
+    expect(setHandsPollingInterval).toHaveBeenCalledWith(15000);
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
-  });
+  test('updates interval to 60s when ws disconnects', () => {
+    const setHandsPollingInterval = jest.fn();
+    const loadHands = jest.fn().mockResolvedValue(undefined);
+    const loadHandApprovals = jest.fn().mockResolvedValue(undefined);
+    const loadHandHistory = jest.fn().mockResolvedValue(undefined);
+    const loadHandTemplates = jest.fn().mockResolvedValue(undefined);
 
-  test('loads hands immediately on mount', async () => {
-    let loadHands: jest.Mock;
-    let loadHandApprovals: jest.Mock;
-    let loadHandHistory: jest.Mock;
-    let setHandsPollingActive: jest.Mock;
-    let setHandsLastLoaded: jest.Mock;
-    let setHandsPollingInterval: jest.Mock;
-
-    (useStore as jest.Mock).mockImplementation((selector) => {
-      loadHands = jest.fn().mockResolvedValue(undefined);
-      loadHandApprovals = jest.fn().mockResolvedValue(undefined);
-      loadHandHistory = jest.fn().mockResolvedValue(undefined);
-      setHandsPollingActive = jest.fn();
-      setHandsLastLoaded = jest.fn();
-      setHandsPollingInterval = jest.fn();
-      const state = {
-        hands: [],
-        handsError: null,
-        handsLoaded: true,
-        handsPollingActive: false,
-        handsPollingInterval: 15000,
-        handsLastLoaded: null,
-        wsReady: true,
-        backendStatus: 'online' as const,
-        loadHands,
-        loadHandApprovals,
-        loadHandHistory,
-        setHandsPollingActive,
-        setHandsLastLoaded,
-        setHandsPollingInterval,
-        loadHandTemplates: jest.fn(),
-        handsPollingActive: false,
-      };
-      return selector(state);
+    mockState = makeMockState({
+      setHandsPollingInterval,
+      loadHands,
+      loadHandApprovals,
+      loadHandHistory,
+      loadHandTemplates,
+      wsReady: true,
+      backendStatus: 'online' as const,
     });
 
     render(<HandsPanel />);
 
-    await act(async () => {
-      jest.runAllTimers();
+    setHandsPollingInterval.mockClear();
+
+    const previousState = { ...mockState };
+
+    mockState = makeMockState({
+      setHandsPollingInterval,
+      loadHands,
+      loadHandApprovals,
+      loadHandHistory,
+      loadHandTemplates,
+      wsReady: false,
+      backendStatus: 'online' as const,
     });
 
-    expect(loadHands).toHaveBeenCalled();
-  });
-
-  test('sets polling active on mount', async () => {
-    let setHandsPollingActive: jest.Mock;
-
-    (useStore as jest.Mock).mockImplementation((selector) => {
-      setHandsPollingActive = jest.fn();
-      const state = {
-        hands: [],
-        handsError: null,
-        handsLoaded: true,
-        handsPollingActive: false,
-        handsPollingInterval: 15000,
-        handsLastLoaded: null,
-        wsReady: true,
-        backendStatus: 'online' as const,
-        loadHands: jest.fn().mockResolvedValue(undefined),
-        loadHandApprovals: jest.fn().mockResolvedValue(undefined),
-        loadHandHistory: jest.fn().mockResolvedValue(undefined),
-        setHandsPollingActive,
-        setHandsLastLoaded: jest.fn(),
-        setHandsPollingInterval: jest.fn(),
-        loadHandTemplates: jest.fn(),
-      };
-      return selector(state);
+    act(() => {
+      capturedCallback?.(previousState);
     });
 
-    render(<HandsPanel />);
-
-    await act(async () => {
-      jest.runAllTimers();
-    });
-
-    expect(setHandsPollingActive).toHaveBeenCalledWith(true);
+    expect(setHandsPollingInterval).toHaveBeenCalledWith(60000);
   });
 });

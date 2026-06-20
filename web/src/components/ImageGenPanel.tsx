@@ -7,6 +7,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { SparklesIcon as SparklesSolid } from '@heroicons/react/24/solid';
 import { copyImage } from '../utils/clipboard';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 interface GeneratedImage {
@@ -99,7 +100,7 @@ export function ImageGenPanel() {
 
   // Fetch models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(res => res.json())
       .then(data => {
         const all = [...(data.chatgpt_models || []), ...(data.direct_api_models || []), ...(data.cloud_models || []), ...(data.local_models || [])];

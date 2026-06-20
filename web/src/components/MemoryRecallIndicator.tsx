@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface RecallEvent {
   id: string;
@@ -49,7 +50,7 @@ export function MemoryRecallIndicator() {
   // Fetch recall status
   const fetchStatus = useCallback(async () => {
     try {
-      const response = await fetch('/api/memory/recalls/status');
+      const response = await apiFetch('/api/memory/recalls/status');
       if (response.ok) {
         const data = await response.json();
 
@@ -65,7 +66,7 @@ export function MemoryRecallIndicator() {
         prevStatusRef.current = { is_active: data.is_active, last_recall: data.last_recall };
         setStatus(data);
       }
-    } catch (e) {
+    } catch (e: any) {
       // Silently ignore - not critical
     }
   }, []);

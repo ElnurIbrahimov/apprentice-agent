@@ -12,8 +12,11 @@ declare const browser: typeof chrome | undefined;
 const ext: typeof chrome =
   typeof browser !== 'undefined' ? (browser as typeof chrome) : chrome;
 
-// Dynamic backend URL — reads from storage, falls back to localhost
-let BACKEND = 'https://aura-elnur.duckdns.org';
+import { DEFAULT_BACKEND_URL } from './src/defaults';
+
+// Dynamic backend URL — reads from storage, falls back to default
+const DEFAULT_BACKEND = DEFAULT_BACKEND_URL;
+let BACKEND = DEFAULT_BACKEND;
 let BACKEND_API_KEY = '';
 
 // Load saved backend URL and API key from extension storage
@@ -85,10 +88,7 @@ async function openActivePanelAndMessage(message: Record<string, unknown>): Prom
       await chrome.sidePanel.open({ windowId: tab.windowId });
     }
   } catch { /* noop */ }
-  // Small delay so the sidebar's message listener is attached before dispatch.
-  setTimeout(() => {
-    ext.runtime.sendMessage(message).catch(() => {});
-  }, 120);
+  ext.runtime.sendMessage(message).catch(() => {});
 }
 
 ext.commands?.onCommand?.addListener(async (command: string) => {
@@ -256,7 +256,7 @@ chrome.notifications?.onClicked?.addListener((notificationId: string) => {
 
 // Approval notification buttons resolve the approval directly from the SW,
 // so the user can approve/deny without ever opening the side panel.
-const pendingApprovalsByNotification = new Map<string, { hand_name: string }>();
+const pendingApprovalsByNotification = new Map<string, { hand_name: string; request_id?: string }>();
 
 chrome.notifications?.onButtonClicked?.addListener(async (notificationId: string, buttonIndex: number) => {
   if (!notificationId.startsWith('aura:approval:')) return;
@@ -267,7 +267,7 @@ chrome.notifications?.onButtonClicked?.addListener(async (notificationId: string
     await fetch(`${BACKEND}/api/hands/${encodeURIComponent(ctx.hand_name)}/approve`, {
       method: 'POST',
       headers: backendHeaders(),
-      body: JSON.stringify({ approved }),
+      body: JSON.stringify({ approved, request_id: ctx.request_id || '' }),
     });
   } catch { /* noop */ }
   chrome.notifications.clear(notificationId);
@@ -297,7 +297,7 @@ ext.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // Serve config from the SW (which has access) via message response.
     ext.storage.local.get(['backendUrl', 'apiKey'], (data) => {
       sendResponse({
-        backendUrl: data?.backendUrl || 'https://aura-elnur.duckdns.org',
+        backendUrl: data?.backendUrl || DEFAULT_BACKEND_URL,
         apiKey: data?.apiKey || '',
       });
     });
@@ -415,7 +415,7 @@ ext.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     } else if (d.type === 'hand_approval_request' && d.request_id) {
       fireApprovalNotification(d);
       const nId = notificationIdFor('approval', String(d.request_id));
-      pendingApprovalsByNotification.set(nId, { hand_name: String(d.hand_name || '') });
+      pendingApprovalsByNotification.set(nId, { hand_name: String(d.hand_name || ''), request_id: String(d.request_id || '') });
     } else if (d.type === 'hand_event') {
       fireHandEventNotification(d);
     }
@@ -428,15 +428,70 @@ ext.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // Listen for settings changes
 ext.storage.onChanged.addListener((changes, area) => {
   if (area === 'local') {
-    if (changes.backendUrl?.newValue) BACKEND = String(changes.backendUrl.newValue).replace(/\/+$/, '');
-    if (changes.apiKey?.newValue) BACKEND_API_KEY = String(changes.apiKey.newValue);
+    if ('backendUrl' in changes) {
+      const nv = changes.backendUrl?.newValue;
+      BACKEND = (typeof nv === 'string' && nv.trim()) ? String(nv).replace(/\/+$/, '') : DEFAULT_BACKEND;
+    }
+    if ('apiKey' in changes) {
+      const nv = changes.apiKey?.newValue;
+      BACKEND_API_KEY = (typeof nv === 'string' && nv.trim()) ? String(nv) : '';
+    }
     // Relay to offscreen so it can reconnect with fresh config even when
     // chrome.storage.onChanged isn't wired directly in the offscreen doc.
-    if (changes.backendUrl || changes.apiKey) {
-      ext.runtime.sendMessage({ type: 'AURA_WS_CONFIG_CHANGED' }).catch(() => {});
-    }
+    ext.runtime.sendMessage({ type: 'AURA_WS_CONFIG_CHANGED' }).catch(() => {});
   }
 });
+
+// ── Helper: send message to content script with fallback inject+retry ────────
+// If the content script is not loaded (tab opened before extension), inject it
+// and retry the message once. Returns the response or null.
+
+async function sendToContentScript(
+  tabId: number,
+  message: Record<string, unknown>,
+  tabUrl?: string,
+): Promise<any> {
+  // Never inject into restricted URLs
+  if (tabUrl && !isSafeScheme(tabUrl)) return null;
+
+  // Try direct message first
+  const direct: any = await new Promise((resolve) => {
+    ext.tabs.sendMessage(tabId, message, (response: any) => {
+      if (ext.runtime.lastError || !response) resolve(null);
+      else resolve(response);
+    });
+  });
+  if (direct) return direct;
+
+  // Content script not loaded — inject and retry once
+  try {
+    await ext.scripting.executeScript({
+      target: { tabId },
+      files: ['content.js'],
+    });
+  } catch { /* injection failed */ }
+
+  // Small delay to let content script initialisation settle
+  await new Promise((r) => setTimeout(r, 150));
+
+  return new Promise((resolve) => {
+    ext.tabs.sendMessage(tabId, message, (response: any) => {
+      if (ext.runtime.lastError) resolve(null);
+      else resolve(response);
+    });
+  });
+}
+
+// ── Utility: encode ArrayBuffer to base64 without stack overflow ─────────────
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  const chunkSize = 8192;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as unknown as number[]);
+  }
+  return btoa(binary);
+}
 
 function backendHeaders(): Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -504,6 +559,11 @@ interface SaveKnowledgeMessage {
 
 interface GetCurrentTabMessage {
   type: 'GET_CURRENT_TAB';
+}
+
+interface PageTranslateMessage {
+  type: 'PAGE_TRANSLATE';
+  targetLang: string;
 }
 
 interface GetPageContentMessage {
@@ -713,6 +773,7 @@ type ExtensionMessage =
   | SidebarReadyMessage
   | SaveKnowledgeMessage
   | GetCurrentTabMessage
+  | PageTranslateMessage
   | GetPageContentMessage
   | OpenPanelMessage
   | OpenWithTextMessage
@@ -1455,6 +1516,25 @@ ext.runtime.onMessage.addListener(
         return true;
       }
 
+      // Route PAGE_TRANSLATE through background so content script gets
+      // injected if the tab was opened before the extension loaded.
+      case 'PAGE_TRANSLATE': {
+        const targetLang = (msg as PageTranslateMessage).targetLang || 'en';
+        ext.tabs.query(
+          { active: true, currentWindow: true },
+          async (tabs: chrome.tabs.Tab[]): Promise<void> => {
+            const tab = tabs[0];
+            if (!tab?.id) {
+              sendResponse({ ok: false, error: 'No active tab' });
+              return;
+            }
+            const resp = await sendToContentScript(tab.id, { type: 'PAGE_TRANSLATE', targetLang }, tab.url);
+            sendResponse(resp ?? { ok: false, error: 'Content script unavailable' });
+          },
+        );
+        return true; // async
+      }
+
       case 'GET_PAGE_CONTENT': {
         ext.tabs.query(
           { active: true, currentWindow: true },
@@ -1691,9 +1771,7 @@ ext.runtime.onMessage.addListener(
                       bmp.close(); // Release ImageBitmap memory
                       const blob: Blob = await oc.convertToBlob({ type: 'image/png' });
                       const arrayBuf = await blob.arrayBuffer();
-                      const b64: string = btoa(
-                        String.fromCharCode(...new Uint8Array(arrayBuf))
-                      );
+                      const b64: string = arrayBufferToBase64(arrayBuf);
                       const resp: Response = await fetch(`${BACKEND}/api/ocr`, {
                         method: 'POST',
                         headers: backendHeaders(),
@@ -1790,9 +1868,7 @@ ext.runtime.onMessage.addListener(
 
                 const blob: Blob = await oc.convertToBlob({ type: 'image/png' });
                 const arrayBuf = await blob.arrayBuffer();
-                screenshot_b64 = btoa(
-                  String.fromCharCode(...new Uint8Array(arrayBuf))
-                );
+                screenshot_b64 = arrayBufferToBase64(arrayBuf);
               } catch (_e) {
                 // Proceed without screenshot
               }
@@ -1845,35 +1921,22 @@ ext.runtime.onMessage.addListener(
                   }
                 }
 
-                // Now ask content script to extract full page data
-                try {
-                  ext.tabs.sendMessage(
-                    tabId,
-                    { type: 'EXTRACT_FULL_PAGE' },
-                    (response: any) => {
-                      if (chrome.runtime.lastError || !response?.ok) {
-                        ext.runtime.sendMessage({
-                          type: 'FULL_PAGE_CAPTURE_ERROR',
-                          error: chrome.runtime.lastError?.message || 'Page extraction failed',
-                        }).catch(() => {});
-                        return;
-                      }
-
-                      // Relay to sidebar with screenshot
-                      ext.runtime.sendMessage({
-                        type: 'FULL_PAGE_CAPTURED',
-                        data: {
-                          ...response.data,
-                          screenshot_b64,
-                          timestamp: Date.now() / 1000,
-                        },
-                      }).catch(() => {});
-                    }
-                  );
-                } catch (_e) {
+                // Ask content script to extract full page data
+                // Uses sendToContentScript which injects content.js if tab is stale
+                const pageResponse = await sendToContentScript(tabId, { type: 'EXTRACT_FULL_PAGE' }, tab.url);
+                if (!pageResponse?.ok) {
                   ext.runtime.sendMessage({
                     type: 'FULL_PAGE_CAPTURE_ERROR',
-                    error: 'Failed to communicate with content script',
+                    error: 'Page extraction failed — content script unavailable',
+                  }).catch(() => {});
+                } else {
+                  ext.runtime.sendMessage({
+                    type: 'FULL_PAGE_CAPTURED',
+                    data: {
+                      ...pageResponse.data,
+                      screenshot_b64,
+                      timestamp: Date.now() / 1000,
+                    },
                   }).catch(() => {});
                 }
               }
@@ -2302,12 +2365,7 @@ ext.runtime.onMessage.addListener(
           })
           .then(async (blob) => {
             const arrayBuf = await blob.arrayBuffer();
-            const bytes = new Uint8Array(arrayBuf);
-            let binary = '';
-            for (let i = 0; i < bytes.length; i++) {
-              binary += String.fromCharCode(bytes[i]);
-            }
-            const b64 = btoa(binary);
+            const b64 = arrayBufferToBase64(arrayBuf);
             const mime = blob.type || 'image/png';
             const dataUrl = `data:${mime};base64,${b64}`;
             // Send data URL to sidebar for the edit panel
@@ -2365,9 +2423,38 @@ ext.runtime.onMessage.addListener(
       }
 
       // SERP AI Answer — proxy fetch through background to avoid CORS
+      // SSRF protection: only allow requests to the AURA backend or explicit
+      // allow-list origins. Block private/internal IPs for non-backend origins
+      // and unsafe schemes.
       case 'SERP_FETCH': {
         (async () => {
           try {
+            if (!isSafeScheme(msg.url)) {
+              sendResponse({ ok: false, error: 'Blocked: unsafe URL scheme' });
+              return;
+            }
+            // Restrict to AURA backend origin unless the URL is on the explicit allow-list
+            const SERP_FETCH_ALLOWED_ORIGINS = [
+              new URL(BACKEND).origin,
+              // Add additional CORS-safe origins here if needed in the future
+            ];
+            let requestOrigin: string;
+            try {
+              requestOrigin = new URL(msg.url).origin;
+            } catch {
+              sendResponse({ ok: false, error: 'Blocked: invalid URL' });
+              return;
+            }
+            if (!SERP_FETCH_ALLOWED_ORIGINS.includes(requestOrigin)) {
+              sendResponse({ ok: false, error: `Blocked: disallowed origin ${requestOrigin}` });
+              return;
+            }
+            // Only block private hosts for non-backend origins (backend may be localhost in dev)
+            if (requestOrigin !== new URL(BACKEND).origin && isPrivateHost(msg.url)) {
+              sendResponse({ ok: false, error: 'Blocked: private/internal host' });
+              return;
+            }
+
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
             if (msg.apiKey) headers['X-API-Key'] = msg.apiKey;
             const resp = await fetch(msg.url, {

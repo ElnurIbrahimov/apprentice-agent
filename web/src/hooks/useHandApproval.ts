@@ -54,7 +54,7 @@ export function useHandApproval() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setPending(null);
       return true;
-    } catch (e) {
+    } catch (e: any) {
       console.warn('[useHandApproval] resolve failed:', e);
       return false;
     } finally {

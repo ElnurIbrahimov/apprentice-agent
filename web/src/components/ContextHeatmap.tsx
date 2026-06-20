@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 interface FocusItem {
   name: string;
@@ -41,7 +42,7 @@ export function ContextHeatmap() {
   // Fetch heatmap data
   const fetchData = useCallback(async () => {
     try {
-      const response = await fetch('/api/context/heatmap');
+      const response = await apiFetch('/api/context/heatmap');
       if (response.ok) {
         const newData = await response.json();
 
@@ -64,7 +65,7 @@ export function ContextHeatmap() {
         prevItemsRef.current = newData.items;
         setData(newData);
       }
-    } catch (e) {
+    } catch (e: any) {
       // Silently ignore - not critical
     }
   }, []);

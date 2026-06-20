@@ -10,6 +10,7 @@ import {
   ClockIcon,
   CheckCircleIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type Tab = 'browse' | 'ask' | 'add';
@@ -74,7 +75,7 @@ export function WisebasePanel() {
 
   /* ── Fetch models ── */
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then((r) => r.json())
       .then((data) => {
         const all = [
@@ -287,7 +288,7 @@ export function WisebasePanel() {
         storedViaApi = true;
         fetchMemories();
       }
-    } catch (e) {
+    } catch (e: any) {
       console.warn('[Wisebase] Memory API unavailable:', e);
     }
 

@@ -20,15 +20,12 @@ from aura.core.skill_manager import SkillManagerMixin
 from aura.security.tool_validator import (  # noqa: F401
     ALLOWED_TOOL_IMPORTS,
     FORBIDDEN_PATTERNS,
-    validate_custom_tool_code,
-    validate_script_code,
 )
 from aura.tools.custom_registry import (
     generate_default_keywords,
     load_custom_tools_from_registry,
 )
-from aura.tools.loader import (  # noqa: F401
-    _TOOL_KEYWORDS,
+from aura.tools.loader import (
     _TOOL_KEYWORDS_RE,
     load_core_tools,
     load_heavy_tools,
@@ -334,14 +331,14 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
                         try:
                             if self.neurodream and self.neurodream.current_phase.value == "awake":
                                 self.neurodream.check_idle_trigger()
-                        except Exception as e:
+                        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                             logger.debug(f"[NeuroDream] Idle poll error: {e}")
                 self._nd_poll_thread = threading.Thread(
                     target=_neurodream_idle_poll, daemon=True, name="NeuroDream-IdlePoll"
                 )
                 self._nd_poll_thread.start()
                 logger.debug("[NeuroDream] Idle polling thread started (60s interval)")
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 self.neurodream = None
                 logger.warning(f"[NeuroDream] Init failed: {e}")
 
@@ -531,6 +528,7 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
         self._kg_queue_lock = threading.Lock()
 
         # Episodic memory consolidated into UnifiedMemory (2026-03-22)
+        # These attributes are dead; UnifiedMemory handles episodic storage.
         self.episodic_memory = None
         self.episodic_bridge = None
         self.episodic_timeline = None
@@ -597,7 +595,7 @@ class ApprenticeAgent(KGBrainMixin, SkillManagerMixin, NarrativeMixin, DirectHan
                 from aura.tools.load_skill import set_skill_library
                 set_skill_library(self.skill_library)
                 logger.debug("[TOOLS] load_skill wired to skill library")
-            except Exception as e:
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:
                 logger.warning(f"[TOOLS] Failed to wire load_skill: {e}")
 
         # Life modeling removed (dead code, 2026-03-22)
@@ -970,7 +968,10 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                 ace_context = _bundle.to_system_prompt()
             except (AttributeError, TypeError, ValueError, OSError) as _ace_err:
                 logger.warning(f"[Agent] ACE context gather failed: {_ace_err}")
-        context = context or {}  # NOTE: reserved for future use, not yet wired into agent loop
+        # NOTE: caller-provided context is reserved for future use (not yet wired
+        # into the agent loop).  Do NOT shadow the parameter so callers don't lose
+        # their dict reference.
+        _run_context = context or {}
         self.brain._last_screenshot_path = None
         self.metacognition.start_goal(goal)
         if self.monologue:
@@ -1154,7 +1155,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     except (AttributeError, TypeError, ValueError, ConnectionError, TimeoutError) as _replan_err:
                         logger.debug(f"[Planner] Re-plan check failed: {_replan_err}")
 
-            except Exception as e:  # Catch-all: protects main agent ReAct loop
+            except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: protects main agent ReAct loop
                 logger.error(f"[AGENT] Error in iteration {iteration}: {e}")
                 consecutive_failures += 1
                 if consecutive_failures >= 3:
@@ -1368,7 +1369,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
         try:
             import aura.pools as _pools
             _pools._shutting_down = True
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:
             logger.warning("Failed to mark pools as shutting down: %s", e)
 
         # 1. Shutdown NeuroDream if sleeping
@@ -1384,7 +1385,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     results["freed_resources"].append("neurodream_sleep_thread")
                 if hasattr(self.neurodream, 'shutdown'):
                     self.neurodream.shutdown()
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"NeuroDream shutdown: {e}")
 
         # 1.5. AURA v3.0 ALIVE system — removed (migrated to ALMA helpers)
@@ -1396,7 +1397,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                 for model, success in unload_result.items():
                     if success:
                         results["freed_resources"].append(f"ollama:{model}")
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"Ollama unload: {e}")
 
         # 2b. Close brain HTTP connection pools
@@ -1404,7 +1405,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             if hasattr(self, 'brain') and self.brain:
                 self.brain.close()
                 results["freed_resources"].append("brain_http_clients")
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"Brain close: {e}")
 
         # 3. Close browser if open
@@ -1412,7 +1413,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             if "browser" in self.tools and hasattr(self.tools["browser"], 'close'):
                 self.tools["browser"].close()
                 results["freed_resources"].append("browser")
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"Browser close: {e}")
 
         # 4. Unload voice/TTS models
@@ -1426,7 +1427,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     elif hasattr(tool, 'unload_whisper'):
                         tool.unload_whisper()
                         results["freed_resources"].append(f"{tool_name}:whisper")
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"Voice unload: {e}")
 
         # 5. Save knowledge graph
@@ -1434,7 +1435,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             if "knowledge_graph" in self.tools:
                 self.tools["knowledge_graph"].save()
                 results["freed_resources"].append("knowledge_graph:saved")
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"KG save: {e}")
 
         # 7. Save conversation history (preserve on disk, only clear in-memory)
@@ -1442,7 +1443,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             if hasattr(self, 'brain') and self.brain:
                 self.brain._save_history()
                 results["freed_resources"].append("conversation_history:saved")
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"History save: {e}")
 
         # 9. Close Knowledge Graph Brain
@@ -1453,7 +1454,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     self.kg_bridge.flush()
                 self.kg_brain.close()
                 results["freed_resources"].append("kg_brain")
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"KG Brain close: {e}")
 
         # 10. Episodic Memory — consolidated into UnifiedMemory, no separate close needed
@@ -1463,7 +1464,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             if hasattr(self, 'skill_library') and self.skill_library:
                 self.skill_library.shutdown()
                 results["freed_resources"].append("skill_library")
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"Skill Library close: {e}")
 
         # 12. Save ALMA emotional state for cross-session continuity
@@ -1471,7 +1472,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
             from aura.emotion.alma_engine import save_state as alma_save_state
             alma_save_state()
             results["freed_resources"].append("alma_emotional_state:saved")
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"ALMA state save: {e}")
 
         # 13. Stop GatewayDaemon (proactive intelligence)
@@ -1489,7 +1490,7 @@ IMPORTANT: If the user asks about something you are not sure about, something re
                     except RuntimeError:
                         asyncio.run(self.gateway_daemon.stop())
                     results["freed_resources"].append("gateway_daemon")
-        except Exception as e:  # Catch-all: shutdown must continue even if one step fails
+        except (OSError, ConnectionError, TimeoutError, ValueError) as e:  # Catch-all: shutdown must continue even if one step fails
             results["errors"].append(f"GatewayDaemon stop: {e}")
 
         results["success"] = len(results["errors"]) == 0

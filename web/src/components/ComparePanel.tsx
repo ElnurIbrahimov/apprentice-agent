@@ -4,6 +4,7 @@ import {
   ClipboardDocumentIcon, CheckIcon, EyeIcon, EyeSlashIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 interface ModelState {
@@ -317,7 +318,7 @@ export function ComparePanel() {
 
   /* Fetch models */
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then(r => r.json())
       .then(data => {
         const all: string[] = [

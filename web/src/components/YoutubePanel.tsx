@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { StopIcon, ClipboardDocumentIcon, CheckIcon } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type InputMode = 'url' | 'transcript';
@@ -88,7 +89,7 @@ export function YoutubePanel() {
 
   // Fetch models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then((res) => res.json())
       .then((data) => {
         const all = [

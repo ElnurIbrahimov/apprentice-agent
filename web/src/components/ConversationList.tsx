@@ -117,7 +117,7 @@ export function ConversationList() {
           setCurrentConversationId(active.id);
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('[ConversationList] Fetch error:', e);
     }
   }, [setConversations, setCurrentConversationId, currentConversationId]);
@@ -271,7 +271,7 @@ export function ConversationList() {
         clearMessages();
         await fetchConversations();
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('[ConversationList] Create error:', e);
     }
   };
@@ -317,7 +317,7 @@ export function ConversationList() {
           await fetchConversations();
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('[ConversationList] Delete error:', e);
     }
     setContextMenuId(null);
@@ -365,7 +365,7 @@ export function ConversationList() {
           setSavingToMemory(null);
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('[ConversationList] Save to memory error:', e);
       setSavingToMemory(null);
     }

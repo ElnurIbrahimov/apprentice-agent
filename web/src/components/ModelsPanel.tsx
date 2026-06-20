@@ -6,6 +6,7 @@ import {
   StarIcon,
 } from '@heroicons/react/24/outline';
 import { StarIcon as StarSolid } from '@heroicons/react/24/solid';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 interface ModelEntry {
@@ -88,9 +89,9 @@ export function ModelsPanel() {
     setError(null);
     try {
       const [modRes, statusRes, rolesRes] = await Promise.all([
-        fetch('/api/models'),
+        apiFetch('/api/models'),
         fetch('/api/status').catch(() => null),
-        fetch('/api/models/roles').catch(() => null),
+        apiFetch('/api/models/roles').catch(() => null),
       ]);
 
       if (!modRes.ok) throw new Error(`Failed to fetch models (${modRes.status})`);
@@ -124,7 +125,7 @@ export function ModelsPanel() {
   const handleSetDefault = useCallback(async (modelName: string) => {
     setSettingDefault(modelName);
     try {
-      const res = await fetch('/api/models/default', {
+      const res = await apiFetch('/api/models/default', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: modelName }),

@@ -9,6 +9,7 @@ import {
   ClipboardDocumentIcon,
   ClipboardDocumentCheckIcon,
 } from '@heroicons/react/24/outline';
+import { apiFetch } from '../utils/apiFetch';
 
 /* ── Types ── */
 type MathMode = 'solve' | 'stepbystep' | 'graph' | 'simplify';
@@ -64,7 +65,7 @@ export function MathPanel() {
 
   // Fetch available models
   useEffect(() => {
-    fetch('/api/models')
+    apiFetch('/api/models')
       .then((res) => res.json())
       .then((data) => {
         const all = [
