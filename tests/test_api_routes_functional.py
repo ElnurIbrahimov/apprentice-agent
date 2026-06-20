@@ -231,7 +231,21 @@ class TestAuthEnforcement:
             from api.main import app
 
             client = TestClient(app, raise_server_exceptions=False)
-            response = client.get("/api/status", headers={"X-API-Key": key})
+            # The /api/status endpoint reads agent state (model, mood, etc.)
+            # via get_agent_service().get_status(). Without ollama installed
+            # (CI environment), the agent is a MagicMock and its attributes
+            # fail Pydantic validation. Patch the service to return valid data.
+            with patch("api.routes.status._get_agent_service") as mock_svc:
+                mock_svc.return_value.get_status.return_value = {
+                    "online": True,
+                    "model": "test-model",
+                    "aura_enabled": False,
+                    "mood": None,
+                    "memory_count": 0,
+                    "query_count": 0,
+                    "last_model_used": "test-model",
+                }
+                response = client.get("/api/status", headers={"X-API-Key": key})
 
         assert response.status_code == 200
 
