@@ -676,7 +676,7 @@ class AgenticLoop:
         self._current_action_mode = None
         _original_model_override = self.model_override  # preserve user-set override
         try:
-            from api.services.agent_service import detect_action_mode, get_model_for_action
+            from api.services.action_modes import detect_action_mode, get_model_for_action
             action_mode = detect_action_mode(prompt)
             if action_mode:
                 self._current_action_mode = action_mode

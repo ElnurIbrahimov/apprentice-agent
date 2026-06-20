@@ -105,7 +105,7 @@ def edit_plan_text(console: Console, plan_text: str) -> str:
         f.write(plan_text)
         tmp_path = f.name
     try:
-        subprocess.run([editor, tmp_path], timeout=300, check=False)
+        subprocess.run([*editor_argv, tmp_path], timeout=300, check=False)
         edited = Path(tmp_path).read_text(encoding="utf-8").strip()
         return edited if edited else plan_text
     except (FileNotFoundError, OSError) as e:

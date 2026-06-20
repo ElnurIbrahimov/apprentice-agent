@@ -6,11 +6,8 @@ Covers: path traversal, SQL injection, shell allowlist, auth endpoints,
         auth fail-closed, dead strategy removal.
 """
 import os
-import json
-import tempfile
-import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -83,8 +80,9 @@ class TestSQLInjectionBlocking:
 
     def test_blocks_with_insert(self):
         """WITH x AS (SELECT 1) INSERT INTO ... should be blocked."""
-        from api.routes.tools_new import _SQL_ALLOWED_PREFIXES
         import re
+
+        from api.routes.tools_new import _SQL_ALLOWED_PREFIXES
         sql = "WITH x AS (SELECT 1) INSERT INTO users VALUES (1, 'admin')"
         sql_stripped = sql.strip().lower()
         # Passes prefix check (starts with 'with')
@@ -151,7 +149,7 @@ class TestPKCEStoreBounded:
     """Verify PKCE store has size limits and TTL."""
 
     def test_store_evicts_at_capacity(self):
-        from api.routes.auth import _pkce_store_put, _pkce_store_get, _pkce_store, _PKCE_MAX_ENTRIES
+        from api.routes.auth import _PKCE_MAX_ENTRIES, _pkce_store, _pkce_store_put
         _pkce_store.clear()
         # Fill to capacity + 1
         for i in range(_PKCE_MAX_ENTRIES + 5):
@@ -160,7 +158,7 @@ class TestPKCEStoreBounded:
         _pkce_store.clear()
 
     def test_store_retrieves_correctly(self):
-        from api.routes.auth import _pkce_store_put, _pkce_store_get, _pkce_store
+        from api.routes.auth import _pkce_store, _pkce_store_get, _pkce_store_put
         _pkce_store.clear()
         _pkce_store_put("test-state", "test-verifier")
         assert _pkce_store_get("test-state") == "test-verifier"
@@ -208,26 +206,30 @@ class TestSSRFProtection:
     """Verify SSRF guard blocks private IPs and DNS rebinding."""
 
     def test_blocks_private_ip_directly(self):
-        from aura.security.ssrf_guard import validate_url_safe
         import pytest
+
+        from aura.security.ssrf_guard import validate_url_safe
         with pytest.raises(ValueError, match="private"):
             validate_url_safe("http://192.168.1.1/admin")
 
     def test_blocks_loopback(self):
-        from aura.security.ssrf_guard import validate_url_safe
         import pytest
-        with pytest.raises(ValueError, match="private|blocked|Blocked"):
+
+        from aura.security.ssrf_guard import validate_url_safe
+        with pytest.raises(ValueError, match=r"private|blocked|Blocked"):
             validate_url_safe("http://127.0.0.1/secret")
 
     def test_blocks_dangerous_port(self):
-        from aura.security.ssrf_guard import validate_url_safe
         import pytest
+
+        from aura.security.ssrf_guard import validate_url_safe
         with pytest.raises(ValueError, match="Blocked port"):
             validate_url_safe("http://example.com:6379/")
 
     def test_blocks_file_scheme(self):
-        from aura.security.ssrf_guard import validate_url_safe
         import pytest
+
+        from aura.security.ssrf_guard import validate_url_safe
         with pytest.raises(ValueError, match="Blocked scheme"):
             validate_url_safe("file:///etc/passwd")
 
@@ -248,46 +250,46 @@ class TestCodeValidation:
     """Verify validate_script_code blocks dangerous patterns."""
 
     def test_blocks_subprocess_direct(self):
-        from aura.agent import validate_script_code
+        from aura.security.tool_validator import validate_script_code
         ok, msg = validate_script_code("import subprocess\nsubprocess.run(['ls'])", "test")
         assert not ok
         assert "subprocess" in msg.lower() or "Forbidden" in msg
 
     def test_blocks_string_concat_evasion(self):
         """String concatenation like 'sub' + 'process' should be caught."""
-        from aura.agent import validate_script_code
+        from aura.security.tool_validator import validate_script_code
         code = 'mod = "sub" + "process"\n__import__(mod)'
-        ok, msg = validate_script_code(code, "test")
+        ok, _msg = validate_script_code(code, "test")
         assert not ok
 
     def test_blocks_getattr_builtins(self):
-        from aura.agent import validate_script_code
+        from aura.security.tool_validator import validate_script_code
         code = 'x = getattr(__builtins__, "eval")\nx("print(1)")'
-        ok, msg = validate_script_code(code, "test")
+        ok, _msg = validate_script_code(code, "test")
         assert not ok
 
     def test_blocks_dunder_subclasses(self):
-        from aura.agent import validate_script_code
+        from aura.security.tool_validator import validate_script_code
         code = 'x = ().__class__.__bases__[0].__subclasses__()'
-        ok, msg = validate_script_code(code, "test")
+        ok, _msg = validate_script_code(code, "test")
         assert not ok
 
     def test_allows_safe_code(self):
-        from aura.agent import validate_script_code
+        from aura.security.tool_validator import validate_script_code
         code = 'import json\nresult = json.dumps({"key": "value"})\nprint(result)'
-        ok, msg = validate_script_code(code, "test")
+        ok, _msg = validate_script_code(code, "test")
         assert ok
 
     def test_blocks_type_call(self):
-        from aura.agent import validate_script_code
+        from aura.security.tool_validator import validate_script_code
         code = 'x = type("Exploit", (object,), {"run": lambda: None})'
-        ok, msg = validate_script_code(code, "test")
+        ok, _msg = validate_script_code(code, "test")
         assert not ok
 
     def test_blocks_os_import(self):
-        from aura.agent import validate_script_code
+        from aura.security.tool_validator import validate_script_code
         code = 'import os\nos.listdir("/")'
-        ok, msg = validate_script_code(code, "test")
+        ok, _msg = validate_script_code(code, "test")
         assert not ok
 
 
@@ -331,6 +333,7 @@ class TestDeadStubRemoval:
     def test_no_mirrormind_attribute(self):
         """Agent source should not set self.mirrormind = None."""
         import inspect
+
         from aura.agent import ApprenticeAgent
         source = inspect.getsource(ApprenticeAgent.__init__)
         assert "self.mirrormind = None" not in source
@@ -338,6 +341,7 @@ class TestDeadStubRemoval:
 
     def test_no_theater_stub(self):
         import inspect
+
         from aura.agent import ApprenticeAgent
         source = inspect.getsource(ApprenticeAgent.__init__)
         assert "self.theater = None" not in source
@@ -345,6 +349,7 @@ class TestDeadStubRemoval:
 
     def test_no_worldsim_stub(self):
         import inspect
+
         from aura.agent import ApprenticeAgent
         source = inspect.getsource(ApprenticeAgent.__init__)
         assert "self.worldsim = None" not in source
@@ -380,8 +385,9 @@ class TestBrainThreadSafety:
 
     def test_inference_refcount_exists(self):
         """OllamaBrain.__init__ should create _inference_rc_lock and _inference_refcount."""
-        from aura.brain import OllamaBrain
         import inspect
+
+        from aura.brain import OllamaBrain
         source = inspect.getsource(OllamaBrain.__init__)
         assert "_inference_rc_lock" in source
         assert "_inference_refcount" in source
@@ -477,20 +483,20 @@ class TestTaintTrackerDisplaySink:
     """Verify SECRET data is blocked from display sink."""
 
     def test_secret_blocked_from_display(self):
-        from aura.security.taint_tracker import TaintTracker, TaintLabel
+        from aura.security.taint_tracker import TaintLabel, TaintTracker
         tracker = TaintTracker()
         # Simulate a session that has seen a secret
         tracker._session_taints["test-session"] = TaintLabel.SECRET
         assert not tracker.is_safe_for_sink("test-session", "display")
 
     def test_pii_allowed_in_display(self):
-        from aura.security.taint_tracker import TaintTracker, TaintLabel
+        from aura.security.taint_tracker import TaintLabel, TaintTracker
         tracker = TaintTracker()
         tracker._session_taints["test-session"] = TaintLabel.PII
         assert tracker.is_safe_for_sink("test-session", "display")
 
     def test_secret_blocked_from_all_sinks(self):
-        from aura.security.taint_tracker import TaintTracker, TaintLabel
+        from aura.security.taint_tracker import TaintLabel, TaintTracker
         tracker = TaintTracker()
         tracker._session_taints["test-session"] = TaintLabel.SECRET
         for sink in ("display", "memory", "log", "external_api"):
@@ -516,10 +522,11 @@ class TestAuthFailClosed:
                 env_copy.pop("AURA_API_KEY", None)
                 with patch.dict(os.environ, env_copy, clear=True):
                     import asyncio
+
                     from api.auth import require_api_key
                     try:
                         asyncio.run(require_api_key(""))
-                        assert False, "Should have raised HTTPException"
+                        raise AssertionError("Should have raised HTTPException")
                     except HTTPException as e:
                         assert e.status_code == 503
 
@@ -533,18 +540,21 @@ class TestDeadStrategyRemoval:
 
     def test_no_cognitive_theater_branch(self):
         import inspect
+
         from aura.agent import ApprenticeAgent
         source = inspect.getsource(ApprenticeAgent)
         assert "COGNITIVE_THEATER" not in source
 
     def test_no_debate_branch(self):
         import inspect
+
         from aura.agent import ApprenticeAgent
         source = inspect.getsource(ApprenticeAgent)
         assert "ReasoningStrategy.DEBATE" not in source
 
     def test_no_reflexion_branch(self):
         import inspect
+
         from aura.agent import ApprenticeAgent
         source = inspect.getsource(ApprenticeAgent)
         assert "ReasoningStrategy.REFLEXION" not in source

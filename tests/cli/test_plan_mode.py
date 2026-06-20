@@ -1,14 +1,21 @@
 """Tests for editable plan mode."""
-import pytest
-from unittest.mock import patch
-from aura.core.agentic_loop_support import RecallResult
-from aura.cli.plan_mode import (
-    PlanStep, ExecutionPlan, StepStatus,
-    parse_plan_from_llm, render_plan, PLAN_GENERATION_PROMPT,
-    show_plan_approval, edit_plan_text,
-)
-from rich.console import Console
 from io import StringIO
+from unittest.mock import patch
+
+from rich.console import Console
+
+from aura.cli.plan_mode import (
+    PLAN_GENERATION_PROMPT,
+    ExecutionPlan,
+    PlanStep,
+    StepStatus,
+    edit_plan_text,
+    parse_plan_from_llm,
+    render_plan,
+    show_plan_approval,
+)
+from aura.core.agentic_loop_support import RecallResult
+
 
 def test_plan_step_defaults():
     step = PlanStep(index=1, description="Do something")
@@ -185,6 +192,7 @@ def test_edit_plan_text_editor_fails():
 def test_plan_first_returns_plan_dict(mock_getmtime, mock_recall):
     """plan_first should return a dict with plan_text, plan, and prompt."""
     from unittest.mock import MagicMock
+
     from aura.core.agentic_loop import AgenticLoop
 
     brain = MagicMock()
@@ -204,6 +212,7 @@ def test_plan_first_returns_plan_dict(mock_getmtime, mock_recall):
     loop.project_root = "."
     loop._current_action_mode = None
     loop._hot_files = {}
+    loop._planner = None
 
     result = loop.plan_first("fix the login bug")
     assert "plan_text" in result
@@ -220,6 +229,7 @@ def test_plan_first_returns_plan_dict(mock_getmtime, mock_recall):
 def test_plan_first_empty_llm_response(mock_getmtime, mock_recall):
     """plan_first with empty LLM response should still return a plan (with defaults)."""
     from unittest.mock import MagicMock
+
     from aura.core.agentic_loop import AgenticLoop
 
     brain = MagicMock()
@@ -233,6 +243,7 @@ def test_plan_first_empty_llm_response(mock_getmtime, mock_recall):
     loop.project_root = "."
     loop._current_action_mode = None
     loop._hot_files = {}
+    loop._planner = None
 
     result = loop.plan_first("do something")
     assert "plan" in result
@@ -244,6 +255,7 @@ def test_plan_first_empty_llm_response(mock_getmtime, mock_recall):
 def test_plan_first_llm_error():
     """plan_first should catch LLM errors and return error key."""
     from unittest.mock import MagicMock
+
     from aura.core.agentic_loop import AgenticLoop
 
     brain = MagicMock()
@@ -257,6 +269,7 @@ def test_plan_first_llm_error():
     loop.project_root = "."
     loop._current_action_mode = None
     loop._hot_files = {}
+    loop._planner = None
 
     result = loop.plan_first("test")
     assert "error" in result
@@ -266,7 +279,7 @@ def test_plan_first_llm_error():
 # ── Permission mode cycling includes PLAN_APPROVE ────────────────────
 
 def test_permission_mode_cycle_includes_plan_approve():
-    from aura.cli.permissions_ui import PermissionMode, _MODE_ORDER, cycle_permission_mode
+    from aura.cli.permissions_ui import _MODE_ORDER, PermissionMode, cycle_permission_mode
 
     assert PermissionMode.PLAN_APPROVE in _MODE_ORDER
 
