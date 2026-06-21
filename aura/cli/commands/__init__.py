@@ -12,12 +12,16 @@ from . import (  # noqa: F401
     auth_commands,
     config_commands,
     copy_command,
+    cron_commands,
     git_commands,
     heatmap_commands,
+    insights_commands,
     provider_commands,
     research_commands,
     session_commands,
+    sessions_cli_commands,
     shadow_commands,
+    skills_commands,
     snippet_command,
     system_commands,
     tool_commands,
@@ -57,6 +61,10 @@ from .provider_commands import (
 from .auth_commands import handle_auth
 from .config_commands import handle_config
 from .toolset_commands import handle_toolsets
+from .cron_commands import handle_cron
+from .insights_commands import handle_insights
+from .skills_commands import handle_skills
+from .sessions_cli_commands import handle_sessions as handle_sessions_cli
 from .research_commands import (
     handle_browse,
     handle_export,
@@ -151,6 +159,7 @@ __all__: list[str] = [
     "handle_tasks", "handle_theme", "handle_trust",
     "handle_provider", "handle_providers",
     "handle_auth", "handle_config", "handle_toolsets",
+    "handle_cron", "handle_insights", "handle_skills", "handle_sessions_cli",
 ]
 
 # Local handler defined here rather than in a submodule.
@@ -232,6 +241,10 @@ COMMANDS: list[tuple[str, str, Callable[..., Any], list[str], str]] = [
     ("/config",   "Show/set configuration (config get/set/path/edit)", handle_config,   [],                TIER_STABLE),
     ("/auth",     "Manage credential pool (list/add/remove/reset)",    handle_auth,     [],                TIER_STABLE),
     ("/toolsets", "List and manage tool groups",                       handle_toolsets, [],                TIER_STABLE),
+    ("/cron",     "Manage scheduled tasks",                           handle_cron,      [],                TIER_STABLE),
+    ("/insights", "Usage analytics — tokens, cost, models",            handle_insights, [],                TIER_STABLE),
+    ("/skills",   "Browse, search, and manage skills",                 handle_skills,   [],                TIER_STABLE),
+    ("/sm",       "Session management (list/export/rename/delete/stats/prune)", handle_sessions_cli, [], TIER_STABLE),
     ("/interrupt","Abort running iteration with optional correction",handle_interrupt,["/stop"],         TIER_STABLE),
 ]
 

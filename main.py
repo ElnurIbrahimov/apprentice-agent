@@ -80,6 +80,7 @@ _SUBCOMMANDS = {
     "mcp-serve", "acp-serve", "exec", "ide", "log", "status", "recall",
     "start", "stop", "why", "heatmap", "worktree",
     "profile", "auth", "tools",
+    "skills", "cron", "sessions", "insights",
 }
 def _collect_valued_flags(parser: argparse.ArgumentParser) -> set[str]:
     """Derive option strings that consume a separate value token from a parser.
@@ -255,6 +256,32 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
                                 choices=["list", "enable", "disable"],
                                 help="Tools action")
         sub_tools.add_argument("tools_args", nargs="*", help="Toolset name")
+
+        # ── Skills management ──
+        sub_skills = subparsers.add_parser("skills", help="Manage skills")
+        sub_skills.add_argument("skills_action", nargs="?", default="list",
+                                  choices=["list", "search", "install", "uninstall"],
+                                  help="Skills action")
+        sub_skills.add_argument("skills_args", nargs="*", help="Search query or install URL")
+
+        # ── Cron management ──
+        sub_cron = subparsers.add_parser("cron", help="Manage scheduled tasks")
+        sub_cron.add_argument("cron_action", nargs="?", default="list",
+                               choices=["list", "create", "pause", "resume", "remove", "run"],
+                               help="Cron action")
+        sub_cron.add_argument("cron_args", nargs="*", help="Schedule + prompt, or job ID")
+
+        # ── Sessions management ──
+        sub_sessions = subparsers.add_parser("sessions", help="Manage sessions")
+        sub_sessions.add_argument("sessions_action", nargs="?", default="list",
+                                   choices=["list", "export", "rename", "delete", "stats", "prune"],
+                                   help="Sessions action")
+        sub_sessions.add_argument("sessions_args", nargs="*", help="Session ID, title, or days")
+
+        # ── Insights ──
+        sub_insights = subparsers.add_parser("insights", help="Usage analytics")
+        sub_insights.add_argument("insights_days", nargs="?", type=int, default=7,
+                                    help="Number of days to analyze (default: 7)")
 
     return parser, use_subparsers
 
@@ -793,6 +820,106 @@ def main() -> None:
             from aura.cli.commands.toolset_commands import _disable_toolset
             _disable_toolset(tools_args[0])
 
+        sys.exit(0)
+
+    # ── Skills subcommand ──
+    elif args.command == "skills":
+        action = getattr(args, "skills_action", "list")
+        skills_args = getattr(args, "skills_args", [])
+        console = _get_console()
+
+        if action == "list":
+            from aura.cli.commands.skills_commands import _list_skills
+            _list_skills()
+        elif action == "search":
+            from aura.cli.commands.skills_commands import _search_skills
+            _search_skills(" ".join(skills_args))
+        elif action == "install":
+            if not skills_args:
+                console.print("[red]Usage: aura skills install <url>[/red]")
+                sys.exit(1)
+            from aura.cli.commands.skills_commands import _install_skill
+            _install_skill(skills_args[0])
+        elif action == "uninstall":
+            if not skills_args:
+                console.print("[red]Usage: aura skills uninstall <name>[/red]")
+                sys.exit(1)
+            from aura.cli.commands.skills_commands import _uninstall_skill
+            _uninstall_skill(skills_args[0])
+
+        sys.exit(0)
+
+    # ── Cron subcommand ──
+    elif args.command == "cron":
+        action = getattr(args, "cron_action", "list")
+        cron_args = getattr(args, "cron_args", [])
+        console = _get_console()
+
+        if action == "list":
+            from aura.cli.commands.cron_commands import _list_jobs
+            _list_jobs()
+        elif action == "create":
+            if len(cron_args) < 2:
+                console.print("[red]Usage: aura cron create <schedule> <prompt>[/red]")
+                sys.exit(1)
+            from aura.cli.commands.cron_commands import _create_job
+            _create_job(cron_args[0], " ".join(cron_args[1:]))
+        elif action == "pause":
+            from aura.cli.commands.cron_commands import _toggle_job
+            _toggle_job(cron_args[0] if cron_args else "", enabled=False)
+        elif action == "resume":
+            from aura.cli.commands.cron_commands import _toggle_job
+            _toggle_job(cron_args[0] if cron_args else "", enabled=True)
+        elif action == "remove":
+            from aura.cli.commands.cron_commands import _remove_job
+            _remove_job(cron_args[0] if cron_args else "")
+        elif action == "run":
+            console.print("[yellow]Cron run requires an active session. Use /cron run <id> in chat.[/yellow]")
+
+        sys.exit(0)
+
+    # ── Sessions subcommand ──
+    elif args.command == "sessions":
+        action = getattr(args, "sessions_action", "list")
+        sessions_args = getattr(args, "sessions_args", [])
+        console = _get_console()
+
+        if action == "list":
+            from aura.cli.commands.sessions_cli_commands import _list_sessions
+            _list_sessions()
+        elif action == "export":
+            if not sessions_args:
+                console.print("[red]Usage: aura sessions export <id>[/red]")
+                sys.exit(1)
+            from aura.cli.commands.sessions_cli_commands import _export_session
+            _export_session(sessions_args[0])
+        elif action == "rename":
+            if len(sessions_args) < 2:
+                console.print("[red]Usage: aura sessions rename <id> <title>[/red]")
+                sys.exit(1)
+            from aura.cli.commands.sessions_cli_commands import _rename_session
+            _rename_session(sessions_args[0], " ".join(sessions_args[1:]))
+        elif action == "delete":
+            if not sessions_args:
+                console.print("[red]Usage: aura sessions delete <id>[/red]")
+                sys.exit(1)
+            from aura.cli.commands.sessions_cli_commands import _delete_session
+            _delete_session(sessions_args[0])
+        elif action == "stats":
+            from aura.cli.commands.sessions_cli_commands import _session_stats
+            _session_stats()
+        elif action == "prune":
+            days = sessions_args[0] if sessions_args else "30"
+            from aura.cli.commands.sessions_cli_commands import _prune_sessions
+            _prune_sessions(days)
+
+        sys.exit(0)
+
+    # ── Insights subcommand ──
+    elif args.command == "insights":
+        days = getattr(args, "insights_days", 7)
+        from aura.cli.commands.insights_commands import _show_insights_shell
+        _show_insights_shell(days)
         sys.exit(0)
 
     # Handle subcommands that don't need the full agent
