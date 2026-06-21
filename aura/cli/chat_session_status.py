@@ -8,9 +8,10 @@ logger = logging.getLogger(__name__)
 
 
 def show_startup_diagnostics(console: Any) -> None:
-    """Show quick warnings if Ollama or cloud key are missing."""
+    """Show quick warnings and provider status at startup."""
     import os as _os
 
+    # ── Ollama checks (existing) ──
     if not _os.environ.get("OLLAMA_API_KEY"):
         console.print(
             "  [yellow]\u26a0 OLLAMA_API_KEY not set \u2014 cloud models unavailable. "
@@ -29,6 +30,29 @@ def show_startup_diagnostics(console: Any) -> None:
             "  [yellow]\u26a0 Ollama not running \u2014 start with: "
             "ollama serve[/yellow]"
         )
+
+    # ── Direct API provider summary ──
+    try:
+        from aura.providers import list_configured_providers
+        configured = [p for p in list_configured_providers() if p["configured"]]
+        if configured:
+            names = ", ".join(p["display_name"] for p in configured)
+            console.print(
+                f"  [dim]\u2713 Direct API providers: {names}[/dim]"
+            )
+    except Exception:
+        pass
+
+    # ── ChatGPT OAuth status ──
+    try:
+        from aura.auth.chatgpt_oauth import is_authenticated
+        if is_authenticated():
+            from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
+            console.print(
+                f"  [dim]\u2713 ChatGPT OAuth: {len(ALL_CHATGPT_MODELS)} models available[/dim]"
+            )
+    except ImportError:
+        pass
 
 
 class SessionStatusController:

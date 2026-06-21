@@ -128,30 +128,67 @@ def _ollama_check(results: list) -> None:
 
 
 def _cloud_providers_check(results: list) -> None:
+    """Check all direct API providers, not just OpenAI and Gemini."""
     try:
-        import urllib.request
-        req = urllib.request.Request("https://api.openai.com/v1/models", method="HEAD",
-                                     headers={"Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY', '')}"})
-        urllib.request.urlopen(req, timeout=5)
-        results.append(("OpenAI", "PASS", "API reachable", ""))
-    except Exception:
-        key = os.environ.get("OPENAI_API_KEY")
-        if key:
-            results.append(("OpenAI", "WARN", "API key set but unreachable", "Check network or billing"))
-        else:
-            results.append(("OpenAI", "SKIP", "No OPENAI_API_KEY", "Set to enable"))
+        from aura.providers import list_configured_providers
+        providers = list_configured_providers()
+        for p in providers:
+            name = p["name"]
+            display = p["display_name"]
+            configured = p["configured"]
+            count = p["model_count"]
+            if configured:
+                results.append((display, "PASS", f"{count} models configured", ""))
+            else:
+                # Find the env var name for the hint
+                env_var = ""
+                try:
+                    from aura.providers.registry import PROVIDER_CONFIGS
+                    env_var = PROVIDER_CONFIGS.get(name, {}).get("env_var", "")
+                except Exception:
+                    pass
+                results.append((display, "SKIP", "Not configured", f"Set {env_var}" if env_var else ""))
+    except ImportError:
+        # Fallback to the old hardcoded checks if provider system isn't available
+        _cloud_providers_check_legacy(results)
 
+    # ── ChatGPT OAuth ──
     try:
-        import urllib.request
-        req = urllib.request.Request("https://generativelanguage.googleapis.com/v1/models", method="HEAD")
-        urllib.request.urlopen(req, timeout=5)
-        results.append(("Gemini", "PASS", "API reachable", ""))
-    except Exception:
-        key = os.environ.get("GEMINI_API_KEY")
-        if key:
-            results.append(("Gemini", "WARN", "API key set but unreachable", ""))
+        from aura.auth.chatgpt_oauth import is_authenticated
+        if is_authenticated():
+            from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
+            results.append(("ChatGPT (OAuth)", "PASS", f"{len(ALL_CHATGPT_MODELS)} models", "Subscription active"))
         else:
-            results.append(("Gemini", "SKIP", "No GEMINI_API_KEY", ""))
+            results.append(("ChatGPT (OAuth)", "SKIP", "Not authenticated", "aura --login chatgpt"))
+    except ImportError:
+        pass
+
+
+def _cloud_providers_check_legacy(results: list) -> None:
+    """Hardcoded provider checks — only used if aura.providers is unavailable."""
+    key = os.environ.get("OPENAI_API_KEY")
+    if key:
+        results.append(("OpenAI", "PASS", "API key set", ""))
+    else:
+        results.append(("OpenAI", "SKIP", "No OPENAI_API_KEY", "Set to enable"))
+
+    key = os.environ.get("GEMINI_API_KEY")
+    if key:
+        results.append(("Gemini", "PASS", "API key set", ""))
+    else:
+        results.append(("Gemini", "SKIP", "No GEMINI_API_KEY", ""))
+
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        results.append(("Anthropic", "PASS", "API key set", ""))
+    else:
+        results.append(("Anthropic", "SKIP", "No ANTHROPIC_API_KEY", "Set to enable"))
+
+    key = os.environ.get("DEEPSEEK_API_KEY")
+    if key:
+        results.append(("DeepSeek", "PASS", "API key set", ""))
+    else:
+        results.append(("DeepSeek", "SKIP", "No DEEPSEEK_API_KEY", "Set to enable"))
 
 
 def _git_check(results: list) -> None:

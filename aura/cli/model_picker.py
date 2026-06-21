@@ -122,7 +122,9 @@ def _build_model_list(current_model: str) -> list[tuple[str, str, str]]:
         for m, provider_name in list_all_provider_models():
             if m not in seen:
                 seen.add(m)
-                items.append((m, provider_name, "api"))
+                # Use short provider name as the tag for cleaner display
+                short_name = provider_name.replace(" (", " ").split()[0].lower()
+                items.append((m, short_name, "api"))
     except ImportError:
         pass
 

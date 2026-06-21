@@ -12,6 +12,7 @@ from . import (  # noqa: F401
     copy_command,
     git_commands,
     heatmap_commands,
+    provider_commands,
     research_commands,
     session_commands,
     shadow_commands,
@@ -46,6 +47,10 @@ from .git_commands import (
 )
 from .heatmap_commands import handle_heatmap
 from .history_commands import handle_history
+from .provider_commands import (
+    handle_provider,
+    handle_providers,
+)
 from .research_commands import (
     handle_browse,
     handle_export,
@@ -138,6 +143,7 @@ __all__: list[str] = [
     "handle_heatmap", "handle_shadow", "handle_help", "handle_model",
     "handle_mood", "handle_quit", "handle_routing", "handle_speak",
     "handle_tasks", "handle_theme", "handle_trust",
+    "handle_provider", "handle_providers",
 ]
 
 # Local handler defined here rather than in a submodule.
@@ -214,6 +220,8 @@ COMMANDS: list[tuple[str, str, Callable[..., Any], list[str], str]] = [
     ("/voice",    "Voice mode (speech input/output)",                _handle_voice,   [],                TIER_BETA),
     ("/snippet",  "Manage prompt templates/snippets",                handle_snippet,  [],                TIER_BETA),
     ("/skill",    "Browse and load skills",                            handle_skill,    [],                TIER_BETA),
+    ("/providers","List all configured providers with status and models",handle_providers,[],               TIER_STABLE),
+    ("/provider", "Switch active provider interactively",              handle_provider, [],                TIER_STABLE),
     ("/interrupt","Abort running iteration with optional correction",handle_interrupt,["/stop"],         TIER_STABLE),
 ]
 
