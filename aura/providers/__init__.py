@@ -17,25 +17,66 @@ _initialized = False
 
 
 def _init_providers():
-    """Create provider instances (once)."""
+    """Create provider instances (once).
+
+    Reads custom providers from config.yaml via config_loader, then
+    registers built-in providers from registry.py. Custom providers
+    from config.yaml are merged on top of built-ins.
+    """
     global _initialized
     if _initialized:
         return
     _initialized = True
 
-    # OpenAI-compatible providers (8 of 10)
+    # Get merged provider configs (config.yaml + built-in defaults)
+    try:
+        from aura.config_loader import get_providers_config
+        merged_configs = get_providers_config()
+    except ImportError:
+        merged_configs = dict(PROVIDER_CONFIGS)
+
+    # Determine which providers are OpenAI-compatible vs custom
     from .openai_compat import OpenAICompatProvider
+
+    # Build-in OpenAI-compatible providers (from registry.py list)
     for name in OPENAI_COMPATIBLE_PROVIDERS:
-        cfg = PROVIDER_CONFIGS[name]
+        cfg = merged_configs.get(name, PROVIDER_CONFIGS.get(name))
+        if not cfg:
+            continue
         _providers[name] = OpenAICompatProvider(
             provider_name=name,
             base_url=cfg["base_url"],
-            env_var=cfg["env_var"],
-            display_name=cfg["display_name"],
-            default_models=cfg["default_models"],
+            env_var=cfg.get("env_var", cfg.get("api_key_env", "")),
+            display_name=cfg.get("display_name", name),
+            default_models=cfg.get("default_models", cfg.get("models", [])),
         )
 
-    # Custom providers
+    # Custom OpenAI-compatible providers from config.yaml (not in built-in list)
+    builtin_names = set(OPENAI_COMPATIBLE_PROVIDERS) | {"anthropic", "gemini"}
+    for name, cfg in merged_configs.items():
+        if name in builtin_names:
+            continue
+        if not isinstance(cfg, dict) or "base_url" not in cfg:
+            continue
+        # Only register if it looks like an OpenAI-compatible endpoint
+        # (custom Anthropic/Gemini would need their own provider classes)
+        env_var = cfg.get("env_var", cfg.get("api_key_env", ""))
+        models = cfg.get("default_models", cfg.get("models", []))
+        # Normalize model names: if they don't have provider prefix, add it
+        normalized_models = [
+            m if ":" in m else f"{name}:{m}"
+            for m in (models or [])
+        ]
+        _providers[name] = OpenAICompatProvider(
+            provider_name=name,
+            base_url=cfg["base_url"],
+            env_var=env_var,
+            display_name=cfg.get("display_name", name),
+            default_models=normalized_models,
+        )
+        logger.info(f"[Providers] Custom provider '{name}' registered from config.yaml")
+
+    # Built-in custom-API providers (non-OpenAI format)
     from .anthropic_provider import AnthropicProvider
     _providers["anthropic"] = AnthropicProvider()
 

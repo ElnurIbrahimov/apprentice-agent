@@ -79,6 +79,7 @@ _SUBCOMMANDS = {
     "init", "setup", "doctor", "config", "models", "commit", "cost",
     "mcp-serve", "acp-serve", "exec", "ide", "log", "status", "recall",
     "start", "stop", "why", "heatmap", "worktree",
+    "profile", "auth", "tools",
 }
 def _collect_valued_flags(parser: argparse.ArgumentParser) -> set[str]:
     """Derive option strings that consume a separate value token from a parser.
@@ -224,6 +225,37 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
         sub_log.add_argument("--format", dest="log_format", choices=["markdown", "json"], default="markdown")
         sub_log.add_argument("--limit", type=int, default=20)
 
+        # ── Profile management ──
+        sub_profile = subparsers.add_parser("profile", help="Manage isolated profiles")
+        sub_profile.add_argument("profile_action", nargs="?", default="list",
+                                  choices=["list", "create", "use", "show", "delete"],
+                                  help="Profile action")
+        sub_profile.add_argument("profile_name", nargs="?", default="", help="Profile name")
+        sub_profile.add_argument("--clone", dest="profile_clone", default=None,
+                                  help="Clone config from an existing profile")
+
+        # ── Config management ──
+        sub_config = subparsers.add_parser("config", help="Show/set configuration")
+        sub_config.add_argument("config_action", nargs="?", default="show",
+                                 choices=["show", "get", "set", "path", "edit"],
+                                 help="Config action")
+        sub_config.add_argument("config_key", nargs="?", default="", help="Config key (dotted path)")
+        sub_config.add_argument("config_value", nargs="?", default="", help="Config value (for set)")
+
+        # ── Auth / credential pool ──
+        sub_auth = subparsers.add_parser("auth", help="Manage credential pool")
+        sub_auth.add_argument("auth_action", nargs="?", default="list",
+                               choices=["list", "add", "remove", "reset"],
+                               help="Auth action")
+        sub_auth.add_argument("auth_args", nargs="*", help="Provider name + optional index")
+
+        # ── Tools management ──
+        sub_tools = subparsers.add_parser("tools", help="Manage toolsets")
+        sub_tools.add_argument("tools_action", nargs="?", default="list",
+                                choices=["list", "enable", "disable"],
+                                help="Tools action")
+        sub_tools.add_argument("tools_args", nargs="*", help="Toolset name")
+
     return parser, use_subparsers
 
 
@@ -239,6 +271,12 @@ def _add_top_level_arguments(parser: argparse.ArgumentParser) -> None:
         "goal",
         nargs="*",
         help="One-shot agentic prompt (e.g., aura 'fix the login bug')"
+    )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Use a named profile (isolated config, sessions, skills)"
     )
     parser.add_argument(
         "--max-iterations",
@@ -466,6 +504,10 @@ def main() -> None:
     if not use_subparsers:
         args.command = None
 
+    # Apply --profile flag early so all downstream code sees the right profile
+    if getattr(args, "profile", None):
+        os.environ["AURA_PROFILE"] = args.profile
+
     # Apply sandbox tier as early as possible so any subsequent code path
     # (subcommands, one-shot, chat loop) sees the clamp.
     _sandbox_label = "unrestricted"
@@ -553,6 +595,205 @@ def main() -> None:
             sys.exit(1)
         args.prompt = exec_prompt  # normalize for the shared --prompt path below
         # Fall through to the non-interactive --prompt path below
+
+    # ── Profile subcommand ──
+    elif args.command == "profile":
+        from aura.profiles import (
+            list_profiles, create_profile, set_active_profile,
+            delete_profile, show_profile, get_active_profile_name,
+        )
+        action = getattr(args, "profile_action", "list")
+        name = getattr(args, "profile_name", "")
+        console = _get_console()
+
+        if action == "list":
+            profiles = list_profiles()
+            for p in profiles:
+                marker = " [green]<-[/green]" if p["active"] else ""
+                console.print(f"  [cyan]{p['name']:<15}[/cyan] {p['session_count']} sessions  [dim]{p['path']}[/dim]{marker}")
+            if not profiles:
+                console.print("[dim]No profiles found. Use 'aura profile create <name>' to create one.[/dim]")
+
+        elif action == "create":
+            if not name:
+                console.print("[red]Usage: aura profile create <name>[/red]")
+                sys.exit(1)
+            clone = getattr(args, "profile_clone", None)
+            if create_profile(name, clone_from=clone):
+                console.print(f"[green]Created profile '{name}'[/green]")
+            else:
+                console.print(f"[red]Failed to create profile '{name}'[/red]")
+                sys.exit(1)
+
+        elif action == "use":
+            if not name:
+                console.print("[red]Usage: aura profile use <name>[/red]")
+                sys.exit(1)
+            if set_active_profile(name):
+                console.print(f"[green]Active profile set to '{name}'[/green]")
+            else:
+                console.print(f"[red]Profile '{name}' not found[/red]")
+                sys.exit(1)
+
+        elif action == "show":
+            info = show_profile(name or None)
+            console.print(f"  [bold]Profile:[/bold] {info['name']}")
+            console.print(f"  [bold]Path:[/bold] {info['path']}")
+            console.print(f"  [bold]Sessions:[/bold] {info['session_count']}")
+            console.print(f"  [bold]Config:[/bold] {'yes' if info['has_config'] else 'no'}")
+            console.print(f"  [bold]Env:[/bold] {'yes' if info['has_env'] else 'no'}")
+
+        elif action == "delete":
+            if not name:
+                console.print("[red]Usage: aura profile delete <name>[/red]")
+                sys.exit(1)
+            if delete_profile(name):
+                console.print(f"[green]Deleted profile '{name}'[/green]")
+            else:
+                console.print(f"[red]Failed to delete profile '{name}'[/red]")
+                sys.exit(1)
+
+        sys.exit(0)
+
+    # ── Config subcommand ──
+    elif args.command == "config":
+        from aura.config_loader import load_config, get_config_value, set_config_value, get_config_path
+        action = getattr(args, "config_action", "show")
+        key = getattr(args, "config_key", "")
+        value = getattr(args, "config_value", "")
+        console = _get_console()
+
+        if action == "show":
+            import yaml
+            cfg = load_config(force=True)
+            if cfg:
+                console.print(yaml.safe_dump(cfg, default_flow_style=False, allow_unicode=True, sort_keys=False))
+            else:
+                console.print(f"[dim]No config.yaml found at {get_config_path()}[/dim]")
+
+        elif action == "get":
+            if not key:
+                console.print("[red]Usage: aura config get <key>[/red]")
+                sys.exit(1)
+            val = get_config_value(key)
+            if val is None:
+                console.print(f"[dim]Key '{key}' not set.[/dim]")
+            else:
+                console.print(f"{key} = {val}")
+
+        elif action == "set":
+            if not key or not value:
+                console.print("[red]Usage: aura config set <key> <value>[/red]")
+                sys.exit(1)
+            # Parse value (bool, int, list, string)
+            parsed = value
+            if value.lower() in ("true", "yes"):
+                parsed = True
+            elif value.lower() in ("false", "no"):
+                parsed = False
+            else:
+                try:
+                    parsed = int(value)
+                except ValueError:
+                    try:
+                        parsed = float(value)
+                    except ValueError:
+                        pass
+            if set_config_value(key, parsed):
+                console.print(f"[green]Set {key} = {parsed}[/green]")
+            else:
+                console.print(f"[red]Failed to set {key}[/red]")
+                sys.exit(1)
+
+        elif action == "path":
+            console.print(str(get_config_path()))
+
+        elif action == "edit":
+            import subprocess
+            path = get_config_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                path.write_text("# Aura configuration\n", encoding="utf-8")
+            editor = os.environ.get("EDITOR", "notepad" if os.name == "nt" else "vim")
+            try:
+                subprocess.run([editor, str(path)])
+            except FileNotFoundError:
+                console.print(f"[red]Editor '{editor}' not found. Edit manually: {path}[/red]")
+
+        sys.exit(0)
+
+    # ── Auth subcommand ──
+    elif args.command == "auth":
+        action = getattr(args, "auth_action", "list")
+        auth_args = getattr(args, "auth_args", [])
+        console = _get_console()
+
+        if action == "list":
+            provider = auth_args[0] if auth_args else ""
+            # Reuse the /auth list handler logic
+            from aura.cli.commands.auth_commands import _auth_list
+            _auth_list(provider)
+
+        elif action == "add":
+            from aura.cli.commands.auth_commands import _auth_add
+            _auth_add()
+
+        elif action == "remove":
+            if len(auth_args) < 2:
+                console.print("[red]Usage: aura auth remove <provider> <index>[/red]")
+                sys.exit(1)
+            from aura.cli.commands.auth_commands import _auth_remove
+            _auth_remove(" ".join(auth_args))
+
+        elif action == "reset":
+            if not auth_args:
+                console.print("[red]Usage: aura auth reset <provider>[/red]")
+                sys.exit(1)
+            from aura.cli.commands.auth_commands import _auth_reset
+            _auth_reset(auth_args[0])
+
+        sys.exit(0)
+
+    # ── Tools subcommand ──
+    elif args.command == "tools":
+        action = getattr(args, "tools_action", "list")
+        tools_args = getattr(args, "tools_args", [])
+        console = _get_console()
+
+        if action == "list":
+            from aura.toolsets import list_toolsets
+            from rich.table import Table
+            ts_list = list_toolsets()
+            table = Table(box=None, padding=(0, 1), show_header=True, header_style="bold")
+            table.add_column("Toolset", style="bold", width=15)
+            table.add_column("Status", width=8, justify="center")
+            table.add_column("Tools", width=6, justify="right")
+            table.add_column("Description", min_width=40)
+            enabled_count = 0
+            for ts in ts_list:
+                status = "[green]\u2713[/green]" if ts["enabled"] else "[dim]\u2717[/dim]"
+                if ts["enabled"]:
+                    enabled_count += 1
+                table.add_row(ts["name"], status, str(ts["tool_count"]), ts["description"])
+            console.print(f"\n  [bold]Toolsets ({enabled_count}/{len(ts_list)} enabled)[/bold]\n")
+            console.print(table)
+            console.print()
+
+        elif action == "enable":
+            if not tools_args:
+                console.print("[red]Usage: aura tools enable <toolset>[/red]")
+                sys.exit(1)
+            from aura.cli.commands.toolset_commands import _enable_toolset
+            _enable_toolset(tools_args[0])
+
+        elif action == "disable":
+            if not tools_args:
+                console.print("[red]Usage: aura tools disable <toolset>[/red]")
+                sys.exit(1)
+            from aura.cli.commands.toolset_commands import _disable_toolset
+            _disable_toolset(tools_args[0])
+
+        sys.exit(0)
 
     # Handle subcommands that don't need the full agent
     elif args.command:

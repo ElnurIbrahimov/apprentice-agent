@@ -68,6 +68,13 @@ class ModelRouterMixin:
                     return self._cloud_client, Config.MODEL_FAST
                 return self.client, Config.MODEL_FAST
 
+        # ── Provider-level failover (from config.yaml fallback_providers) ──
+        # If the model's provider is configured but the call fails at runtime,
+        # the caller should try the next provider in the fallback list.
+        # This block is NOT hit during routing — it's a fallback for when
+        # _get_client_for_model returns a provider that later raises ConnectionError.
+        # The actual failover loop is in _try_with_fallback().
+
         if model.endswith(("-cloud", ":cloud")):
             # Cloud models: prefer the dedicated cloud client (api.ollama.com) if available,
             # fall back to local Ollama bridge (for setups where Ollama Pro runs locally).
@@ -92,6 +99,66 @@ class ModelRouterMixin:
             return self._cloud_client, cloud_model
 
         return self.client, model
+
+    def _get_fallback_providers(self) -> list[str]:
+        """Get the provider-level fallback list from config.yaml.
+
+        Returns provider names in priority order. When the primary provider
+        fails with a ConnectionError, the caller tries the next provider.
+        """
+        try:
+            from aura.config_loader import get_fallback_providers
+            return get_fallback_providers()
+        except ImportError:
+            return []
+
+    def _try_with_fallback(self, model: str, messages: list, **kwargs) -> dict:
+        """Call a model with provider-level failover.
+
+        Tries the primary model first. If it raises ConnectionError, iterates
+        through fallback_providers from config.yaml, trying the first model
+        from each provider. Returns the first successful response.
+
+        Falls back to the old model-level fallback chain if no provider
+        fallback is configured or all providers fail.
+        """
+        client, actual_model = self._get_client_for_model(model)
+        try:
+            return client.chat(actual_model, messages, **kwargs)
+        except (ConnectionError, Exception) as primary_err:
+            logger.warning(f"[BRAIN] Primary provider failed: {primary_err}")
+
+            # Try provider-level fallback
+            fallback_providers = self._get_fallback_providers()
+            for provider_name in fallback_providers:
+                try:
+                    from aura.providers import get_provider
+                    provider = get_provider(provider_name)
+                    if provider is None or not provider.is_configured():
+                        continue
+                    models = provider.list_models()
+                    if not models:
+                        continue
+                    fb_model = models[0]
+                    logger.info(f"[BRAIN] Failing over to {provider_name}: {fb_model}")
+                    return provider.chat(fb_model, messages, **kwargs)
+                except Exception as fb_err:
+                    logger.warning(f"[BRAIN] Fallback {provider_name} failed: {fb_err}")
+                    continue
+
+            # Last resort: model-level fallback chain
+            chain = self._get_fallback_chain(model)
+            for fb_model in chain:
+                if fb_model == model:
+                    continue
+                try:
+                    fb_client, fb_actual = self._get_client_for_model(fb_model)
+                    logger.info(f"[BRAIN] Model fallback to: {fb_model}")
+                    return fb_client.chat(fb_actual, messages, **kwargs)
+                except Exception:
+                    continue
+
+            raise primary_err
 
     def _get_fallback_chain(self, model: str) -> list:
         """Return the fallback chain for the given model (Phase 4 -- model fallback)."""

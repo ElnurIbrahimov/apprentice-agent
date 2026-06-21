@@ -9,6 +9,8 @@ from typing import Any, Callable
 # ─────────────────────────────────────────────────────────────────────────────
 from . import (  # noqa: F401
     agent_commands,
+    auth_commands,
+    config_commands,
     copy_command,
     git_commands,
     heatmap_commands,
@@ -19,6 +21,7 @@ from . import (  # noqa: F401
     snippet_command,
     system_commands,
     tool_commands,
+    toolset_commands,
     ui_commands,
     verify_commands,
     why_commands,
@@ -51,6 +54,9 @@ from .provider_commands import (
     handle_provider,
     handle_providers,
 )
+from .auth_commands import handle_auth
+from .config_commands import handle_config
+from .toolset_commands import handle_toolsets
 from .research_commands import (
     handle_browse,
     handle_export,
@@ -144,6 +150,7 @@ __all__: list[str] = [
     "handle_mood", "handle_quit", "handle_routing", "handle_speak",
     "handle_tasks", "handle_theme", "handle_trust",
     "handle_provider", "handle_providers",
+    "handle_auth", "handle_config", "handle_toolsets",
 ]
 
 # Local handler defined here rather than in a submodule.
@@ -222,6 +229,9 @@ COMMANDS: list[tuple[str, str, Callable[..., Any], list[str], str]] = [
     ("/skill",    "Browse and load skills",                            handle_skill,    [],                TIER_BETA),
     ("/providers","List all configured providers with status and models",handle_providers,[],               TIER_STABLE),
     ("/provider", "Switch active provider interactively",              handle_provider, [],                TIER_STABLE),
+    ("/config",   "Show/set configuration (config get/set/path/edit)", handle_config,   [],                TIER_STABLE),
+    ("/auth",     "Manage credential pool (list/add/remove/reset)",    handle_auth,     [],                TIER_STABLE),
+    ("/toolsets", "List and manage tool groups",                       handle_toolsets, [],                TIER_STABLE),
     ("/interrupt","Abort running iteration with optional correction",handle_interrupt,["/stop"],         TIER_STABLE),
 ]
 
