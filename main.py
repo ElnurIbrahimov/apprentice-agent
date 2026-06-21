@@ -81,6 +81,7 @@ _SUBCOMMANDS = {
     "start", "stop", "why", "heatmap", "worktree",
     "profile", "auth", "tools",
     "skills", "cron", "sessions", "insights",
+    "update", "completion", "plugins", "prune", "status",
 }
 def _collect_valued_flags(parser: argparse.ArgumentParser) -> set[str]:
     """Derive option strings that consume a separate value token from a parser.
@@ -282,6 +283,33 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
         sub_insights = subparsers.add_parser("insights", help="Usage analytics")
         sub_insights.add_argument("insights_days", nargs="?", type=int, default=7,
                                     help="Number of days to analyze (default: 7)")
+
+        # ── Self-update ──
+        sub_update = subparsers.add_parser("update", help="Self-update Aura")
+
+        # ── Shell completions ──
+        sub_completion = subparsers.add_parser("completion", help="Generate shell completion script")
+        sub_completion.add_argument("completion_shell", choices=["bash", "zsh", "powershell"],
+                                       help="Shell to generate completion for")
+
+        # ── Plugins ──
+        sub_plugins = subparsers.add_parser("plugins", help="Manage plugins")
+        sub_plugins.add_argument("plugins_action", nargs="?", default="list",
+                                   choices=["list", "enable", "disable", "install"],
+                                   help="Plugins action")
+        sub_plugins.add_argument("plugins_args", nargs="*", help="Plugin name or URL")
+
+        # ── Prune sessions ──
+        sub_prune = subparsers.add_parser("prune", help="Prune old sessions")
+        sub_prune.add_argument("prune_days", nargs="?", type=int, default=90,
+                                 help="Retention days (default: 90)")
+        sub_prune.add_argument("--dry-run", action="store_true",
+                                 help="Show what would be deleted without deleting")
+
+        # ── Status ──
+        sub_status = subparsers.add_parser("status", help="Show all component status")
+        sub_status.add_argument("--all", dest="status_all", action="store_true",
+                                  help="Show all components (default)")
 
     return parser, use_subparsers
 
@@ -920,6 +948,100 @@ def main() -> None:
         days = getattr(args, "insights_days", 7)
         from aura.cli.commands.insights_commands import _show_insights_shell
         _show_insights_shell(days)
+        sys.exit(0)
+
+    # ── Update subcommand ──
+    elif args.command == "update":
+        from aura.cli.display import _get_console
+        from aura.self_update import run_update
+        console = _get_console()
+        console.print("[cyan]Updating Aura...[/cyan]")
+        result = run_update(backup=True, install_deps=True)
+        if result.get("backup_path"):
+            console.print(f"  [dim]Backup: {result['backup_path']}[/dim]")
+        if result["success"]:
+            console.print(f"[green]{result['message']}[/green]")
+        else:
+            console.print(f"[red]{result['message']}[/red]")
+        sys.exit(0)
+
+    # ── Completion subcommand ──
+    elif args.command == "completion":
+        shell = getattr(args, "completion_shell", "bash")
+        try:
+            from aura.completions import generate_completion
+            print(generate_completion(shell))
+        except ValueError as e:
+            print(f"Error: {e}")
+        sys.exit(0)
+
+    # ── Plugins subcommand ──
+    elif args.command == "plugins":
+        from aura.plugins import (
+            list_available_plugins, enable_plugin, disable_plugin, install_plugin,
+        )
+        action = getattr(args, "plugins_action", "list")
+        args_list = getattr(args, "plugins_args", [])
+        if action == "list":
+            plugins = list_available_plugins()
+            if not plugins:
+                print("No plugins found in ~/.aura/plugins/")
+            for p in plugins:
+                status = "[x]" if p["enabled"] else "[ ]"
+                print(f"  {status} {p['name']:<20} v{p['version']:<10} {p['description']}")
+        elif action == "enable" and args_list:
+            enable_plugin(args_list[0])
+        elif action == "disable" and args_list:
+            disable_plugin(args_list[0])
+        elif action == "install" and args_list:
+            if install_plugin(args_list[0]):
+                print(f"Installed plugin from {args_list[0]}")
+            else:
+                print(f"Failed to install plugin from {args_list[0]}")
+        sys.exit(0)
+
+    # ── Prune sessions subcommand ──
+    elif args.command == "prune":
+        from aura.session_prune import run_auto_prune
+        days = getattr(args, "prune_days", 90)
+        dry_run = getattr(args, "dry_run", False)
+        from aura.session_prune import get_sessions_config
+        get_sessions_config()  # ensure config loaded
+        result = run_auto_prune(dry_run=dry_run)
+        action = "Would prune" if dry_run else "Pruned"
+        print(f"{action} {result['pruned']} sessions older than {days} days.")
+        if result["errors"]:
+            print(f"  {result['errors']} errors during prune.")
+        sys.exit(0)
+
+    # ── Status subcommand ──
+    elif args.command == "status":
+        from aura.status_aggregator import get_full_status
+        import json
+        status = get_full_status()
+        for component, info in status.items():
+            if isinstance(info, dict) and "error" in info:
+                print(f"  {component:<14} error: {info['error']}")
+                continue
+            if component == "providers":
+                print(f"  {'providers':<14} {info.get('configured', 0)}/{info.get('total', 0)} configured")
+            elif component == "models":
+                print(f"  {'models':<14} default={info.get('default', '?')}")
+            elif component == "profile":
+                print(f"  {'profile':<14} active={info.get('active', '?')}")
+            elif component == "toolsets":
+                print(f"  {'toolsets':<14} {info.get('enabled', 0)}/{info.get('total', 0)} enabled")
+            elif component == "cron":
+                print(f"  {'cron':<14} {info.get('active', 0)} active / {info.get('total', 0)} total")
+            elif component == "sessions":
+                print(f"  {'sessions':<14} {info.get('total', 0)} total")
+            elif component == "activity":
+                tokens = info.get('tokens_in', 0) + info.get('tokens_out', 0)
+                print(f"  {'activity':<14} {info.get('interactions', 0)} interactions, {tokens:,} tokens, ${info.get('cost', 0):.4f}")
+            elif component == "security":
+                print(f"  {'security':<14} approvals={info.get('approvals_mode', '?')}, redact={info.get('redact_secrets', False)}")
+            elif component == "compression":
+                print(f"  {'compression':<14} {'enabled' if info.get('enabled') else 'disabled'}")
         sys.exit(0)
 
     # Handle subcommands that don't need the full agent

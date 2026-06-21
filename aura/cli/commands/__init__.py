@@ -16,6 +16,7 @@ from . import (  # noqa: F401
     git_commands,
     heatmap_commands,
     insights_commands,
+    ops_commands,
     provider_commands,
     research_commands,
     session_commands,
@@ -27,6 +28,7 @@ from . import (  # noqa: F401
     tool_commands,
     toolset_commands,
     ui_commands,
+    utility_commands,
     verify_commands,
     why_commands,
 )
@@ -65,6 +67,12 @@ from .cron_commands import handle_cron
 from .insights_commands import handle_insights
 from .skills_commands import handle_skills
 from .sessions_cli_commands import handle_sessions as handle_sessions_cli
+from .ops_commands import (
+    handle_autoprune, handle_humanize, handle_lsp, handle_plugins_cmd, handle_status_all,
+)
+from .utility_commands import (
+    handle_catalog, handle_completion, handle_personality, handle_update,
+)
 from .research_commands import (
     handle_browse,
     handle_export,
@@ -160,6 +168,9 @@ __all__: list[str] = [
     "handle_provider", "handle_providers",
     "handle_auth", "handle_config", "handle_toolsets",
     "handle_cron", "handle_insights", "handle_skills", "handle_sessions_cli",
+    "handle_autoprune", "handle_humanize", "handle_lsp", "handle_plugins_cmd",
+    "handle_status_all", "handle_catalog", "handle_completion",
+    "handle_personality", "handle_update",
 ]
 
 # Local handler defined here rather than in a submodule.
@@ -245,6 +256,15 @@ COMMANDS: list[tuple[str, str, Callable[..., Any], list[str], str]] = [
     ("/insights", "Usage analytics — tokens, cost, models",            handle_insights, [],                TIER_STABLE),
     ("/skills",   "Browse, search, and manage skills",                 handle_skills,   [],                TIER_STABLE),
     ("/sm",       "Session management (list/export/rename/delete/stats/prune)", handle_sessions_cli, [], TIER_STABLE),
+    ("/status",   "Show all component status",                        handle_status_all, [], TIER_STABLE),
+    ("/plugins",  "List and manage plugins",                          handle_plugins_cmd, [], TIER_STABLE),
+    ("/lsp",      "Check LSP server configuration",                  handle_lsp,        [], TIER_STABLE),
+    ("/personality", "List/switch personality presets",                handle_personality, [], TIER_STABLE),
+    ("/completion", "Generate shell completion script",               handle_completion, [], TIER_STABLE),
+    ("/catalog",  "Search remote model catalog",                     handle_catalog,    [], TIER_STABLE),
+    ("/update",   "Self-update Aura to latest version",               handle_update,     [], TIER_STABLE),
+    ("/autoprune","Run session auto-prune",                           handle_autoprune,   [], TIER_BETA),
+    ("/humanize", "Toggle human-like typing delay",                   handle_humanize,   [], TIER_BETA),
     ("/interrupt","Abort running iteration with optional correction",handle_interrupt,["/stop"],         TIER_STABLE),
 ]
 
