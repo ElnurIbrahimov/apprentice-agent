@@ -214,3 +214,77 @@ def test_cron_find_job_helper(tmp_path, monkeypatch):
 
     # No match
     assert cron_commands._find_job(jobs, "nonexistent") is None
+
+
+# ── main.py: regression test for the import-shadowing bug ─────────────
+
+def test_main_subcommands_dont_shadow_module_helpers():
+    """Regression: importing `_get_console` inside `main()` made the name
+    local to the entire function, breaking every other reference.
+
+    Verify that `main._get_console` is the module-level function (not a
+    local variable that gets shadowed by the subcommand handlers).
+    """
+    import main as aura_main
+    # _get_console should be a module-level function attribute.
+    assert callable(getattr(aura_main, "_get_console", None))
+
+
+def test_main_subcommands_run_without_unboundlocalerror():
+    """Regression: `aura config` used to raise UnboundLocalError because
+    `from ... import _get_console` inside `update` made `_get_console` a
+    local variable in main() that wasn't bound on the first config call.
+
+    The handler should not error out on basic config invocation.
+    """
+    import sys
+    from unittest.mock import patch
+
+    # Patch argv so the parser builds with subparsers enabled.
+    with patch.object(sys, "argv", ["aura", "config"]):
+        from main import _build_argument_parser
+        parser, _ = _build_argument_parser()
+        args = parser.parse_args()
+        assert args.command == "config"
+
+
+def test_main_completion_subcommand_parses():
+    """`aura completion` should default to bash and work without args."""
+    import sys
+    from unittest.mock import patch
+
+    with patch.object(sys, "argv", ["aura", "completion"]):
+        from main import _build_argument_parser
+        parser, _ = _build_argument_parser()
+        args = parser.parse_args()
+        assert args.command == "completion"
+        assert args.completion_shell == "bash"
+
+
+def test_main_plugins_subcommand_parses():
+    """`aura plugins` should default to list action."""
+    import sys
+    from unittest.mock import patch
+
+    with patch.object(sys, "argv", ["aura", "plugins"]):
+        from main import _build_argument_parser
+        parser, _ = _build_argument_parser()
+        args = parser.parse_args()
+        assert args.command == "plugins"
+        assert args.plugins_action == "list"
+        assert args.plugins_name == ""
+        assert args.plugins_source == ""
+
+
+def test_main_prune_subcommand_parses():
+    """`aura prune --dry-run` should parse with --days default 90."""
+    import sys
+    from unittest.mock import patch
+
+    with patch.object(sys, "argv", ["aura", "prune", "--dry-run"]):
+        from main import _build_argument_parser
+        parser, _ = _build_argument_parser()
+        args = parser.parse_args()
+        assert args.command == "prune"
+        assert args.prune_days == 90
+        assert args.dry_run is True

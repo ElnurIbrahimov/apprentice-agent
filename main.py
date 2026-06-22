@@ -239,11 +239,11 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
 
         # ── Config management ──
         sub_config = subparsers.add_parser("config", help="Show/set configuration")
-        sub_config.add_argument("config_action", nargs="?", default="show",
+        sub_config.add_argument("--action", dest="config_action", default="show",
                                  choices=["show", "get", "set", "path", "edit"],
-                                 help="Config action")
-        sub_config.add_argument("config_key", nargs="?", default="", help="Config key (dotted path)")
-        sub_config.add_argument("config_value", nargs="?", default="", help="Config value (for set)")
+                                 help="Config action (default: show)")
+        sub_config.add_argument("--key", dest="config_key", default="", help="Config key (dotted path)")
+        sub_config.add_argument("--value", dest="config_value", default="", help="Value to set (when action=set)")
 
         # ── Auth / credential pool ──
         sub_auth = subparsers.add_parser("auth", help="Manage credential pool")
@@ -290,19 +290,23 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
 
         # ── Shell completions ──
         sub_completion = subparsers.add_parser("completion", help="Generate shell completion script")
-        sub_completion.add_argument("completion_shell", choices=["bash", "zsh", "powershell"],
-                                       help="Shell to generate completion for")
+        sub_completion.add_argument("--shell", dest="completion_shell", default="bash",
+                                       choices=["bash", "zsh", "powershell"],
+                                       help="Shell to generate completion for (default: bash)")
 
         # ── Plugins ──
         sub_plugins = subparsers.add_parser("plugins", help="Manage plugins")
-        sub_plugins.add_argument("plugins_action", nargs="?", default="list",
+        sub_plugins.add_argument("--action", dest="plugins_action", default="list",
                                    choices=["list", "enable", "disable", "install"],
-                                   help="Plugins action")
-        sub_plugins.add_argument("plugins_args", nargs="*", help="Plugin name or URL")
+                                   help="Plugins action (default: list)")
+        sub_plugins.add_argument("--name", dest="plugins_name", default="",
+                                   help="Plugin name (for enable/disable/install)")
+        sub_plugins.add_argument("--source", dest="plugins_source", default="",
+                                   help="Plugin source URL or path (for install)")
 
         # ── Prune sessions ──
         sub_prune = subparsers.add_parser("prune", help="Prune old sessions")
-        sub_prune.add_argument("prune_days", nargs="?", type=int, default=90,
+        sub_prune.add_argument("--days", dest="prune_days", type=int, default=90,
                                  help="Retention days (default: 90)")
         sub_prune.add_argument("--dry-run", action="store_true",
                                  help="Show what would be deleted without deleting")
@@ -596,7 +600,7 @@ def main() -> None:
     )
     if _emit_boot_banner:
         try:
-            _get_console().print(  # noqa: F823 — function defined at module load
+            _get_console().print(
                 f"  [dim]mode: {_sandbox_label} | trust: {_trust_label}[/dim]"
             )
         except Exception:
@@ -962,7 +966,6 @@ def main() -> None:
 
     # ── Update subcommand ──
     elif args.command == "update":
-        from aura.cli.display import _get_console
         from aura.self_update import run_update
         console = _get_console()
         console.print("[cyan]Updating Aura...[/cyan]")
@@ -994,7 +997,8 @@ def main() -> None:
             list_available_plugins,
         )
         action = getattr(args, "plugins_action", "list")
-        args_list = getattr(args, "plugins_args", [])
+        name = getattr(args, "plugins_name", "")
+        source = getattr(args, "plugins_source", "")
         if action == "list":
             plugins = list_available_plugins()
             if not plugins:
@@ -1002,15 +1006,19 @@ def main() -> None:
             for p in plugins:
                 status = "[x]" if p["enabled"] else "[ ]"
                 print(f"  {status} {p['name']:<20} v{p['version']:<10} {p['description']}")
-        elif action == "enable" and args_list:
-            enable_plugin(args_list[0])
-        elif action == "disable" and args_list:
-            disable_plugin(args_list[0])
-        elif action == "install" and args_list:
-            if install_plugin(args_list[0]):
-                print(f"Installed plugin from {args_list[0]}")
+        elif action == "enable" and name:
+            enable_plugin(name)
+        elif action == "disable" and name:
+            disable_plugin(name)
+        elif action == "install" and source:
+            if install_plugin(source):
+                print(f"Installed plugin from {source}")
             else:
-                print(f"Failed to install plugin from {args_list[0]}")
+                print(f"Failed to install plugin from {source}")
+        elif action in ("enable", "disable") and not name:
+            print("--name is required for enable/disable")
+        elif action == "install" and not source:
+            print("--source is required for install")
         sys.exit(0)
 
     # ── Prune sessions subcommand ──
