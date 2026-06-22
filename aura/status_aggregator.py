@@ -13,7 +13,6 @@ Reports the status of all major Aura components in one view:
 from __future__ import annotations
 
 import logging
-import time
 
 logger = logging.getLogger(__name__)
 

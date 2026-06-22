@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from ..context import get_ctx
 from ..display import console
 from .common import command, TIER_STABLE
 
@@ -160,14 +159,22 @@ def _create_job(schedule: str, prompt: str) -> None:
 def _toggle_job(job_id: str, enabled: bool) -> None:
     """Pause or resume a job."""
     jobs = _load_jobs()
+    job = _find_job(jobs, job_id)
+    if job is None:
+        console.print(f"[red]Job '{job_id}' not found.[/red]")
+        return
+    job["enabled"] = enabled
+    _save_jobs(jobs)
+    action = "resumed" if enabled else "paused"
+    console.print(f"[green]Job {job['id']} {action}.[/green]")
+
+
+def _find_job(jobs: list[dict], job_id: str) -> dict | None:
+    """Return the first job whose id starts with job_id, or None."""
     for job in jobs:
         if job.get("id", "").startswith(job_id):
-            job["enabled"] = enabled
-            _save_jobs(jobs)
-            action = "resumed" if enabled else "paused"
-            console.print(f"[green]Job {job['id']} {action}.[/green]")
-            return
-    console.print(f"[red]Job '{job_id}' not found.[/red]")
+            return job
+    return None
 
 
 def _remove_job(job_id: str) -> None:
@@ -184,21 +191,21 @@ def _remove_job(job_id: str) -> None:
 def _run_job(agent: Any, job_id: str) -> None:
     """Trigger a job immediately."""
     jobs = _load_jobs()
-    for job in jobs:
-        if job.get("id", "").startswith(job_id):
-            prompt = job.get("prompt", "")
-            console.print(f"[cyan]Running job {job['id']}: {prompt[:60]}[/cyan]")
-            # Update last_run
-            job["last_run"] = time.time()
-            job["run_count"] = job.get("run_count", 0) + 1
-            _save_jobs(jobs)
-            # Execute via agent
-            try:
-                result = agent.run(prompt)
-                response = result.get("response", "") if result else ""
-                if response:
-                    console.print(f"[dim]{response[:200]}[/dim]")
-            except Exception as e:
-                console.print(f"[red]Job failed: {e}[/red]")
-            return
-    console.print(f"[red]Job '{job_id}' not found.[/red]")
+    job = _find_job(jobs, job_id)
+    if job is None:
+        console.print(f"[red]Job '{job_id}' not found.[/red]")
+        return
+    prompt = job.get("prompt", "")
+    console.print(f"[cyan]Running job {job['id']}: {prompt[:60]}[/cyan]")
+    # Update last_run
+    job["last_run"] = time.time()
+    job["run_count"] = job.get("run_count", 0) + 1
+    _save_jobs(jobs)
+    # Execute via agent
+    try:
+        result = agent.run(prompt)
+        response = result.get("response", "") if result else ""
+        if response:
+            console.print(f"[dim]{response[:200]}[/dim]")
+    except Exception as e:
+        console.print(f"[red]Job failed: {e}[/red]")

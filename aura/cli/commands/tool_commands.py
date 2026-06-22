@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from .common import confirm_action, resolve_user_path
-from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
+from .common import command, TIER_BETA, TIER_STABLE
 logger = logging.getLogger(__name__)
 
 

@@ -3,7 +3,7 @@ import os
 from typing import Optional
 
 from ..display import console
-from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
+from .common import command, TIER_BETA, TIER_STABLE
 
 logger = logging.getLogger(__name__)
 

@@ -7,12 +7,16 @@ and DNS rebinding attacks.
 Fixes the vulnerability flagged in ENGINEERING_REVIEW_2026-03-20.md:
   "validate_url_scheme resolves at check time, HTTP client again at request time"
 """
+from __future__ import annotations
 
 import ipaddress
 import logging
 import socket
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    import requests
 
 logger = logging.getLogger(__name__)
 

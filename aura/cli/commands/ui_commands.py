@@ -4,7 +4,7 @@ from typing import Optional
 
 from ..context import get_ctx
 from ..display import console
-from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
+from .common import command, TIER_BETA, TIER_STABLE
 
 logger = logging.getLogger(__name__)
 

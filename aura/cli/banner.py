@@ -1,6 +1,8 @@
 """Banner for AURA CLI — gradient block-art logo with theme colors."""
 from __future__ import annotations
 
+import logging
+
 from rich.text import Text
 
 # Compact 2-line block art — looks striking, renders on all terminals
@@ -9,7 +11,9 @@ _LOGO_LINES = [
     "█▀█ █▄█ █▀▄ █▀█",
 ]
 
-_STAR = "✦"
+_STAR = "\u2726"
+
+logger = logging.getLogger(__name__)
 
 
 def _apply_gradient(text: str, colors: list[str]) -> Text:

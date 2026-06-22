@@ -7,7 +7,6 @@ with auto-completion for subcommands and options.
 """
 from __future__ import annotations
 
-from typing import List
 
 
 # All aura subcommands

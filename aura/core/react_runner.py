@@ -5,6 +5,7 @@ All methods assume self has: brain, tools, memory, monologue, metacognition,
 max_iterations, tool_rag, kg_bridge, adaptive_planner, _tool_executor,
 _REACT_TOOL_MODEL, _REACT_CODE_MODEL, _REACT_REASON_MODEL.
 """
+from __future__ import annotations
 
 import json
 import logging

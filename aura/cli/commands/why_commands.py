@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..display import console
-from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
+from .common import command, TIER_EXPERIMENTAL
 
 logger = logging.getLogger(__name__)
 

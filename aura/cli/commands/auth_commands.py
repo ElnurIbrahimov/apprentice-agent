@@ -6,10 +6,8 @@ Mirrors Hermes Agent's `hermes auth list/add/remove/reset` pattern.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Optional
 
-from ..context import get_ctx
 from ..display import console
 from .common import command, TIER_STABLE
 

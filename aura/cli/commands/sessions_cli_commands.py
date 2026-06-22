@@ -13,7 +13,6 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from ..context import get_ctx
 from ..display import console
 from .common import command, TIER_STABLE
 
@@ -163,10 +162,30 @@ def _export_session(session_id: str) -> None:
         console.print(f"[red]Export failed: {e}[/red]")
 
 
+def _safe_session_path(sessions_dir: Path, session_id: str) -> Path | None:
+    """Resolve a session id to a path within sessions_dir, blocking traversal.
+
+    Returns None if session_id contains path-traversal characters or the
+    resolved path would escape sessions_dir.
+    """
+    if not session_id or ".." in session_id or "/" in session_id or "\\" in session_id:
+        return None
+    target = (sessions_dir / session_id).resolve()
+    try:
+        target.relative_to(sessions_dir.resolve())
+    except ValueError:
+        return None
+    return target
+
+
 def _rename_session(session_id: str, title: str) -> None:
     """Rename a session."""
     sessions_dir = _get_sessions_dir()
-    session_file = sessions_dir / session_id / "session.json"
+    session_dir = _safe_session_path(sessions_dir, session_id)
+    if session_dir is None:
+        console.print(f"[red]Invalid session id: {session_id}[/red]")
+        return
+    session_file = session_dir / "session.json"
     if not session_file.exists():
         console.print(f"[red]Session '{session_id}' not found.[/red]")
         return
@@ -184,7 +203,10 @@ def _delete_session(session_id: str) -> None:
     """Delete a session."""
     import shutil
     sessions_dir = _get_sessions_dir()
-    session_dir = sessions_dir / session_id
+    session_dir = _safe_session_path(sessions_dir, session_id)
+    if session_dir is None:
+        console.print(f"[red]Invalid session id: {session_id}[/red]")
+        return
     if not session_dir.exists():
         console.print(f"[red]Session '{session_id}' not found.[/red]")
         return
@@ -234,6 +256,7 @@ def _prune_sessions(days_str: str) -> None:
         console.print("[red]Days must be a number.[/red]")
         return
 
+    sessions_dir = _get_sessions_dir().resolve()
     sessions = _load_session_summaries()
     cutoff = time.time() - (days * 86400)
     old = [s for s in sessions if s.get("updated_at", 0) < cutoff]
@@ -245,8 +268,14 @@ def _prune_sessions(days_str: str) -> None:
     import shutil
     count = 0
     for s in old:
+        # Defensive: only delete paths that resolve under sessions_dir.
         try:
-            shutil.rmtree(s["path"])
+            target = Path(s["path"]).resolve()
+            target.relative_to(sessions_dir)
+        except (ValueError, OSError):
+            continue
+        try:
+            shutil.rmtree(target)
             count += 1
         except Exception:
             pass

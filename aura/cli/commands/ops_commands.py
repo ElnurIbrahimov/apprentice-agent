@@ -7,7 +7,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ..context import get_ctx
 from ..display import console
 from .common import command, TIER_STABLE, TIER_BETA
 
@@ -180,7 +179,7 @@ def handle_autoprune(agent: Any, arg: str, context: dict) -> Optional[str]:
 @command("/humanize", "Toggle human-like typing delay", tier=TIER_BETA)
 def handle_humanize(agent: Any, arg: str, context: dict) -> Optional[str]:
     """Toggle humanize mode (natural typing delay)."""
-    from aura.human_delay import get_human_delay_config, is_human_delay_enabled
+    from aura.human_delay import get_human_delay_config
 
     cfg = get_human_delay_config()
     current_mode = cfg.get("mode", "off")

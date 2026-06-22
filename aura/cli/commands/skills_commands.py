@@ -17,7 +17,6 @@ import shutil
 from pathlib import Path
 from typing import Any, Optional
 
-from ..context import get_ctx
 from ..display import console
 from .common import command, TIER_STABLE
 
@@ -180,9 +179,23 @@ def _install_skill(url: str) -> None:
             resp = urllib.request.urlopen(raw_url, timeout=15)
             content = resp.read().decode("utf-8")
 
-            # Extract skill name from URL
-            skill_name = raw_url.rstrip("/").split("/")[-2] if raw_url.endswith("/SKILL.md") else raw_url.split("/")[-1].replace(".md", "")
-            skill_dir = target_dir / skill_name
+            # Extract skill name from URL, sanitized against path traversal.
+            # Reject anything that isn't a simple slug to prevent escaping target_dir.
+            raw_name = raw_url.rstrip("/").split("/")[-2] if raw_url.endswith("/SKILL.md") else raw_url.split("/")[-1].replace(".md", "")
+            import re as _re
+            skill_name = _re.sub(r"[^A-Za-z0-9_.-]", "_", raw_name).strip("._")[:60]
+            if not skill_name or skill_name in (".", ".."):
+                console.print("[red]Could not derive safe skill name from URL.[/red]")
+                return
+
+            # Verify the resolved path stays within target_dir
+            skill_dir = (target_dir / skill_name).resolve()
+            try:
+                skill_dir.relative_to(target_dir.resolve())
+            except ValueError:
+                console.print("[red]Refusing to install: path escapes skills directory.[/red]")
+                return
+
             skill_dir.mkdir(parents=True, exist_ok=True)
             (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
 
@@ -190,9 +203,19 @@ def _install_skill(url: str) -> None:
         except Exception as e:
             console.print(f"[red]Failed to install from URL: {e}[/red]")
     elif Path(url).exists() and Path(url).is_dir():
-        # Local directory — copy
-        skill_name = Path(url).name
-        dest = target_dir / skill_name
+        # Local directory — copy. Sanitize the name and reject symlinks.
+        raw_name = Path(url).name
+        import re as _re
+        skill_name = _re.sub(r"[^A-Za-z0-9_.-]", "_", raw_name).strip("._")[:60]
+        if not skill_name or skill_name in (".", ".."):
+            console.print(f"[red]Invalid skill name: {raw_name}[/red]")
+            return
+        dest = (target_dir / skill_name).resolve()
+        try:
+            dest.relative_to(target_dir.resolve())
+        except ValueError:
+            console.print("[red]Refusing to install: path escapes skills directory.[/red]")
+            return
         if dest.exists():
             console.print(f"[red]Skill '{skill_name}' already installed.[/red]")
             return
@@ -205,8 +228,19 @@ def _install_skill(url: str) -> None:
 
 def _uninstall_skill(name: str) -> None:
     """Remove a skill by name."""
-    target_dir = Path.home() / ".aura" / "skills"
-    skill_dir = target_dir / name
+    import re as _re
+    target_dir = (Path.home() / ".aura" / "skills").resolve()
+    safe_name = _re.sub(r"[^A-Za-z0-9_.-]", "_", name).strip("._")[:60]
+    if not safe_name or safe_name in (".", ".."):
+        console.print(f"[red]Invalid skill name: {name}[/red]")
+        return
+    skill_dir = (target_dir / safe_name).resolve()
+    # Verify the resolved path stays within target_dir.
+    try:
+        skill_dir.relative_to(target_dir)
+    except ValueError:
+        console.print("[red]Refusing to uninstall: path escapes skills directory.[/red]")
+        return
 
     if not skill_dir.exists():
         console.print(f"[red]Skill '{name}' not found in {target_dir}[/red]")

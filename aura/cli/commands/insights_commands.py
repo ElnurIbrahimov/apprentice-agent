@@ -9,7 +9,6 @@ import logging
 import time
 from typing import Any, Optional
 
-from ..context import get_ctx
 from ..display import console
 from .common import command, TIER_STABLE
 

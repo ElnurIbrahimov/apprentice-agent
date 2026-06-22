@@ -100,7 +100,7 @@ def should_redact_text(text: str) -> str:
         return text
 
     try:
-        from aura.security.taint_tracker import TaintTracker, TaintLabel
+        from aura.security.taint_tracker import TaintTracker
         tracker = TaintTracker()
         # Check and redact
         if is_secret_redaction_enabled():

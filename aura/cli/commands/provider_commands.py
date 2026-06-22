@@ -154,7 +154,7 @@ def handle_provider(agent: Any, arg: str, context: dict) -> Optional[str]:
         return None
 
     # Interactive picker
-    from aura.cli.picker import PickerItem, run_picker
+    from aura.cli.picker import run_picker
 
     items = _build_provider_picker_items()
     selected = run_picker(items, title="Switch Provider", max_visible=18)

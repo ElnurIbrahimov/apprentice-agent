@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Optional
-from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
+from .common import command, TIER_BETA
 
 
 @command("/snippet",  "Manage prompt templates/snippets",                 tier=TIER_BETA)

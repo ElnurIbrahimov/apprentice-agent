@@ -5,7 +5,9 @@ from __future__ import annotations
 # Stub _wmi BEFORE any other import — Python 3.12's platform.py imports _wmi
 # at module level, and WMI can hang on Windows. This stub lets platform.machine()
 # fall back to the PROCESSOR_ARCHITECTURE env var instead.
-import sys as _sys, types as _types
+import sys as _sys
+import types as _types
+
 if '_wmi' not in _sys.modules:
     _wmi_stub = _types.ModuleType('_wmi')
     _wmi_stub.exec_query = lambda *a, **k: (_ for _ in ()).throw(OSError("_wmi stubbed"))
@@ -15,7 +17,7 @@ import argparse
 import logging
 import os
 import sys
-from typing import Any, NoReturn, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +42,15 @@ def _suppress_warnings() -> None:
     os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 
     try:
-        from tqdm import tqdm as _orig_tqdm
         from functools import partialmethod
+
+        from tqdm import tqdm as _orig_tqdm
         _orig_tqdm.__init__ = partialmethod(_orig_tqdm.__init__, disable=True)
     except ImportError:
         pass
 
-    import warnings
     import logging
+    import warnings
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="urllib3")
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="comtypes")
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="pycaw")
@@ -77,7 +80,7 @@ def _suppress_warnings() -> None:
 
 _SUBCOMMANDS = {
     "init", "setup", "doctor", "config", "models", "commit", "cost",
-    "mcp-serve", "acp-serve", "exec", "ide", "log", "status", "recall",
+    "mcp-serve", "acp-serve", "exec", "ide", "log", "recall",
     "start", "stop", "why", "heatmap", "worktree",
     "profile", "auth", "tools",
     "skills", "cron", "sessions", "insights",
@@ -169,7 +172,6 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
         subparsers.add_parser("init", help="Create AURA.md in current project")
         subparsers.add_parser("setup", help="Interactive setup wizard for new projects")
         subparsers.add_parser("doctor", help="Check Ollama, models, dependencies")
-        subparsers.add_parser("config", help="Show current configuration")
         subparsers.add_parser("models", help="List available models with routing roles")
         sub_commit = subparsers.add_parser("commit", help="Smart commit with AI-generated message")
         sub_commit.add_argument("--all", "-a", action="store_true", help="Stage all changes")
@@ -180,7 +182,6 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
                               help="Show per-provider cost breakdown")
         sub_cost.add_argument("--session", default="",
                               help="Filter to a specific session ID")
-        subparsers.add_parser("status", help="Show current Aura state (Ollama, routing, bandit, daemon)")
         subparsers.add_parser("start", help="Start the Aura background daemon")
         subparsers.add_parser("stop", help="Stop the Aura background daemon")
         sub_why = subparsers.add_parser("why", help="Intent-to-Code Ledger lookup")
@@ -285,7 +286,7 @@ def _build_argument_parser() -> tuple[argparse.ArgumentParser, bool]:
                                     help="Number of days to analyze (default: 7)")
 
         # ── Self-update ──
-        sub_update = subparsers.add_parser("update", help="Self-update Aura")
+        subparsers.add_parser("update", help="Self-update Aura")
 
         # ── Shell completions ──
         sub_completion = subparsers.add_parser("completion", help="Generate shell completion script")
@@ -595,7 +596,7 @@ def main() -> None:
     )
     if _emit_boot_banner:
         try:
-            _get_console().print(
+            _get_console().print(  # noqa: F823 — function defined at module load
                 f"  [dim]mode: {_sandbox_label} | trust: {_trust_label}[/dim]"
             )
         except Exception:
@@ -654,8 +655,11 @@ def main() -> None:
     # ── Profile subcommand ──
     elif args.command == "profile":
         from aura.profiles import (
-            list_profiles, create_profile, set_active_profile,
-            delete_profile, show_profile, get_active_profile_name,
+            create_profile,
+            delete_profile,
+            list_profiles,
+            set_active_profile,
+            show_profile,
         )
         action = getattr(args, "profile_action", "list")
         name = getattr(args, "profile_name", "")
@@ -712,7 +716,12 @@ def main() -> None:
 
     # ── Config subcommand ──
     elif args.command == "config":
-        from aura.config_loader import load_config, get_config_value, set_config_value, get_config_path
+        from aura.config_loader import (
+            get_config_path,
+            get_config_value,
+            load_config,
+            set_config_value,
+        )
         action = getattr(args, "config_action", "show")
         key = getattr(args, "config_key", "")
         value = getattr(args, "config_value", "")
@@ -816,8 +825,9 @@ def main() -> None:
         console = _get_console()
 
         if action == "list":
-            from aura.toolsets import list_toolsets
             from rich.table import Table
+
+            from aura.toolsets import list_toolsets
             ts_list = list_toolsets()
             table = Table(box=None, padding=(0, 1), show_header=True, header_style="bold")
             table.add_column("Toolset", style="bold", width=15)
@@ -978,7 +988,10 @@ def main() -> None:
     # ── Plugins subcommand ──
     elif args.command == "plugins":
         from aura.plugins import (
-            list_available_plugins, enable_plugin, disable_plugin, install_plugin,
+            disable_plugin,
+            enable_plugin,
+            install_plugin,
+            list_available_plugins,
         )
         action = getattr(args, "plugins_action", "list")
         args_list = getattr(args, "plugins_args", [])
@@ -1017,7 +1030,6 @@ def main() -> None:
     # ── Status subcommand ──
     elif args.command == "status":
         from aura.status_aggregator import get_full_status
-        import json
         status = get_full_status()
         for component, info in status.items():
             if isinstance(info, dict) and "error" in info:
@@ -1051,7 +1063,6 @@ def main() -> None:
 
     # Heavy imports deferred until after argparse (so --help is instant)
     from aura import ApprenticeAgent
-    from aura.config import Config
     from aura.dream import run_dream_mode
 
     # Handle dream mode first (doesn't need agent)
@@ -1111,7 +1122,7 @@ def main() -> None:
         _handle_resume(agent, args)
 
     # Read piped stdin if available (for composability)
-    from aura.cli.pipe_mode import PipeOutput, read_piped_input, EXIT_SUCCESS, EXIT_ERROR
+    from aura.cli.pipe_mode import EXIT_ERROR, EXIT_SUCCESS, PipeOutput, read_piped_input
 
     if not args.prompt and not sys.stdin.isatty():
         piped = read_piped_input()

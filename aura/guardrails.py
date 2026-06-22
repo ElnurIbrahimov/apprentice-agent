@@ -18,17 +18,23 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
+# Cap on the number of recent calls retained for idempotent-detection.
+_RECENT_CALLS_MAXLEN = 20
+
+
 @dataclass
 class GuardrailState:
     """Tracks tool call patterns for guardrail decisions."""
-    # Last N tool calls (for "same_tool_failure" detection)
-    recent_calls: list[dict] = field(default_factory=list)
+    # Last N tool calls (for "same_tool_failure" detection).
+    # Bounded by _RECENT_CALLS_MAXLEN via deque(maxlen=...) — O(1) append, auto-trim.
+    recent_calls: deque = field(default_factory=lambda: deque(maxlen=_RECENT_CALLS_MAXLEN))
     # Last successful tool call (for "idempotent_no_progress" detection)
     last_success_signature: Optional[str] = None
     # Consecutive idempotent calls with no progress
@@ -81,15 +87,13 @@ def record_tool_call(tool_name: str, args: dict, success: bool) -> dict:
     thresholds = get_thresholds()
     signature = f"{tool_name}:{hash(frozenset(args.items()) if args else frozenset())}"
 
-    # Track in recent calls
+    # Track in recent calls (deque(maxlen=...) auto-trims)
     state.recent_calls.append({
         "tool": tool_name,
         "signature": signature,
         "success": success,
         "time": time.time(),
     })
-    if len(state.recent_calls) > 20:
-        state.recent_calls = state.recent_calls[-20:]
 
     if success:
         state.tool_failures[tool_name] = 0
@@ -102,8 +106,9 @@ def record_tool_call(tool_name: str, args: dict, success: bool) -> dict:
     state.tool_failures[tool_name] = state.tool_failures.get(tool_name, 0) + 1
     fail_count = state.tool_failures[tool_name]
 
-    # Check idempotent (same tool + same args consecutively)
-    if state.recent_calls and state.recent_calls[-2]["signature"] == signature:
+    # Check idempotent (same tool + same args consecutively).
+    # Only meaningful when there's a previous call in the deque.
+    if len(state.recent_calls) >= 2 and state.recent_calls[-2]["signature"] == signature:
         state.idempotent_streak += 1
     else:
         state.idempotent_streak = 0

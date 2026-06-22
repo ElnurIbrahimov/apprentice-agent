@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ..context import get_ctx
 from ..display import console
 from .common import command, TIER_STABLE
 

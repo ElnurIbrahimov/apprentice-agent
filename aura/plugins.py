@@ -17,11 +17,8 @@ Each plugin is a directory with a plugin.yaml manifest:
 """
 from __future__ import annotations
 
-import importlib
 import logging
-import os
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -120,13 +117,31 @@ def list_available_plugins() -> list[dict]:
 def install_plugin(source: str) -> bool:
     """Install a plugin from a git URL or local path."""
     import shutil
+    import re as _re
     import subprocess
 
     PLUGINS_DIR.mkdir(parents=True, exist_ok=True)
 
+    def _safe_name(raw: str) -> str:
+        """Sanitize a plugin name and reject path-traversal attempts."""
+        safe = _re.sub(r"[^A-Za-z0-9_.-]", "_", raw).strip("._")[:60]
+        if not safe or safe in (".", ".."):
+            return ""
+        # Verify the resolved path stays within PLUGINS_DIR.
+        dest = (PLUGINS_DIR / safe).resolve()
+        try:
+            dest.relative_to(PLUGINS_DIR.resolve())
+        except ValueError:
+            return ""
+        return safe
+
     if source.startswith("https://") or source.startswith("git@"):
         # Git clone
-        plugin_name = source.rstrip("/").split("/")[-1].replace(".git", "")
+        raw_name = source.rstrip("/").split("/")[-1].replace(".git", "")
+        plugin_name = _safe_name(raw_name)
+        if not plugin_name:
+            logger.error("Plugin install refused: unsafe name from URL")
+            return False
         dest = PLUGINS_DIR / plugin_name
         try:
             subprocess.run(
@@ -139,7 +154,11 @@ def install_plugin(source: str) -> bool:
             logger.error(f"Plugin install failed: {e}")
             return False
     elif Path(source).exists():
-        plugin_name = Path(source).name
+        raw_name = Path(source).name
+        plugin_name = _safe_name(raw_name)
+        if not plugin_name:
+            logger.error("Plugin install refused: unsafe name from local path")
+            return False
         dest = PLUGINS_DIR / plugin_name
         if dest.exists():
             return False

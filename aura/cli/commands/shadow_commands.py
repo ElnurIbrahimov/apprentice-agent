@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
-from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
+from .common import command, TIER_BETA
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..context import get_ctx
-from .common import command, TIER_BETA, TIER_EXPERIMENTAL, TIER_STABLE
+from .common import command, TIER_BETA
 
 logger = logging.getLogger(__name__)
 

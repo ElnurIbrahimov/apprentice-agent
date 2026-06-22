@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ..context import get_ctx
 from ..display import console
 from .common import command, TIER_STABLE
 
@@ -117,7 +116,7 @@ def _enable_toolset(name: str) -> None:
 
 def _disable_toolset(name: str) -> None:
     """Disable a toolset in config.yaml."""
-    from aura.toolsets import TOOLSETS, ALWAYS_LOADED
+    from aura.toolsets import TOOLSETS
 
     if name not in TOOLSETS:
         console.print(f"[red]Unknown toolset: {name}[/red]")
