@@ -5,7 +5,12 @@ from typing import Optional
 from .common import command, TIER_STABLE
 
 
-@command("/copy",     "Copy last response or code block to clipboard",    tier=TIER_STABLE)
+@command("/copy",     "Copy last response or code block to clipboard",    tier=TIER_STABLE,
+          examples=[
+              "/copy                         -- copy last response",
+              "/copy code                    -- copy first code block",
+              "/copy code 2                  -- copy 2nd code block",
+          ])
 def handle_copy(agent, arg, context) -> Optional[str]:
     """Copy last response or a specific code block to clipboard.
 

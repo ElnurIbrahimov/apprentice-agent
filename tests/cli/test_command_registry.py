@@ -73,7 +73,41 @@ def test_every_registry_value_is_callable():
         assert callable(handler), f"Handler for {cmd} is not callable"
 
 
-# ── Aliases ───────────────────────────────────────────────────────────────
+def test_examples_kwarg_attaches_to_handler():
+    """The command() decorator's examples= kwarg should attach the
+    examples list to the handler as __aura_examples__.
+
+    handle_help reads this attribute to populate the "Examples" section
+    of `/help <cmd>`. If a future refactor drops the attribute, /help
+    silently loses all examples.
+    """
+    # The 9 commands that the prior EXAMPLES dict covered must still
+    # carry examples via the new mechanism.
+    expected_with_examples = {
+        "/model", "/copy", "/fleet", "/chain", "/test",
+        "/shell", "/grep", "/research", "/debate",
+    }
+    for cmd in expected_with_examples:
+        handler = COMMAND_REGISTRY.get(cmd)
+        assert handler is not None, f"Missing command: {cmd}"
+        examples = getattr(handler, "__aura_examples__", None)
+        assert examples is not None, (
+            f"{cmd} handler is missing __aura_examples__. "
+            f"Did the @command decorator lose its examples= kwarg?"
+        )
+        assert isinstance(examples, list) and len(examples) > 0, (
+            f"{cmd} should have at least one example"
+        )
+        # Each example must be a non-empty string starting with the
+        # command name (so they look like real examples, not garbage).
+        for ex in examples:
+            assert isinstance(ex, str) and ex.strip()
+            assert ex.strip().startswith(cmd), (
+                f"Example {ex!r} for {cmd} should start with the command name"
+            )
+
+
+
 
 def test_exit_aliases_to_quit():
     assert COMMAND_REGISTRY["/exit"] is COMMAND_REGISTRY["/quit"]

@@ -21,7 +21,12 @@ def _set_model(ctx, agent, choice: Optional[str]) -> None:
         ctx.agentic_loop.model_override = choice
 
 
-@command("/model",    "View/set model (auto, <name>)",                  tier=TIER_STABLE)
+@command("/model",    "View/set model (auto, <name>)",                  tier=TIER_STABLE,
+          examples=[
+              "/model                        -- open interactive picker",
+              "/model qwen3:8b               -- lock to specific model",
+              "/model auto                   -- return to auto-routing",
+          ])
 def handle_model(agent, arg, context) -> Optional[str]:
     ctx = get_ctx()
     if not arg:
@@ -136,30 +141,14 @@ def handle_help(agent, arg, context) -> Optional[str]:
         for line in doc.strip().split("\n"):
             console.print(f"  {line.strip()}")
 
-        # Built-in examples
-        EXAMPLES = {
-            "/model": ["/model              -- open interactive picker",
-                       "/model qwen3:8b     -- lock to specific model",
-                       "/model auto         -- return to auto-routing"],
-            "/copy": ["/copy               -- copy last response",
-                      "/copy code          -- copy first code block",
-                      "/copy code 2        -- copy 2nd code block"],
-            "/fleet": ["/fleet build auth   -- decompose and run in parallel"],
-            "/chain": ["/chain step1 -> step2 -> step3",
-                       "/chain list         -- show saved chains"],
-            "/test": ["/test               -- run configured test command",
-                      "/test --fix         -- auto-fix on failure"],
-            "/shell": ["/shell ls -la       -- run shell command"],
-            "/grep": ["/grep TODO          -- search for pattern",
-                      "/grep -t py error   -- search .py files"],
-            "/research": ["/research start topic  -- begin research mode",
-                          "/research stop         -- end research mode"],
-            "/debate": ["/debate Should we use X or Y?"],
-        }
-
-        if cmd in EXAMPLES:
+        # Examples are declared at the @command() site via the
+        # ``examples=[...]`` kwarg and stored on the function as
+        # ``__aura_examples__``. This is the single source of truth
+        # (no separate EXAMPLES dict to drift from the registry).
+        examples = getattr(handler, "__aura_examples__", []) or []
+        if examples:
             console.print("\n  [dim]Examples:[/dim]")
-            for ex in EXAMPLES[cmd]:
+            for ex in examples:
                 console.print(f"    [dim]{ex}[/dim]")
         console.print()
     else:

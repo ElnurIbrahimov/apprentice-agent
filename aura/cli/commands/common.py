@@ -23,6 +23,7 @@ def command(
     description: str,
     aliases: list[str] | None = None,
     tier: str = TIER_STABLE,
+    examples: list[str] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Register a slash-command handler in the central registry.
 
@@ -33,10 +34,13 @@ def command(
             ...
 
     The decorated function is returned unchanged so it can still be imported
-    and called directly.
+    and called directly. Examples are stored on the function as
+    ``func.__aura_examples__`` so ``handle_help`` can show them via
+    ``/help <cmd>`` without keeping a separate map.
     """
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         _COMMAND_REGISTRY.append((name, description, func, aliases or [], tier))
+        func.__aura_examples__ = list(examples) if examples else []  # type: ignore[attr-defined]
         return func
     return decorator
 

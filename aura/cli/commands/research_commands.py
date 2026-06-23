@@ -8,7 +8,11 @@ from .common import command, TIER_BETA
 logger = logging.getLogger(__name__)
 
 
-@command("/research","Start research mode",                              tier=TIER_BETA)
+@command("/research","Start research mode",                              tier=TIER_BETA,
+          examples=[
+              "/research start topic          -- begin research mode",
+              "/research stop                 -- end research mode",
+          ])
 def handle_research(agent, arg, context) -> Optional[str]:
     from ..display import console, show_info
     ctx = get_ctx()

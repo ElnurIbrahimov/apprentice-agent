@@ -160,7 +160,10 @@ def handle_plan(agent, arg, context) -> Optional[str]:
         _plan_console.print("Usage: /plan <task description>")
 
 
-@command("/fleet",   "Run parallel sub-agents",                        tier=TIER_BETA)
+@command("/fleet",   "Run parallel sub-agents",                        tier=TIER_BETA,
+          examples=[
+              "/fleet build auth            -- decompose and run in parallel",
+          ])
 def handle_fleet(agent, arg, context) -> Optional[str]:
     # NB: imported as ``_fleet_console`` (not used directly as ``console``)
     # so test mocks of ``aura.cli.display.console`` can intercept calls.
@@ -309,7 +312,10 @@ def _handle_agent_command(agent, arg: str):
         _agent_console.print(f"  Available: {', '.join(specialists)}, parallel")
 
 
-@command("/debate",  "Multi-model debate on a question",                 tier=TIER_EXPERIMENTAL)
+@command("/debate",  "Multi-model debate on a question",                 tier=TIER_EXPERIMENTAL,
+          examples=[
+              "/debate Should we use X or Y?",
+          ])
 def handle_debate(agent, arg, context) -> Optional[str]:
     from ..debate_mode import parse_debate_args, run_debate
     from ..display import console as _debate_console
@@ -329,7 +335,11 @@ def handle_debate(agent, arg, context) -> Optional[str]:
         _debate_err2(f"Debate failed: {e}")
 
 
-@command("/chain",   "Run prompt pipelines (step1 -> step2 -> ...)",    tier=TIER_BETA)
+@command("/chain",   "Run prompt pipelines (step1 -> step2 -> ...)",    tier=TIER_BETA,
+          examples=[
+              "/chain step1 -> step2 -> step3",
+              "/chain list                   -- show saved chains",
+          ])
 def handle_chain(agent, arg, context) -> Optional[str]:
     """Run, save, load, or list prompt chains."""
     from aura.cli.chain_mode import (

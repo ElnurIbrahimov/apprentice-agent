@@ -8,12 +8,19 @@ from .common import command, TIER_BETA, TIER_STABLE
 logger = logging.getLogger(__name__)
 
 
-@command("/shell",    "Execute shell command",                            aliases=["/bash","/run"], tier=TIER_STABLE)
+@command("/shell",    "Execute shell command",                            aliases=["/bash","/run"], tier=TIER_STABLE,
+          examples=[
+              "/shell ls -la                 -- run shell command",
+          ])
 def handle_shell(agent, arg, context) -> Optional[str]:
     _handle_shell_command(agent, arg)
 
 
-@command("/grep",     "Search code content",                              tier=TIER_STABLE)
+@command("/grep",     "Search code content",                              tier=TIER_STABLE,
+          examples=[
+              "/grep TODO                    -- search for pattern",
+              "/grep -t py error             -- search only .py files",
+          ])
 def handle_grep(agent, arg, context) -> Optional[str]:
     _handle_grep_command(agent, arg)
 
@@ -28,7 +35,11 @@ def handle_edit(agent, arg, context) -> Optional[str]:
     _handle_edit_command(agent, arg)
 
 
-@command("/test",     "Run tests",                                        tier=TIER_STABLE)
+@command("/test",     "Run tests",                                        tier=TIER_STABLE,
+          examples=[
+              "/test                         -- run configured test command",
+              "/test --fix                   -- auto-fix on failure",
+          ])
 def handle_test(agent, arg, context) -> Optional[str]:
     from ..display import console as _test_console
     from ..display import show_response as _test_show
