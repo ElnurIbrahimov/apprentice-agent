@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from ..display import console
+from ..display import console, show_info, show_success, show_progress
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ def handle_cron(agent: Any, arg: str, context: dict) -> Optional[str]:
     elif sub == "run" and len(parts) >= 2:
         _run_job(agent, parts[1])
     else:
-        console.print("[dim]Usage: /cron [list|create SCHEDULE PROMPT|pause ID|resume ID|remove ID|run ID][/dim]")
+        show_info("Usage: /cron [list|create SCHEDULE PROMPT|pause ID|resume ID|remove ID|run ID]")
 
     return None
 
@@ -94,7 +94,7 @@ def _list_jobs() -> None:
 
     jobs = _load_jobs()
     if not jobs:
-        console.print("[dim]No scheduled jobs. Use /cron create <schedule> <prompt>[/dim]")
+        show_info("No scheduled jobs. Use /cron create <schedule> <prompt>")
         return
 
     table = Table(box=None, padding=(0, 1), show_header=True, header_style="bold")
@@ -151,9 +151,9 @@ def _create_job(schedule: str, prompt: str) -> None:
         "run_count": 0,
     })
     _save_jobs(jobs)
-    console.print(f"[green]Created job {job_id}[/green]")
-    console.print(f"  [dim]Schedule: {parsed_schedule}[/dim]")
-    console.print(f"  [dim]Prompt: {prompt[:80]}[/dim]")
+    show_success(f"Created job {job_id}")
+    show_info(f"Schedule: {parsed_schedule}")
+    show_info(f"Prompt: {prompt[:80]}")
 
 
 def _toggle_job(job_id: str, enabled: bool) -> None:
@@ -166,7 +166,7 @@ def _toggle_job(job_id: str, enabled: bool) -> None:
     job["enabled"] = enabled
     _save_jobs(jobs)
     action = "resumed" if enabled else "paused"
-    console.print(f"[green]Job {job['id']} {action}.[/green]")
+    show_success(f"Job {job['id']} {action}.")
 
 
 def _find_job(jobs: list[dict], job_id: str) -> dict | None:
@@ -185,7 +185,7 @@ def _remove_job(job_id: str) -> None:
         console.print(f"[red]Job '{job_id}' not found.[/red]")
         return
     _save_jobs(new_jobs)
-    console.print(f"[green]Removed job matching '{job_id}'.[/green]")
+    show_success(f"Removed job matching '{job_id}'.")
 
 
 def _run_job(agent: Any, job_id: str) -> None:
@@ -196,7 +196,7 @@ def _run_job(agent: Any, job_id: str) -> None:
         console.print(f"[red]Job '{job_id}' not found.[/red]")
         return
     prompt = job.get("prompt", "")
-    console.print(f"[cyan]Running job {job['id']}: {prompt[:60]}[/cyan]")
+    show_progress(f"Running job {job['id']}: {prompt[:60]}")
     # Update last_run
     job["last_run"] = time.time()
     job["run_count"] = job.get("run_count", 0) + 1
@@ -206,6 +206,6 @@ def _run_job(agent: Any, job_id: str) -> None:
         result = agent.run(prompt)
         response = result.get("response", "") if result else ""
         if response:
-            console.print(f"[dim]{response[:200]}[/dim]")
+            show_info(f"{response[:200]}")
     except Exception as e:
         console.print(f"[red]Job failed: {e}[/red]")

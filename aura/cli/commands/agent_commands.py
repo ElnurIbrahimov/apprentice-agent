@@ -10,14 +10,14 @@ logger = logging.getLogger(__name__)
 
 
 def print_result(result, is_fastpath: bool = False):
-    from ..display import console, show_response
+    from ..display import console, show_info, show_response
 
     response = result.get("response", "")
     if response:
         show_response(response)
     else:
         mode = "Fast-path" if is_fastpath else f"{result.get('iterations', '?')} iterations"
-        console.print(f"[dim]Completed ({mode})[/dim]")
+        show_info(f"Completed ({mode})")
 
 
 @command("/interrupt","Abort running iteration with optional correction",aliases=["/stop"], tier=TIER_STABLE)
@@ -29,6 +29,10 @@ def handle_interrupt(agent, arg, context) -> Optional[str]:
     next iteration picks up the correction immediately after the abort.
     """
     from ..context import get_ctx
+    # NB: imported as ``_int_console`` (not used directly as ``console``)
+    # so test mocks of ``aura.cli.display.console`` can intercept the
+    # call. A module-level ``from ..display import console`` would bind
+    # the name once at import time and not reflect later patches.
     from ..display import console as _int_console
 
     ctx = get_ctx()
@@ -158,12 +162,13 @@ def handle_plan(agent, arg, context) -> Optional[str]:
 
 @command("/fleet",   "Run parallel sub-agents",                        tier=TIER_BETA)
 def handle_fleet(agent, arg, context) -> Optional[str]:
+    # NB: imported as ``_fleet_console`` (not used directly as ``console``)
+    # so test mocks of ``aura.cli.display.console`` can intercept calls.
+    from ..display import console as _fleet_console
     task = arg.strip()
     if not task:
-        from ..display import console as _fleet_console
         _fleet_console.print("[dim]Usage: /fleet <task description>[/dim]")
         return
-    from ..display import console as _fleet_console
     from ..fleet import (
         DECOMPOSITION_PROMPT,
         FleetExecutor,

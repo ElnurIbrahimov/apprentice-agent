@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ..display import console, show_error
+from ..display import console, show_error, show_info, show_success
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def handle_auth(agent: Any, arg: str, context: dict) -> Optional[str]:
     elif sub == "reset" and sub_arg:
         _auth_reset(sub_arg)
     else:
-        console.print("[dim]Usage: /auth [list [provider]|add|remove <provider> <idx>|reset <provider>][/dim]")
+        show_info("Usage: /auth [list [provider]|add|remove <provider> <idx>|reset <provider>]")
 
     return None
 
@@ -58,7 +58,7 @@ def _auth_list(provider_filter: str) -> None:
     all_providers = pool.registered_providers()
 
     if not all_providers:
-        console.print("[dim]No credentials registered. Use /auth add to add API keys.[/dim]")
+        show_info("No credentials registered. Use /auth add to add API keys.")
         return
 
     table = Table(box=None, padding=(0, 1), show_header=True, header_style="bold")
@@ -125,19 +125,19 @@ def _auth_add() -> None:
     try:
         from aura.providers.registry import PROVIDER_CONFIGS
         known = sorted(PROVIDER_CONFIGS.keys())
-        console.print(f"[dim]Known providers: {', '.join(known)}[/dim]")
+        show_info(f"Known providers: {', '.join(known)}")
     except ImportError:
         known = []
 
     try:
         provider = console.input("  Provider name: ").strip().lower()
         if not provider:
-            console.print("[dim]Cancelled.[/dim]")
+            show_info("Cancelled.")
             return
 
         key = console.input("  API key: ").strip()
         if not key:
-            console.print("[dim]Cancelled.[/dim]")
+            show_info("Cancelled.")
             return
 
         # Determine env var name
@@ -178,19 +178,19 @@ def _auth_add() -> None:
         except Exception:
             pass
 
-        console.print(f"\n[green]Added {provider} key to {env_path}[/green]")
-        console.print(f"[dim]Env var: {env_var}[/dim]")
-        console.print("[dim]Restart or /reset for changes to take effect.[/dim]")
+        show_success(f"Added {provider} key to {env_path}")
+        show_info(f"Env var: {env_var}")
+        show_info("Restart or /reset for changes to take effect.")
 
     except (EOFError, KeyboardInterrupt):
-        console.print("\n[dim]Cancelled.[/dim]")
+        show_info("Cancelled.")
 
 
 def _auth_remove(args: str) -> None:
     """Remove a key by provider + index."""
     parts = args.split()
     if len(parts) < 2:
-        console.print("[dim]Usage: /auth remove <provider> <index>[/dim]")
+        show_info("Usage: /auth remove <provider> <index>")
         return
 
     provider = parts[0].lower()
@@ -230,7 +230,7 @@ def _auth_remove(args: str) -> None:
         # Reload pool
         pool.register(provider, env_var)
 
-        console.print(f"[green]Removed key #{idx + 1} from {provider}.[/green]")
+        show_success(f"Removed key #{idx + 1} from {provider}.")
 
     except ImportError:
         show_error("Credential pool not available.")
@@ -247,7 +247,7 @@ def _auth_reset(provider: str) -> None:
         if not count:
             console.print(f"[red]Provider '{provider}' not found in pool.[/red]")
             return
-        console.print(f"[green]Reset {count} key(s) for {provider}. All keys now available.[/green]")
+        show_success(f"Reset {count} key(s) for {provider}. All keys now available.")
     except ImportError:
         show_error("Credential pool not available.")
     except Exception as e:

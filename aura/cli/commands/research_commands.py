@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 @command("/research","Start research mode",                              tier=TIER_BETA)
 def handle_research(agent, arg, context) -> Optional[str]:
-    from ..display import console as _research_console
+    from ..display import console, show_info
     ctx = get_ctx()
     research_ctx = ctx.research_ctx if ctx else None
     if research_ctx is None:
@@ -22,31 +22,31 @@ def handle_research(agent, arg, context) -> Optional[str]:
     if not topic:
         if research_ctx.is_active:
             research_ctx.stop()
-            _research_console.print("[dim]Research mode ended.[/dim]")
+            show_info("Research mode ended.")
         else:
-            _research_console.print("[dim]Usage: /research <topic>[/dim]")
+            show_info("Usage: /research <topic>")
         return
     research_ctx.start(topic)
-    _research_console.print(f"[magenta]Research mode: {topic}[/magenta]")
+    console.print(f"[magenta]Research mode: {topic}[/magenta]")
 
 
 @command("/sources",  "Show research sources",                            tier=TIER_BETA)
 def handle_sources(agent, arg, context) -> Optional[str]:
-    from ..display import console as _sources_console
+    from ..display import console, show_info
     ctx = get_ctx()
     research_ctx = ctx.research_ctx if ctx else None
     if research_ctx and research_ctx.is_active:
         from ..research_mode import render_sources
-        render_sources(_sources_console, research_ctx)
+        render_sources(console, research_ctx)
     else:
-        _sources_console.print("[dim]No research session active.[/dim]")
+        show_info("No research session active.")
 
 
 @command("/export",   "Export research to Markdown",                      tier=TIER_BETA)
 def handle_export(agent, arg, context) -> Optional[str]:
     import re as _re_export
 
-    from ..display import console as _export_console
+    from ..display import console, show_info, show_success
     ctx = get_ctx()
     research_ctx = ctx.research_ctx if ctx else None
     if research_ctx and research_ctx.is_active:
@@ -54,9 +54,9 @@ def handle_export(agent, arg, context) -> Optional[str]:
         safe_topic = _re_export.sub(r'[^\w\-]', '_', research_ctx.topic)[:30]
         out_path = Path(f"research_{safe_topic}.md")
         out_path.write_text(md)
-        _export_console.print(f"[green]Exported to {out_path}[/green]")
+        show_success(f"Exported to {out_path}")
     else:
-        _export_console.print("[dim]No active research session to export.[/dim]")
+        show_info("No active research session to export.")
 
 
 @command("/browse",   "Browse web pages",                                 tier=TIER_BETA)
@@ -70,7 +70,7 @@ def handle_browse(agent, arg, context) -> Optional[str]:
 
 @command("/recall",   "Search memories",                                  aliases=["/memory"], tier=TIER_BETA)
 def handle_recall(agent, arg, context) -> Optional[str]:
-    from ..display import console
+    from ..display import console, show_info
     if not arg:
         console.print("Usage: /recall <query>  (alias: /memory)")
         return None
@@ -80,7 +80,7 @@ def handle_recall(agent, arg, context) -> Optional[str]:
         console.print(f"[red]Memory query failed: {exc}[/red]")
         return None
     if not memories:
-        console.print(f"[dim]No memories found for '{arg}'.[/dim]")
+        show_info(f"No memories found for '{arg}'.")
         return None
     console.print(f"\n[bold]Recalled {len(memories)} memories for '{arg}':[/bold]")
     for i, m in enumerate(memories, 1):

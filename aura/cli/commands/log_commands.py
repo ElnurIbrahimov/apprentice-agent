@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 
-from aura.cli.display import console
+from aura.cli.display import console, show_info
 
 
 def cmd_log(args: argparse.Namespace) -> int:
@@ -27,7 +27,7 @@ def cmd_log(args: argparse.Namespace) -> int:
         results = log.search(query, limit=args.limit)
         for r in results:
             console.print(f"[cyan][{r['model']}][/cyan] {r['prompt'][:80]}")
-            console.print(f"  [dim]-> {r['response'][:120]}[/dim]")
+            show_info(f"-> {r['response'][:120]}")
         return 0
 
     if action == "stats":
@@ -47,5 +47,5 @@ def cmd_log(args: argparse.Namespace) -> int:
 
     # Default: recent
     for r in log.get_recent(args.limit):
-        console.print(f"  [dim]{r['prompt'][:80]}[/dim]")
+        show_info(f"{r['prompt'][:80]}")
     return 0

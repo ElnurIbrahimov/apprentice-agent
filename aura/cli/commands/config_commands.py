@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ..display import console
+from ..display import console, show_info, show_success, show_progress
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def handle_config(agent: Any, arg: str, context: dict) -> Optional[str]:
     elif sub == "edit":
         _edit_config()
     else:
-        console.print("[dim]Usage: /config [show|get KEY|set KEY VAL|path|edit][/dim]")
+        show_info("Usage: /config [show|get KEY|set KEY VAL|path|edit]")
 
     return None
 
@@ -51,8 +51,8 @@ def _show_config() -> None:
         from aura.config_loader import load_config
         config = load_config(force=True)
         if not config:
-            console.print("[dim]No config.yaml found. Defaults are in use.[/dim]")
-            console.print(f"[dim]Create one at: {_config_path_str()}[/dim]")
+            show_info("No config.yaml found. Defaults are in use.")
+            show_info(f"Create one at: {_config_path_str()}")
             return
         console.print(yaml.safe_dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False))
     except ImportError:
@@ -66,7 +66,7 @@ def _show_config_fallback() -> None:
     from aura.config_loader import load_config
     config = load_config(force=True)
     if not config:
-        console.print("[dim]No config.yaml found. Defaults are in use.[/dim]")
+        show_info("No config.yaml found. Defaults are in use.")
         return
     import json
     console.print(json.dumps(config, indent=2, default=str))
@@ -77,7 +77,7 @@ def _get_config_value(key: str) -> None:
     from aura.config_loader import get_config_value
     value = get_config_value(key)
     if value is None:
-        console.print(f"[dim]Key '{key}' not set.[/dim]")
+        show_info(f"Key '{key}' not set.")
     else:
         console.print(f"[cyan]{key}[/cyan] = [green]{value}[/green]")
 
@@ -91,15 +91,15 @@ def _set_config_value(key: str, value: str) -> None:
 
     success = set_config_value(key, parsed)
     if success:
-        console.print(f"[green]Set {key} = {parsed}[/green]")
-        console.print("[dim]Restart or /reset for changes to take effect.[/dim]")
+        show_success(f"Set {key} = {parsed}")
+        show_info("Restart or /reset for changes to take effect.")
     else:
         console.print(f"[red]Failed to set {key}. Check that PyYAML is installed.[/red]")
 
 
 def _show_config_path() -> None:
     """Print the config.yaml file path."""
-    console.print(f"[cyan]{_config_path_str()}[/cyan]")
+    show_progress(_config_path_str())
 
 
 def _edit_config() -> None:
@@ -118,10 +118,10 @@ def _edit_config() -> None:
         subprocess.run([editor, str(path)])
     except FileNotFoundError:
         console.print(f"[red]Editor '{editor}' not found. Set $EDITOR or edit manually:[/red]")
-        console.print(f"  [dim]{path}[/dim]")
+        show_info(f"Edit manually: {path}")
     except Exception as e:
         console.print(f"[red]Failed to open editor: {e}[/red]")
-        console.print(f"  [dim]Edit manually: {path}[/dim]")
+        show_info(f"Edit manually: {path}")
 
 
 def _config_path_str() -> str:

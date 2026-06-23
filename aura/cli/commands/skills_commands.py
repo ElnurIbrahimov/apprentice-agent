@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Optional
 
-from ..display import console, show_error
+from ..display import console, show_error, show_info, show_success
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ def handle_skills(agent: Any, arg: str, context: dict) -> Optional[str]:
     elif sub == "uninstall" and len(parts) >= 2:
         _uninstall_skill(parts[1].strip())
     else:
-        console.print("[dim]Usage: /skills [list|search QUERY|install URL|uninstall NAME][/dim]")
+        show_info("Usage: /skills [list|search QUERY|install URL|uninstall NAME]")
 
     return None
 
@@ -114,7 +114,7 @@ def _list_skills() -> None:
 
     skills = _find_all_skills()
     if not skills:
-        console.print("[dim]No skills found. Install with /skills install <url>[/dim]")
+        show_info("No skills found. Install with /skills install <url>")
         return
 
     table = Table(box=None, padding=(0, 1), show_header=True, header_style="bold")
@@ -140,7 +140,7 @@ def _search_skills(query: str) -> None:
     """Search skills by fuzzy match on name + description."""
     skills = _find_all_skills()
     if not skills:
-        console.print("[dim]No skills found.[/dim]")
+        show_info("No skills found.")
         return
 
     q = query.lower()
@@ -150,7 +150,7 @@ def _search_skills(query: str) -> None:
     ]
 
     if not matches:
-        console.print(f"[dim]No skills matching '{query}'.[/dim]")
+        show_info(f"No skills matching '{query}'.")
         return
 
     console.print(f"\n  [bold]Skills matching '{query}'[/bold] ({len(matches)} found):\n")
@@ -199,7 +199,7 @@ def _install_skill(url: str) -> None:
             skill_dir.mkdir(parents=True, exist_ok=True)
             (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
 
-            console.print(f"[green]Installed skill '{skill_name}' to {skill_dir}[/green]")
+            show_success(f"Installed skill '{skill_name}' to {skill_dir}")
         except Exception as e:
             console.print(f"[red]Failed to install from URL: {e}[/red]")
     elif Path(url).exists() and Path(url).is_dir():
@@ -220,10 +220,10 @@ def _install_skill(url: str) -> None:
             console.print(f"[red]Skill '{skill_name}' already installed.[/red]")
             return
         shutil.copytree(url, dest)
-        console.print(f"[green]Installed skill '{skill_name}' from {url}[/green]")
+        show_success(f"Installed skill '{skill_name}' from {url}")
     else:
         console.print(f"[red]Invalid URL or path: {url}[/red]")
-        console.print("[dim]Usage: /skills install https://github.com/user/repo[/dim]")
+        show_info("Usage: /skills install https://github.com/user/repo")
 
 
 def _uninstall_skill(name: str) -> None:
@@ -248,6 +248,6 @@ def _uninstall_skill(name: str) -> None:
 
     try:
         shutil.rmtree(skill_dir)
-        console.print(f"[green]Uninstalled skill '{name}'.[/green]")
+        show_success(f"Uninstalled skill '{name}'.")
     except Exception as e:
         console.print(f"[red]Failed to uninstall: {e}[/red]")

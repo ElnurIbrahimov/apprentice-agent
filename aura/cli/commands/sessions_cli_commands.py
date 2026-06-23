@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from ..display import console, show_error
+from ..display import console, show_error, show_info, show_success
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ def handle_sessions(agent: Any, arg: str, context: dict) -> Optional[str]:
     elif sub == "prune" and len(parts) >= 2:
         _prune_sessions(parts[1].strip())
     else:
-        console.print("[dim]Usage: /sessions [list|export ID|rename ID TITLE|delete ID|stats|prune DAYS][/dim]")
+        show_info("Usage: /sessions [list|export ID|rename ID TITLE|delete ID|stats|prune DAYS]")
 
     return None
 
@@ -100,7 +100,7 @@ def _list_sessions() -> None:
 
     sessions = _load_session_summaries()
     if not sessions:
-        console.print("[dim]No sessions found.[/dim]")
+        show_info("No sessions found.")
         return
 
     table = Table(box=None, padding=(0, 1), show_header=True, header_style="bold")
@@ -157,7 +157,7 @@ def _export_session(session_id: str) -> None:
         data = json.loads(session_file.read_text(encoding="utf-8"))
         outpath = Path.cwd() / f"session_{safe_id}_{int(time.time())}.json"
         outpath.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
-        console.print(f"[green]Exported to {outpath.name}[/green]")
+        show_success(f"Exported to {outpath.name}")
     except Exception as e:
         console.print(f"[red]Export failed: {e}[/red]")
 
@@ -194,7 +194,7 @@ def _rename_session(session_id: str, title: str) -> None:
         data = json.loads(session_file.read_text(encoding="utf-8"))
         data["title"] = title
         session_file.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
-        console.print(f"[green]Renamed session to: {title}[/green]")
+        show_success(f"Renamed session to: {title}")
     except Exception as e:
         console.print(f"[red]Rename failed: {e}[/red]")
 
@@ -213,7 +213,7 @@ def _delete_session(session_id: str) -> None:
 
     try:
         shutil.rmtree(session_dir)
-        console.print(f"[green]Deleted session '{session_id}'.[/green]")
+        show_success(f"Deleted session '{session_id}'.")
     except Exception as e:
         console.print(f"[red]Delete failed: {e}[/red]")
 
@@ -225,7 +225,7 @@ def _session_stats() -> None:
 
     sessions = _load_session_summaries()
     if not sessions:
-        console.print("[dim]No sessions to analyze.[/dim]")
+        show_info("No sessions to analyze.")
         return
 
     total_msgs = sum(s.get("message_count", 0) for s in sessions)
@@ -262,7 +262,7 @@ def _prune_sessions(days_str: str) -> None:
     old = [s for s in sessions if s.get("updated_at", 0) < cutoff]
 
     if not old:
-        console.print(f"[green]No sessions older than {days} days.[/green]")
+        show_success(f"No sessions older than {days} days.")
         return
 
     import shutil
@@ -280,4 +280,4 @@ def _prune_sessions(days_str: str) -> None:
         except Exception:
             pass
 
-    console.print(f"[green]Pruned {count} sessions older than {days} days.[/green]")
+    show_success(f"Pruned {count} sessions older than {days} days.")

@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ..display import console
+from ..display import console, show_info, show_success
 from .common import command, TIER_STABLE, TIER_BETA
 
 logger = logging.getLogger(__name__)
@@ -90,29 +90,29 @@ def handle_plugins_cmd(agent: Any, arg: str, context: dict) -> Optional[str]:
     if sub == "list" or sub == "":
         plugins = list_available_plugins()
         if not plugins:
-            console.print("[dim]No plugins found in ~/.aura/plugins/[/dim]")
-            console.print("[dim]Add plugins by creating a directory with plugin.yaml[/dim]")
+            show_info("No plugins found in ~/.aura/plugins/")
+            show_info("Add plugins by creating a directory with plugin.yaml")
             return None
         for p in plugins:
             status = "[green]\u2713[/green]" if p["enabled"] else "[dim]\u2717[/dim]"
             console.print(f"  {status} [cyan]{p['name']:<20}[/cyan] v{p['version']:<10} [dim]{p['description']}[/dim]")
     elif sub == "enable" and len(parts) >= 2:
         if enable_plugin(parts[1]):
-            console.print(f"[green]Enabled plugin '{parts[1]}'.[/green]")
+            show_success(f"Enabled plugin '{parts[1]}'.")
         else:
             console.print(f"[red]Failed to enable plugin '{parts[1]}'.[/red]")
     elif sub == "disable" and len(parts) >= 2:
         if disable_plugin(parts[1]):
-            console.print(f"[green]Disabled plugin '{parts[1]}'.[/green]")
+            show_success(f"Disabled plugin '{parts[1]}'.")
         else:
             console.print(f"[red]Failed to disable plugin '{parts[1]}'.[/red]")
     elif sub == "install" and len(parts) >= 2:
         if install_plugin(parts[1]):
-            console.print(f"[green]Installed plugin from {parts[1]}[/green]")
+            show_success(f"Installed plugin from {parts[1]}")
         else:
             console.print(f"[red]Failed to install plugin from {parts[1]}[/red]")
     else:
-        console.print("[dim]Usage: /plugins [list|enable N|disable N|install URL][/dim]")
+        show_info("Usage: /plugins [list|enable N|disable N|install URL]")
     return None
 
 
@@ -125,8 +125,8 @@ def handle_lsp(agent: Any, arg: str, context: dict) -> Optional[str]:
     )
 
     if not is_lsp_enabled():
-        console.print("[dim]LSP disabled. Enable with:[/dim]")
-        console.print("[dim]  aura config set lsp.enabled true[/dim]")
+        show_info("LSP disabled. Enable with:")
+        show_info("  aura config set lsp.enabled true")
         return None
 
     console.print("  [bold cyan]LSP Status[/bold cyan]")
@@ -134,8 +134,8 @@ def handle_lsp(agent: Any, arg: str, context: dict) -> Optional[str]:
 
     servers = get_lsp_servers()
     if not servers:
-        console.print("  [dim]No LSP servers configured.[/dim]")
-        console.print("  [dim]Example: aura config set lsp.servers.python 'pylsp --stdio'[/dim]")
+        show_info("No LSP servers configured.")
+        show_info("Example: aura config set lsp.servers.python 'pylsp --stdio'")
         return None
 
     for lang, cmd in servers.items():
@@ -162,15 +162,15 @@ def handle_autoprune(agent: Any, arg: str, context: dict) -> Optional[str]:
     from aura.session_prune import run_auto_prune, is_auto_prune_enabled, get_retention_days
 
     if not is_auto_prune_enabled():
-        console.print("[dim]Auto-prune disabled. Enable with:[/dim]")
-        console.print("[dim]  aura config set sessions.auto_prune true[/dim]")
-        console.print(f"  [dim](retention: {get_retention_days()} days)[/dim]")
+        show_info("Auto-prune disabled. Enable with:")
+        show_info("  aura config set sessions.auto_prune true")
+        show_info(f"(retention: {get_retention_days()} days)")
         return None
 
     dry_run = "--dry-run" in (arg or "")
     result = run_auto_prune(dry_run=dry_run)
     action = "Would prune" if dry_run else "Pruned"
-    console.print(f"[green]{action} {result['pruned']} sessions older than {get_retention_days()} days.[/green]")
+    show_success(f"{action} {result['pruned']} sessions older than {get_retention_days()} days.")
     if result["errors"]:
         console.print(f"[yellow]{result['errors']} errors during prune.[/yellow]")
     return None
@@ -188,9 +188,9 @@ def handle_humanize(agent: Any, arg: str, context: dict) -> Optional[str]:
     from aura.config_loader import set_config_value
     if set_config_value("human_delay.mode", new_mode):
         if new_mode == "off":
-            console.print("[green]Humanize mode disabled.[/green]")
+            show_success("Humanize mode disabled.")
         else:
             min_ms, max_ms = cfg.get("min_ms", 800), cfg.get("max_ms", 2500)
-            console.print(f"[green]Humanize mode enabled ({min_ms}-{max_ms}ms delay).[/green]")
-        console.print("[dim]Restart or /reset for changes to take effect.[/dim]")
+            show_success(f"Humanize mode enabled ({min_ms}-{max_ms}ms delay).")
+        show_info("Restart or /reset for changes to take effect.")
     return None

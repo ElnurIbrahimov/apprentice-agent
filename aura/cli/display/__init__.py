@@ -719,6 +719,31 @@ def show_info(message: str) -> None:
     _register_block("info", str(message)[:120], str(message))
 
 
+def show_success(message: str) -> None:
+    """Display a success confirmation — green check + message.
+
+    Use for "switched to X", "model override cleared", "plan execution
+    complete", etc. Distinct from ``show_info`` (which is dim/quiet) and
+    ``show_error`` (which uses the error color and ✗ icon).
+    """
+    colors = _get_theme_colors()
+    console.print(f"  [{colors['success']}]\u2713[/{colors['success']}] {message}")
+    _register_block("info", str(message)[:120], str(message))
+
+
+def show_progress(message: str) -> None:
+    """Display a progress/status line — cyan bullet + message.
+
+    Use for long-running operations the user is waiting on
+    ("Updating Aura\u2026", "Recalling memories\u2026"). Distinguishable
+    from the static ``show_info`` so the eye can pick it out as
+    in-flight work.
+    """
+    colors = _get_theme_colors()
+    console.print(f"  [{colors['accent']}]\u00b7[/{colors['accent']}] {message}")
+    _register_block("info", str(message)[:120], str(message))
+
+
 def show_warning(message: str) -> None:
     """Display warning with triangle icon."""
     colors = _get_theme_colors()

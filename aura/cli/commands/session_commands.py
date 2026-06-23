@@ -302,27 +302,27 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
         if ctx and ctx.session:
             current_sid = getattr(ctx.session, 'session_id', "") or ""
         all_sessions = agentic_sessions + brain_conversations
-        result = pick_session(_sessions_console, all_sessions, current_sid)
+        result = pick_session(console, all_sessions, current_sid)
         if result and "__action__" not in result:
             sid = result.get("id", "")
             if sid and ctx and ctx.agentic_loop:
                 if ctx.agentic_loop.load_session(sid):
-                    _sessions_console.print(f"  Switched to session: {result.get('title', 'Untitled')}")
+                    console.print(f"  Switched to session: {result.get('title', 'Untitled')}")
                 else:
-                    _sessions_console.print(f"  Failed to load session: {sid}")
+                    console.print(f"  Failed to load session: {sid}")
         elif result and result.get("__action__") == "delete":
             target_session = result.get("session", {})
             target_id = target_session.get("id", "")
             if target_id and session_mgr.delete(target_id):
-                _sessions_console.print(f"  Deleted session: {target_session.get('title', target_id)}")
+                console.print(f"  Deleted session: {target_session.get('title', target_id)}")
             else:
-                _sessions_console.print("  Failed to delete session.")
+                console.print("  Failed to delete session.")
 
 
 @command("/clear",    "Clear conversation history",                      tier=TIER_STABLE)
 def handle_clear(agent, arg, context) -> Optional[str]:
     if arg.strip() != "--force":
-        from ..display import console
+        from ..display import console, show_info
         approved = confirm_action(
             agent,
             "clear_history",
@@ -330,7 +330,7 @@ def handle_clear(agent, arg, context) -> Optional[str]:
             fallback_prompt="  Clear conversation history? [y/N] ",
         )
         if not approved:
-            console.print("  [dim]Cancelled.[/dim]")
+            show_info("Cancelled.")
             return
     agent.brain.clear_history()
     ctx = get_ctx()
@@ -344,7 +344,7 @@ def handle_clear(agent, arg, context) -> Optional[str]:
 
 @command("/compact",  "Compact conversation history",                    tier=TIER_STABLE)
 def handle_compact(agent, arg, context) -> Optional[str]:
-    from ..display import console
+    from ..display import console, show_info
     focus = arg if arg else None
 
     # Measure tokens before compaction
@@ -361,7 +361,7 @@ def handle_compact(agent, arg, context) -> Optional[str]:
         tokens_before = 0
         msg_count_before = 0
 
-    console.print("[dim]Compacting conversation history...[/dim]")
+    show_info("Compacting conversation history...")
     summary = agent.brain.compact_history(focus=focus)
     if summary:
         # Measure tokens after compaction
@@ -381,10 +381,10 @@ def handle_compact(agent, arg, context) -> Optional[str]:
 
         console.print(f"[green]\u2713[/green] Compacted {msgs_freed} messages")
         if tokens_freed > 0:
-            console.print(f"  [dim]{tokens_freed:,} tokens freed ({tokens_before:,} \u2192 {tokens_after:,})[/dim]")
-        console.print(f"  [dim]Summary: {summary[:200]}{'...' if len(summary) > 200 else ''}[/dim]")
+            show_info(f"{tokens_freed:,} tokens freed ({tokens_before:,} → {tokens_after:,})")
+        show_info(f"Summary: {summary[:200]}{'...' if len(summary) > 200 else ''}")
     else:
-        console.print("[dim]Nothing to compact (history too short).[/dim]")
+        show_info("Nothing to compact (history too short).")
 
 
 def handle_retry(agent, arg, context) -> Optional[str]:
@@ -620,15 +620,15 @@ def handle_checkout(agent, arg, context) -> Optional[str]:
 def handle_changes(agent, arg, context) -> Optional[str]:
     """Show files modified in the current session with diffs."""
     from ..context import get_ctx
-    from ..display import console
+    from ..display import console, show_info
     ctx = get_ctx()
     if not ctx or not ctx.agentic_loop:
-        console.print("[dim]No active session.[/dim]")
+        show_info("No active session.")
         return
 
     hot_files = getattr(ctx.agentic_loop, '_hot_files', [])
     if not hot_files:
-        console.print("[dim]No files modified in this session.[/dim]")
+        show_info("No files modified in this session.")
         return
 
     console.print(f"\n[bold]Files modified this session ({len(hot_files)}):[/bold]\n")
@@ -695,11 +695,11 @@ def handle_merge(agent, arg, context) -> Optional[str]:
 def handle_blocks(agent, arg, context) -> Optional[str]:
     """List recent output blocks. /blocks N expands block N."""
     from ..context import get_ctx as _get_ctx
-    from ..display import console
+    from ..display import console, show_info
 
     ctx = _get_ctx()
     if ctx is None or ctx.blocks is None:
-        console.print("  [dim]No blocks (chat mode only).[/dim]")
+        show_info("No blocks (chat mode only).")
         return
 
     bm = ctx.blocks
@@ -735,7 +735,7 @@ def handle_blocks(agent, arg, context) -> Optional[str]:
     # /blocks — list recent blocks
     recent = bm.get_recent(15)
     if not recent:
-        console.print("  [dim]No output blocks yet.[/dim]")
+        show_info("No output blocks yet.")
         return
 
     console.print(f"\n  [bold]Recent blocks[/bold] ({bm.count} total)\n")
@@ -748,4 +748,4 @@ def handle_blocks(agent, arg, context) -> Optional[str]:
         console.print(
             f"  [dim]#{b.id:>3}[/dim] [{icon}] [bold]{b.block_type:<12}[/bold] {escaped_title}"
         )
-    console.print("\n  [dim]/blocks <N> to expand a block[/dim]")
+    show_info("/blocks <N> to expand a block")

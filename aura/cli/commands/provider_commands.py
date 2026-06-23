@@ -12,7 +12,7 @@ import logging
 from typing import Any, Optional
 
 from ..context import get_ctx
-from ..display import console, show_error, show_info
+from ..display import console, show_error, show_info, show_success
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -170,12 +170,12 @@ def _switch_provider(agent: Any, name: str) -> None:
     # Special cases: Ollama variants and ChatGPT
     if name_lower in ("ollama", "ollama-local", "local"):
         _set_model_on_agent(agent, "auto")
-        console.print("[green]Switched to local Ollama (auto-routing).[/green]")
+        show_success("Switched to local Ollama (auto-routing).")
         return
     if name_lower in ("ollama-cloud", "cloud"):
         from aura.config import Config
         _set_model_on_agent(agent, Config.MODEL_FAST)
-        console.print(f"[green]Switched to Ollama Cloud.[/green] [dim](model: {Config.MODEL_FAST})[/dim]")
+        show_success(f"Switched to Ollama Cloud. (model: {Config.MODEL_FAST})")
         return
     if name_lower in ("chatgpt", "openai-oauth"):
         try:
@@ -186,7 +186,7 @@ def _switch_provider(agent: Any, name: str) -> None:
             from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
             first_model = sorted(ALL_CHATGPT_MODELS)[0]
             _set_model_on_agent(agent, first_model)
-            console.print(f"[green]Switched to ChatGPT OAuth.[/green] [dim](model: {first_model})[/dim]")
+            show_success(f"Switched to ChatGPT OAuth. (model: {first_model})")
             return
         except ImportError:
             show_error("ChatGPT OAuth not available.")
@@ -201,10 +201,10 @@ def _switch_provider(agent: Any, name: str) -> None:
 
     provider = get_provider(name_lower)
     if provider is None:
-        console.print(f"[red]Unknown provider: {name}[/red]")
-        console.print("[dim]Available: ollama, ollama-cloud, chatgpt, anthropic, openai, gemini, "
+        show_error(f"Unknown provider: {name}")
+        show_info("Available: ollama, ollama-cloud, chatgpt, anthropic, openai, gemini, "
                        "grok, perplexity, deepseek, minimax, qwen, kimi, glm, mistral, cohere, "
-                       "groq, together, fireworks, openrouter, crof[/dim]")
+                       "groq, together, fireworks, openrouter, crof")
         return
 
     if not provider.is_configured():
@@ -215,13 +215,16 @@ def _switch_provider(agent: Any, name: str) -> None:
             env_var = cfg.get("env_var", "")
         except Exception:
             pass
-        console.print(f"[red]{provider.display_name} not configured.[/red]")
+        show_error(f"{provider.display_name} not configured.")
         if env_var:
-            console.print(f"[dim]Set {env_var} in your .env file.[/dim]")
+            show_info(f"Set {env_var} in your .env file.")
         return
 
     models = provider.list_models()
     if not models:
+        # yellow status — kept as raw [yellow] (not converted to show_warning
+        # because this is a status line, not a warning; adding a ⚠ would
+        # imply the user did something wrong when it's just an empty list).
         console.print(f"[yellow]{provider.display_name} has no models configured.[/yellow]")
         return
 
