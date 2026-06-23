@@ -24,7 +24,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -184,12 +184,76 @@ class CredentialPool:
                 })
             return out
 
+    def key_summaries(self, provider: str) -> List[Dict[str, object]]:
+        """Per-key view for the /auth list display.
+
+        Returns one entry per registered key with:
+          - ``key``: the full key value (caller must mask before display)
+          - ``available``: True iff not currently cooling
+          - ``cooldown_remaining``: seconds until the key becomes available
+          - ``failure_count``: cumulative failure count for this key
+
+        Returns [] if the provider is not registered.
+        """
+        pkey = provider.lower()
+        with self._lock:
+            pool = self._pools.get(pkey)
+            if pool is None:
+                return []
+            now = time.time()
+            return [
+                {
+                    "key": e.key,
+                    "available": e.is_available,
+                    "cooldown_remaining": max(0.0, e.cooldown_until - now),
+                    "failure_count": e.failure_count,
+                }
+                for e in pool.keys
+            ]
+
     def pool_size(self, provider: str) -> int:
         """Number of keys registered for a provider."""
         pkey = provider.lower()
         with self._lock:
             pool = self._pools.get(pkey)
             return len(pool.keys) if pool else 0
+
+    def registered_providers(self) -> List[str]:
+        """Return the list of registered provider names (alphabetical)."""
+        with self._lock:
+            return sorted(self._pools.keys())
+
+    def list_keys(self, provider: str) -> List[Tuple[str, str]]:
+        """List (env_var, key) pairs for a provider.
+
+        Returns the env var name (so the caller can edit the .env file) and
+        the full key value (caller is responsible for safe handling — e.g.
+        masking before display, treating as sensitive when logging).
+
+        Returns [] if the provider is not registered.
+        """
+        pkey = provider.lower()
+        with self._lock:
+            pool = self._pools.get(pkey)
+            if pool is None:
+                return []
+            return [(pool.env_var, e.key) for e in pool.keys]
+
+    def reset_provider(self, provider: str) -> int:
+        """Clear exhaustion and failure state for every key of a provider.
+
+        Returns the number of keys reset. Returns 0 if the provider is
+        not registered (so callers can report a clear error).
+        """
+        pkey = provider.lower()
+        with self._lock:
+            pool = self._pools.get(pkey)
+            if pool is None:
+                return 0
+            for entry in pool.keys:
+                entry.cooldown_until = 0.0
+                entry.failure_count = 0
+            return len(pool.keys)
 
 
 _GLOBAL_POOL = CredentialPool()

@@ -55,7 +55,7 @@ def _auth_list(provider_filter: str) -> None:
         return
 
     # Get all provider names from the pool
-    all_providers = sorted(pool._pools.keys())
+    all_providers = pool.registered_providers()
 
     if not all_providers:
         console.print("[dim]No credentials registered. Use /auth add to add API keys.[/dim]")
@@ -68,36 +68,33 @@ def _auth_list(provider_filter: str) -> None:
     table.add_column("Key Preview", min_width=20)
     table.add_column("Cooldown", width=12)
 
-    import time
-
     for provider_name in all_providers:
         if provider_filter and provider_filter.lower() not in provider_name.lower():
             continue
 
-        ppool = pool._pools.get(provider_name)
-        if not ppool or not ppool.keys:
+        key_summaries = pool.key_summaries(provider_name)
+        if not key_summaries:
             table.add_row(provider_name, "0", "[dim]no keys[/dim]", "", "")
             continue
 
-        for i, key_entry in enumerate(ppool.keys):
+        for i, summary in enumerate(key_summaries):
             # Determine status
-            now = time.time()
-            if key_entry.is_available:
+            if summary["available"]:
                 status = "[green]available[/green]"
                 cooldown = ""
             else:
-                remaining = key_entry.cooldown_until - now
+                remaining = summary["cooldown_remaining"]
                 if remaining > 60:
                     cooldown = f"{int(remaining / 60)}m"
                 else:
                     cooldown = f"{int(remaining)}s"
-                if key_entry.failure_count > 5:
+                if summary["failure_count"] > 5:
                     status = "[red]exhausted[/red]"
                 else:
                     status = "[yellow]cooling[/yellow]"
 
             # Mask key — show first 4 + last 4
-            key = key_entry.key
+            key = summary["key"]
             if len(key) > 12:
                 preview = f"{key[:4]}...{key[-4:]}"
             else:
@@ -206,14 +203,12 @@ def _auth_remove(args: str) -> None:
     try:
         from aura.providers.credential_pool import get_pool
         pool = get_pool()
-        ppool = pool._pools.get(provider)
-        if not ppool or idx < 0 or idx >= len(ppool.keys):
+        keys = pool.list_keys(provider)
+        if not keys or idx < 0 or idx >= len(keys):
             console.print(f"[red]Invalid index for {provider}. Use /auth list {provider} to see indices.[/red]")
             return
 
-        # Remove from env file
-        env_var = ppool.env_var
-        key_to_remove = ppool.keys[idx].key
+        env_var, key_to_remove = keys[idx]
 
         from aura.config_loader import get_env_path
         env_path = get_env_path()
@@ -233,7 +228,7 @@ def _auth_remove(args: str) -> None:
             env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         # Reload pool
-        ppool.load_from_env()
+        pool.register(provider, env_var)
 
         console.print(f"[green]Removed key #{idx + 1} from {provider}.[/green]")
 
@@ -248,20 +243,11 @@ def _auth_reset(provider: str) -> None:
     try:
         from aura.providers.credential_pool import get_pool
         pool = get_pool()
-        ppool = pool._pools.get(provider)
-        if not ppool:
+        count = pool.reset_provider(provider)
+        if not count:
             console.print(f"[red]Provider '{provider}' not found in pool.[/red]")
             return
-
-        import time
-        count = 0
-        for key_entry in ppool.keys:
-            key_entry.cooldown_until = 0.0
-            key_entry.failure_count = 0
-            count += 1
-
         console.print(f"[green]Reset {count} key(s) for {provider}. All keys now available.[/green]")
-
     except ImportError:
         console.print("[red]Credential pool not available.[/red]")
     except Exception as e:

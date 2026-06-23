@@ -116,3 +116,23 @@ def test_cheapest_in_chain_uses_default_cost_for_unknown_models():
     chain = ["unknown-model", "known-cheap"]
     d = _make_mixin(chain=chain, costs=costs)
     assert d._cheapest_in_chain("unknown-model") == "known-cheap"
+
+
+def test_get_model_override_returns_current_override():
+    """get_model_override is the public read counterpart of set_model_override.
+
+    The CLI uses it in the quiet banner and the legacy brain-mirror re-sync
+    path; it must return whatever set_model_override last set (or None).
+    """
+    from aura.core.model_router_mixin import ModelRouterMixin
+
+    # _model_override is initialized lazily by the host class (the brain
+    # initializes it in __init__). For a bare mixin we set it manually so
+    # the public getter has something to read.
+    mixin = ModelRouterMixin()
+    mixin._model_override = None
+    assert mixin.get_model_override() is None
+    mixin.set_model_override("gpt-4")
+    assert mixin.get_model_override() == "gpt-4"
+    mixin.set_model_override(None)
+    assert mixin.get_model_override() is None

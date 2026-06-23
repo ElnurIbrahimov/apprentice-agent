@@ -11,8 +11,6 @@ logger = logging.getLogger(__name__)
 
 from . import ERROR_SENTINELS as _ERROR_SENTINELS
 
-logger = logging.getLogger(__name__)
-
 _IMAGE_TOKEN_RE = re.compile(r"\[image:\s*([^\]\n]+?)\s*\]")
 
 # Tool names that mutate files — snapshot before execution so /rewind works.

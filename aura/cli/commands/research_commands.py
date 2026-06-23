@@ -84,9 +84,10 @@ def handle_recall(agent, arg, context) -> Optional[str]:
         return None
     console.print(f"\n[bold]Recalled {len(memories)} memories for '{arg}':[/bold]")
     for i, m in enumerate(memories, 1):
-        score = m.get("score", 0.0) if isinstance(m, dict) else getattr(m, "score", 0.0)
-        content = m.get("content", "") if isinstance(m, dict) else getattr(m, "content", str(m))
-        meta = m.get("metadata", {}) if isinstance(m, dict) else {}
+        # recall_memories() returns a list of dicts ({"content", "score", "metadata"}).
+        score = m.get("score", 0.0)
+        content = m.get("content", "")
+        meta = m.get("metadata", {}) or {}
         source = meta.get("source", "memory") if isinstance(meta, dict) else "memory"
         snippet = str(content)[:140]
         console.print(f"  [cyan]{i:>2}.[/cyan] [dim][{source}, {score:.3f}][/dim] {snippet}")

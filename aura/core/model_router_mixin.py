@@ -256,6 +256,15 @@ class ModelRouterMixin:
         else:
             logger.info("[BRAIN] Model override cleared, returning to auto-selection")
 
+    def get_model_override(self) -> Optional[str]:
+        """Return the current manual model override, or None if auto-selecting.
+
+        Public read-only counterpart of ``set_model_override``. Callers that
+        only need to *display* the active override (e.g. status bar, banner)
+        should use this rather than reaching into ``_model_override`` directly.
+        """
+        return self._model_override
+
     def set_action_mode(self, mode: Optional[str]) -> None:
         """Set the current action mode for context-aware prompt injection.
 

@@ -78,7 +78,7 @@ class ChatSession:
         if _quiet:
             try:
                 from aura import __version__ as _v
-                _m = agent.brain._model_override or "auto"
+                _m = agent.brain.get_model_override() or "auto"
                 self.console.print(
                     f"  [dim]aura v{_v} · {_m} · {os.getcwd()}[/dim]"
                 )
@@ -546,7 +546,7 @@ class ChatSession:
         # current_model is kept authoritative by apply_model_override; only
         # re-sync from brain if something bypassed the helper (legacy guard).
         if not self.current_model or self.current_model == "auto":
-            brain_override = getattr(self.agent.brain, "_model_override", None)
+            brain_override = self.agent.brain.get_model_override()
             if brain_override:
                 self.current_model = brain_override
         self.token_used = estimate_messages_tokens(self.agentic._conversation_history)

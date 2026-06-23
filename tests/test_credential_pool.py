@@ -94,6 +94,31 @@ def test_explicit_reset_seconds_overrides_default(monkeypatch, pool):
     assert 4.0 <= status[0]["cooldown_remaining"] <= 5.5
 
 
+def test_reset_provider_clears_all_keys(monkeypatch, pool):
+    monkeypatch.setenv("TEST_PROV_KEY", "k1,k2")
+    pool.register("testprov", "TEST_PROV_KEY")
+    pool.mark_exhausted("testprov", "k1", reason="rate_limit", reset_seconds=5.0)
+    pool.mark_exhausted("testprov", "k2", reason="billing", reset_seconds=100.0)
+
+    # Both keys should be unavailable before reset.
+    assert pool.status("testprov")[0]["available"] is False
+    assert pool.status("testprov")[1]["available"] is False
+
+    # reset_provider returns the count of keys reset.
+    assert pool.reset_provider("testprov") == 2
+
+    # All keys should now be available, with failure_count cleared.
+    after = pool.status("testprov")
+    assert all(k["available"] for k in after)
+    assert all(k["cooldown_remaining"] == 0.0 for k in after)
+
+
+def test_reset_provider_unknown_provider_returns_zero(monkeypatch, pool):
+    """Calling reset_provider on a provider that doesn't exist returns 0
+    (and doesn't raise) so the CLI can report a clean error."""
+    assert pool.reset_provider("does_not_exist") == 0
+
+
 def test_hot_rotation_picks_up_new_keys(monkeypatch, pool):
     monkeypatch.setenv("TEST_PROV_KEY", "k1")
     pool.register("testprov", "TEST_PROV_KEY")

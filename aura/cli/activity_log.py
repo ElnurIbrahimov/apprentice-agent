@@ -108,40 +108,31 @@ class ActivityLog:
             first = prompt.lstrip().split(None, 1)[0]
             command = first.lstrip("/")[:40] or None
 
-        conn = sqlite3.connect(str(self._db_path), timeout=10)
         try:
-            cursor = conn.execute(
-                """INSERT INTO interactions
-                   (timestamp, session_id, prompt, response, model, tokens_in, tokens_out, cost, tool_calls, command)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (time.time(), session_id, prompt[:10000], response[:50000], model,
-                 tokens_in, tokens_out, cost, tool_calls, command),
-            )
-            row_id = cursor.lastrowid
-            conn.commit()
-        except Exception as e:
+            with sqlite3.connect(str(self._db_path), timeout=10) as conn:
+                cursor = conn.execute(
+                    """INSERT INTO interactions
+                       (timestamp, session_id, prompt, response, model, tokens_in, tokens_out, cost, tool_calls, command)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (time.time(), session_id, prompt[:10000], response[:50000], model,
+                     tokens_in, tokens_out, cost, tool_calls, command),
+                )
+                row_id = cursor.lastrowid
+                conn.commit()
+        except sqlite3.Error as e:
             logger.warning("[ActivityLog] Failed to log interaction: %s", e)
-            conn.rollback()
-            conn.close()
             return -1
-        finally:
-            # conn is closed inside the exception path too; success path closes here.
-            if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    logger.debug("activity_log_conn_close_failed", exc_info=True)
 
         # Defer the embedding compute to bg_pool so chat turns don't block
         # waiting for Ollama. A separate connection is opened in the worker
         # because sqlite3 connections aren't safe to share across threads.
-        if row_id is not None and row_id > 0:
+        if row_id and row_id > 0:
             try:
                 from aura.pools import bg_submit
                 bg_submit(self._compute_and_store_embedding, row_id, prompt, response)
             except Exception:
                 logger.debug("embedding_bg_submit_failed", exc_info=True)
-        return row_id if row_id is not None else -1
+        return row_id if row_id else -1
 
     def _compute_and_store_embedding(self, row_id: int, prompt: str, response: str) -> None:
         """Background worker: compute an embedding and write it to the row.
