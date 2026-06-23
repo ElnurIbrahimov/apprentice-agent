@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Optional
 
-from ..display import console
+from ..display import console, show_error
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -185,7 +185,7 @@ def _install_skill(url: str) -> None:
             import re as _re
             skill_name = _re.sub(r"[^A-Za-z0-9_.-]", "_", raw_name).strip("._")[:60]
             if not skill_name or skill_name in (".", ".."):
-                console.print("[red]Could not derive safe skill name from URL.[/red]")
+                show_error("Could not derive safe skill name from URL.")
                 return
 
             # Verify the resolved path stays within target_dir
@@ -193,7 +193,7 @@ def _install_skill(url: str) -> None:
             try:
                 skill_dir.relative_to(target_dir.resolve())
             except ValueError:
-                console.print("[red]Refusing to install: path escapes skills directory.[/red]")
+                show_error("Refusing to install: path escapes skills directory.")
                 return
 
             skill_dir.mkdir(parents=True, exist_ok=True)
@@ -214,7 +214,7 @@ def _install_skill(url: str) -> None:
         try:
             dest.relative_to(target_dir.resolve())
         except ValueError:
-            console.print("[red]Refusing to install: path escapes skills directory.[/red]")
+            show_error("Refusing to install: path escapes skills directory.")
             return
         if dest.exists():
             console.print(f"[red]Skill '{skill_name}' already installed.[/red]")
@@ -239,7 +239,7 @@ def _uninstall_skill(name: str) -> None:
     try:
         skill_dir.relative_to(target_dir)
     except ValueError:
-        console.print("[red]Refusing to uninstall: path escapes skills directory.[/red]")
+        show_error("Refusing to uninstall: path escapes skills directory.")
         return
 
     if not skill_dir.exists():

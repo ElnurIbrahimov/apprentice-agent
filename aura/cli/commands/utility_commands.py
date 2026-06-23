@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ..display import console
+from ..display import console, show_error
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ def _switch_personality(name: str) -> None:
         console.print(f"[green]Switched to personality '{name}'.[/green]")
         console.print("[dim]Restart or /reset for changes to take effect.[/dim]")
     else:
-        console.print("[red]Failed to set personality. Check config.yaml.[/red]")
+        show_error("Failed to set personality. Check config.yaml.")
 
 
 @command("/completion", "Generate shell completion script", tier=TIER_STABLE)

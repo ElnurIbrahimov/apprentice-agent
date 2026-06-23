@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ..display import console
+from ..display import console, show_error
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ def _auth_list(provider_filter: str) -> None:
         from aura.providers.credential_pool import get_pool
         pool = get_pool()
     except ImportError:
-        console.print("[red]Credential pool not available.[/red]")
+        show_error("Credential pool not available.")
         return
 
     # Get all provider names from the pool
@@ -197,7 +197,7 @@ def _auth_remove(args: str) -> None:
     try:
         idx = int(parts[1]) - 1  # 1-indexed display
     except ValueError:
-        console.print("[red]Index must be a number.[/red]")
+        show_error("Index must be a number.")
         return
 
     try:
@@ -233,7 +233,7 @@ def _auth_remove(args: str) -> None:
         console.print(f"[green]Removed key #{idx + 1} from {provider}.[/green]")
 
     except ImportError:
-        console.print("[red]Credential pool not available.[/red]")
+        show_error("Credential pool not available.")
     except Exception as e:
         console.print(f"[red]Failed to remove key: {e}[/red]")
 
@@ -249,6 +249,6 @@ def _auth_reset(provider: str) -> None:
             return
         console.print(f"[green]Reset {count} key(s) for {provider}. All keys now available.[/green]")
     except ImportError:
-        console.print("[red]Credential pool not available.[/red]")
+        show_error("Credential pool not available.")
     except Exception as e:
         console.print(f"[red]Failed to reset: {e}[/red]")

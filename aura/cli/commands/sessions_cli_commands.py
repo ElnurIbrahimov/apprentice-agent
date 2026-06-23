@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from ..display import console
+from ..display import console, show_error
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -253,7 +253,7 @@ def _prune_sessions(days_str: str) -> None:
     try:
         days = int(days_str)
     except ValueError:
-        console.print("[red]Days must be a number.[/red]")
+        show_error("Days must be a number.")
         return
 
     sessions_dir = _get_sessions_dir().resolve()

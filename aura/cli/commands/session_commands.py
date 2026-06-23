@@ -691,6 +691,7 @@ def handle_merge(agent, arg, context) -> Optional[str]:
     )
 
 
+@command("/blocks",   "List recent output blocks (/blocks N to expand)",    tier=TIER_BETA)
 def handle_blocks(agent, arg, context) -> Optional[str]:
     """List recent output blocks. /blocks N expands block N."""
     from ..context import get_ctx as _get_ctx

@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from ..display import console
+from ..display import console, show_error
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ def _disable_toolset(name: str) -> None:
 
     # Don't allow disabling core
     if name == "core":
-        console.print("[red]Cannot disable 'core' toolset — it contains essential tools.[/red]")
+        show_error("Cannot disable 'core' toolset — it contains essential tools.")
         return
 
     from aura.config_loader import get_config_value, set_config_value

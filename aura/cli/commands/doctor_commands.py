@@ -10,9 +10,12 @@ import subprocess
 import sys
 from typing import Any, Optional
 
+from .common import TIER_STABLE, command
+
 logger = logging.getLogger(__name__)
 
 
+@command("/doctor",   "Run full system diagnostic",                        tier=TIER_STABLE)
 def handle_doctor(agent: Any, arg: str, context: dict) -> Optional[str]:
     """Run a full system diagnostic and display results as a Rich panel."""
     from rich.console import Group

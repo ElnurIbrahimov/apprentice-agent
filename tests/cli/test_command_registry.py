@@ -27,7 +27,34 @@ EXPECTED_COMMANDS = [
     "/trace", "/rewind", "/cost", "/undo", "/diff", "/git", "/pr", "/branch",
     "/stash", "/blame", "/test", "/verify", "/why", "/watch", "/mcp",
     "/interrupt", "/stop",
+    # Commands added during the 2026-06-22 CLI polish pass.
+    # Each of these has a real handler module + @command decorator.
+    # If any of them fall out of the registry again, this list (and
+    # test_handlers_are_all_registered) will catch the regression.
+    "/bench", "/blocks", "/doctor", "/fix", "/history", "/skill",
 ]
+
+
+def test_handlers_are_all_registered():
+    """Regression: handlers that import without a @command decorator
+    silently disappear from /help, autocomplete, and the picker.
+
+    This walks every handler in HANDLER_MAP (defined later in this file)
+    and asserts each one is actually in the live COMMAND_REGISTRY. If a
+    future change removes a @command decorator, this test fails
+    immediately instead of waiting for a user to type /<cmd> and get
+    'Unknown command'.
+    """
+    # HANDLER_MAP is defined below — local import to keep the test
+    # colocated with the data it iterates.
+    for name, handler in HANDLER_MAP.items():
+        if name.startswith("_"):
+            continue  # skip private helpers
+        assert name in COMMAND_REGISTRY, (
+            f"Handler {handler.__module__}.{handler.__name__} is registered "
+            f"in HANDLER_MAP as {name!r} but is NOT in COMMAND_REGISTRY. "
+            f"Add the @command decorator to the handler."
+        )
 
 
 def test_registry_has_all_expected_commands():

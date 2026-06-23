@@ -7,9 +7,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from .common import TIER_STABLE, command
+
 logger = logging.getLogger(__name__)
 
 
+@command("/history",  "Scannable conversation timeline",                    tier=TIER_STABLE)
 def handle_history(agent: Any, arg: str, context: dict) -> Optional[str]:
     from rich.panel import Panel
     from rich.table import Table

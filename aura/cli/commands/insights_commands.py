@@ -9,7 +9,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from ..display import console
+from ..display import console, show_error
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ def _show_insights(days: int) -> None:
         from ..activity_log import ActivityLog
         log = ActivityLog()
     except Exception:
-        console.print("[red]Activity log not available.[/red]")
+        show_error("Activity log not available.")
         return
 
     cutoff = time.time() - (days * 86400)

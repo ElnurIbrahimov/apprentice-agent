@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from .common import TIER_BETA, command
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,6 +49,7 @@ BENCH_TIERS: dict[str, list[str]] = {
 }
 
 
+@command("/bench",    "Benchmark prompt across multiple models",           tier=TIER_BETA)
 def handle_bench(agent: Any, arg: str, context: dict) -> Optional[str]:
     from rich.console import Group
     from rich.panel import Panel

@@ -12,7 +12,7 @@ import logging
 from typing import Any, Optional
 
 from ..context import get_ctx
-from ..display import console
+from ..display import console, show_error, show_info
 from .common import command, TIER_STABLE
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ def handle_providers(agent: Any, arg: str, context: dict) -> Optional[str]:
     try:
         from aura.providers import list_configured_providers, list_all_provider_models
     except ImportError:
-        console.print("[red]Provider system not available.[/red]")
+        show_error("Provider system not available.")
         return None
 
     # ── Ollama (local + cloud) ──
@@ -181,7 +181,7 @@ def _switch_provider(agent: Any, name: str) -> None:
         try:
             from aura.auth.chatgpt_oauth import is_authenticated
             if not is_authenticated():
-                console.print("[red]ChatGPT not authenticated. Run: aura --login chatgpt[/red]")
+                show_error("ChatGPT not authenticated. Run: aura --login chatgpt")
                 return
             from aura.auth.chatgpt_client import ALL_CHATGPT_MODELS
             first_model = sorted(ALL_CHATGPT_MODELS)[0]
@@ -189,14 +189,14 @@ def _switch_provider(agent: Any, name: str) -> None:
             console.print(f"[green]Switched to ChatGPT OAuth.[/green] [dim](model: {first_model})[/dim]")
             return
         except ImportError:
-            console.print("[red]ChatGPT OAuth not available.[/red]")
+            show_error("ChatGPT OAuth not available.")
             return
 
     # Direct API providers
     try:
         from aura.providers import get_provider
     except ImportError:
-        console.print("[red]Provider system not available.[/red]")
+        show_error("Provider system not available.")
         return
 
     provider = get_provider(name_lower)

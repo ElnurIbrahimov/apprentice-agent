@@ -11,6 +11,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from .common import TIER_BETA, command
+
 logger = logging.getLogger(__name__)
 
 MAX_FIX_ATTEMPTS = 5
@@ -25,6 +27,7 @@ class FixResult:
     error: str = ""
 
 
+@command("/fix",      "Auto-fix failing tests (run → fix → verify loop)",     tier=TIER_BETA)
 def handle_fix(agent: Any, arg: str, context: dict) -> Optional[str]:
 
     from ..context import get_ctx

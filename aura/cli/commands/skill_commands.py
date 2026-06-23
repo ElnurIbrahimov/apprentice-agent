@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+from .common import TIER_BETA, command
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,6 +67,7 @@ def _parse_skill_metadata(path: Path) -> dict:
     return {"name": name, "description": description[:80]}
 
 
+@command("/skill",    "Browse and load skills",                             tier=TIER_BETA)
 def handle_skill(agent: Any, arg: str, context: dict) -> Optional[str]:
     from rich.panel import Panel
     from rich.table import Table
