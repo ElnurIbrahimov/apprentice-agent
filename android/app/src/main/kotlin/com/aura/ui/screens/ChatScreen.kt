@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +30,8 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -93,7 +96,7 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             Row(
                 modifier = Modifier
                     .clickable { showModelPicker = true }
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -107,6 +110,13 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                         text = humanModelName(state.activeModel),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+                IconButton(onClick = { viewModel.toggleTts() }) {
+                    Icon(
+                        imageVector = if (state.ttsEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+                        contentDescription = if (state.ttsEnabled) "TTS on, tap to mute" else "TTS off, tap to enable",
+                        tint = if (state.ttsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                     )
                 }
                 Icon(
@@ -175,6 +185,7 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             },
         )
     }
+
     if (showModelPicker) {
         ModelPickerSheet(
             currentModel = state.activeModel,
@@ -246,8 +257,8 @@ private fun MessageBubble(text: String, isUser: Boolean) {
 private fun ToolCallBubble(name: String, result: String) {
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer,
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             Text(

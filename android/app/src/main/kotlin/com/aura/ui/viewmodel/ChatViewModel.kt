@@ -1,10 +1,12 @@
 package com.aura.ui.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.agent.AgentEvent
 import com.aura.agent.MemoryAugmentedAgenticLoop
 import com.aura.providers.ProviderRegistry
+import com.aura.voice.TextToSpeech
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,27 +23,31 @@ data class ChatUiState(
     val error: String? = null,
     val activeModel: String = "ollama:deepseek-v3.2:cloud",
     val availableModels: List<String> = emptyList(),
+    val ttsEnabled: Boolean = true,
 )
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
+    application: Application,
     private val loop: MemoryAugmentedAgenticLoop,
     private val providerRegistry: ProviderRegistry,
-) : ViewModel() {
+    private val textToSpeech: TextToSpeech,
+) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private var runJob: Job? = null
+    private var currentResponseBuffer = StringBuilder()
 
     init {
         refreshModels()
-        // Load default model from settings
-        viewModelScope.launch {
-            // Default model preference is read by the SettingsViewModel; here we
-            // start with the bundled default. v1.5 wires the SettingsViewModel
-            // to push changes back into the chat state.
-        }
+        textToSpeech.initialize()
+    }
+
+    override fun onCleared() {
+        textToSpeech.shutdown()
+        super.onCleared()
     }
 
     fun refreshModels() {
@@ -51,8 +57,6 @@ class ChatViewModel @Inject constructor(
                     p.listModels()
                 }.getOrDefault(emptyList()).map { "${p.prefix}:$it" }
             }
-            // Always include the curated defaults so the picker isn't empty
-            // even when no API keys are set yet.
             val defaults = listOf(
                 "ollama:deepseek-v3.2:cloud",
                 "ollama:kimi-k2.6:cloud",
@@ -73,6 +77,15 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(activeModel = model) }
     }
 
+    fun setTtsEnabled(enabled: Boolean) {
+        _state.update { it.copy(ttsEnabled = enabled) }
+        if (!enabled) textToSpeech.stop()
+    }
+
+    fun toggleTts() {
+        setTtsEnabled(!_state.value.ttsEnabled)
+    }
+
     fun cancel() {
         runJob?.cancel()
         runJob = null
@@ -85,6 +98,7 @@ class ChatViewModel @Inject constructor(
         if (text.isEmpty() || current.streaming) return
 
         current.conversation.addUser(text)
+        currentResponseBuffer = StringBuilder()
         _state.update { it.copy(draft = "", streaming = true, error = null) }
 
         runJob = viewModelScope.launch {
@@ -92,20 +106,28 @@ class ChatViewModel @Inject constructor(
                 loop.run(current.conversation, model = current.activeModel).collect { event ->
                     when (event) {
                         is AgentEvent.TextDelta -> {
+                            currentResponseBuffer.append(event.text)
                             current.conversation.turns.lastOrNull()?.let { last ->
                                 val updated = last.copy(assistant = (last.assistant ?: "") + event.text)
                                 current.conversation.turns[current.conversation.turns.lastIndex] = updated
                             }
                             _state.update { it.copy(conversation = current.conversation) }
                         }
-                        is AgentEvent.ToolExecuting -> {
-                            _state.update { it.copy(conversation = current.conversation) }
-                        }
-                        is AgentEvent.ToolResult -> {
+                        is AgentEvent.ToolExecuting, is AgentEvent.ToolResult -> {
                             _state.update { it.copy(conversation = current.conversation) }
                         }
                         is AgentEvent.Error -> {
                             _state.update { it.copy(error = "${event.code}: ${event.message}") }
+                        }
+                        is AgentEvent.Done -> {
+                            // Auto-TTS: speak the final assistant turn if enabled
+                            if (_state.value.ttsEnabled && currentResponseBuffer.isNotBlank()) {
+                                textToSpeech.speak(
+                                    text = currentResponseBuffer.toString(),
+                                    utteranceId = "turn-${System.currentTimeMillis()}",
+                                    flush = true,
+                                )
+                            }
                         }
                         else -> Unit
                     }
@@ -116,6 +138,7 @@ class ChatViewModel @Inject constructor(
                 _state.update { it.copy(error = e.message ?: "unknown error") }
             } finally {
                 _state.update { it.copy(streaming = false) }
+                currentResponseBuffer = StringBuilder()
             }
         }
     }
