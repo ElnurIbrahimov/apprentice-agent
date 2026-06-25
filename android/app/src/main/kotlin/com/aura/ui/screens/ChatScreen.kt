@@ -1,6 +1,7 @@
 package com.aura.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
@@ -32,17 +34,22 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.viewmodel.ChatViewModel
 
 @Composable
 fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
+    var showModelPicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.conversation.turns.size) {
         if (state.conversation.turns.isNotEmpty()) {
@@ -56,18 +63,19 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             .imePadding()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        // Header
+        // Header — now with a real model picker
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 1.dp,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                modifier = Modifier
+                    .clickable { showModelPicker = true }
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Aura",
                         style = MaterialTheme.typography.titleLarge,
@@ -75,11 +83,16 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = state.activeModel.substringAfter(':').substringBefore(':'),
+                        text = humanModelName(state.activeModel),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )
                 }
+                Icon(
+                    imageVector = Icons.Filled.ArrowDropDown,
+                    contentDescription = "Change model",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
             }
         }
 
@@ -99,11 +112,14 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                 turn.assistant?.let { assistantMsg ->
                     MessageBubble(text = assistantMsg, isUser = false)
                 }
-                turn.toolTurns.forEach { toolTurn ->
+                for (toolTurn in turn.toolTurns) {
                     if (toolTurn.result.isNotEmpty()) {
                         ToolCallBubble(name = toolTurn.name, result = toolTurn.result)
                     }
                 }
+            }
+            if (state.streaming && state.conversation.turns.lastOrNull()?.assistant.isNullOrBlank()) {
+                item { TypingIndicator() }
             }
         }
 
@@ -123,7 +139,6 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             }
         }
 
-        // Input bar
         ChatInputBar(
             draft = state.draft,
             streaming = state.streaming,
@@ -131,6 +146,27 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             onSend = viewModel::send,
             onCancel = viewModel::cancel,
         )
+    }
+
+    if (showModelPicker) {
+        ModelPickerSheet(
+            currentModel = state.activeModel,
+            models = state.availableModels,
+            onPick = viewModel::setModel,
+            onDismiss = { showModelPicker = false },
+        )
+    }
+}
+
+private fun humanModelName(id: String): String {
+    val parts = id.split(":", limit = 2)
+    val provider = parts.getOrNull(0) ?: "?"
+    val model = parts.getOrNull(1) ?: id
+    return when (id) {
+        "ollama:deepseek-v3.2:cloud" -> "DeepSeek V3.2 · $provider"
+        "ollama:kimi-k2.6:cloud" -> "Kimi K2.6 · $provider"
+        "anthropic:claude-sonnet-4-5" -> "Claude Sonnet 4.5 · $provider"
+        else -> "$model · $provider"
     }
 }
 
@@ -182,6 +218,26 @@ private fun ToolCallBubble(name: String, result: String) {
                 text = result.take(280) + if (result.length > 280) "…" else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TypingIndicator() {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            Text(
+                text = "● ● ●",
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                style = MaterialTheme.typography.bodyLarge,
             )
         }
     }

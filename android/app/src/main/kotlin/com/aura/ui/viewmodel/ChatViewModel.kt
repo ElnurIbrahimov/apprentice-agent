@@ -3,9 +3,7 @@ package com.aura.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.agent.AgentEvent
-import com.aura.agent.AgenticLoop
-import com.aura.agent.Brain
-import com.aura.agent.Conversation
+import com.aura.agent.MemoryAugmentedAgenticLoop
 import com.aura.providers.ProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -17,7 +15,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class ChatUiState(
-    val conversation: Conversation = Conversation(),
+    val conversation: com.aura.agent.Conversation = com.aura.agent.Conversation(),
     val streaming: Boolean = false,
     val draft: String = "",
     val error: String? = null,
@@ -27,8 +25,7 @@ data class ChatUiState(
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    private val brain: Brain,
-    private val loop: AgenticLoop,
+    private val loop: MemoryAugmentedAgenticLoop,
     private val providerRegistry: ProviderRegistry,
 ) : ViewModel() {
 
@@ -39,6 +36,12 @@ class ChatViewModel @Inject constructor(
 
     init {
         refreshModels()
+        // Load default model from settings
+        viewModelScope.launch {
+            // Default model preference is read by the SettingsViewModel; here we
+            // start with the bundled default. v1.5 wires the SettingsViewModel
+            // to push changes back into the chat state.
+        }
     }
 
     fun refreshModels() {
@@ -48,7 +51,17 @@ class ChatViewModel @Inject constructor(
                     p.listModels()
                 }.getOrDefault(emptyList()).map { "${p.prefix}:$it" }
             }
-            _state.update { it.copy(availableModels = all) }
+            // Always include the curated defaults so the picker isn't empty
+            // even when no API keys are set yet.
+            val defaults = listOf(
+                "ollama:deepseek-v3.2:cloud",
+                "ollama:kimi-k2.6:cloud",
+                "anthropic:claude-sonnet-4-5",
+                "ollama:minimax-m2.7:cloud",
+                "ollama:qwen3-coder:480b-cloud",
+            )
+            val merged = (defaults + all).distinct()
+            _state.update { it.copy(availableModels = merged) }
         }
     }
 
