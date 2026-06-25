@@ -1,9 +1,13 @@
 package com.aura.ui.screens
 
+import android.Manifest
+import android.app.Activity
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,6 +26,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
@@ -39,17 +44,33 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.viewmodel.ChatViewModel
+import com.aura.ui.voice.VoiceOverlay
 
 @Composable
 fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
     var showModelPicker by remember { mutableStateOf(false) }
+    var showVoiceOverlay by remember { mutableStateOf(false) }
+    var hasMicPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasMicPermission = granted
+        if (granted) showVoiceOverlay = true
+    }
 
     LaunchedEffect(state.conversation.turns.size) {
         if (state.conversation.turns.isNotEmpty()) {
@@ -63,7 +84,7 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             .imePadding()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        // Header — now with a real model picker
+        // Header
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 1.dp,
@@ -145,9 +166,15 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             onDraftChange = viewModel::setDraft,
             onSend = viewModel::send,
             onCancel = viewModel::cancel,
+            onMicClick = {
+                if (hasMicPermission) {
+                    showVoiceOverlay = true
+                } else {
+                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            },
         )
     }
-
     if (showModelPicker) {
         ModelPickerSheet(
             currentModel = state.activeModel,
@@ -155,6 +182,22 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             onPick = viewModel::setModel,
             onDismiss = { showModelPicker = false },
         )
+    }
+
+    if (showVoiceOverlay) {
+        if (hasMicPermission) {
+            VoiceOverlay(
+                onTranscript = { transcript ->
+                    viewModel.setDraft(transcript)
+                    viewModel.send()
+                },
+                onDismiss = { showVoiceOverlay = false },
+            )
+        } else {
+            LaunchedEffect(Unit) {
+                showVoiceOverlay = false
+            }
+        }
     }
 }
 
@@ -203,8 +246,8 @@ private fun MessageBubble(text: String, isUser: Boolean) {
 private fun ToolCallBubble(name: String, result: String) {
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer,
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
             Text(
@@ -250,6 +293,7 @@ private fun ChatInputBar(
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onCancel: () -> Unit,
+    onMicClick: () -> Unit,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -270,7 +314,15 @@ private fun ChatInputBar(
                 maxLines = 4,
                 shape = RoundedCornerShape(24.dp),
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            IconButton(onClick = onMicClick) {
+                Icon(
+                    imageVector = Icons.Filled.Mic,
+                    contentDescription = "Voice input",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Spacer(modifier = Modifier.width(4.dp))
             if (streaming) {
                 IconButton(
                     onClick = onCancel,
