@@ -7,11 +7,6 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
-/**
- * Hilt module that wires every Tool into the singleton ToolRegistry.
- * Mirrors aura/toolsets.py — tools are grouped semantically but here
- * we register them all flat. Future: per-platform enable/disable.
- */
 @Module
 @InstallIn(SingletonComponent::class)
 object ToolsModule {
@@ -40,6 +35,8 @@ object ToolsModule {
         dndMode: DndModeTool,
         taskManager: TaskManagerTool,
         notificationList: NotificationListTool,
+        imageInput: ImageInputTool,
+        filePicker: FilePickerTool,
     ): ToolRegistry {
         val registry = ToolRegistry()
         registry.register(webSearch.tool)
@@ -63,6 +60,8 @@ object ToolsModule {
         registry.register(dndMode.tool)
         registry.register(taskManager.tool)
         registry.register(notificationList.tool)
+        registry.register(imageInput.tool)
+        registry.register(filePicker.tool)
         return registry
     }
 }

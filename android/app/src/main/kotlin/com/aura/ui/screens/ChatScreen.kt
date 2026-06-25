@@ -52,9 +52,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.aura.IncomingShareStore
 import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.viewmodel.ChatViewModel
 import com.aura.ui.voice.VoiceOverlay
+import dagger.hilt.android.EntryPointAccessors
 
 @Composable
 fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
@@ -73,6 +75,17 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
     ) { granted ->
         hasMicPermission = granted
         if (granted) showVoiceOverlay = true
+    }
+
+    // On first composition, consume any pending shared text from the share sheet
+    // and pre-fill the chat draft. IncomingShareStore is a Hilt singleton.
+    LaunchedEffect(Unit) {
+        val store = EntryPointAccessors.fromApplication<HiltEntryPoint>(context.applicationContext as android.app.Application)
+            .incomingShareStore()
+        val pending = store.consume()
+        if (!pending.isNullOrBlank()) {
+            viewModel.setDraft(pending)
+        }
     }
 
     LaunchedEffect(state.conversation.turns.size) {
