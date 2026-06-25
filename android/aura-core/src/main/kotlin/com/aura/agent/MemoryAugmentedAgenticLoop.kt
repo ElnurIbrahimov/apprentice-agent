@@ -146,3 +146,13 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         emit(AgentEvent.Done)
     }
 }
+
+sealed class AgentEvent {
+    data class TextDelta(val text: String) : AgentEvent()
+    data class ToolCallStart(val id: String, val name: String) : AgentEvent()
+    data class ToolCallEnd(val id: String, val name: String, val arguments: String) : AgentEvent()
+    data class ToolExecuting(val id: String, val name: String) : AgentEvent()
+    data class ToolResult(val id: String, val name: String, val result: String) : AgentEvent()
+    data class Error(val code: String, val message: String, val retryable: Boolean) : AgentEvent()
+    data object Done : AgentEvent()
+}

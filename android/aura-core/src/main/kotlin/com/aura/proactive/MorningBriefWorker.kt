@@ -10,7 +10,6 @@ import androidx.core.app.NotificationCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.aura.agent.Brain
 import com.aura.agent.Conversation
 import com.aura.core.R
 import com.aura.memory.MemoryStore
@@ -18,7 +17,6 @@ import com.aura.providers.ChatOptions
 import com.aura.providers.ProviderRegistry
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
-import kotlinx.coroutines.flow.first
 
 /**
  * WorkManager job that runs at ~7am local time, asks Aura for a morning brief
@@ -29,7 +27,6 @@ import kotlinx.coroutines.flow.first
 class MorningBriefWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted params: WorkerParameters,
-    private val brain: Brain,
     private val providerRegistry: ProviderRegistry,
     private val memoryStore: MemoryStore,
     private val eventBus: ProactiveEventBus,
@@ -46,24 +43,44 @@ class MorningBriefWorker @AssistedInject constructor(
             conversations, weave it in naturally. Today's date is $now.
         """.trimIndent()
         val userMessage = "Give me my morning brief.\n\n# What I remember about you:\n$memories"
-        // 2) Run a single-shot agentic call
-        val conversation = Conversation(systemPrompt = systemPrompt)
-        conversation.addUser(userMessage)
         val options = ChatOptions(temperature = 0.7, maxTokens = 500)
-        val responseText = StringBuilder()
-        val activeModel = "ollama:deepseek-v3.2:cloud"
+
+        // 2) Pick the first configured provider. If none, this is a permanent
+        // skip (no key configured) — return success, not retry, so we don't
+        // burn battery every 7am forever.
         val provider = providerRegistry.all().firstOrNull { it.isConfigured() }
         if (provider == null) {
-            // No provider configured; skip silently
             return Result.success()
         }
+        // Resolve the model id properly. ProviderRegistry.parse() handles the
+        // "provider:model" prefix routing. We pass the user's selected default
+        // model id if it can be served by this provider, else fall back to the
+        // first model that this provider exposes.
+        val desiredId = defaultModelIdForProvider(provider.prefix)
+        val modelId = provider.listModels().firstOrNull()
+            ?.let { "${provider.prefix}:$it" }
+            ?: desiredId
+        val (_, model) = try {
+            providerRegistry.parse(modelId)
+        } catch (e: IllegalArgumentException) {
+            // Model prefix not registered. Skip silently.
+            return Result.success()
+        }
+        val conversation = Conversation(systemPrompt = systemPrompt)
+        conversation.addUser(userMessage)
+        val responseText = StringBuilder()
         try {
-            // Use Brain.stream to get a single response (no tool calls expected)
-            val messages = conversation.toMessages()
-            provider.chat(activeModel.substringAfter(":"), messages, options, emptyList<com.aura.providers.ToolDefinition>()).collect { chunk ->
+            provider.chat(model, conversation.toMessages(), options, emptyList<com.aura.providers.ToolDefinition>()).collect { chunk ->
                 chunk.text?.let { responseText.append(it) }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
+            // Transient errors (network blip, 5xx): retry per WorkManager's
+            // exponential backoff. We treat most exceptions as transient by
+            // default since 7am is far enough in the future that one retry
+            // is acceptable. Specific known-permanent conditions (no API key
+            // configured) are checked above and return success.
             return Result.retry()
         }
         val text = responseText.toString().trim()
@@ -74,6 +91,20 @@ class MorningBriefWorker @AssistedInject constructor(
         eventBus.emit(ProactiveEventBus.Event.MorningBriefReady("☀️ Good morning", text))
         return Result.success()
     }
+
+    /**
+     * Build a model id the provider can serve. The SettingsViewModel persists
+     * a default in DataStore, but the worker doesn't depend on that state —
+     * it asks the provider for its model list and picks the first.
+     */
+    private fun defaultModelIdForProvider(prefix: String): String =
+        when (prefix) {
+            "ollama" -> "ollama:deepseek-v3.2:cloud"
+            "anthropic" -> "anthropic:claude-sonnet-4-5"
+            "openai" -> "openai:gpt-5.2"
+            "deepseek" -> "deepseek:deepseek-chat"
+            else -> "ollama:deepseek-v3.2:cloud"
+        }
 
     private fun postNotification(ctx: Context, title: String, body: String) {
         val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

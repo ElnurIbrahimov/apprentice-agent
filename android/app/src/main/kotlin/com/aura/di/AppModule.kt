@@ -1,22 +1,15 @@
 package com.aura.di
 
-import com.aura.agent.ToolExecutor
 import dagger.Module
-import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import javax.inject.Singleton
 
 /**
- * App-level Hilt providers. ToolRegistry is provided by [com.aura.tools.ToolsModule]
- * in the aura-core module — don't redefine it here.
+ * App-level Hilt providers. ToolRegistry and ToolExecutor are provided by
+ * [com.aura.tools.ToolsModule] in the aura-core module — both are @Inject
+ * constructors and Hilt resolves them automatically. This file is kept as
+ * a marker so future app-scoped providers have an obvious home.
  */
 @Module
 @InstallIn(SingletonComponent::class)
-object AppModule {
-
-    @Provides
-    @Singleton
-    fun provideToolExecutor(registry: com.aura.agent.ToolRegistry): ToolExecutor =
-        ToolExecutor(registry)
-}
+object AppModule

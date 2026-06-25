@@ -1,23 +1,8 @@
 package com.aura
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import com.aura.ui.theme.AuraTheme
 import dagger.hilt.android.AndroidEntryPoint
 
 /**
@@ -25,13 +10,16 @@ import dagger.hilt.android.AndroidEntryPoint
  * the shared text into the Aura chat. Listed in AndroidManifest.xml with
  * an intent-filter for android.intent.action.SEND + mimeType text/plain
  * so Aura appears in the system share sheet.
+ *
+ * This Activity is intentionally tiny: it does not render UI itself. It
+ * extracts the shared text, launches MainActivity with the text as an
+ * extra, then finishes. The translucent theme ensures no visual flash.
  */
 @AndroidEntryPoint
 class ShareReceiverActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val sharedText = extractSharedText(intent)
-        // Launch MainActivity with the shared text as an extra
         val main = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             putExtra(EXTRA_SHARED_TEXT, sharedText)

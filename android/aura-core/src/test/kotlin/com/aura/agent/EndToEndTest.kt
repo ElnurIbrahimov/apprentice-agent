@@ -71,7 +71,7 @@ class EndToEndTest {
             ),
         )
 
-        val executor = ToolExecutor(toolRegistry)
+        val executor = ToolExecutor(toolRegistry, context = io.mockk.mockk(relaxed = true))
         val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore)
 
         // 3. Run a conversation
@@ -125,7 +125,7 @@ class EndToEndTest {
             ),
         )
 
-        val executor = ToolExecutor(toolRegistry)
+        val executor = ToolExecutor(toolRegistry, context = io.mockk.mockk(relaxed = true))
         val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore)
 
         val conv = Conversation()
@@ -155,7 +155,7 @@ class EndToEndTest {
             BrainChunk.Text("Nice to meet you, Elnur."),
             BrainChunk.Finished(FinishReason.stop.name),
         )
-        val executor = ToolExecutor(toolRegistry)
+        val executor = ToolExecutor(toolRegistry, context = io.mockk.mockk(relaxed = true))
         val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore)
 
         val conv = Conversation()

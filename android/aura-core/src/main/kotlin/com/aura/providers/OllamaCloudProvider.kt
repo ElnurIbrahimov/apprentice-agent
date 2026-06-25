@@ -74,7 +74,20 @@ class OllamaCloudProvider(
             override fun onClosed(eventSource: EventSource) { channel.close() }
         })
         activeEventSource = src
-        for (chunk in channel) emit(chunk)
+        // Bound the per-request read so a misbehaving server that never sends
+        // [DONE] and never closes the stream can't hang the agent forever. The
+        // OkHttp read timeout (configured in ProviderModule) is the primary
+        // backstop; this is a defensive upper bound.
+        try {
+            kotlinx.coroutines.withTimeout(STREAM_READ_TIMEOUT_MS) {
+                for (chunk in channel) emit(chunk)
+            }
+        } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+            // Synthesize a finish so downstream loops terminate cleanly.
+            emit(ProviderChunk(finishReason = FinishReason.stop))
+        } finally {
+            activeEventSource = null
+        }
     }
 
     override suspend fun listModels(): List<String> {
@@ -127,5 +140,11 @@ class OllamaCloudProvider(
             .addHeader("Content-Type", "application/json")
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
+    }
+
+    companion object {
+        // 5 minutes: long enough for a slow model + max_tokens worth of tokens,
+        // short enough that a misbehaving server doesn't hang the agent loop.
+        const val STREAM_READ_TIMEOUT_MS = 5L * 60L * 1000L
     }
 }

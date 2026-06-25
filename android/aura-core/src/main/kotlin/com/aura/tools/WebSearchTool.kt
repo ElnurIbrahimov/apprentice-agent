@@ -9,7 +9,6 @@ import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 

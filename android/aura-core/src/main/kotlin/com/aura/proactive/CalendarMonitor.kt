@@ -37,7 +37,14 @@ class CalendarMonitor @Inject constructor(
     private var pollJob: Job? = null
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
-    private val surfaced = mutableSetOf<Long>()
+
+    /**
+     * IDs of events we've already emitted for, so we don't fire the same
+     * notification twice. Bounded FIFO: when we exceed the cap we drop the
+     * oldest entry. This trades a tiny chance of a duplicate emission (when
+     * an event ID re-appears after a long gap) for bounded memory.
+     */
+    private val surfaced: LinkedHashSet<Long> = LinkedHashSet()
 
     fun start() {
         if (pollJob?.isActive == true) return
@@ -77,6 +84,11 @@ class CalendarMonitor @Inject constructor(
                     val title = c.getString(1) ?: "(no title)"
                     val start = c.getLong(2)
                     if (id in surfaced) continue
+                    if (surfaced.size >= MAX_SURFACED_IDS) {
+                        // LinkedHashSet iteration order is insertion order; remove
+                        // the oldest entry by evicting the first iterator element.
+                        surfaced.iterator().next().let { surfaced.remove(it) }
+                    }
                     surfaced.add(id)
                     val minutesUntil = ((start - now) / 60_000L).toInt().coerceAtLeast(0)
                     eventBus.emit(CalendarEventSoon(title, minutesUntil))
@@ -91,5 +103,9 @@ class CalendarMonitor @Inject constructor(
 
     companion object {
         const val POLL_INTERVAL_MS = 5L * 60L * 1000L
+        // Cap surfaced IDs at ~10k. At 5-min polling each event ID re-appears
+        // every poll only if it stays in the next-15-min window, so the
+        // practical hit rate is well under the cap.
+        const val MAX_SURFACED_IDS = 10_000
     }
 }

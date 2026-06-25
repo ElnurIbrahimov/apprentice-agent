@@ -6,18 +6,20 @@ This is a port of the Python [Aura](https://github.com/ElnurIbrahimov/apprentice
 
 ## Status
 
-**v0.1.0 — Day 7** (see `.hermes/plans/2026-06-25_161811-aura-android-superapp.md` for the plan)
+**v0.1.x** — see `.hermes/plans/2026-06-25_161811-aura-android-superapp.md` for the full plan.
 
-What's working today:
-- 21 tools (web search, location, calendar, contacts, tasks, reminders, share, notifications, biometric, app launcher, system volume, photo library, network state, battery state, DND, remember, recall, web fetch, system volume, get current time, camera)
-- Memory stack (Room + FTS5 + vector cosine + 14-day FadeMem decay + heuristic write-gate classifier)
-- Task subsystem (Room-backed CRUD with WorkManager-scheduled reminder notifications)
+What works:
+- 23 tools (web search, location, calendar read/write, contacts, tasks, reminders, share, notifications, biometric gate, app launcher, system volume, photo library, network state, battery state, DND, remember, recall, get current time, camera capture, image input, file picker)
+- Memory stack (Room + vector + 14-day FadeMem + write-gate)
+- Task subsystem (Room + WorkManager)
 - Agentic loop (ReAct-style with tool dispatch, abort, conversation state)
-- 5 cloud LLM providers (Ollama Cloud, DeepSeek, Anthropic, OpenAI, OpenAI-compat)
+- 4 cloud LLM providers (Ollama, Anthropic, OpenAI, DeepSeek)
 - 4-tab UI (Home greeting, Chat with voice+text, Memory browser, Settings)
-- Voice input (push-to-talk STT) and output (auto-TTS for agent responses)
-- Proactive: WorkManager daily morning brief + 5-minute calendar event monitor
-- 35 unit tests pass
+- Voice I/O (push-to-talk STT and auto-TTS for agent responses)
+- Proactive: WorkManager daily morning brief + 5-minute calendar monitor
+- 35+ unit tests
+
+Note: the app uses **cloud providers only** — there is no on-device model.
 
 ## Quick start (sideload on a real device)
 
@@ -126,7 +128,7 @@ android/
 │   │   └── MainActivity, AuraApp
 ├── aura-core/            # :aura-core library — all logic
 │   ├── src/main/kotlin/com/aura/
-│   │   ├── agent/        # Brain, AgenticLoop, Conversation
+│   │   ├── agent/        # Brain, MemoryAugmentedAgenticLoop, Conversation
 │   │   ├── providers/    # Provider SDK
 │   │   ├── memory/       # Room + vector + decay
 │   │   ├── tools/        # 21 tools

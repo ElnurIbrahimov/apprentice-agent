@@ -83,13 +83,13 @@ class MemoryStore @Inject constructor(
     suspend fun count(): Int = dao.countOnce()
 
     /**
-     * Run decay pass: halves decayScore for all memories older than the cutoff.
-     * Called periodically (WorkManager in v2) or on app open.
+     * Run decay pass: recompute the decay score for every memory. The work
+     * is bounded by the table size; on a large memory DB this is still O(n)
+     * but n is small in practice (hundreds to a few thousand).
      */
     suspend fun runDecayPass() {
         val now = System.currentTimeMillis()
-        // For each memory, recompute its score
-        val all = dao.recent(1000)
+        val all = dao.recent(10_000)  // hard cap; raise if needed
         for (mem in all) {
             val newScore = FadeMem.compute(mem.createdAt, mem.accessedAt, now)
             if (kotlin.math.abs(newScore - mem.decayScore) > 0.05f) {

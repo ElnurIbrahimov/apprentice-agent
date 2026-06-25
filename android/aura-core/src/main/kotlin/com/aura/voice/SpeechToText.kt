@@ -14,9 +14,12 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,18 +39,27 @@ class SpeechToText @Inject constructor(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
+    // Internal scope for the partialTranscript forwarder. Process-scoped
+    // (the singleton lives as long as the app process), so we don't need to
+    // cancel it explicitly.
+    private val scope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+    )
+
     /**
-     * Convenience: just the latest partial transcript text (or empty if not in a partial state).
-     * Mirrors what the UI binds to the "what we heard so far" line.
+     * Convenience: the latest partial or final transcript text (or empty when
+     * the recognizer is in Ready/Listening/Idle/Error). Implemented as a
+     * derived StateFlow so subscribers always see a consistent snapshot.
      */
     val partialTranscript: StateFlow<String> = _state
-        .let { src ->
-            MutableStateFlow("").also { derived ->
-                kotlinx.coroutines.flow.combine(src, MutableStateFlow(Unit)) { s, _ ->
-                    (s as? State.PartialResult)?.text ?: (s as? State.FinalResult)?.text ?: ""
-                }
+        .map { s ->
+            when (s) {
+                is State.PartialResult -> s.text
+                is State.FinalResult -> s.text
+                else -> ""
             }
         }
+        .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, "")
 
     private val _results = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val results: SharedFlow<String> = _results.asSharedFlow()

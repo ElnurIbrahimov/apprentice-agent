@@ -2,23 +2,19 @@ package com.aura.agent
 
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
+import android.content.Context
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.double
 import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.float
-import kotlinx.serialization.json.floatOrNull
-import kotlinx.serialization.json.int
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.long
 import kotlinx.serialization.json.longOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,13 +26,16 @@ import javax.inject.Singleton
 @Singleton
 class ToolExecutor @Inject constructor(
     private val registry: ToolRegistry,
+    @ApplicationContext private val context: Context,
 ) {
     suspend fun execute(name: String, argumentsJson: String, ctx: ToolContext): ToolResult {
         val tool = registry.get(name) ?: return ToolResult.Error("Unknown tool: $name", "unknown_tool")
 
-        // Permission gate
+        // Permission gate. We resolve against the live PackageManager state every
+        // call so the model sees the freshest answer (user may have just granted
+        // the permission via Settings).
         for (perm in tool.requiredPermissions) {
-            if (perm !in ctx.permissions) {
+            if (!isGranted(perm)) {
                 return ToolResult.NeedsPermission(perm, "Tool $name requires $perm")
             }
         }
@@ -53,6 +52,16 @@ class ToolExecutor @Inject constructor(
         } catch (e: Exception) {
             ToolResult.Error(e.message ?: "tool failed", "exception")
         }
+    }
+
+    private fun isGranted(permission: String): Boolean = try {
+        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    } catch (e: Exception) {
+        // Defensive: some permissions (e.g. BIND_NOTIFICATION_LISTENER_SERVICE) are
+        // not regular Android permissions and checkSelfPermission may throw.
+        // We treat that as "not granted" so the model gets a NeedsPermission
+        // result and can explain the situation to the user.
+        false
     }
 
     /**
@@ -74,8 +83,10 @@ class ToolExecutor @Inject constructor(
         v is JsonPrimitive && prop.type == "integer" -> v.intOrNull
         v is JsonPrimitive && prop.type == "number" -> v.doubleOrNull
         v is JsonPrimitive && prop.type == "boolean" -> v.booleanOrNull
+        v is JsonPrimitive && prop.type == "any" -> v.contentOrNull
         v is JsonArray && prop.type == "array" -> v.map { coerce(it, ToolProperty(type = "any")) }
         v is JsonObject && prop.type == "object" -> v.mapValues { coerce(it.value, ToolProperty(type = "any")) }
+        v is JsonPrimitive -> v.contentOrNull
         else -> v.toString()
     }
 }

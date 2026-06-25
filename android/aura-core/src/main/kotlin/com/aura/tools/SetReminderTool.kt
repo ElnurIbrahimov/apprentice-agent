@@ -14,8 +14,6 @@ import com.aura.providers.ToolDefinition
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.text.SimpleDateFormat
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -52,7 +50,7 @@ class SetReminderTool @Inject constructor(
         execute = { call, ctx ->
             val whenStr = call.arguments["when"] as? String ?: return@Tool ToolResult.Error("missing 'when'", "bad_args")
             val message = call.arguments["message"] as? String ?: return@Tool ToolResult.Error("missing 'message'", "bad_args")
-            val triggerAt = parseTime(whenStr)
+            val triggerAt = TimeParser.parse(whenStr)
             if (triggerAt == null) {
                 return@Tool ToolResult.Error("could not parse 'when': $whenStr (use HH:mm or ISO 8601)", "bad_args")
             }
@@ -68,37 +66,12 @@ class SetReminderTool @Inject constructor(
                 .setConstraints(Constraints.NONE)
                 .addTag("reminder")
                 .build()
+            // Each reminder has a unique work name so simultaneous reminders
+            // don't coalesce. The REPLACE policy here is defensive only —
+            // uniqueness is already guaranteed by the timestamp suffix.
             WorkManager.getInstance(context)
                 .enqueueUniqueWork("reminder-${System.currentTimeMillis()}", ExistingWorkPolicy.REPLACE, work)
-            val humanTime = SimpleDateFormat("EEE MMM d, HH:mm", Locale.US).format(triggerAt)
-            ToolResult.Ok("Reminder set for $humanTime: $message")
+            ToolResult.Ok("Reminder set for ${TimeParser.format(triggerAt)}: $message")
         },
     )
-
-    private fun parseTime(s: String): Long? {
-        // Try ISO 8601 first
-        return try {
-            val iso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(s)
-            iso?.time
-        } catch (_: Exception) {
-            // Try HH:mm (today or tomorrow)
-            try {
-                val parts = s.split(":")
-                if (parts.size != 2) return null
-                val hour = parts[0].toInt()
-                val minute = parts[1].toInt()
-                val cal = java.util.Calendar.getInstance()
-                cal.set(java.util.Calendar.HOUR_OF_DAY, hour)
-                cal.set(java.util.Calendar.MINUTE, minute)
-                cal.set(java.util.Calendar.SECOND, 0)
-                cal.set(java.util.Calendar.MILLISECOND, 0)
-                if (cal.timeInMillis <= System.currentTimeMillis()) {
-                    cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
-                }
-                cal.timeInMillis
-            } catch (_: Exception) {
-                null
-            }
-        }
-    }
 }

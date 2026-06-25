@@ -16,8 +16,6 @@ import com.aura.providers.ToolProperty
 import com.aura.tasks.TaskEntity
 import com.aura.tasks.TaskDao
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.text.SimpleDateFormat
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -58,7 +56,7 @@ class TaskManagerTool @Inject constructor(
                     val whenStr = call.arguments["when"] as? String
                     try {
                         val id = java.util.UUID.randomUUID().toString()
-                        val triggerAt = whenStr?.let { parseTime(it) }
+                        val triggerAt = whenStr?.let { TimeParser.parse(it) }
                         taskDao.insert(
                             TaskEntity(id = id, title = title, createdAt = System.currentTimeMillis(), dueAt = triggerAt, status = "pending")
                         )
@@ -77,7 +75,7 @@ class TaskManagerTool @Inject constructor(
                                 .build()
                             WorkManager.getInstance(context).enqueueUniqueWork("task-$id", ExistingWorkPolicy.REPLACE, work)
                         }
-                        val whenDisplay = triggerAt?.let { SimpleDateFormat("EEE MMM d, HH:mm", Locale.US).format(it) } ?: "(no reminder)"
+                        val whenDisplay = triggerAt?.let { TimeParser.format(it) } ?: "(no reminder)"
                         ToolResult.Ok("Task created (id $id): $title — $whenDisplay")
                     } catch (e: Exception) {
                         ToolResult.Error("create failed: ${e.message}", "exception")
@@ -85,11 +83,14 @@ class TaskManagerTool @Inject constructor(
                 }
                 "list" -> {
                     try {
-                        val all = taskDao.all()
-                        if (all.isEmpty()) return@Tool ToolResult.Ok("No tasks.")
+                        // Filter to non-completed tasks so "what are my tasks"
+                        // doesn't surface a graveyard. The model can call
+                        // the data layer directly for completed-task history.
+                        val all = taskDao.allPending()
+                        if (all.isEmpty()) return@Tool ToolResult.Ok("No open tasks.")
                         val text = all.take(20).mapIndexed { i, t ->
-                            val due = t.dueAt?.let { SimpleDateFormat("MMM d HH:mm", Locale.US).format(it) } ?: "—"
-                            "${i + 1}. [${t.status}] $t.title (due: $due)"
+                            val due = t.dueAt?.let { TimeParser.format(it) } ?: "—"
+                            "${i + 1}. ${t.title} (due: $due)"
                         }.joinToString("\n")
                         ToolResult.Ok(text)
                     } catch (e: Exception) {
@@ -119,20 +120,4 @@ class TaskManagerTool @Inject constructor(
             }
         },
     )
-
-    private fun parseTime(s: String): Long? {
-        return try {
-            val parts = s.split(":")
-            if (parts.size != 2) return null
-            val cal = java.util.Calendar.getInstance()
-            cal.set(java.util.Calendar.HOUR_OF_DAY, parts[0].toInt())
-            cal.set(java.util.Calendar.MINUTE, parts[1].toInt())
-            cal.set(java.util.Calendar.SECOND, 0)
-            cal.set(java.util.Calendar.MILLISECOND, 0)
-            if (cal.timeInMillis <= System.currentTimeMillis()) {
-                cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
-            }
-            cal.timeInMillis
-        } catch (_: Exception) { null }
-    }
 }

@@ -73,8 +73,14 @@ class AnthropicProvider(
                     return@flow
                 }
                 val source = resp.body?.source() ?: return@flow
-                while (!source.exhausted()) {
+                // SSE stream. readUtf8Line() blocks until a line arrives (or returns
+                // null at EOF). We process each 'data: ...' line. The two terminal
+                // events we care about are 'message_stop' (Anthropic's normal end)
+                // and finish_reason=tool_calls in 'message_delta' (which we also
+                // map to FinishReason.tool_calls so the loop dispatches tools).
+                while (true) {
                     val line = source.readUtf8Line() ?: break
+                    if (line.isEmpty()) continue
                     if (!line.startsWith("data: ")) continue
                     val data = line.removePrefix("data: ").trim()
                     if (data.isEmpty()) continue
@@ -85,6 +91,10 @@ class AnthropicProvider(
                             if (block?.get("type")?.let { (it as JsonPrimitive).content } == "tool_use") {
                                 val id = (block["id"] as? JsonPrimitive)?.content ?: ""
                                 val name = (block["name"] as? JsonPrimitive)?.content ?: ""
+                                // Emit with empty arguments; downstream BrainChunk
+                                // emits ToolCallStart (id+name, no args) which the
+                                // agentic loop will associate with subsequent
+                                // input_json_delta events keyed by id.
                                 emit(ProviderChunk(toolCall = ToolCall(id, name, "")))
                             }
                         }

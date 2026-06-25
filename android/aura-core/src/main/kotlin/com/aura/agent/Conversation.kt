@@ -2,7 +2,6 @@ package com.aura.agent
 
 import com.aura.providers.ProviderMessage
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import java.util.UUID
 
 /**
@@ -36,20 +35,24 @@ data class Conversation(
         return out
     }
 
-    fun touch() { /* data class val updatedAt can't be reassigned without copy; use copy() in callers */ }
-    fun addUser(text: String) { turns += Turn(user = text); touch() }
+    /**
+     * Append a user turn. Note: updatedAt is a data class val so we can't
+     * reassign it in place; if you need to track recency, copy the conversation.
+     * Keeping the mutator pattern here because the alternative (returning a
+     * new Conversation per turn) balloons allocations on long sessions.
+     */
+    fun addUser(text: String) { turns += Turn(user = text) }
     fun addAssistant(text: String) {
         if (turns.isEmpty() || turns.last().assistant != null || turns.last().user == null) {
             turns += Turn(assistant = text)
         } else {
             turns[turns.lastIndex] = turns.last().copy(assistant = text)
         }
-        touch()
     }
     fun addToolCall(id: String, name: String, args: String) {
         if (turns.isEmpty()) turns += Turn()
         val last = turns.lastIndex
-        turns[last] = turns[last].copy(toolTurns = turns[last].toolTurns + ToolTurn(id, name, args, ""))
+        turns[last] = turns.last().copy(toolTurns = turns[last].toolTurns + ToolTurn(id, name, args, ""))
     }
     fun setToolResult(id: String, result: String) {
         if (turns.isEmpty()) return
@@ -60,7 +63,7 @@ data class Conversation(
                 toolTurns[i] = toolTurns[i].copy(result = result)
             }
         }
-        turns[last] = turns[last].copy(toolTurns = toolTurns)
+        turns[last] = turns.last().copy(toolTurns = toolTurns)
     }
 }
 
@@ -78,8 +81,3 @@ data class ToolTurn(
     val args: String,
     val result: String,
 )
-
-object JsonCodec {
-    val pretty: Json = Json { prettyPrint = true; ignoreUnknownKeys = true; encodeDefaults = true }
-    val strict: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true; isLenient = true }
-}

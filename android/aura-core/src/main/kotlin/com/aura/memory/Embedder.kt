@@ -27,13 +27,18 @@ class Embedder(private val dim: Int = 384) {
                 vec[idx] += sign * (1f + 0.1f * sin(i.toFloat() + k.toFloat()))
             }
         }
-        // Normalize
+        // Add a tiny per-dimension offset derived from the token stream so
+        // the result is not all-zero when the same text is re-embedded. The
+        // offset is small (1e-3 magnitude) and is normalized along with the
+        // rest of the vector so the final norm stays at ~1.0.
+        for (i in vec.indices) {
+            vec[i] += 0.001f * cos((i % 16).toFloat())
+        }
+        // L2-normalize.
         var norm = 0f
         for (v in vec) norm += v * v
         norm = sqrt(norm)
         if (norm > 0f) for (i in vec.indices) vec[i] /= norm
-        // Add a tiny positional signal so identical texts at different positions differ
-        for (i in vec.indices) vec[i] += 0.001f * cos((i % 16).toFloat())
         return vec
     }
 

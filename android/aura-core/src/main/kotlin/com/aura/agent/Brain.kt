@@ -40,8 +40,13 @@ class Brain @Inject constructor(
         tools: List<ToolDefinition> = emptyList(),
         options: ChatOptions = ChatOptions(),
     ): Flow<BrainChunk> = flow {
+        // nameById accumulates tool-call ids to names across the stream so
+        // providers that send argument deltas without re-sending the name
+        // (e.g. Anthropic input_json_delta) can still be routed to the
+        // correct tool. Reset per stream call.
+        val nameById = mutableMapOf<String, String>()
         providerRegistry.chat(model, messages, options, tools).collect { providerChunk ->
-            emit(BrainChunk.fromProvider(providerChunk))
+            emit(BrainChunk.fromProvider(providerChunk, nameById))
         }
     }
 }
@@ -55,12 +60,41 @@ sealed class BrainChunk {
     data class Error(val code: String, val message: String, val retryable: Boolean) : BrainChunk()
 
     companion object {
-        fun fromProvider(p: com.aura.providers.ProviderChunk) = when {
-            p.error != null -> Error(p.error.code, p.error.message, p.error.retryable)
-            p.finishReason != null -> Finished(p.finishReason.name)
-            p.toolCall != null -> ToolCallDelta(p.toolCall.id, p.toolCall.arguments)
-            p.text != null -> Text(p.text)
-            else -> Text("")
+        /**
+         * Map a ProviderChunk into the higher-level BrainChunk stream the
+         * agentic loop consumes. For tool calls we emit:
+         *   - ToolCallStart the first time we see a given id with a name
+         *   - ToolCallDelta for every subsequent argument chunk
+         *   - ToolCallEnd once (typically on the finish_reason=tool_calls event,
+         *     but providers are inconsistent so we also accept ProviderChunks
+         *     that carry a full arguments string).
+         *
+         * The previous version collapsed all three into a single ToolCallDelta
+         * and never emitted ToolCallStart, which broke the loop's tool-name
+         * lookup for OpenAI/Anthropic (the loop reads the name from
+         * `toolCallStarts[id]`).
+         */
+        fun fromProvider(p: com.aura.providers.ProviderChunk, nameById: MutableMap<String, String> = mutableMapOf()): BrainChunk {
+            p.error?.let { return Error(it.code, it.message, it.retryable) }
+            p.finishReason?.let { return Finished(it.name) }
+            val tc = p.toolCall
+            if (tc != null) {
+                if (tc.id.isNotEmpty() && tc.name.isNotEmpty()) {
+                    if (nameById.put(tc.id, tc.name) == null) {
+                        return ToolCallStart(tc.id, tc.name)
+                    }
+                    if (tc.arguments.isNotEmpty()) {
+                        return ToolCallEnd(tc.id, tc.name, tc.arguments)
+                    }
+                    return ToolCallDelta(tc.id, "")
+                }
+                // delta-style chunk (Anthropic input_json_delta): no id, no name.
+                // Look up the most-recent id we saw and append to its args.
+                val id = nameById.keys.lastOrNull() ?: return Text("")
+                return ToolCallDelta(id, tc.arguments)
+            }
+            p.text?.let { return Text(it) }
+            return Text("")
         }
     }
 }
