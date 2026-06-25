@@ -64,10 +64,4 @@ object ProviderModule {
         httpClient = client,
     )
 
-    @Provides
-    @IntoMap
-    @StringKey("local")
-    fun provideLocal(): Provider = LocalProvider(
-        modelDir = java.io.File(System.getProperty("user.home") ?: "/sdcard", "Aura/models"),
-    )
 }

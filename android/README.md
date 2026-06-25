@@ -1,8 +1,8 @@
 # Aura Android
 
-A native Android superapp — Kotlin + Jetpack Compose, on-device first, your data stays on your phone.
+A native Android superapp — Kotlin + Jetpack Compose, cloud-powered, your data stays private.
 
-This is a port of the Python [Aura](https://github.com/ElnurIbrahimov/apprentice-agent) assistant to a native Android app. The goal is the full Aura capability surface: brain, agentic loop, 21 tools, memory stack, voice I/O, multi-agent routing, proactive monitors — all running on the phone, with cloud LLMs as opt-in.
+This is a port of the Python [Aura](https://github.com/ElnurIbrahimov/apprentice-agent) assistant to a native Android app. The goal is the full Aura capability surface: brain, agentic loop, 21 tools, memory stack, voice I/O, multi-agent routing, proactive monitors — all powered by cloud LLM providers.
 
 ## Status
 
@@ -13,7 +13,7 @@ What's working today:
 - Memory stack (Room + FTS5 + vector cosine + 14-day FadeMem decay + heuristic write-gate classifier)
 - Task subsystem (Room-backed CRUD with WorkManager-scheduled reminder notifications)
 - Agentic loop (ReAct-style with tool dispatch, abort, conversation state)
-- 5 cloud LLM providers (Ollama Cloud, DeepSeek, Anthropic, OpenAI, OpenAI-compat) + a local-model stub
+- 5 cloud LLM providers (Ollama Cloud, DeepSeek, Anthropic, OpenAI, OpenAI-compat)
 - 4-tab UI (Home greeting, Chat with voice+text, Memory browser, Settings)
 - Voice input (push-to-talk STT) and output (auto-TTS for agent responses)
 - Proactive: WorkManager daily morning brief + 5-minute calendar event monitor
@@ -76,7 +76,7 @@ Or transfer the APK to the phone and tap it (enable "Install from unknown source
 └─────┬─────┘ │(Room+vec)│  └────┬──────────────┘
       │       └──────────┘       │
 ┌─────▼──────────────────────────▼───────────────┐
-│ Provider SDK (4 cloud + 1 local stub)            │   Ollama-compat SSE, Anthropic
+│ Provider SDK (5 cloud providers)                  │   Ollama-compat SSE, Anthropic
 └─────────────────────────────────────────────────┘
 ```
 
