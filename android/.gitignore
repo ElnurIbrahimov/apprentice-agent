@@ -1,0 +1,46 @@
+# Gradle
+.gradle/
+**/.gradle/
+
+# Build outputs (anywhere in the tree)
+build/
+**/build/
+
+# IntelliJ / Android Studio
+.idea/
+**/.idea/
+*.iml
+**/*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Android Studio captures
+captures/
+**/captures/
+
+# Native build
+.externalNativeBuild/
+.cxx/
+**/.externalNativeBuild/
+**/.cxx/
+
+# Build artifacts
+*.apk
+*.aab
+*.aar
+
+# Kotlin
+.kotlin/
+.kotlin_metadata/
+**/.kotlin/
+**/.kotlin_metadata/
+
+# Local config
+local.properties
+**/local.properties
+
+# Keystore
+*.jks
+*.keystore
