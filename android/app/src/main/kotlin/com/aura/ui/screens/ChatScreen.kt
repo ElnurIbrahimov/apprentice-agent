@@ -243,12 +243,22 @@ fun ChatScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(8.dp),
             ) {
-                Text(
-                    text = err,
-                    modifier = Modifier.padding(12.dp),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = err,
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (state.errorRetryable) {
+                        TextButton(onClick = { viewModel.retryLast() }) {
+                            Text("Retry", color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                    TextButton(onClick = { viewModel.dismissError() }) {
+                        Text("✕", color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                }
             }
         }
 

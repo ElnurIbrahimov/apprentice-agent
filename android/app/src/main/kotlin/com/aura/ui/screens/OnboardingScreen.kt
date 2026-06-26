@@ -60,8 +60,8 @@ data class OnboardingUiState(
     val ollamaKey: String = "",
     val anthropicKey: String = "",
     val configuredCount: Int = 0,
-    val testing: Boolean = false,
-    val testError: String? = null,
+    val verifying: Boolean = false,
+    val verifyResult: String? = null,
 )
 
 @HiltViewModel
@@ -89,6 +89,29 @@ class OnboardingViewModel @Inject constructor(
             _state.value = _state.value.copy(
                 configuredCount = providerRegistry.configured().size
             )
+        }
+    }
+
+    /**
+     * Verify the saved API key by hitting the provider's models endpoint. If
+     * the call succeeds, the key is good. If it fails, show the error.
+     */
+    fun verifyKey(prefix: String) {
+        if (providerRegistry.configured().none { it.prefix == prefix }) {
+            _state.value = _state.value.copy(verifyResult = "✗ No key saved for $prefix")
+            return
+        }
+        _state.value = _state.value.copy(verifying = true, verifyResult = null)
+        viewModelScope.launch {
+            val provider = providerRegistry.all().firstOrNull { it.prefix == prefix }
+            val result = if (provider == null) {
+                "✗ Provider $prefix not found"
+            } else {
+                runCatching { provider.listModels() }
+                    .map { "✓ Verified — ${it.size} models available" }
+                    .getOrElse { "✗ Failed: ${it.message?.take(80)}" }
+            }
+            _state.value = _state.value.copy(verifying = false, verifyResult = result)
         }
     }
 
@@ -140,9 +163,13 @@ fun OnboardingScreen(
                     ollamaKey = state.ollamaKey,
                     anthropicKey = state.anthropicKey,
                     configuredCount = state.configuredCount,
+                    verifying = state.verifying,
+                    verifyResult = state.verifyResult,
                     onOllamaKeyChange = viewModel::saveOllamaKey,
                     onAnthropicKeyChange = viewModel::saveAnthropicKey,
                     onRefreshConfigured = viewModel::refreshConfigured,
+                    onVerifyOllama = { viewModel.verifyKey("ollama") },
+                    onVerifyAnthropic = { viewModel.verifyKey("anthropic") },
                     onNext = { page = 2 },
                 )
                 2 -> PageDone(
@@ -201,9 +228,13 @@ private fun PageKeys(
     ollamaKey: String,
     anthropicKey: String,
     configuredCount: Int,
+    verifying: Boolean,
+    verifyResult: String?,
     onOllamaKeyChange: (String) -> Unit,
     onAnthropicKeyChange: (String) -> Unit,
     onRefreshConfigured: () -> Unit,
+    onVerifyOllama: () -> Unit,
+    onVerifyAnthropic: () -> Unit,
     onNext: () -> Unit,
 ) {
     Column(
@@ -240,7 +271,25 @@ private fun PageKeys(
             helperText = "Get a key at console.anthropic.com/settings/keys",
         )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Verify buttons — let the user prove the key works
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onVerifyOllama, enabled = ollamaKey.isNotBlank() && !verifying) {
+                Text(if (verifying) "Checking…" else "Test Ollama key")
+            }
+            OutlinedButton(onClick = onVerifyAnthropic, enabled = anthropicKey.isNotBlank() && !verifying) {
+                Text(if (verifying) "Checking…" else "Test Anthropic key")
+            }
+        }
+
+        verifyResult?.let { msg ->
+            Spacer(Modifier.height(8.dp))
+            val color = if (msg.startsWith("✓")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+            Text(msg, color = color, style = MaterialTheme.typography.bodySmall)
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         if (configuredCount > 0) {
             Surface(

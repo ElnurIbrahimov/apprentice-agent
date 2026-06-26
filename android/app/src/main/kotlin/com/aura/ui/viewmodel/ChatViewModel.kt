@@ -82,6 +82,8 @@ data class ChatUiState(
     val permissionRationale: String? = null,
     /** Tool name + args that the permission was requested for. Used to retry after grant. */
     val pendingToolRetry: Pair<String, String>? = null,
+    /** Whether the last error is retryable. */
+    val errorRetryable: Boolean = false,
 )
 
 @HiltViewModel
@@ -203,6 +205,30 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(pendingPermission = null, permissionRationale = null) }
     }
 
+    fun dismissError() {
+        _state.update { it.copy(error = null, errorRetryable = false) }
+    }
+
+    private fun setErrorWithAutoDismiss(error: String, retryable: Boolean = false) {
+        _state.update { it.copy(error = error, errorRetryable = retryable) }
+        // Auto-dismiss after 5 seconds
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(5_000L)
+            if (_state.value.error == error) {
+                _state.update { it.copy(error = null, errorRetryable = false) }
+            }
+        }
+    }
+
+    /** Retry the last user message by re-running the agent. */
+    fun retryLast() {
+        val conv = _state.value.conversation
+        val lastUser = conv.turns.lastOrNull { it.user != null } ?: return
+        if (lastUser.user.isNullOrBlank()) return
+        _state.update { it.copy(error = null, errorRetryable = false) }
+        send()
+    }
+
     fun retryAfterPermission(permission: String) {
         // Re-execute the failed tool directly with the original args, no model round-trip.
         val (toolName, args) = _state.value.pendingToolRetry ?: ("" to "")
@@ -301,9 +327,7 @@ class ChatViewModel @Inject constructor(
                                 }
                             }
                         }
-                        is AgentEvent.Error -> {
-                            _state.update { it.copy(error = "${event.code}: ${event.message}") }
-                        }
+                        is AgentEvent.Error -> setErrorWithAutoDismiss("${event.code}: ${event.message}", retryable = event.retryable)
                         is AgentEvent.Result -> {
                             // Replace the conversation snapshot with the loop's final state
                             // which includes all tool calls, tool results, and assistant text.
