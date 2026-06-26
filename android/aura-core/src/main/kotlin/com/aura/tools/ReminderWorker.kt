@@ -21,13 +21,20 @@ class ReminderWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val title = inputData.getString("title") ?: "⏰ Reminder"
+        val title = inputData.getString("title") ?: "\u23F0 Reminder"
         val body = inputData.getString("body") ?: ""
-        postNotification(applicationContext, title, body)
+        // Use the work request ID as notification ID. Keyed by unique work name
+        // so each reminder gets its own notification and they don't overwrite
+        // each other when fired concurrently.
+        val notificationId = inputData.getInt("notificationId", id.hashCode().let {
+            if (it < 0) -it else it
+        })
+        val idInt = if (notificationId == 0) 1 else notificationId
+        postNotification(applicationContext, title, body, idInt)
         return Result.success()
     }
 
-    private fun postNotification(ctx: Context, title: String, body: String) {
+    private fun postNotification(ctx: Context, title: String, body: String, id: Int) {
         val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
@@ -52,6 +59,6 @@ class ReminderWorker(
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
-        mgr.notify(System.currentTimeMillis().toInt(), n)
+        mgr.notify(id, n)
     }
 }

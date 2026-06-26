@@ -98,11 +98,12 @@ class MorningBriefWorker @AssistedInject constructor(
      */
     private fun defaultModelIdForProvider(prefix: String): String =
         when (prefix) {
-            "ollama" -> "ollama:deepseek-v3.2:cloud"
+            "ollama" -> "ollama:deepseek-v4-pro:cloud"
             "anthropic" -> "anthropic:claude-sonnet-4-5"
-            "openai" -> "openai:gpt-5.2"
+            "openai" -> "openai:gpt-4.1"
             "deepseek" -> "deepseek:deepseek-chat"
-            else -> "ollama:deepseek-v3.2:cloud"
+            "gemini" -> "gemini:gemini-1.5-flash"
+            else -> "ollama:deepseek-v4-pro:cloud"
         }
 
     private fun postNotification(ctx: Context, title: String, body: String) {
