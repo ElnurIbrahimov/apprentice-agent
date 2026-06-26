@@ -38,7 +38,7 @@ class NotificationListTool @Inject constructor(
         name = "notification_list",
         description = definition().description,
         risk = ToolRisk.PRIVACY,
-        requiredPermissions = listOf("android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"),
+        requiredPermissions = emptyList(),  // Uses NotificationManager.activeNotifications which only returns Aura's own notifications unless the device-level Notification Listener is enabled
         parameters = definition().parameters,
         execute = { call, ctx ->
             val limit = (call.arguments["limit"] as? Int ?: 20).coerceIn(1, 50)

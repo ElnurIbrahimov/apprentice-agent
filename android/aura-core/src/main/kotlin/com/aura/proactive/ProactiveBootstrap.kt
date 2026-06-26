@@ -23,6 +23,10 @@ class ProactiveBootstrap @Inject constructor(
     private val scheduler: ProactiveScheduler,
     private val memoryStore: MemoryStore,
 ) {
+    private val scope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+    )
+
     fun start() {
         scheduler.scheduleMorningBrief()
         scheduler.scheduleDecay()
@@ -30,9 +34,7 @@ class ProactiveBootstrap @Inject constructor(
         // One-shot decay pass on startup so any overdue decay is applied
         // immediately rather than waiting up to 6 hours. The periodic worker
         // handles the "app sat idle for days" case.
-        kotlinx.coroutines.CoroutineScope(
-            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
-        ).launch {
+        scope.launch {
             runCatching { memoryStore.runDecayPass() }
         }
     }
