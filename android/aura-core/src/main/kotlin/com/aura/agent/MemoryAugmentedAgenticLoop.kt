@@ -26,6 +26,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
     private val toolExecutor: ToolExecutor,
     private val memoryStore: MemoryStore,
     private val kgExtractor: ConversationKgExtractor,
+    private val userProfileStore: com.aura.profile.UserProfileStore,
 ) {
     /**
      * Run the agentic loop, optionally overriding the base system prompt
@@ -67,6 +68,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                     specialist?.systemPrompt,
                     currentConversation.systemPrompt,
                     brain.identity.ifBlank { null },
+                    userProfileStore.getSystemPrompt().ifBlank { null },
                 ).joinToString("\n\n") + memoryContext
                 if (sys.isNotBlank()) add(ProviderMessage(role = Role.system, content = sys))
                 addAll(currentConversation.toMessages())
@@ -154,11 +156,33 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             runCatching { memoryStore.maybeStore(lastUserMessage, source = "user") }
         }
 
+        // 5) Extract user profile from last assistant turn (name, traits, facts)
+        val lastAssistant = currentConversation.turns.lastOrNull()?.assistant
+        if (!lastAssistant.isNullOrBlank()) {
+            runCatching { extractProfileFromText(lastAssistant) }
+        }
+
         if (!finished) {
             emit(AgentEvent.Error("max_steps_exceeded", "Hit max steps ($maxSteps) without finishing.", retryable = false))
         }
         emit(AgentEvent.Result(currentConversation))
         emit(AgentEvent.Done)
+    }
+
+    /** Lightweight regex-based profile extraction. Updates name, traits, and facts. */
+    private suspend fun extractProfileFromText(text: String) {
+        val facts = mutableListOf<String>()
+        Regex("""(?:my name is|i'm|i am|call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)""", RegexOption.IGNORE_CASE)
+            .find(text)?.groupValues?.getOrNull(1)?.let { name ->
+                userProfileStore.update(name = name.trim())
+            }
+        Regex("""(?:i (?:live|am|work) (?:in|at|from))\s+([A-Z][a-zA-Z\s,]+?)(?:\.|,|\s+(?:and|but|so|because)|\s*$)""", RegexOption.IGNORE_CASE)
+            .find(text)?.groupValues?.getOrNull(1)?.let { loc -> facts.add("Lives in ${loc.trim()}") }
+        Regex("""(?:i(?:'m| am) an?\s+|i work as (?:an?\s+)?)([a-z]+(?:\s+[a-z]+){0,3})""", RegexOption.IGNORE_CASE)
+            .find(text)?.groupValues?.getOrNull(1)?.let { job -> facts.add("Works as ${job.trim()}") }
+        Regex("""(?:i (?:prefer|like|love))\s+(.+?)(?:\.|,|\s+(?:and|but|so|because)|\s*$)""", RegexOption.IGNORE_CASE)
+            .find(text)?.groupValues?.getOrNull(1)?.let { pref -> facts.add("Prefers ${pref.trim()}") }
+        if (facts.isNotEmpty()) userProfileStore.update(facts = facts)
     }
 }
 
