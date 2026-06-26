@@ -2,10 +2,10 @@ package com.aura
 
 import android.content.Intent
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.fragment.app.FragmentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -13,15 +13,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import com.aura.security.BiometricActivityHolder
 import com.aura.ui.nav.NavGraph
 import com.aura.ui.theme.AuraTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     @Inject lateinit var incomingShareStore: IncomingShareStore
+    @Inject lateinit var biometricHolder: BiometricActivityHolder
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
@@ -29,10 +31,16 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.auto(Color.Transparent.value.toInt(), Color.Transparent.value.toInt()),
         )
         super.onCreate(savedInstanceState)
+        biometricHolder.activity = this
         handleSharedText(intent)
         setContent {
             AuraRoot()
         }
+    }
+
+    override fun onDestroy() {
+        biometricHolder.activity = null
+        super.onDestroy()
     }
 
     /**

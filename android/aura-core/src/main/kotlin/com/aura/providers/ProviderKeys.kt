@@ -1,19 +1,15 @@
 package com.aura.providers
 
-import android.content.Context
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
-import dagger.hilt.android.qualifiers.ApplicationContext
+import com.aura.security.SecureDataStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
-
-private val Context.auraProviderKeys by preferencesDataStore(name = "aura_settings")
 
 /**
  * Source of truth for cloud-provider API keys. Each key is the value the user
@@ -34,15 +30,15 @@ private val Context.auraProviderKeys by preferencesDataStore(name = "aura_settin
  */
 @Singleton
 class ProviderKeys @Inject constructor(
-    @ApplicationContext private val context: Context,
+    private val secureDataStore: SecureDataStore,
 ) {
     private val _state = MutableStateFlow<Map<String, String>>(emptyMap())
     val state: StateFlow<Map<String, String>> = _state.asStateFlow()
 
     // Process-scoped: the @Singleton lives for the lifetime of the app, so we
     // don't need to cancel the scope explicitly.
-    private val scope = kotlinx.coroutines.CoroutineScope(
-        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO
     )
 
     /**
@@ -55,8 +51,7 @@ class ProviderKeys @Inject constructor(
      */
     init {
         scope.launch {
-            val prefs = runCatching { context.auraProviderKeys.data.first() }.getOrNull()
-            if (prefs != null) _state.value = readFrom(prefs)
+            _state.value = loadAllKeys()
         }
     }
 
@@ -75,22 +70,20 @@ class ProviderKeys @Inject constructor(
      * so the value survives process death.
      */
     suspend fun set(prefix: String, key: String) {
-        context.auraProviderKeys.edit { prefs ->
-            val datastoreKey = stringPreferencesKey("${prefix}_api_key")
-            if (key.isBlank()) prefs.remove(datastoreKey) else prefs[datastoreKey] = key
+        val datastoreKey = "${prefix}_api_key"
+        if (key.isBlank()) {
+            secureDataStore.removeString(datastoreKey)
+        } else {
+            secureDataStore.putString(datastoreKey, key)
         }
-        val refreshed = runCatching {
-            val prefs = context.auraProviderKeys.data.first()
-            readFrom(prefs)
-        }.getOrDefault(_state.value)
-        _state.value = refreshed
+        _state.value = loadAllKeys()
     }
 
-    private fun readFrom(prefs: androidx.datastore.preferences.core.Preferences): Map<String, String> {
+    private suspend fun loadAllKeys(): Map<String, String> {
         val out = mutableMapOf<String, String>()
         for (prefix in PREFIXES) {
-            val datastoreKey = stringPreferencesKey("${prefix}_api_key")
-            prefs[datastoreKey]?.let { out[prefix] = it }
+            val datastoreKey = "${prefix}_api_key"
+            secureDataStore.getString(datastoreKey)?.let { out[prefix] = it }
         }
         return out
     }

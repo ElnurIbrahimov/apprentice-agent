@@ -21,14 +21,15 @@ import javax.inject.Singleton
 class ProactiveBootstrap @Inject constructor(
     @ApplicationContext private val appContext: android.content.Context,
     private val scheduler: ProactiveScheduler,
-    private val calendarMonitor: CalendarMonitor,
     private val memoryStore: MemoryStore,
 ) {
     fun start() {
         scheduler.scheduleMorningBrief()
-        calendarMonitor.start()
-        // Decay pass on a background scope tied to the application lifetime.
-        // If the user is in the middle of a long chat, this won't block them.
+        scheduler.scheduleDecay()
+        CalendarMonitorService.start(appContext)
+        // One-shot decay pass on startup so any overdue decay is applied
+        // immediately rather than waiting up to 6 hours. The periodic worker
+        // handles the "app sat idle for days" case.
         kotlinx.coroutines.CoroutineScope(
             kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
         ).launch {

@@ -16,6 +16,7 @@ import javax.inject.Singleton
  * Schedules and owns the lifecycle of proactive WorkManager jobs.
  * - MorningBriefWorker: fires daily at 7am (or the next time the device
  *   wakes if before 7am).
+ * - DecayWorker: fires every 6 hours to run a memory decay pass.
  */
 @Singleton
 class ProactiveScheduler @Inject constructor(
@@ -50,5 +51,26 @@ class ProactiveScheduler @Inject constructor(
 
     fun cancelMorningBrief() {
         WorkManager.getInstance(context).cancelUniqueWork(MorningBriefWorker.UNIQUE_NAME)
+    }
+
+    /**
+     * Enqueue a periodic decay worker that runs [MemoryStore.runDecayPass]
+     * every 6 hours. Uses UPDATE policy so re-scheduling on each app start
+     * is idempotent. No network constraint required — the decay pass is local.
+     */
+    fun scheduleDecay() {
+        val request = PeriodicWorkRequestBuilder<DecayWorker>(6, TimeUnit.HOURS)
+            .addTag("memory-decay")
+            .build()
+        WorkManager.getInstance(context)
+            .enqueueUniquePeriodicWork(
+                DecayWorker.UNIQUE_NAME,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                request,
+            )
+    }
+
+    fun cancelDecay() {
+        WorkManager.getInstance(context).cancelUniqueWork(DecayWorker.UNIQUE_NAME)
     }
 }
