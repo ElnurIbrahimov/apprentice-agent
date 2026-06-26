@@ -1,5 +1,6 @@
 package com.aura
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -28,16 +29,29 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.auto(Color.Transparent.value.toInt(), Color.Transparent.value.toInt()),
         )
         super.onCreate(savedInstanceState)
-
-        // If we were launched from a share intent, deposit the text in the
-        // IncomingShareStore. ChatScreen consumes it on first composition.
-        val sharedText = intent?.getStringExtra(ShareReceiverActivity.EXTRA_SHARED_TEXT)
-        if (!sharedText.isNullOrBlank()) {
-            incomingShareStore.set(sharedText)
-        }
-
+        handleSharedText(intent)
         setContent {
             AuraRoot()
+        }
+    }
+
+    /**
+     * Handles the case where Aura is already in the background and the user
+     * shares new text. Without this, [intent] would still be the original
+     * launching intent (with no EXTRA_SHARED_TEXT) and the share would
+     * silently disappear. We update the stored intent and route the new
+     * shared text into the IncomingShareStore for ChatScreen to pick up.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleSharedText(intent)
+    }
+
+    private fun handleSharedText(intent: Intent?) {
+        val sharedText = intent?.getStringExtra(ShareReceiverActivity.EXTRA_SHARED_TEXT) ?: return
+        if (sharedText.isNotBlank()) {
+            incomingShareStore.set(sharedText)
         }
     }
 }

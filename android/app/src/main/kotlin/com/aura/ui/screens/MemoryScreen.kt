@@ -73,6 +73,12 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
                 placeholder = { Text("Search memories…") },
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSearch = { viewModel.search() },
+                ),
             )
             Spacer(modifier = Modifier.size(8.dp))
             IconButton(
@@ -86,17 +92,18 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
         }
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Category chips (quick filters)
+        // Category chips (quick filters) — tap a category to filter the list
+        // to just that category; tap "All" to clear the filter. Previously
+        // the chip set the text query, which made the chip behave as a
+        // content-match instead of a true category filter.
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("All", "preference", "person", "fact", "task", "idea").forEach { cat ->
+            listOf("All" to null, "preference" to "preference", "person" to "person", "fact" to "fact", "task" to "task", "idea" to "idea").forEach { (label, cat) ->
+                val selected = state.categoryFilter == cat
                 AssistChip(
-                    onClick = {
-                        viewModel.setQuery(if (cat == "All") "" else cat)
-                        viewModel.search()
-                    },
-                    label = { Text(cat) },
+                    onClick = { viewModel.setCategory(cat) },
+                    label = { Text(label) },
                     colors = AssistChipDefaults.assistChipColors(
-                        containerColor = if (state.query == cat || (cat == "All" && state.query.isBlank())) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                     ),
                 )
             }
@@ -158,7 +165,6 @@ private fun MemoryRow(
     decay: Float,
     onForget: () -> Unit,
 ) {
-    val timeFmt = SimpleDateFormat("MMM d, HH:mm", Locale.US)
     val age = (System.currentTimeMillis() - createdAt) / 1000
     val ageDisplay = when {
         age < 60 -> "just now"
@@ -191,12 +197,12 @@ private fun MemoryRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     )
                     Text(
-                        text = "  ·  ",
+                        text = "  ·  $source",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                     )
                     Text(
-                        text = ageDisplay,
+                        text = "  ·  $ageDisplay",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     )

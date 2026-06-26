@@ -15,6 +15,8 @@ import javax.inject.Inject
 data class MemoryUiState(
     val memories: List<MemoryEntity> = emptyList(),
     val query: String = "",
+    /** When non-null, restricts the list to memories in this category. */
+    val categoryFilter: String? = null,
     val loading: Boolean = true,
 )
 
@@ -31,8 +33,13 @@ class MemoryViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(loading = true) }
-            val recent = memoryStore.recent(100)
-            _state.update { it.copy(memories = recent, loading = false) }
+            val current = _state.value
+            val results = when {
+                current.categoryFilter != null -> memoryStore.listByCategory(current.categoryFilter, 100)
+                current.query.isNotBlank() -> memoryStore.query(current.query, 50)
+                else -> memoryStore.recent(100)
+            }
+            _state.update { it.copy(memories = results, loading = false) }
         }
     }
 
@@ -40,13 +47,23 @@ class MemoryViewModel @Inject constructor(
         _state.update { it.copy(query = q) }
     }
 
+    /**
+     * Set a category filter. Pass null to clear (show all). Tapping a category
+     * chip in the UI calls this with the category name; tapping "All" passes
+     * null. The category filter takes precedence over the text query — the
+     * two are mutually exclusive in the v1 UI.
+     */
+    fun setCategory(category: String?) {
+        _state.update { it.copy(categoryFilter = category) }
+        refresh()
+    }
+
     fun search() {
-        val q = _state.value.query.trim()
-        viewModelScope.launch {
-            _state.update { it.copy(loading = true) }
-            val results = if (q.isBlank()) memoryStore.recent(100) else memoryStore.query(q, 50)
-            _state.update { it.copy(memories = results, loading = false) }
+        // Clear any category filter when a text search is explicitly triggered.
+        if (_state.value.categoryFilter != null) {
+            _state.update { it.copy(categoryFilter = null) }
         }
+        refresh()
     }
 
     fun forget(id: String) {

@@ -28,7 +28,10 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
+fun HomeScreen(
+    viewModel: HomeViewModel = hiltViewModel(),
+    onOpenChat: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsState()
     val greeting = when (state.hour) {
         in 5..11 -> "Good morning"
@@ -107,7 +110,7 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
 
         // CTA
         Button(
-            onClick = { /* navController.navigate("chat") - hooked up in NavGraph */ },
+            onClick = onOpenChat,
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Open chat")

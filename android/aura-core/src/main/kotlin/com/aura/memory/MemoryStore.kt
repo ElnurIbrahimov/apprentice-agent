@@ -56,7 +56,11 @@ class MemoryStore @Inject constructor(
     }
 
     suspend fun query(text: String, limit: Int = 5): List<MemoryEntity> {
-        // BM25-like: simple text match by LIKE, then rerank with vector similarity
+        // BM25-like: simple text match by LIKE, then rerank with vector similarity.
+        // On hit, call [touch] to bump accessedAt + accessCount + decayScore. This
+        // is what makes FadeMem meaningful — a frequently-recalled fact decays
+        // slower. Without it, every memory decays at the same rate regardless of
+        // how useful it actually is to the model.
         val textHits = dao.searchByText("%$text%", limit * 3)
         if (textHits.isEmpty()) return emptyList()
         val qVec = embedder.embed(text)
@@ -66,8 +70,21 @@ class MemoryStore @Inject constructor(
         val vectorHits = vectorIndex.search(qVec, candidates, topK = limit * 2)
         val byId = textHits.associateBy { it.id }
         val hitIds = (vectorHits.map { it.memoryId } + textHits.map { it.id }).distinct()
-        return hitIds.mapNotNull { byId[it] }.take(limit)
+        val results = hitIds.mapNotNull { byId[it] }.take(limit)
+        // Touch is fire-and-forget; we don't want a failed decay update to break recall.
+        for (mem in results) {
+            runCatching { touch(mem.id) }
+        }
+        return results
     }
+
+    /**
+     * List memories filtered by category. Unlike [query] this is a direct
+     * Room filter (no embedding or text matching) and does NOT touch the
+     * returned memories — category browsing is metadata, not a recall.
+     */
+    suspend fun listByCategory(category: String, limit: Int = 50): List<MemoryEntity> =
+        dao.byCategory(category, limit)
 
     suspend fun recent(limit: Int = 20): List<MemoryEntity> = dao.recent(limit)
     suspend fun byCategory(category: String, limit: Int = 20): List<MemoryEntity> = dao.byCategory(category, limit)

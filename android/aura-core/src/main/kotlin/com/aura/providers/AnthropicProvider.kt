@@ -17,18 +17,23 @@ import okhttp3.sse.EventSources
 
 /**
  * Anthropic Messages API. Tool use blocks are converted to ToolCall chunks.
- * Mirrors aura/providers/anthropic_provider.py.
+ *
+ * Like [OllamaCloudProvider], the API key is read from [ProviderKeys] on
+ * every [chat] call so user changes in Settings take effect immediately.
  */
 class AnthropicProvider(
-    private val apiKey: String,
+    private val providerKeys: ProviderKeys,
     private val httpClient: OkHttpClient,
 ) : Provider {
     override val prefix = "anthropic"
     override val displayName = "Anthropic"
 
+    /** Live API key, looked up at call time. */
+    private val apiKey: String get() = providerKeys.keyFor(prefix) ?: ""
+
     @Volatile private var activeCall: okhttp3.Call? = null
 
-    override fun isConfigured(): Boolean = apiKey.isNotBlank()
+    override fun isConfigured(): Boolean = providerKeys.isConfigured(prefix)
 
     override fun chat(model: String, messages: List<ProviderMessage>, options: ChatOptions, tools: List<ToolDefinition>): Flow<ProviderChunk> = flow {
         val (systemPrompt, anthropicMessages) = splitSystem(messages)

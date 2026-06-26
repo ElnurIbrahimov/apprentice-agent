@@ -26,41 +26,41 @@ object ProviderModule {
     @Provides
     @IntoMap
     @StringKey("ollama")
-    fun provideOllama(client: OkHttpClient): Provider = OllamaCloudProvider(
+    fun provideOllama(client: OkHttpClient, keys: ProviderKeys): Provider = OllamaCloudProvider(
         prefix = "ollama",
         displayName = "Ollama Cloud",
         baseUrl = "https://ollama.com/v1",
-        apiKey = System.getenv("OLLAMA_API_KEY") ?: "",
+        providerKeys = keys,
         httpClient = client,
     )
 
     @Provides
     @IntoMap
     @StringKey("anthropic")
-    fun provideAnthropic(client: OkHttpClient): Provider = AnthropicProvider(
-        apiKey = System.getenv("ANTHROPIC_API_KEY") ?: "",
+    fun provideAnthropic(client: OkHttpClient, keys: ProviderKeys): Provider = AnthropicProvider(
+        providerKeys = keys,
         httpClient = client,
     )
 
     @Provides
     @IntoMap
     @StringKey("openai")
-    fun provideOpenAI(client: OkHttpClient): Provider = OllamaCloudProvider(
+    fun provideOpenAI(client: OkHttpClient, keys: ProviderKeys): Provider = OllamaCloudProvider(
         prefix = "openai",
         displayName = "OpenAI",
         baseUrl = "https://api.openai.com/v1",
-        apiKey = System.getenv("OPENAI_API_KEY") ?: "",
+        providerKeys = keys,
         httpClient = client,
     )
 
     @Provides
     @IntoMap
     @StringKey("deepseek")
-    fun provideDeepSeek(client: OkHttpClient): Provider = OllamaCloudProvider(
+    fun provideDeepSeek(client: OkHttpClient, keys: ProviderKeys): Provider = OllamaCloudProvider(
         prefix = "deepseek",
         displayName = "DeepSeek",
         baseUrl = "https://api.deepseek.com/v1",
-        apiKey = System.getenv("DEEPSEEK_API_KEY") ?: "",
+        providerKeys = keys,
         httpClient = client,
     )
 

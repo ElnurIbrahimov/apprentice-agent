@@ -19,19 +19,29 @@ import okhttp3.sse.EventSources
 
 /**
  * OpenAI-compatible chat completions client. Works with Ollama Cloud, DeepSeek, OpenAI, NVIDIA, vLLM, etc.
- * Mirrors aura/providers/openai_compat.py.
+ *
+ * The API key is read from [ProviderKeys] on every [chat] call, not at
+ * construction time, so changes the user makes in the Settings UI take
+ * effect immediately without restarting the app.
  */
 class OllamaCloudProvider(
     override val prefix: String,
     override val displayName: String,
     private val baseUrl: String,
-    private val apiKey: String,
+    private val providerKeys: ProviderKeys,
     private val httpClient: OkHttpClient,
 ) : Provider {
 
     @Volatile private var activeEventSource: EventSource? = null
 
-    override fun isConfigured(): Boolean = apiKey.isNotBlank()
+    /**
+     * The current API key, looked up at call time. Returns blank if the user
+     * hasn't set a key for this provider; [isConfigured] will return false in
+     * that case and the chat request will fail with a clear 401.
+     */
+    private val apiKey: String get() = providerKeys.keyFor(prefix) ?: ""
+
+    override fun isConfigured(): Boolean = providerKeys.isConfigured(prefix)
 
     override fun chat(
         model: String,

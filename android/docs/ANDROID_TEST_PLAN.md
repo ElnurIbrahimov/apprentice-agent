@@ -58,19 +58,25 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 1. Open the system calendar app and create an event 20 minutes from now.
 2. In Aura chat, say "what's on my calendar today".
 3. Agent calls `calendar_read` → returns the event.
-4. Wait — the calendar monitor runs every 5 minutes, so within 5 minutes
-   you should see a notification "📅 [event name] starts in N minutes".
+4. (Notification about upcoming events is wired in code but the UI
+   subscriber is not implemented yet — calendar events are recorded
+   internally but no user-facing notification fires. This is tracked
+   for v1.5.)
 
 ## 7. Test the morning brief
 
 The morning brief is scheduled for 7am. To test immediately:
 
-1. Open Settings → enable "Morning brief" (TODO: add this toggle).
-2. Use adb to trigger the job:
+1. Use adb to trigger the job:
    ```bash
-   adb shell cmd jobscheduler run -f com.aura 0
+   adb shell cmd jobscheduler run -f com.aura.debug 0
    ```
-3. Within seconds, a notification appears with the brief.
+   (Use `com.aura.debug` because debug builds have the `.debug`
+   applicationIdSuffix — see `app/build.gradle.kts`.)
+2. Within seconds, a notification appears with the brief.
+
+Note: there is no Settings toggle for the morning brief yet; it is
+always on and fires daily at 7am. A toggle is a v1.5 task.
 
 ## 8. Test the home screen
 
@@ -82,7 +88,7 @@ The morning brief is scheduled for 7am. To test immediately:
 ## 9. Verify the build
 
 ```bash
-./gradlew :aura-core:testDebugUnitTest   # 32 unit tests pass
+./gradlew :aura-core:testDebugUnitTest   # 35+ unit tests pass
 ./gradlew :app:testDebugUnitTest         # 3 unit tests pass
 ./gradlew :app:assembleDebug             # APK builds
 ```

@@ -6,56 +6,78 @@ Native Kotlin/Compose superapp — a full port of the Aura desktop application t
 
 ## Modules
 
-1. **app** — Main application shell: DI wiring, navigation graph, top-level UI scaffold, and entry point (AuraApp, MainActivity).
-2. **aura-core** — Shared data layer: local persistence (Room), network (OkHttp), serialization (kotlinx), encryption (Tink), and DataStore preferences.
-3. **aura-assistant** — Conversational AI module: chat UI, streaming SSE bridge to LLM backends, context management, and prompt history.
-4. **aura-knowledge** — Semantic knowledge base: vector-store integration (sqlite-vec), document ingestion, embedding pipeline, and full-text search.
-5. **aura-memory** — Persistent memory layer: entity extraction, relationship graphs, spaced-repetition recall, and user-profile embeddings.
-6. **aura-automation** — Automation engine: trigger-action rules, WorkManager-based cron scheduling, context-aware action suggestions.
-7. **aura-files** — File management: storage access framework integration, file indexing, metadata extraction, and local/cloud file picker.
-8. **aura-media** — Media pipeline: CameraX integration, audio recording, image gallery, media metadata, and transcoding.
-9. **aura-connect** — Device connectivity: Bluetooth LE scanner, Wi-Fi peer discovery, USB accessory bridge, and nearby share.
-10. **aura-location** — Location & context: fused location provider, geofencing, place recognition, and activity detection.
-11. **aura-calendar** — Calendar & scheduling: CalendarProvider sync, event management, reminders, and natural-language date parsing.
-12. **aura-contacts** — Contacts hub: ContactsProvider sync, contact enrichment, groups, and communication history.
-13. **aura-sync** — Cross-device sync: encrypted sync protocol, conflict resolution, delta-based sync engine.
-14. **aura-settings** — Settings & onboarding: preference screen, permissions manager, theme config, backup/restore, and first-run wizard.
+The project is a 2-module Gradle build:
+
+1. **app** (`:app`) — Main application shell: Hilt graph, navigation graph, top-level UI scaffold, MainActivity, share-target Activity, settings UI, chat/home/memory screens. This is the user-facing module.
+2. **aura-core** (`:aura-core`) — Shared library: agentic loop (`Brain`, `MemoryAugmentedAgenticLoop`), provider SDK (Ollama, Anthropic, OpenAI, DeepSeek via `OllamaCloudProvider` + `AnthropicProvider`), tool registry with 23 phone-native tools, Room-backed memory + tasks, voice I/O (STT + TTS), proactive layer (morning brief + calendar monitor), DataStore preferences for API keys.
+
+This document is a snapshot of the **actual** project state, not aspirational. The earlier version of this file described a 14-module plan that was never implemented; that description is removed.
 
 ## ASCII Architecture Diagram
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                     app (shell)                           │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────────┐ │
-│  │ assistant │ │knowledge │ │  memory  │ │ automation  │ │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └──────┬──────┘ │
-│  ┌────┴─────┐ ┌────┴─────┐ ┌────┴─────┐ ┌──────┴──────┐ │
-│  │  files   │ │  media   │ │ connect  │ │  location   │ │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └──────┬──────┘ │
-│  ┌────┴─────┐ ┌────┴─────┐ ┌────┴─────┐ ┌──────┴──────┐ │
-│  │ calendar │ │ contacts │ │  sync    │ │  settings   │ │
-│  └──────────┘ └──────────┘ └──────────┘ └─────────────┘ │
-│                           │                               │
-│                    ┌──────┴──────┐                        │
-│                    │  aura-core  │                        │
-│                    │ (data layer)│                        │
-│                    └─────────────┘                        │
-└──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│  :app  (Compose UI + Activities)                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
+│  │  Home   │  │   Chat   │  │  Memory  │  Settings│
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  ...     │
+│       └──────────┬─┴──────────┬─┘                 │
+│       ┌──────────▼──────────▼──────────┐          │
+│       │   ViewModels (Hilt @HiltVM)   │          │
+│       └──────────┬────────────────────┘          │
+│                  │                                │
+│       ┌──────────▼────────────────────┐          │
+│       │  IncomingShareStore           │          │
+│       └────────────────────────────────┘          │
+└────────────────────┬───────────────────────────────┘
+                     │
+┌────────────────────▼───────────────────────────────┐
+│  :aura-core  (logic library)                       │
+│  ┌──────────────────────────────────────────────┐ │
+│  │   MemoryAugmentedAgenticLoop  +  Brain      │ │
+│  └────┬──────────┬────────────┬─────────────┬───┘ │
+│       │          │            │             │     │
+│  ┌────▼────┐ ┌───▼────┐ ┌─────▼──────┐ ┌───▼────┐│
+│  │Memory  │ │Tool    │ │  Provider  │ │ Voice  ││
+│  │Store   │ │Registry│ │   SDK      │ │ I/O    ││
+│  │(Room)  │ │(23 tls)│ │ 4 providers│ │STT+TTS ││
+│  └────────┘ └────────┘ └────────────┘ └────────┘│
+│                                                 │
+│  ┌──────────────────────────────────────────────┐│
+│  │  Proactive layer (morning brief + monitor)  ││
+│  │  ProviderKeys (DataStore)                    ││
+│  └──────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────┘
 ```
 
 ## Key Design Decisions
 
-- **Single-activity architecture**: One MainActivity, all screens are Compose destinations via Navigation Compose.
+- **Single-activity architecture**: One `MainActivity`, all screens are Compose destinations via Navigation Compose.
 - **Hilt DI**: Dependency injection throughout, scoped to component lifetimes.
-- **Offline-first**: Room + DataStore are the source of truth; network is a sync layer.
-- **Privacy-centric**: All processing stays on-device unless user explicitly enables sync. Biometric gate for sensitive operations.
-- **Modular by domain**: Each module has its own package, can be developed/tested independently, and communicates through repository interfaces defined in aura-core.
-- **Compose Material 3**: Following Material You design language with dynamic color support.
-- **Kotlin serialization**: Used for all structured data (network DTOs, settings, backup payloads).
+- **Cloud-only LLM providers**: User-supplied API keys (Ollama Cloud is free) read live from DataStore via `ProviderKeys`; no on-device model.
+- **Offline-first for memory + tasks**: Room is the source of truth; no network needed for any user data layer.
+- **Memory decay (FadeMem)**: 14-day half-life, bumped on recall, recomputed on app start.
+- **Permission-gated tools**: `ToolExecutor` checks `ContextCompat.checkSelfPermission` against `Tool.requiredPermissions` at execution time, so a permission that was just granted is honored on the next call without restart.
+- **Privacy-centric**: All processing stays on-device; cloud LLMs are an opt-in dependency. No cross-device sync, no analytics, no telemetry.
+- **Compose Material 3**: Following Material You design language.
 - **Coroutines + Flow**: Async throughout; StateFlow for UI state, SharedFlow for one-shot events.
+
+## What is NOT in this codebase (despite earlier docs)
+
+These are features that the architecture plan mentioned but were never built. Listing them explicitly so future readers don't go looking:
+
+- No Tink encryption — keys are stored in DataStore in plaintext. Encryption is a v1.5+ task.
+- No sqlite-vec — vector search is an in-memory `VectorIndex` over a deterministic SHA-256-projection `Embedder` (384-dim, not a real semantic model). Real embedding is v1.5+.
+- No CameraX — `ImageInputTool` opens the system camera via `ACTION_IMAGE_CAPTURE`.
+- No Coil — image rendering uses Compose `Image` directly.
+- No kotlinx-datetime — `java.util.Calendar` and `SimpleDateFormat` throughout.
+- No cross-device sync, no Bluetooth, no USB bridge, no nearby share.
+- No document ingestion / FTS pipeline.
+- No biometric UI — `BiometricPromptTool` is a `NeedsApproval` marker; the real `BiometricPrompt` API requires a `FragmentActivity` reference, which the agent loop doesn't carry.
+- No `aura-assistant` / `aura-knowledge` / `aura-automation` / `aura-files` / `aura-media` / `aura-connect` / `aura-location` / `aura-calendar` / `aura-contacts` / `aura-sync` modules. Two-module build.
 
 ## Version
 
-0.1.0
+`BuildConfig.VERSION_NAME` from `app/build.gradle.kts` (currently `0.1.0`).
 
 Source of truth: `.hermes/plans/2026-06-25_161811-aura-android-superapp.md`

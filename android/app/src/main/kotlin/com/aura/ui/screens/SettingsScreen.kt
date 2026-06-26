@@ -159,7 +159,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
 
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "Aura Android v0.1.0 — Day 3 build",
+            text = "Aura Android v" + com.aura.BuildConfig.VERSION_NAME,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
         )
