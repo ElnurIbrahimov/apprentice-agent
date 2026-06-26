@@ -43,7 +43,7 @@ dependencies {
     implementation(libs.androidx.biometric)
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
-    implementation(libs.kotlinx.serialization.json)
+    api(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

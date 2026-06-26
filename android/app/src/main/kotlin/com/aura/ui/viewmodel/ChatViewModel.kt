@@ -7,6 +7,7 @@ import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.agent.AgentEvent
+import com.aura.agent.ConversationStore
 import com.aura.agent.MemoryAugmentedAgenticLoop
 import com.aura.agent.Specialist
 import com.aura.agent.SpecialistRouter
@@ -17,7 +18,11 @@ import com.aura.agent.ToolResult
 import com.aura.providers.ProviderRegistry
 import com.aura.tools.Citation
 import com.aura.voice.TextToSpeech
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -93,6 +98,15 @@ class ChatViewModel @Inject constructor(
     init {
         refreshModels()
         textToSpeech.initialize()
+        viewModelScope.launch {
+            val store = EntryPointAccessors.fromApplication(
+                getApplication(),
+                ConversationStoreEntryPoint::class.java,
+            ).conversationStore()
+            store.mostRecent()?.let { conv ->
+                _state.update { it.copy(conversation = conv) }
+            }
+        }
     }
 
     override fun onCleared() {
@@ -223,6 +237,17 @@ class ChatViewModel @Inject constructor(
                                     flush = true,
                                 )
                             }
+                            // Persist conversation to Room
+                            val app = getApplication<android.app.Application>()
+                            viewModelScope.launch {
+                                runCatching {
+                                    val store = EntryPointAccessors.fromApplication(
+                                        app,
+                                        ConversationStoreEntryPoint::class.java,
+                                    ).conversationStore()
+                                    store.save(_state.value.conversation)
+                                }
+                            }
                         }
                         else -> Unit
                     }
@@ -324,4 +349,10 @@ class ChatViewModel @Inject constructor(
         compress(Bitmap.CompressFormat.JPEG, quality, stream)
         return Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
     }
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface ConversationStoreEntryPoint {
+    fun conversationStore(): ConversationStore
 }
