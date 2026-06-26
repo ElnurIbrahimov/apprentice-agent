@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,7 +34,7 @@ class CalendarMonitor @Inject constructor(
     @ApplicationContext private val context: Context,
     private val eventBus: ProactiveEventBus,
 ) {
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var pollJob: Job? = null
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
@@ -60,6 +61,9 @@ class CalendarMonitor @Inject constructor(
     fun stop() {
         pollJob?.cancel()
         pollJob = null
+        scope.cancel()
+        // Create a fresh scope so start() works again after stop()
+        scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         _running.value = false
     }
 

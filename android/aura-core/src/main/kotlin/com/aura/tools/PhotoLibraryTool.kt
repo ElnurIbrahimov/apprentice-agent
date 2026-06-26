@@ -2,8 +2,11 @@ package com.aura.tools
 
 import android.content.ContentUris
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
+import androidx.core.content.ContextCompat
 import com.aura.agent.Tool
 import com.aura.agent.ToolContext
 import com.aura.agent.ToolResult
@@ -41,9 +44,18 @@ class PhotoLibraryTool @Inject constructor(
         name = "photo_library",
         description = definition().description,
         risk = ToolRisk.PRIVACY,
-        requiredPermissions = emptyList(), // READ_MEDIA_IMAGES is granular; permission is at OS level
+        requiredPermissions = listOf("android.permission.READ_MEDIA_IMAGES"),
         parameters = definition().parameters,
         execute = { call, ctx ->
+            // Check permission before querying MediaStore to avoid relying on
+            // SecurityException catch for the common case.
+            val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                android.Manifest.permission.READ_MEDIA_IMAGES
+            else
+                android.Manifest.permission.READ_EXTERNAL_STORAGE
+            if (ContextCompat.checkSelfPermission(context, perm) != PackageManager.PERMISSION_GRANTED) {
+                return@Tool ToolResult.NeedsPermission(perm, "Photo library access required to list recent photos.")
+            }
             val limit = (call.arguments["limit"] as? Int ?: 10).coerceIn(1, 50)
             try {
                 val photos = listRecent(limit)
