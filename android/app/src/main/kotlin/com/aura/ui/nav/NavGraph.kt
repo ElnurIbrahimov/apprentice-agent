@@ -34,9 +34,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aura.ui.screens.ChatScreen
 import com.aura.ui.screens.GraphScreen
+import com.aura.ui.screens.HandsScreen
 import com.aura.ui.screens.HistoryScreen
 import com.aura.ui.screens.HomeScreen
 import com.aura.ui.screens.MemoryScreen
+import com.aura.ui.screens.ProactiveHistoryScreen
+import com.aura.ui.screens.TasksScreen
 import com.aura.ui.screens.SettingsScreen
 
 sealed class TopLevelRoute(val route: String, val label: String, val selectedIcon: ImageVector, val unselectedIcon: ImageVector) {
@@ -98,6 +101,9 @@ fun NavGraph() {
                     }
                 })
             }
+            composable("hands") { HandsScreen() }
+            composable("tasks") { TasksScreen() }
+            composable("proactive") { ProactiveHistoryScreen() }
         }
     }
 }

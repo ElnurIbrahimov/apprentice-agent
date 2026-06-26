@@ -41,6 +41,9 @@ import java.util.Locale
 fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     onOpenChat: () -> Unit = {},
+    onOpenHands: () -> Unit = {},
+    onOpenTasks: () -> Unit = {},
+    onOpenProactive: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val greeting = when (state.hour) {

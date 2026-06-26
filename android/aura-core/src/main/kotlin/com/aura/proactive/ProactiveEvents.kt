@@ -28,10 +28,14 @@ class ProactiveEvents @Inject constructor(
     private val _latest = MutableStateFlow<ProactiveEventBus.Event?>(null)
     val latest: StateFlow<ProactiveEventBus.Event?> = _latest.asStateFlow()
 
+    private val _history = MutableStateFlow<List<ProactiveEventBus.Event>>(emptyList())
+    val history: StateFlow<List<ProactiveEventBus.Event>> = _history.asStateFlow()
+
     init {
         scope.launch {
             bus.events.collect { event ->
                 _latest.value = event
+                _history.value = (_history.value + event).takeLast(100)
             }
         }
     }
