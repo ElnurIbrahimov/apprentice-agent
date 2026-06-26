@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Send
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.compose.rememberNavController
 import com.aura.IncomingShareStore
 import com.aura.agent.Specialist
 import com.aura.ui.components.ModelPickerSheet
@@ -70,7 +72,10 @@ import com.aura.ui.voice.VoiceOverlay
 import dagger.hilt.android.EntryPointAccessors
 
 @Composable
-fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
+fun ChatScreen(
+    viewModel: ChatViewModel = hiltViewModel(),
+    onNavigateHistory: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -180,6 +185,9 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                         contentDescription = if (state.ttsEnabled) "TTS on, tap to mute" else "TTS off, tap to enable",
                         tint = if (state.ttsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                     )
+                }
+                IconButton(onClick = onNavigateHistory) {
+                    Icon(Icons.Filled.History, contentDescription = "History", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 }
                 Icon(
                     imageVector = Icons.Filled.ArrowDropDown,

@@ -34,6 +34,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aura.ui.screens.ChatScreen
 import com.aura.ui.screens.GraphScreen
+import com.aura.ui.screens.HistoryScreen
 import com.aura.ui.screens.HomeScreen
 import com.aura.ui.screens.MemoryScreen
 import com.aura.ui.screens.SettingsScreen
@@ -79,10 +80,24 @@ fun NavGraph() {
                     }
                 })
             }
-            composable(TopLevelRoute.Chat.route) { ChatScreen() }
+            composable(TopLevelRoute.Chat.route) {
+                ChatScreen(onNavigateHistory = {
+                    navController.navigate("history")
+                })
+            }
             composable(TopLevelRoute.Memory.route) { MemoryScreen() }
             composable(TopLevelRoute.Settings.route) { SettingsScreen() }
             composable(TopLevelRoute.Graph.route) { GraphScreen() }
+            composable("history") {
+                HistoryScreen(onSelect = { convId ->
+                    // Navigate to chat — the conversation will be loaded from ConversationStore
+                    navController.navigate(TopLevelRoute.Chat.route) {
+                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                })
+            }
         }
     }
 }
