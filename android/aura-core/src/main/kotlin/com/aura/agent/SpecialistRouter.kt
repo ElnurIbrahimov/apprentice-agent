@@ -39,7 +39,7 @@ object SpecialistRouter {
                 // Notifications
                 "notification", "notify me", "alert",
                 // Device state
-                "screen", "screenshot", "display",
+                "screenshot", "display",
                 "battery", "volume", "wifi", "bluetooth", "airplane mode",
                 "dnd", "do not disturb", "flashlight", "torch",
             ))

@@ -82,8 +82,8 @@ data class ChatUiState(
     val permissionRationale: String? = null,
     /** Tool name + args that the permission was requested for. Used to retry after grant. */
     val pendingToolRetry: Pair<String, String>? = null,
-    /** Whether the last error is retryable. */
     val errorRetryable: Boolean = false,
+    val kgNodeCount: Int = 0,
 )
 
 @HiltViewModel
@@ -94,6 +94,7 @@ class ChatViewModel @Inject constructor(
     private val toolRegistry: ToolRegistry,
     private val textToSpeech: TextToSpeech,
     private val userPreferences: UserPreferences,
+    private val memoryStore: com.aura.memory.MemoryStore,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -138,6 +139,33 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * After the first conversation, create a memory that this user has
+     * started using Aura, so future conversations can reference it.
+     */
+    private fun onFirstConversationComplete() {
+        val count = runCatching {
+            kotlinx.coroutines.runBlocking {
+                EntryPointAccessors.fromApplication(
+                    getApplication(),
+                    ConversationStoreEntryPoint::class.java,
+                ).conversationStore().recent(2)
+            }
+        }.getOrDefault(emptyList()).size
+        if (count <= 1) {
+            viewModelScope.launch {
+                runCatching {
+                    memoryStore.store(
+                        content = "This user started using Aura. They went through the onboarding.",
+                        source = "system",
+                        category = "episode",
+                        importance = 0.8f,
+                    )
+                }
+            }
+        }
+    }
+
     override fun onCleared() {
         textToSpeech.shutdown()
         super.onCleared()
@@ -177,7 +205,10 @@ class ChatViewModel @Inject constructor(
     }
 
     fun setSpecialist(specialist: Specialist?) {
-        _state.update { it.copy(selectedSpecialist = specialist) }
+        _state.update { old ->
+            val newModel = specialist?.suggestedModel ?: old.activeModel
+            old.copy(selectedSpecialist = specialist, activeModel = newModel)
+        }
     }
 
     fun setTtsEnabled(enabled: Boolean) {
@@ -208,6 +239,8 @@ class ChatViewModel @Inject constructor(
     fun dismissError() {
         _state.update { it.copy(error = null, errorRetryable = false) }
     }
+
+    private fun refreshKgNodeCount() { viewModelScope.launch { runCatching { val entry = EntryPointAccessors.fromApplication(getApplication(), KgNodeCountEntryPoint::class.java); val count = entry.repository().stats().nodeCount; if (count > _state.value.kgNodeCount) _state.update { it.copy(kgNodeCount = count) } } } }
 
     private fun setErrorWithAutoDismiss(error: String, retryable: Boolean = false) {
         _state.update { it.copy(error = error, errorRetryable = retryable) }
@@ -256,11 +289,12 @@ class ChatViewModel @Inject constructor(
                     is ToolResult.NeedsPermission -> "Still needs permission: ${result.permission}"
                     is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
                 }
-                // Add the result as an assistant turn so the user can see it
+                // Add the result as a tool turn so the model sees it in the right format
                 _state.update { old ->
-                    old.copy(
-                        conversation = old.conversation.addAssistant("🔧 $toolName → $resultText"),
-                    )
+                    val updated = old.conversation
+                        .addToolCall("retry-$toolName", toolName, args)
+                        .setToolResult("retry-$toolName", resultText)
+                    old.copy(conversation = updated)
                 }
                 saveConversation()
             } catch (e: kotlinx.coroutines.CancellationException) { /* cancelled */ }
@@ -344,6 +378,9 @@ class ChatViewModel @Inject constructor(
                                 )
                             }
                             saveConversation()
+                            // Check if KG learned new nodes
+                            refreshKgNodeCount()
+                            onFirstConversationComplete()
                         }
                         else -> Unit
                     }
@@ -457,4 +494,10 @@ interface ConversationStoreEntryPoint {
 @InstallIn(SingletonComponent::class)
 interface ToolExecutorEntryPoint {
     fun toolExecutor(): com.aura.agent.ToolExecutor
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface KgNodeCountEntryPoint {
+    fun repository(): com.aura.kg.KnowledgeGraphRepository
 }

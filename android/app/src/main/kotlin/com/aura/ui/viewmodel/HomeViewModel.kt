@@ -45,6 +45,8 @@ class HomeViewModel @Inject constructor(
     init {
         refresh()
         observeProactiveEvents()
+        observeTasks()
+        observeMemories()
     }
 
     private fun observeProactiveEvents() {
@@ -57,6 +59,24 @@ class HomeViewModel @Inject constructor(
 
     fun dismissProactiveEvent() {
         proactiveEvents.dismiss()
+    }
+
+    private fun observeTasks() {
+        viewModelScope.launch {
+            taskDao.observeAll().collect { tasks ->
+                _state.update { it.copy(pendingTasks = tasks.take(5).map { t -> t.title }) }
+            }
+        }
+    }
+
+    private fun observeMemories() {
+        viewModelScope.launch {
+            memoryStore.observeCount().collect { _ ->
+                // When memories change, refresh the recent list
+                val recent = memoryStore.recent(5)
+                _state.update { it.copy(recentMemories = recent) }
+            }
+        }
     }
 
     fun refresh() {
