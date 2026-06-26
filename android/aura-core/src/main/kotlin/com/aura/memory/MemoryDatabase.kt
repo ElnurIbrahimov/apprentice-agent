@@ -2,8 +2,12 @@ package com.aura.memory
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import com.aura.kg.EdgeEntity
+import com.aura.kg.KnowledgeGraphDao
+import com.aura.kg.NodeEntity
 
-@Database(entities = [MemoryEntity::class], version = 1, exportSchema = false)
+@Database(entities = [MemoryEntity::class, NodeEntity::class, EdgeEntity::class], version = 2, exportSchema = false)
 abstract class MemoryDatabase : RoomDatabase() {
     abstract fun memoryDao(): MemoryDao
+    abstract fun knowledgeGraphDao(): KnowledgeGraphDao
 }
