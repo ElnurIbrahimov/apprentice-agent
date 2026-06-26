@@ -1,5 +1,6 @@
 package com.aura.agent
 
+import com.aura.kg.ConversationKgExtractor
 import com.aura.memory.MemoryStore
 import com.aura.providers.ChatOptions
 import com.aura.providers.ProviderMessage
@@ -16,7 +17,7 @@ import kotlinx.coroutines.ensureActive
 /**
  * The memory-augmented agentic loop. Pre-pends relevant memories to the system
  * prompt before each model call, and auto-stores memorable user facts after.
- * Mirrors how aura/core/agentic_loop.py interacts with aura/memory/.
+ * Also extracts a knowledge graph from each assistant turn (best-effort).
  */
 @Singleton
 class MemoryAugmentedAgenticLoop @Inject constructor(
@@ -24,6 +25,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
     private val toolRegistry: ToolRegistry,
     private val toolExecutor: ToolExecutor,
     private val memoryStore: MemoryStore,
+    private val kgExtractor: ConversationKgExtractor,
 ) {
     /**
      * Run the agentic loop, optionally overriding the base system prompt
@@ -115,7 +117,10 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                 }
             }
 
-            if (accumulatedText.isNotEmpty()) conversation.addAssistant(accumulatedText.toString())
+            if (accumulatedText.isNotEmpty()) {
+                conversation.addAssistant(accumulatedText.toString())
+                kgExtractor.extract(accumulatedText.toString())
+            }
             for ((id, args) in toolCalls) {
                 val name = toolCallStarts[id] ?: ""
                 conversation.addToolCall(id, name, args)

@@ -64,18 +64,23 @@ class KnowledgeGraphTool @Inject constructor(
                 ?: return@Tool ToolResult.Error("missing 'text' argument", "bad_args")
 
             try {
-                val result = extractGraph(text)
-                ToolResult.Ok(result)
+                val (nodes, edges) = extract(text)
+                ToolResult.Ok(buildJsonResult(nodes, edges))
             } catch (e: Exception) {
                 ToolResult.Error("Knowledge graph extraction failed: ${e.message}", "extraction_error")
             }
         },
     )
 
-    private suspend fun extractGraph(text: String): String {
+    suspend fun extract(text: String): Pair<List<KgNode>, List<KgEdge>> {
         val response = callLlm(text)
-        val parsed = parseResponse(response) ?: return """{"nodes":[],"edges":[]}"""
-        return buildJsonResult(parsed.first, parsed.second)
+        return parseResponse(response) ?: Pair(emptyList(), emptyList())
+    }
+
+    fun buildJsonResult(nodes: List<KgNode>, edges: List<KgEdge>): String {
+        val nodesJson = nodes.joinToString(",", "[", "]") { node -> formatNodeJson(node) }
+        val edgesJson = edges.joinToString(",", "[", "]") { edge -> formatEdgeJson(edge) }
+        return """{"nodes":$nodesJson,"edges":$edgesJson}"""
     }
 
     /**
@@ -209,22 +214,12 @@ class KnowledgeGraphTool @Inject constructor(
         )
     }
 
-    private fun buildJsonResult(nodes: List<KgNode>, edges: List<KgEdge>): String {
-        val nodesJson = nodes.joinToString(",", "[", "]") { node ->
-            buildNodeJson(node)
-        }
-        val edgesJson = edges.joinToString(",", "[", "]") { edge ->
-            buildEdgeJson(edge)
-        }
-        return """{"nodes":$nodesJson,"edges":$edgesJson}"""
-    }
-
-    private fun buildNodeJson(node: KgNode): String {
+    private fun formatNodeJson(node: KgNode): String {
         val props = if (node.properties.isEmpty()) "" else ",${node.properties.toString()}"
         return """{"id":"${escapeJson(node.id)}","label":"${escapeJson(node.label)}","type":"${node.type.name.lowercase()}"$props}"""
     }
 
-    private fun buildEdgeJson(edge: KgEdge): String {
+    private fun formatEdgeJson(edge: KgEdge): String {
         val props = if (edge.properties.isEmpty()) "" else ",${edge.properties.toString()}"
         return """{"id":"${escapeJson(edge.id)}","type":"${edge.type.name.lowercase()}","source_id":"${escapeJson(edge.sourceId)}","target_id":"${escapeJson(edge.targetId)}","weight":${edge.weight}$props}"""
     }

@@ -72,7 +72,8 @@ class EndToEndTest {
         )
 
         val executor = ToolExecutor(toolRegistry, context = io.mockk.mockk(relaxed = true))
-        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore)
+        val kgExtractor = io.mockk.mockk<com.aura.kg.ConversationKgExtractor>(relaxed = true)
+        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor)
 
         // 3. Run a conversation
         val conv = Conversation()
@@ -126,7 +127,8 @@ class EndToEndTest {
         )
 
         val executor = ToolExecutor(toolRegistry, context = io.mockk.mockk(relaxed = true))
-        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore)
+        val kgExtractor = io.mockk.mockk<com.aura.kg.ConversationKgExtractor>(relaxed = true)
+        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor)
 
         val conv = Conversation()
         conv.addUser("what do you remember about my preferences?")
@@ -156,7 +158,8 @@ class EndToEndTest {
             BrainChunk.Finished(FinishReason.stop.name),
         )
         val executor = ToolExecutor(toolRegistry, context = io.mockk.mockk(relaxed = true))
-        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore)
+        val kgExtractor = io.mockk.mockk<com.aura.kg.ConversationKgExtractor>(relaxed = true)
+        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor)
 
         val conv = Conversation()
         conv.addUser("my name is Elnur")
