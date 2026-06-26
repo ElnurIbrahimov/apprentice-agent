@@ -8,6 +8,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.agent.AgentEvent
 import com.aura.agent.MemoryAugmentedAgenticLoop
+import com.aura.agent.Specialist
+import com.aura.agent.SpecialistRouter
 import com.aura.agent.ToolCall
 import com.aura.agent.ToolContext
 import com.aura.agent.ToolRegistry
@@ -68,6 +70,8 @@ data class ChatUiState(
     val activeModel: String = "ollama:deepseek-v3.2:cloud",
     val availableModels: List<String> = emptyList(),
     val ttsEnabled: Boolean = true,
+    val selectedSpecialist: Specialist? = null,
+    val suggestedSpecialist: Specialist? = null,
 )
 
 @HiltViewModel
@@ -115,11 +119,20 @@ class ChatViewModel @Inject constructor(
     }
 
     fun setDraft(text: String) {
-        _state.update { it.copy(draft = text) }
+        _state.update { old ->
+            val toolNames = toolRegistry.definitions().map { it.name }
+            val suggested = if (text.isBlank()) null
+                else SpecialistRouter.pickSpecialist(text, toolNames)
+            old.copy(draft = text, suggestedSpecialist = suggested)
+        }
     }
 
     fun setModel(model: String) {
         _state.update { it.copy(activeModel = model) }
+    }
+
+    fun setSpecialist(specialist: Specialist?) {
+        _state.update { it.copy(selectedSpecialist = specialist) }
     }
 
     fun setTtsEnabled(enabled: Boolean) {
@@ -147,8 +160,9 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(draft = "", streaming = true, error = null) }
 
         runJob = viewModelScope.launch {
+            val specialist = current.selectedSpecialist
             try {
-                loop.run(current.conversation, model = current.activeModel).collect { event ->
+                loop.run(current.conversation, model = current.activeModel, specialist = specialist).collect { event ->
                     when (event) {
                         is AgentEvent.TextDelta -> {
                             currentResponseBuffer.append(event.text)

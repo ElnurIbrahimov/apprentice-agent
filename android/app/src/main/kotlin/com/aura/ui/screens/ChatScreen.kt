@@ -60,7 +60,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.IncomingShareStore
+import com.aura.agent.Specialist
 import com.aura.ui.components.ModelPickerSheet
+import com.aura.ui.components.SpecialistChips
 import com.aura.ui.viewmodel.ChatViewModel
 import com.aura.ui.voice.VoiceOverlay
 import dagger.hilt.android.EntryPointAccessors
@@ -231,6 +233,18 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+        }
+
+        // Specialist chip row — shown when draft has content or a specialist is selected
+        if (state.draft.isNotBlank() || state.selectedSpecialist != null) {
+            SpecialistChips(
+                selected = state.selectedSpecialist,
+                suggested = state.suggestedSpecialist,
+                onSelect = { specialist ->
+                    viewModel.setSpecialist(specialist)
+                },
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
         }
 
         ChatInputBar(

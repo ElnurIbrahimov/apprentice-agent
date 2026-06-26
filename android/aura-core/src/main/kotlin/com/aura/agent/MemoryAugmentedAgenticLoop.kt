@@ -25,12 +25,17 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
     private val toolExecutor: ToolExecutor,
     private val memoryStore: MemoryStore,
 ) {
+    /**
+     * Run the agentic loop, optionally overriding the base system prompt
+     * with a [Specialist]'s system prompt.
+     */
     fun run(
         conversation: Conversation,
         model: String,
         maxSteps: Int = 10,
         options: ChatOptions = ChatOptions(),
         recallLimit: Int = 5,
+        specialist: Specialist? = null,
     ): Flow<AgentEvent> = flow {
         val tools = toolRegistry.definitions()
         var step = 0
@@ -56,6 +61,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             // 2) Build messages
             val messages = buildList {
                 val sys = listOfNotNull(
+                    specialist?.systemPrompt,
                     conversation.systemPrompt,
                     brain.identity.ifBlank { null },
                 ).joinToString("\n\n") + memoryContext

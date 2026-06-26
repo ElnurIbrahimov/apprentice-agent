@@ -44,6 +44,7 @@ object ToolsModule {
         vision: VisionTool,
         imageGen: ImageGenTool,
         transcription: TranscriptionTool,
+        runHand: RunHandTool,
     ): ToolRegistry {
         val registry = ToolRegistry()
         registry.register(webSearch.tool)
@@ -76,6 +77,7 @@ object ToolsModule {
         registry.register(vision.tool)
         registry.register(imageGen.tool)
         registry.register(transcription.tool)
+        registry.register(runHand.tool)
         return registry
     }
 }

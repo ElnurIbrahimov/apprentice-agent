@@ -72,7 +72,7 @@ class NotificationsTool @Inject constructor(
         },
     )
 
-    private fun post(title: String, body: String) {
+    internal fun post(title: String, body: String) {
         // Launch the app's main activity by package + launcher intent. Works
         // without depending on the app module's MainActivity class directly.
         val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
