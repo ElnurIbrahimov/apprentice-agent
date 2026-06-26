@@ -142,8 +142,10 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                     is ToolResult.NeedsPermission -> "Permission needed: ${result.permission} — ${result.rationale}"
                     is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
                 }
+                val needsPerm = if (result is ToolResult.NeedsPermission) result.permission else null
+                val permRationale = if (result is ToolResult.NeedsPermission) result.rationale else null
                 currentConversation = currentConversation.setToolResult(id, resultText)
-                emit(AgentEvent.ToolResult(id, name, resultText))
+                emit(AgentEvent.ToolResult(id, name, resultText, needsPerm, permRationale))
             }
         }
 
@@ -165,7 +167,7 @@ sealed class AgentEvent {
     data class ToolCallStart(val id: String, val name: String) : AgentEvent()
     data class ToolCallEnd(val id: String, val name: String, val arguments: String) : AgentEvent()
     data class ToolExecuting(val id: String, val name: String) : AgentEvent()
-    data class ToolResult(val id: String, val name: String, val result: String) : AgentEvent()
+    data class ToolResult(val id: String, val name: String, val result: String, val needsPermission: String? = null, val permissionRationale: String? = null) : AgentEvent()
     data class Error(val code: String, val message: String, val retryable: Boolean) : AgentEvent()
     data class Result(val conversation: com.aura.agent.Conversation) : AgentEvent()
     data object Done : AgentEvent()

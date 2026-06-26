@@ -72,6 +72,8 @@ data class ChatUiState(
     val ttsEnabled: Boolean = true,
     val selectedSpecialist: Specialist? = null,
     val suggestedSpecialist: Specialist? = null,
+    val pendingPermission: String? = null,
+    val permissionRationale: String? = null,
 )
 
 @HiltViewModel
@@ -143,6 +145,10 @@ class ChatViewModel @Inject constructor(
         setTtsEnabled(!_state.value.ttsEnabled)
     }
 
+    fun dismissPermission() {
+        _state.update { it.copy(pendingPermission = null, permissionRationale = null) }
+    }
+
     fun cancel() {
         runJob?.cancel()
         runJob = null
@@ -187,6 +193,14 @@ class ChatViewModel @Inject constructor(
                                 if (citations.isNotEmpty()) {
                                     _state.update { old ->
                                         old.copy(conversation = old.conversation.setCitations(citations))
+                                    }
+                                }
+                                if (event.needsPermission != null) {
+                                    _state.update { old ->
+                                        old.copy(
+                                            pendingPermission = event.needsPermission,
+                                            permissionRationale = event.permissionRationale,
+                                        )
                                     }
                                 }
                             }

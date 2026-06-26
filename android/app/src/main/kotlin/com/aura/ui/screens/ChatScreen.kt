@@ -44,6 +44,8 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -303,6 +305,39 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                 showVoiceOverlay = false
             }
         }
+    }
+
+    // Permission request dialog — shown when a tool returns NeedsPermission
+    val pendingPerm = state.pendingPermission
+    if (pendingPerm != null) {
+        val permLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission()
+        ) { granted ->
+            viewModel.dismissPermission()
+            // After granting, the next tool execution attempt will succeed
+        }
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissPermission() },
+            title = { Text("Permission needed") },
+            text = {
+                Text(
+                    buildString {
+                        append(state.permissionRationale ?: "Aura needs access to continue.")
+                        append("\n\nPermission: $pendingPerm")
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { permLauncher.launch(pendingPerm) }) {
+                    Text("Grant")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissPermission() }) {
+                    Text("Deny")
+                }
+            },
+        )
     }
 }
 
