@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,6 +28,11 @@ import javax.inject.Singleton
  * constructs one ProviderKeys instance (singleton), and providers call
  * [keyFor] at every [Provider.chat] / [Provider.isConfigured] call. The
  * StateFlow cache is invalidated on every DataStore write.
+ *
+ * The initial load runs asynchronously to avoid ANR during Hilt graph
+ * construction. [keyFor] returns null until that load completes. To avoid a
+ * concurrent Settings write being overwritten by the late init load, all
+ * writes and reads that need a consistent snapshot go through [stateMutex].
  *
  * Mirrors the role aura_python/api_keys.py played in the Python codebase.
  */
@@ -47,6 +54,15 @@ class ProviderKeys @Inject constructor(
     )
 
     /**
+     * Guards the DataStore load-and-publish sequence. The initial async load in
+     * [init] and the explicit write in [set] both call [loadAllKeys] and
+     * publish the result to [_state]. Without the mutex a user who saves a key
+     * immediately after app start could have that write overwritten by the
+     * still-running init load.
+     */
+    private val stateMutex = Mutex()
+
+    /**
      * Asynchronous initial load. We do NOT block here — Hilt graph construction
      * is on the main thread, and a blocking DataStore read on it can ANR.
      * Instead, [keyFor] returns null until the load completes; the user sees
@@ -56,8 +72,12 @@ class ProviderKeys @Inject constructor(
      */
     init {
         scope.launch {
-            _state.value = loadAllKeys()
-            loadEmbeddingModel()
+            val loaded = loadAllKeys()
+            val model = loadEmbeddingModel()
+            stateMutex.withLock {
+                _state.value = loaded
+                _embeddingModel.value = model
+            }
         }
     }
 
@@ -82,7 +102,10 @@ class ProviderKeys @Inject constructor(
         } else {
             secureDataStore.putString(datastoreKey, key)
         }
-        _state.value = loadAllKeys()
+        val loaded = loadAllKeys()
+        stateMutex.withLock {
+            _state.value = loaded
+        }
     }
 
     private suspend fun loadAllKeys(): Map<String, String> {
@@ -94,22 +117,22 @@ class ProviderKeys @Inject constructor(
         return out
     }
 
-    /** Load the embedding model from DataStore, falling back to default. */
-    private suspend fun loadEmbeddingModel() {
+    /** Load the embedding model from DataStore, returning the fallback if absent. */
+    private suspend fun loadEmbeddingModel(): String {
         val saved = secureDataStore.getString("embedding_model")
-        if (!saved.isNullOrBlank()) {
-            _embeddingModel.value = saved
-        }
+        return if (!saved.isNullOrBlank()) saved else DEFAULT_EMBEDDING_MODEL
     }
 
     /** Persist a new embedding model name. */
     suspend fun setEmbeddingModel(model: String) {
-        if (model.isBlank()) {
+        val value = model.takeIf { it.isNotBlank() } ?: DEFAULT_EMBEDDING_MODEL
+        if (value == DEFAULT_EMBEDDING_MODEL) {
             secureDataStore.removeString("embedding_model")
-            _embeddingModel.value = DEFAULT_EMBEDDING_MODEL
         } else {
-            secureDataStore.putString("embedding_model", model)
-            _embeddingModel.value = model
+            secureDataStore.putString("embedding_model", value)
+        }
+        stateMutex.withLock {
+            _embeddingModel.value = value
         }
     }
 

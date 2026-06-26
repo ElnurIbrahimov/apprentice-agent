@@ -43,13 +43,14 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         var step = 0
         var finished = false
         var lastUserMessage = ""
+        var currentConversation = conversation
 
         while (!finished && step < maxSteps) {
             step += 1
             coroutineContext.ensureActive()
 
             // 1) Recall relevant memories for the last user message
-            lastUserMessage = conversation.turns.lastOrNull { it.user != null }?.user ?: ""
+            lastUserMessage = currentConversation.turns.lastOrNull { it.user != null }?.user ?: ""
             val memoryContext = if (lastUserMessage.isNotBlank()) {
                 val hits = memoryStore.query(lastUserMessage, recallLimit)
                 if (hits.isNotEmpty()) {
@@ -64,11 +65,11 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             val messages = buildList {
                 val sys = listOfNotNull(
                     specialist?.systemPrompt,
-                    conversation.systemPrompt,
+                    currentConversation.systemPrompt,
                     brain.identity.ifBlank { null },
                 ).joinToString("\n\n") + memoryContext
                 if (sys.isNotBlank()) add(ProviderMessage(role = Role.system, content = sys))
-                addAll(conversation.toMessages())
+                addAll(currentConversation.toMessages())
             }
 
             // 3) Stream the model step
@@ -118,12 +119,12 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             }
 
             if (accumulatedText.isNotEmpty()) {
-                conversation.addAssistant(accumulatedText.toString())
+                currentConversation = currentConversation.addAssistant(accumulatedText.toString())
                 kgExtractor.extract(accumulatedText.toString())
             }
             for ((id, args) in toolCalls) {
                 val name = toolCallStarts[id] ?: ""
-                conversation.addToolCall(id, name, args)
+                currentConversation = currentConversation.addToolCall(id, name, args)
             }
 
             if (toolCalls.isEmpty() || finishReason == "stop" || finishReason == "length") {
@@ -134,14 +135,14 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             for ((id, args) in toolCalls) {
                 val name = toolCallStarts[id] ?: continue
                 emit(AgentEvent.ToolExecuting(id, name))
-                val result = toolExecutor.execute(name, args, ToolContext(conversationId = conversation.id))
+                val result = toolExecutor.execute(name, args, ToolContext(conversationId = currentConversation.id))
                 val resultText = when (result) {
                     is ToolResult.Ok -> result.output
                     is ToolResult.Error -> "Error: ${result.message}"
                     is ToolResult.NeedsPermission -> "Permission needed: ${result.permission} — ${result.rationale}"
                     is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
                 }
-                conversation.setToolResult(id, resultText)
+                currentConversation = currentConversation.setToolResult(id, resultText)
                 emit(AgentEvent.ToolResult(id, name, resultText))
             }
         }
@@ -154,6 +155,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         if (!finished) {
             emit(AgentEvent.Error("max_steps_exceeded", "Hit max steps ($maxSteps) without finishing.", retryable = false))
         }
+        emit(AgentEvent.Result(currentConversation))
         emit(AgentEvent.Done)
     }
 }
@@ -165,5 +167,6 @@ sealed class AgentEvent {
     data class ToolExecuting(val id: String, val name: String) : AgentEvent()
     data class ToolResult(val id: String, val name: String, val result: String) : AgentEvent()
     data class Error(val code: String, val message: String, val retryable: Boolean) : AgentEvent()
+    data class Result(val conversation: com.aura.agent.Conversation) : AgentEvent()
     data object Done : AgentEvent()
 }

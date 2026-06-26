@@ -53,9 +53,15 @@ class GeminiProvider(
         tools: List<ToolDefinition>,
     ): Flow<ProviderChunk> = flow {
         val body = buildRequestBody(messages, options)
+        val key = apiKey
+        if (key.isBlank()) {
+            emit(ProviderChunk(error = ProviderError("missing_api_key", "Gemini API key not configured", retryable = false)))
+            return@flow
+        }
         val request = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent?key=$apiKey")
+            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent")
             .addHeader("Content-Type", "application/json")
+            .addHeader("X-Goog-Api-Key", key)
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
         val call = httpClient.newCall(request)

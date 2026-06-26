@@ -23,13 +23,13 @@ interface KnowledgeGraphDao {
 
     @Query("""
         SELECT * FROM kg_nodes
-        WHERE label LIKE '%' || :query || '%'
-           OR type LIKE '%' || :query || '%'
-           OR properties LIKE '%' || :query || '%'
+        WHERE label LIKE '%' || :queryEscaped || '%' ESCAPE '\'
+           OR type LIKE '%' || :queryEscaped || '%' ESCAPE '\'
+           OR properties LIKE '%' || :queryEscaped || '%' ESCAPE '\'
         ORDER BY accessCount DESC, updatedAt DESC
         LIMIT :limit
     """)
-    suspend fun searchNodes(query: String, limit: Int = 50): List<NodeEntity>
+    suspend fun searchNodes(queryEscaped: String, limit: Int = 50): List<NodeEntity>
 
     @Query("SELECT * FROM kg_nodes ORDER BY updatedAt DESC LIMIT :limit")
     suspend fun recentNodes(limit: Int = 50): List<NodeEntity>

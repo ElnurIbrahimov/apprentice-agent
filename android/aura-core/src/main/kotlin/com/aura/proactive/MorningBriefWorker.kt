@@ -66,8 +66,7 @@ class MorningBriefWorker @AssistedInject constructor(
             // Model prefix not registered. Skip silently.
             return Result.success()
         }
-        val conversation = Conversation(systemPrompt = systemPrompt)
-        conversation.addUser(userMessage)
+        val conversation = Conversation(systemPrompt = systemPrompt).addUser(userMessage)
         val responseText = StringBuilder()
         try {
             provider.chat(model, conversation.toMessages(), options, emptyList<com.aura.providers.ToolDefinition>()).collect { chunk ->

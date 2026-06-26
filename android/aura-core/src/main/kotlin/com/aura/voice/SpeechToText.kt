@@ -81,7 +81,8 @@ class SpeechToText @Inject constructor(
             _state.value = State.Error(-2, "No speech recognizer available on this device")
             return
         }
-        if (recognizer != null) return
+        // Destroy any existing recognizer before creating a new one
+        cleanup()
         val r = SpeechRecognizer.createSpeechRecognizer(context)
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -121,6 +122,7 @@ class SpeechToText @Inject constructor(
 
     fun stop() {
         recognizer?.stopListening()
+        cleanup()
     }
 
     fun cancel() {

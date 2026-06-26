@@ -63,7 +63,8 @@ class MemoryStore @Inject constructor(
         // is what makes FadeMem meaningful — a frequently-recalled fact decays
         // slower. Without it, every memory decays at the same rate regardless of
         // how useful it actually is to the model.
-        val textHits = dao.searchByText("%$text%", limit * 3)
+        val escapedText = escapeLikeWildcards(text)
+        val textHits = dao.searchByText("%$escapedText%", limit * 3)
         if (textHits.isEmpty()) return emptyList()
         val qVec = embedder.embed(text)
 
@@ -152,3 +153,13 @@ private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
     if (aN == 0f || bN == 0f) return 0f
     return dot / (aN * bN)
 }
+
+/**
+ * Escape SQL LIKE wildcards (% and _) so user queries containing these
+ * characters are matched literally rather than acting as pattern metacharacters.
+ * Must be kept in sync with the ESCAPE '\' clause in MemoryDao.searchByText.
+ */
+internal fun escapeLikeWildcards(s: String): String = s
+    .replace("\\", "\\\\")
+    .replace("%", "\\%")
+    .replace("_", "\\_")

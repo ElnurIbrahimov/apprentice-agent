@@ -8,6 +8,12 @@ import java.util.UUID
 /**
  * One conversation: a list of turns. Mirrors aura/core/conversation_manager.py
  * minus the persistence (Room-backed ConversationStore in module 3).
+ *
+ * The turn list is immutable at the public API surface. Mutator methods return
+ * a new [Conversation] so callers holding a snapshot (e.g. a Compose StateFlow
+ * value) cannot race with concurrent updates. This also makes StateFlow equality
+ * checks stable: a new turn produces a new [Conversation] reference, so
+ * collectors recompose exactly once per meaningful change.
  */
 @Serializable
 data class Conversation(
@@ -16,7 +22,7 @@ data class Conversation(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val systemPrompt: String? = null,
-    val turns: MutableList<Turn> = mutableListOf(),
+    val turns: List<Turn> = emptyList(),
     val model: String? = null,
     val metadata: Map<String, String> = emptyMap(),
 ) {
@@ -36,45 +42,51 @@ data class Conversation(
         return out
     }
 
-    /**
-     * Append a user turn. Note: updatedAt is a data class val so we can't
-     * reassign it in place; if you need to track recency, copy the conversation.
-     * Keeping the mutator pattern here because the alternative (returning a
-     * new Conversation per turn) balloons allocations on long sessions.
-     */
-    fun addUser(text: String) { turns += Turn(user = text) }
-    fun addAssistant(text: String) {
+    /** Append a user turn. */
+    fun addUser(text: String): Conversation = copy(
+        turns = turns + Turn(user = text),
+        updatedAt = System.currentTimeMillis(),
+    )
+
+    /** Append or fill in an assistant turn. */
+    fun addAssistant(text: String): Conversation {
         if (turns.isEmpty() || turns.last().assistant != null || turns.last().user == null) {
-            turns += Turn(assistant = text)
-        } else {
-            turns[turns.lastIndex] = turns.last().copy(assistant = text)
+            return copy(turns = turns + Turn(assistant = text), updatedAt = System.currentTimeMillis())
         }
+        return replaceLastTurn(turns.last().copy(assistant = text))
     }
-    fun addToolCall(id: String, name: String, args: String) {
-        if (turns.isEmpty()) turns += Turn()
-        val last = turns.lastIndex
-        turns[last] = turns.last().copy(toolTurns = turns[last].toolTurns + ToolTurn(id, name, args, ""))
+
+    /** Append a tool call to the current turn. */
+    fun addToolCall(id: String, name: String, args: String): Conversation {
+        if (turns.isEmpty()) return copy(turns = listOf(Turn(toolTurns = listOf(ToolTurn(id, name, args, "")))))
+        val last = turns.last()
+        return replaceLastTurn(last.copy(toolTurns = last.toolTurns + ToolTurn(id, name, args, "")))
     }
-    fun setToolResult(id: String, result: String) {
-        if (turns.isEmpty()) return
-        val last = turns.lastIndex
-        val toolTurns = turns[last].toolTurns.toMutableList()
-        for (i in toolTurns.indices) {
-            if (toolTurns[i].id == id) {
-                toolTurns[i] = toolTurns[i].copy(result = result)
-            }
+
+    /** Set the result for a tool call on the current turn. */
+    fun setToolResult(id: String, result: String): Conversation {
+        if (turns.isEmpty()) return this
+        val last = turns.last()
+        val updatedToolTurns = last.toolTurns.map {
+            if (it.id == id) it.copy(result = result) else it
         }
-        turns[last] = turns.last().copy(toolTurns = toolTurns)
+        return replaceLastTurn(last.copy(toolTurns = updatedToolTurns))
     }
 
     /**
      * Attach citations to the current turn (e.g. from web/research tools).
      * Replaces any existing citations on the last turn.
      */
-    fun setCitations(citations: List<Citation>) {
-        if (turns.isEmpty()) return
-        turns[turns.lastIndex] = turns.last().copy(citations = citations)
+    fun setCitations(citations: List<Citation>): Conversation {
+        if (turns.isEmpty()) return this
+        return replaceLastTurn(turns.last().copy(citations = citations))
     }
+
+    /** Replace the last turn, used by callers streaming partial assistant text. */
+    fun replaceLastTurn(newLast: Turn): Conversation = copy(
+        turns = turns.dropLast(1) + newLast,
+        updatedAt = System.currentTimeMillis(),
+    )
 }
 
 @Serializable

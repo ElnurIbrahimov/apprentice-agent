@@ -2,18 +2,14 @@ package com.aura.agent
 
 import com.aura.memory.MemoryEntity
 import com.aura.memory.MemoryStore
-import com.aura.providers.ChatOptions
 import com.aura.providers.FinishReason
 import com.aura.providers.Provider
-import com.aura.providers.ProviderChunk
 import com.aura.providers.ProviderRegistry
-import com.aura.providers.ToolCall
 import com.aura.tools.RememberTool
 import com.aura.tools.RecallTool
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -76,8 +72,7 @@ class EndToEndTest {
         val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor)
 
         // 3. Run a conversation
-        val conv = Conversation()
-        conv.addUser("I prefer dark mode")
+        val conv = Conversation().addUser("I prefer dark mode")
         val events = mutableListOf<AgentEvent>()
         loop.run(conv, model = "test:model", maxSteps = 5).collect { events += it }
 
@@ -85,7 +80,8 @@ class EndToEndTest {
         val toolExec = events.filterIsInstance<AgentEvent.ToolExecuting>().firstOrNull { it.name == "remember" }
         assertTrue(toolExec != null, "remember tool should have been executed")
 
-        val assistantText = conv.turns.last().assistant ?: ""
+        val finalConv = events.filterIsInstance<AgentEvent.Result>().last().conversation
+        val assistantText = finalConv.turns.last().assistant ?: ""
         assertTrue(assistantText.contains("Got it"), "assistant should respond with 'Got it', got: $assistantText")
     }
 
@@ -130,15 +126,15 @@ class EndToEndTest {
         val kgExtractor = io.mockk.mockk<com.aura.kg.ConversationKgExtractor>(relaxed = true)
         val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor)
 
-        val conv = Conversation()
-        conv.addUser("what do you remember about my preferences?")
+        val conv = Conversation().addUser("what do you remember about my preferences?")
         val events = mutableListOf<AgentEvent>()
         loop.run(conv, model = "test:model", maxSteps = 5).collect { events += it }
 
         val recallExec = events.filterIsInstance<AgentEvent.ToolExecuting>().firstOrNull { it.name == "recall" }
         assertTrue(recallExec != null, "recall tool should have been executed")
 
-        val assistantText = conv.turns.last().assistant ?: ""
+        val finalConv = events.filterIsInstance<AgentEvent.Result>().last().conversation
+        val assistantText = finalConv.turns.last().assistant ?: ""
         assertTrue(assistantText.contains("dark mode"), "assistant should mention dark mode from memory, got: $assistantText")
     }
 
@@ -161,8 +157,7 @@ class EndToEndTest {
         val kgExtractor = io.mockk.mockk<com.aura.kg.ConversationKgExtractor>(relaxed = true)
         val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor)
 
-        val conv = Conversation()
-        conv.addUser("my name is Elnur")
+        val conv = Conversation().addUser("my name is Elnur")
         loop.run(conv, model = "test:model", maxSteps = 2).collect { /* discard */ }
 
         // The auto-store path should have called maybeStore for the user message

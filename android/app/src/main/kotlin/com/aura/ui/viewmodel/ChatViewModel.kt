@@ -87,7 +87,6 @@ class ChatViewModel @Inject constructor(
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private var runJob: Job? = null
-    private var currentResponseBuffer = StringBuilder()
 
     init {
         refreshModels()
@@ -155,39 +154,57 @@ class ChatViewModel @Inject constructor(
         val text = current.draft.trim()
         if (text.isEmpty() || current.streaming) return
 
-        current.conversation.addUser(text)
-        currentResponseBuffer = StringBuilder()
-        _state.update { it.copy(draft = "", streaming = true, error = null) }
+        _state.update { it.copy(
+            conversation = it.conversation.addUser(text),
+            draft = "",
+            streaming = true,
+            error = null,
+        ) }
+        val specialist = current.selectedSpecialist
+        var responseBuffer = StringBuilder()
 
         runJob = viewModelScope.launch {
-            val specialist = current.selectedSpecialist
             try {
-                loop.run(current.conversation, model = current.activeModel, specialist = specialist).collect { event ->
+                val conversation = _state.value.conversation
+                loop.run(conversation, model = current.activeModel, specialist = specialist).collect { event ->
                     when (event) {
                         is AgentEvent.TextDelta -> {
-                            currentResponseBuffer.append(event.text)
-                            current.conversation.turns.lastOrNull()?.let { last ->
-                                val updated = last.copy(assistant = (last.assistant ?: "") + event.text)
-                                current.conversation.turns[current.conversation.turns.lastIndex] = updated
+                            responseBuffer.append(event.text)
+                            _state.update { old ->
+                                val turns = old.conversation.turns
+                                val last = turns.lastOrNull()
+                                val updatedConversation = if (last != null) {
+                                    old.conversation.replaceLastTurn(
+                                        last.copy(assistant = (last.assistant ?: "") + event.text)
+                                    )
+                                } else old.conversation
+                                old.copy(conversation = updatedConversation)
                             }
-                            _state.update { it.copy(conversation = current.conversation) }
                         }
                         is AgentEvent.ToolExecuting, is AgentEvent.ToolResult -> {
                             if (event is AgentEvent.ToolResult) {
                                 val citations = extractCitations(event.name, event.result)
                                 if (citations.isNotEmpty()) {
-                                    current.conversation.setCitations(citations)
+                                    _state.update { old ->
+                                        old.copy(conversation = old.conversation.setCitations(citations))
+                                    }
                                 }
                             }
-                            _state.update { it.copy(conversation = current.conversation) }
                         }
                         is AgentEvent.Error -> {
                             _state.update { it.copy(error = "${event.code}: ${event.message}") }
                         }
+                        is AgentEvent.Result -> {
+                            // Replace the conversation snapshot with the loop's final state
+                            // which includes all tool calls, tool results, and assistant text.
+                            _state.update { old ->
+                                old.copy(conversation = event.conversation)
+                            }
+                        }
                         is AgentEvent.Done -> {
-                            if (_state.value.ttsEnabled && currentResponseBuffer.isNotBlank()) {
+                            if (_state.value.ttsEnabled && responseBuffer.isNotBlank()) {
                                 textToSpeech.speak(
-                                    text = currentResponseBuffer.toString(),
+                                    text = responseBuffer.toString(),
                                     utteranceId = "turn-${System.currentTimeMillis()}",
                                     flush = true,
                                 )
@@ -202,7 +219,6 @@ class ChatViewModel @Inject constructor(
                 _state.update { it.copy(error = e.message ?: "unknown error") }
             } finally {
                 _state.update { it.copy(streaming = false) }
-                currentResponseBuffer = StringBuilder()
             }
         }
     }
@@ -218,9 +234,11 @@ class ChatViewModel @Inject constructor(
                 _state.update { it.copy(error = "vision tool not available") }
                 return@launch
             }
-            _state.update {
-                it.conversation.addUser(question)
-                it.copy(conversation = it.conversation, streaming = true)
+            _state.update { old ->
+                old.copy(
+                    conversation = old.conversation.addUser(question),
+                    streaming = true,
+                )
             }
             val result = tool.execute(
                 ToolCall(
@@ -236,8 +254,12 @@ class ChatViewModel @Inject constructor(
                 is ToolResult.NeedsPermission -> "Permission needed: ${result.permission}"
                 is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
             }
-            _state.value.conversation.addAssistant(text)
-            _state.update { it.copy(streaming = false) }
+            _state.update { old ->
+                old.copy(
+                    conversation = old.conversation.addAssistant(text),
+                    streaming = false,
+                )
+            }
         }
     }
 
@@ -274,8 +296,12 @@ class ChatViewModel @Inject constructor(
                 is ToolResult.NeedsPermission -> "Permission needed: ${result.permission}"
                 is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
             }
-            _state.value.conversation.addUser("🎤 $text")
-            _state.update { it.copy(streaming = false) }
+            _state.update { old ->
+                old.copy(
+                    conversation = old.conversation.addUser("🎤 $text"),
+                    streaming = false,
+                )
+            }
         }
     }
 

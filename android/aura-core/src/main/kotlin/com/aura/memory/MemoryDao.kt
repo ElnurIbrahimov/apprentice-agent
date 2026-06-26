@@ -24,7 +24,7 @@ interface MemoryDao {
     @Query("SELECT * FROM memories WHERE category = :category ORDER BY createdAt DESC LIMIT :limit")
     suspend fun byCategory(category: String, limit: Int = 50): List<MemoryEntity>
 
-    @Query("SELECT * FROM memories WHERE content LIKE :query ORDER BY decayScore DESC LIMIT :limit")
+    @Query("SELECT * FROM memories WHERE content LIKE :query ESCAPE '\\' ORDER BY decayScore DESC LIMIT :limit")
     suspend fun searchByText(query: String, limit: Int = 50): List<MemoryEntity>
 
     @Query("SELECT * FROM memories ORDER BY decayScore DESC LIMIT :limit")
