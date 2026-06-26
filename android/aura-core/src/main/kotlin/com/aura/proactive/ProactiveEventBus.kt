@@ -17,10 +17,11 @@ import javax.inject.Singleton
 class ProactiveEventBus @Inject constructor() {
 
     sealed class Event {
-        data class MorningBriefReady(val title: String, val body: String) : Event()
-        data class CalendarEventSoon(val title: String, val minutesUntil: Int) : Event()
-        data class LocationArrived(val placeName: String, val recalledMemories: List<String>) : Event()
-        data class MemoryDecayWarning(val memoryId: String, val preview: String) : Event()
+        abstract val timestamp: Long
+        data class MorningBriefReady(val title: String, val body: String, override val timestamp: Long = System.currentTimeMillis()) : Event()
+        data class CalendarEventSoon(val title: String, val minutesUntil: Int, override val timestamp: Long = System.currentTimeMillis()) : Event()
+        data class LocationArrived(val placeName: String, val recalledMemories: List<String>, override val timestamp: Long = System.currentTimeMillis()) : Event()
+        data class MemoryDecayWarning(val memoryId: String, val preview: String, override val timestamp: Long = System.currentTimeMillis()) : Event()
     }
 
     private val _events = MutableSharedFlow<Event>(

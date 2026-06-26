@@ -31,7 +31,7 @@ private fun EventRow(event: ProactiveEventBus.Event) {
             Text(icon, style = MaterialTheme.typography.titleLarge, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold); if (body.isNotBlank()) { Spacer(Modifier.height(2.dp)); Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)) } }
-            Text(fmt.format(Date(System.currentTimeMillis())), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            Text(fmt.format(Date(event.timestamp)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
         }
     }
 }

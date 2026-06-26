@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.aura.UserPreferences
 import com.aura.agent.AgentEvent
 import com.aura.agent.ConversationStore
 import com.aura.agent.MemoryAugmentedAgenticLoop
@@ -88,12 +89,24 @@ class ChatViewModel @Inject constructor(
     private val providerRegistry: ProviderRegistry,
     private val toolRegistry: ToolRegistry,
     private val textToSpeech: TextToSpeech,
+    private val userPreferences: UserPreferences,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
     private var runJob: Job? = null
+
+    private fun saveConversation() {
+        viewModelScope.launch {
+            runCatching {
+                EntryPointAccessors.fromApplication(
+                    getApplication(),
+                    ConversationStoreEntryPoint::class.java,
+                ).conversationStore().save(_state.value.conversation)
+            }
+        }
+    }
 
     init {
         refreshModels()
@@ -103,8 +116,20 @@ class ChatViewModel @Inject constructor(
                 getApplication(),
                 ConversationStoreEntryPoint::class.java,
             ).conversationStore()
-            store.mostRecent()?.let { conv ->
-                _state.update { it.copy(conversation = conv) }
+            val recent = store.mostRecent()
+            if (recent != null) {
+                _state.update { it.copy(conversation = recent) }
+            } else {
+                // First conversation ever — set a welcoming system prompt
+                _state.update { it.copy(conversation = it.conversation.copy(
+                    systemPrompt = "You are Aura, a personal AI assistant. This is your first conversation with a new user. Introduce yourself warmly — tell them what you can do: remember things, set reminders, search the web, manage tasks, and work through delegated hands. Be concise and direct. Ask what they need help with.",
+                    title = "Welcome",
+                )) }
+            }
+        }
+        viewModelScope.launch {
+            userPreferences.defaultModel.collect { model ->
+                _state.update { it.copy(activeModel = model) }
             }
         }
     }
@@ -144,6 +169,7 @@ class ChatViewModel @Inject constructor(
 
     fun setModel(model: String) {
         _state.update { it.copy(activeModel = model) }
+        viewModelScope.launch { userPreferences.setDefaultModel(model) }
     }
 
     fun setSpecialist(specialist: Specialist?) {
@@ -159,8 +185,71 @@ class ChatViewModel @Inject constructor(
         setTtsEnabled(!_state.value.ttsEnabled)
     }
 
+    fun loadConversation(id: String) {
+        viewModelScope.launch {
+            val store = EntryPointAccessors.fromApplication(
+                getApplication(),
+                ConversationStoreEntryPoint::class.java,
+            ).conversationStore()
+            store.load(id)?.let { conv ->
+                _state.update { it.copy(conversation = conv) }
+            }
+        }
+    }
+
     fun dismissPermission() {
         _state.update { it.copy(pendingPermission = null, permissionRationale = null) }
+    }
+
+    fun retryAfterPermission(permission: String) {
+        // Inject a system message telling the agent permission was granted,
+        // then re-run the agent loop so it retries the failed tool call.
+        _state.update { old ->
+            old.copy(
+                conversation = old.conversation.addUser(
+                    "[System: Permission $permission was just granted. Please retry your last operation.]"
+                ),
+                pendingPermission = null,
+                permissionRationale = null,
+            )
+        }
+        // Trigger the send to re-run the agent
+        runJob?.cancel()
+        runJob = viewModelScope.launch {
+            val current = _state.value
+            val conversation = current.conversation
+            var responseBuffer = StringBuilder()
+            try {
+                loop.run(conversation, model = current.activeModel, specialist = current.selectedSpecialist).collect { event ->
+                    when (event) {
+                        is AgentEvent.TextDelta -> {
+                            responseBuffer.append(event.text)
+                            _state.update { old ->
+                                val last = old.conversation.turns.lastOrNull()
+                                val updated = if (last != null) old.conversation.replaceLastTurn(last.copy(assistant = (last.assistant ?: "") + event.text)) else old.conversation
+                                old.copy(conversation = updated)
+                            }
+                        }
+                        is AgentEvent.ToolExecuting, is AgentEvent.ToolResult -> {
+                            if (event is AgentEvent.ToolResult) {
+                                val citations = extractCitations(event.name, event.result)
+                                if (citations.isNotEmpty()) _state.update { old -> old.copy(conversation = old.conversation.setCitations(citations)) }
+                                if (event.needsPermission != null) _state.update { old -> old.copy(pendingPermission = event.needsPermission, permissionRationale = event.permissionRationale) }
+                            }
+                        }
+                        is AgentEvent.Error -> _state.update { it.copy(error = "${event.code}: ${event.message}") }
+                        is AgentEvent.Result -> _state.update { old -> old.copy(conversation = event.conversation) }
+                        is AgentEvent.Done -> {
+                            if (_state.value.ttsEnabled && responseBuffer.isNotBlank()) textToSpeech.speak(text = responseBuffer.toString(), utteranceId = "turn-${System.currentTimeMillis()}", flush = true)
+                            viewModelScope.launch { runCatching { EntryPointAccessors.fromApplication(getApplication(), ConversationStoreEntryPoint::class.java).conversationStore().save(_state.value.conversation) } }
+                        }
+                        else -> Unit
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) { /* cancelled */ }
+            catch (e: Exception) { _state.update { it.copy(error = e.message ?: "unknown error") } }
+            finally { _state.update { it.copy(streaming = false) } }
+        }
     }
 
     fun cancel() {
@@ -182,6 +271,8 @@ class ChatViewModel @Inject constructor(
         ) }
         val specialist = current.selectedSpecialist
         var responseBuffer = StringBuilder()
+
+        saveConversation()  // Save user message immediately
 
         runJob = viewModelScope.launch {
             try {
@@ -237,17 +328,7 @@ class ChatViewModel @Inject constructor(
                                     flush = true,
                                 )
                             }
-                            // Persist conversation to Room
-                            val app = getApplication<android.app.Application>()
-                            viewModelScope.launch {
-                                runCatching {
-                                    val store = EntryPointAccessors.fromApplication(
-                                        app,
-                                        ConversationStoreEntryPoint::class.java,
-                                    ).conversationStore()
-                                    store.save(_state.value.conversation)
-                                }
-                            }
+                            saveConversation()
                         }
                         else -> Unit
                     }

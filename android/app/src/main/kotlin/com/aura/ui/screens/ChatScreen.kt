@@ -74,8 +74,15 @@ import dagger.hilt.android.EntryPointAccessors
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel(),
+    resumeConversationId: String? = null,
     onNavigateHistory: () -> Unit = {},
 ) {
+    // Load a specific conversation if resuming from history
+    LaunchedEffect(resumeConversationId) {
+        if (resumeConversationId != null) {
+            viewModel.loadConversation(resumeConversationId)
+        }
+    }
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -321,8 +328,11 @@ fun ChatScreen(
         val permLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission()
         ) { granted ->
-            viewModel.dismissPermission()
-            // After granting, the next tool execution attempt will succeed
+            if (granted) {
+                viewModel.retryAfterPermission(pendingPerm)
+            } else {
+                viewModel.dismissPermission()
+            }
         }
         AlertDialog(
             onDismissRequest = { viewModel.dismissPermission() },
