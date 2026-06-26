@@ -1,6 +1,7 @@
 package com.aura.agent
 
 import com.aura.providers.ProviderMessage
+import com.aura.tools.Citation
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
@@ -65,6 +66,15 @@ data class Conversation(
         }
         turns[last] = turns.last().copy(toolTurns = toolTurns)
     }
+
+    /**
+     * Attach citations to the current turn (e.g. from web/research tools).
+     * Replaces any existing citations on the last turn.
+     */
+    fun setCitations(citations: List<Citation>) {
+        if (turns.isEmpty()) return
+        turns[turns.lastIndex] = turns.last().copy(citations = citations)
+    }
 }
 
 @Serializable
@@ -72,6 +82,7 @@ data class Turn(
     val user: String? = null,
     val assistant: String? = null,
     val toolTurns: List<ToolTurn> = emptyList(),
+    val citations: List<Citation> = emptyList(),
 )
 
 @Serializable

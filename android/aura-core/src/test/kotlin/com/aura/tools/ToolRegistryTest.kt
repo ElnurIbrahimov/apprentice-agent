@@ -15,6 +15,7 @@ class ToolRegistryTest {
 
     private val expectedTools = listOf(
         "web_search" to ToolRisk.READ_ONLY,
+        "brave_search" to ToolRisk.READ_ONLY,
         "post_notification" to ToolRisk.WRITE_LOCAL,
         "location_now" to ToolRisk.PRIVACY,
         "share" to ToolRisk.WRITE_LOCAL,

@@ -32,12 +32,16 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -64,6 +68,7 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
     var showModelPicker by remember { mutableStateOf(false) }
+    var showSources by remember { mutableStateOf(false) }
     var showVoiceOverlay by remember { mutableStateOf(false) }
     var hasMicPermission by remember {
         mutableStateOf(
@@ -154,7 +159,12 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                     MessageBubble(text = userMsg, isUser = true)
                 }
                 turn.assistant?.let { assistantMsg ->
-                    MessageBubble(text = assistantMsg, isUser = false)
+                    MessageBubble(
+                        text = assistantMsg,
+                        isUser = false,
+                        citations = turn.citations,
+                        onShowSources = { showSources = true },
+                    )
                 }
                 for (toolTurn in turn.toolTurns) {
                     if (toolTurn.result.isNotEmpty()) {
@@ -208,6 +218,14 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
         )
     }
 
+    val sources = state.conversation.turns.lastOrNull()?.citations ?: emptyList()
+    if (showSources && sources.isNotEmpty()) {
+        SourcesSheet(
+            citations = sources,
+            onDismiss = { showSources = false },
+        )
+    }
+
     if (showVoiceOverlay) {
         if (hasMicPermission) {
             VoiceOverlay(
@@ -238,7 +256,12 @@ private fun humanModelName(id: String): String {
 }
 
 @Composable
-private fun MessageBubble(text: String, isUser: Boolean) {
+private fun MessageBubble(
+    text: String,
+    isUser: Boolean,
+    citations: List<com.aura.tools.Citation> = emptyList(),
+    onShowSources: () -> Unit = {},
+) {
     val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
     val textColor = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
     val alignment = if (isUser) Alignment.End else Alignment.Start
@@ -256,12 +279,28 @@ private fun MessageBubble(text: String, isUser: Boolean) {
             ),
             modifier = Modifier.widthIn(max = 320.dp),
         ) {
-            Text(
-                text = text.ifBlank { "…" },
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                color = textColor,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                Text(
+                    text = text.ifBlank { "…" },
+                    color = textColor,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (!isUser && citations.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.clickable { onShowSources() },
+                    ) {
+                        Text(
+                            text = "${citations.size} sources",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -307,6 +346,61 @@ private fun TypingIndicator() {
                 style = MaterialTheme.typography.bodyLarge,
             )
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SourcesSheet(
+    citations: List<com.aura.tools.Citation>,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+        ) {
+            Text(
+                text = "Sources",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(citations) { citation ->
+                    CitationRow(citation = citation)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun CitationRow(citation: com.aura.tools.Citation) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+    ) {
+        Text(
+            text = "[${citation.index}] ${citation.title}",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = citation.url,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
     }
 }
 

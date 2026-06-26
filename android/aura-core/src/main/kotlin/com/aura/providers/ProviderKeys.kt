@@ -114,7 +114,7 @@ class ProviderKeys @Inject constructor(
     }
 
     companion object {
-        val PREFIXES = listOf("ollama", "anthropic", "openai", "deepseek", "gemini", "groq", "openrouter")
+        val PREFIXES = listOf("ollama", "anthropic", "openai", "deepseek", "gemini", "groq", "openrouter", "brave", "tavily", "firecrawl")
         const val DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"
     }
 }

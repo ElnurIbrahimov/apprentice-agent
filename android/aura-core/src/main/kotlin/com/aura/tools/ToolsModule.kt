@@ -15,6 +15,8 @@ object ToolsModule {
     @Singleton
     fun provideToolRegistry(
         webSearch: WebSearchTool,
+        braveSearch: BraveSearchTool,
+        tavilySearch: TavilySearchTool,
         notifications: NotificationsTool,
         location: LocationNowTool,
         share: ShareIntentTool,
@@ -37,9 +39,13 @@ object ToolsModule {
         notificationList: NotificationListTool,
         imageInput: ImageInputTool,
         filePicker: FilePickerTool,
+        firecrawlFetch: FirecrawlFetchTool,
+        deepResearch: DeepResearchTool,
     ): ToolRegistry {
         val registry = ToolRegistry()
         registry.register(webSearch.tool)
+        registry.register(braveSearch.tool)
+        registry.register(tavilySearch.tool)
         registry.register(notifications.tool)
         registry.register(location.tool)
         registry.register(share.tool)
@@ -62,6 +68,8 @@ object ToolsModule {
         registry.register(notificationList.tool)
         registry.register(imageInput.tool)
         registry.register(filePicker.tool)
+        registry.register(firecrawlFetch.tool)
+        registry.register(deepResearch.tool)
         return registry
     }
 }

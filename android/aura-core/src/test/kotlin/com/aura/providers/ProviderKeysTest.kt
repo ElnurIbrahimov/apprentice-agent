@@ -72,16 +72,12 @@ class ProviderKeysTest {
 
     @Test
     fun `PREFIXES contains all supported providers`() {
-        // If a new provider is added, this test forces the maintainer to
-        // update PREFIXES — the Settings UI iterates over this list to
-        // decide which input fields to show.
-        assertTrue(ProviderKeys.PREFIXES.contains("ollama"))
-        assertTrue(ProviderKeys.PREFIXES.contains("anthropic"))
-        assertTrue(ProviderKeys.PREFIXES.contains("openai"))
-        assertTrue(ProviderKeys.PREFIXES.contains("deepseek"))
-        assertTrue(ProviderKeys.PREFIXES.contains("gemini"))
-        assertTrue(ProviderKeys.PREFIXES.contains("groq"))
-        assertTrue(ProviderKeys.PREFIXES.contains("openrouter"))
-        assertEquals(7, ProviderKeys.PREFIXES.size)
+        // If a new provider or tool API key is added, this test forces
+        // the maintainer to update PREFIXES — the Settings UI iterates
+        // over this list to decide which input fields to show.
+        assertEquals(
+            setOf("ollama", "anthropic", "openai", "deepseek", "gemini", "groq", "openrouter", "brave", "tavily", "firecrawl"),
+            ProviderKeys.PREFIXES.toSet()
+        )
     }
 }

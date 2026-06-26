@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.aura.agent.AgentEvent
 import com.aura.agent.MemoryAugmentedAgenticLoop
 import com.aura.providers.ProviderRegistry
+import com.aura.tools.Citation
 import com.aura.voice.TextToSpeech
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -14,7 +15,40 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
+
+private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+private fun extractCitations(toolName: String, result: String): List<Citation> {
+    return when (toolName) {
+        "deep_research" -> {
+            runCatching {
+                val obj = json.parseToJsonElement(result).jsonObject
+                val arr = obj["citations"]?.jsonArray ?: return@runCatching emptyList<Citation>()
+                arr.mapIndexed { idx, el ->
+                    val map = el.jsonObject
+                    Citation(
+                        index = idx + 1,
+                        title = map["title"]?.jsonPrimitive?.content ?: "Source",
+                        url = map["url"]?.jsonPrimitive?.content ?: "",
+                    )
+                }
+            }.getOrDefault(emptyList())
+        }
+        "brave_search", "tavily_search" -> {
+            // Parse markdown lines: "- [title](url): snippet"
+            val regex = """- \[([^\]]+)\]\(([^)]+)\):""".toRegex()
+            regex.findAll(result).mapIndexed { idx, match ->
+                Citation(index = idx + 1, title = match.groupValues[1], url = match.groupValues[2])
+            }.toList()
+        }
+        else -> emptyList()
+    }
+}
 
 data class ChatUiState(
     val conversation: com.aura.agent.Conversation = com.aura.agent.Conversation(),
@@ -114,6 +148,12 @@ class ChatViewModel @Inject constructor(
                             _state.update { it.copy(conversation = current.conversation) }
                         }
                         is AgentEvent.ToolExecuting, is AgentEvent.ToolResult -> {
+                            if (event is AgentEvent.ToolResult) {
+                                val citations = extractCitations(event.name, event.result)
+                                if (citations.isNotEmpty()) {
+                                    current.conversation.setCitations(citations)
+                                }
+                            }
                             _state.update { it.copy(conversation = current.conversation) }
                         }
                         is AgentEvent.Error -> {
