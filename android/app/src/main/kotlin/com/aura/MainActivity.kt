@@ -7,17 +7,37 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import com.aura.security.BiometricActivityHolder
 import com.aura.ui.nav.NavGraph
+import com.aura.ui.screens.OnboardingScreen
 import com.aura.ui.theme.AuraTheme
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface FirstRunGateEntryPoint {
+    fun firstRunGate(): FirstRunGate
+}
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
@@ -66,12 +86,29 @@ class MainActivity : FragmentActivity() {
 
 @Composable
 fun AuraRoot() {
+    val ctx = LocalContext.current
+    var firstRunComplete by remember { mutableStateOf<Boolean?>(null) }
+
+    LaunchedEffect(Unit) {
+        val gate = EntryPointAccessors.fromApplication(
+            ctx.applicationContext,
+            FirstRunGateEntryPoint::class.java,
+        ).firstRunGate()
+        firstRunComplete = gate.isFirstRunComplete()
+    }
+
     AuraTheme {
         Surface(
             modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
             color = MaterialTheme.colorScheme.background,
         ) {
-            NavGraph()
+            when (firstRunComplete) {
+                null -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+                false -> OnboardingScreen(onComplete = { firstRunComplete = true })
+                true -> NavGraph()
+            }
         }
     }
 }

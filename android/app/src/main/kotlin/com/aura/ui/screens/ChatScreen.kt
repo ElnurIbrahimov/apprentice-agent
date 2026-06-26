@@ -311,8 +311,8 @@ private fun humanModelName(id: String): String {
     val provider = parts.getOrNull(0) ?: "?"
     val model = parts.getOrNull(1) ?: id
     return when (id) {
-        "ollama:deepseek-v3.2:cloud" -> "DeepSeek V3.2 · $provider"
-        "ollama:kimi-k2.6:cloud" -> "Kimi K2.6 · $provider"
+        "ollama:deepseek-v4-pro:cloud" -> "DeepSeek V4 Pro · $provider"
+        "ollama:kimi-k2.7-code:cloud" -> "Kimi K2.7 · $provider"
         "anthropic:claude-sonnet-4-5" -> "Claude Sonnet 4.5 · $provider"
         else -> "$model · $provider"
     }

@@ -92,7 +92,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            text = "Restart the app after adding a key so the provider can pick it up.",
+            text = "API keys are stored locally and never leave your device. Changes take effect immediately.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
         )
@@ -153,10 +153,12 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             listOf(
-                "ollama:deepseek-v3.2:cloud" to "DeepSeek V3.2 (cheap, fast)",
-                "ollama:kimi-k2.6:cloud" to "Kimi K2.6 (tool calls)",
+                "ollama:deepseek-v4-pro:cloud" to "DeepSeek V4 Pro (fast, cheap)",
+                "ollama:kimi-k2.7-code:cloud" to "Kimi K2.7 Code (tool use)",
                 "anthropic:claude-sonnet-4-5" to "Claude Sonnet 4.5",
                 "ollama:minimax-m2.7:cloud" to "MiniMax M2.7 (code)",
+                "ollama:gemma4:31b:cloud" to "Gemma 4 31B",
+                "ollama:qwen3.5:cloud" to "Qwen 3.5",
             ).forEach { (id, label) ->
                 AssistChip(
                     onClick = { viewModel.setDefaultModel(id) },

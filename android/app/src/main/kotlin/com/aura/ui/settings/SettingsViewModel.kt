@@ -29,7 +29,7 @@ data class SettingsUiState(
     val deepseekKey: String = "",
     val groqKey: String = "",
     val openrouterKey: String = "",
-    val defaultModel: String = "ollama:deepseek-v3.2:cloud",
+    val defaultModel: String = "ollama:deepseek-v4-pro:cloud",
     val firstRunComplete: Boolean = false,
     val configuredProviders: List<String> = emptyList(),
 )
@@ -63,7 +63,7 @@ class SettingsViewModel @Inject constructor(
                 deepseekKey = deepseek,
                 groqKey = groq,
                 openrouterKey = openrouter,
-                defaultModel = prefs[KEY_DEFAULT_MODEL] ?: "ollama:deepseek-v3.2:cloud",
+                defaultModel = prefs[KEY_DEFAULT_MODEL] ?: "ollama:deepseek-v4-pro:cloud",
                 firstRunComplete = prefs[KEY_FIRST_RUN] == "true",
                 configuredProviders = configured,
             )

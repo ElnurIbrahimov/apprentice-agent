@@ -67,7 +67,7 @@ data class ChatUiState(
     val streaming: Boolean = false,
     val draft: String = "",
     val error: String? = null,
-    val activeModel: String = "ollama:deepseek-v3.2:cloud",
+    val activeModel: String = "ollama:deepseek-v4-pro:cloud",
     val availableModels: List<String> = emptyList(),
     val ttsEnabled: Boolean = true,
     val selectedSpecialist: Specialist? = null,
@@ -106,11 +106,11 @@ class ChatViewModel @Inject constructor(
                 }.getOrDefault(emptyList()).map { "${p.prefix}:$it" }
             }
             val defaults = listOf(
-                "ollama:deepseek-v3.2:cloud",
-                "ollama:kimi-k2.6:cloud",
+                "ollama:deepseek-v4-pro:cloud",
+                "ollama:kimi-k2.7-code:cloud",
                 "anthropic:claude-sonnet-4-5",
                 "ollama:minimax-m2.7:cloud",
-                "ollama:qwen3-coder:480b-cloud",
+                "ollama:qwen3.5:cloud",
             )
             val merged = (defaults + all).distinct()
             _state.update { it.copy(availableModels = merged) }
