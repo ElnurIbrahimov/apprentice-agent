@@ -80,6 +80,8 @@ data class ChatUiState(
     val suggestedSpecialist: Specialist? = null,
     val pendingPermission: String? = null,
     val permissionRationale: String? = null,
+    /** Tool name + args that the permission was requested for. Used to retry after grant. */
+    val pendingToolRetry: Pair<String, String>? = null,
 )
 
 @HiltViewModel
@@ -202,50 +204,39 @@ class ChatViewModel @Inject constructor(
     }
 
     fun retryAfterPermission(permission: String) {
-        // Inject a system message telling the agent permission was granted,
-        // then re-run the agent loop so it retries the failed tool call.
-        _state.update { old ->
-            old.copy(
-                conversation = old.conversation.addUser(
-                    "[System: Permission $permission was just granted. Please retry your last operation.]"
-                ),
-                pendingPermission = null,
-                permissionRationale = null,
-            )
+        // Re-execute the failed tool directly with the original args, no model round-trip.
+        val (toolName, args) = _state.value.pendingToolRetry ?: ("" to "")
+        _state.update { it.copy(
+            pendingPermission = null,
+            permissionRationale = null,
+            pendingToolRetry = null,
+            streaming = true,
+        ) }
+        if (toolName.isBlank()) {
+            _state.update { it.copy(streaming = false, error = "Lost tool call context") }
+            return
         }
-        // Trigger the send to re-run the agent
-        runJob?.cancel()
         runJob = viewModelScope.launch {
-            val current = _state.value
-            val conversation = current.conversation
-            var responseBuffer = StringBuilder()
             try {
-                loop.run(conversation, model = current.activeModel, specialist = current.selectedSpecialist).collect { event ->
-                    when (event) {
-                        is AgentEvent.TextDelta -> {
-                            responseBuffer.append(event.text)
-                            _state.update { old ->
-                                val last = old.conversation.turns.lastOrNull()
-                                val updated = if (last != null) old.conversation.replaceLastTurn(last.copy(assistant = (last.assistant ?: "") + event.text)) else old.conversation
-                                old.copy(conversation = updated)
-                            }
-                        }
-                        is AgentEvent.ToolExecuting, is AgentEvent.ToolResult -> {
-                            if (event is AgentEvent.ToolResult) {
-                                val citations = extractCitations(event.name, event.result)
-                                if (citations.isNotEmpty()) _state.update { old -> old.copy(conversation = old.conversation.setCitations(citations)) }
-                                if (event.needsPermission != null) _state.update { old -> old.copy(pendingPermission = event.needsPermission, permissionRationale = event.permissionRationale) }
-                            }
-                        }
-                        is AgentEvent.Error -> _state.update { it.copy(error = "${event.code}: ${event.message}") }
-                        is AgentEvent.Result -> _state.update { old -> old.copy(conversation = event.conversation) }
-                        is AgentEvent.Done -> {
-                            if (_state.value.ttsEnabled && responseBuffer.isNotBlank()) textToSpeech.speak(text = responseBuffer.toString(), utteranceId = "turn-${System.currentTimeMillis()}", flush = true)
-                            viewModelScope.launch { runCatching { EntryPointAccessors.fromApplication(getApplication(), ConversationStoreEntryPoint::class.java).conversationStore().save(_state.value.conversation) } }
-                        }
-                        else -> Unit
-                    }
+                val ctx = ToolContext(conversationId = _state.value.conversation.id)
+                val entryPoint = EntryPointAccessors.fromApplication(
+                    getApplication(),
+                    ToolExecutorEntryPoint::class.java,
+                )
+                val result = entryPoint.toolExecutor().execute(toolName, args, ctx)
+                val resultText = when (result) {
+                    is ToolResult.Ok -> result.output
+                    is ToolResult.Error -> "Error: ${result.message}"
+                    is ToolResult.NeedsPermission -> "Still needs permission: ${result.permission}"
+                    is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
                 }
+                // Add the result as an assistant turn so the user can see it
+                _state.update { old ->
+                    old.copy(
+                        conversation = old.conversation.addAssistant("🔧 $toolName → $resultText"),
+                    )
+                }
+                saveConversation()
             } catch (e: kotlinx.coroutines.CancellationException) { /* cancelled */ }
             catch (e: Exception) { _state.update { it.copy(error = e.message ?: "unknown error") } }
             finally { _state.update { it.copy(streaming = false) } }
@@ -436,4 +427,10 @@ class ChatViewModel @Inject constructor(
 @InstallIn(SingletonComponent::class)
 interface ConversationStoreEntryPoint {
     fun conversationStore(): ConversationStore
+}
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface ToolExecutorEntryPoint {
+    fun toolExecutor(): com.aura.agent.ToolExecutor
 }

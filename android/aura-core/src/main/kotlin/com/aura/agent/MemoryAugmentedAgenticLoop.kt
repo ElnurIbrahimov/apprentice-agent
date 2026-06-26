@@ -134,7 +134,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
 
             for ((id, args) in toolCalls) {
                 val name = toolCallStarts[id] ?: continue
-                emit(AgentEvent.ToolExecuting(id, name))
+                emit(AgentEvent.ToolExecuting(id, name, args))
                 val result = toolExecutor.execute(name, args, ToolContext(conversationId = currentConversation.id))
                 val resultText = when (result) {
                     is ToolResult.Ok -> result.output
@@ -166,8 +166,10 @@ sealed class AgentEvent {
     data class TextDelta(val text: String) : AgentEvent()
     data class ToolCallStart(val id: String, val name: String) : AgentEvent()
     data class ToolCallEnd(val id: String, val name: String, val arguments: String) : AgentEvent()
-    data class ToolExecuting(val id: String, val name: String) : AgentEvent()
+    data class ToolExecuting(val id: String, val name: String, val arguments: String = "") : AgentEvent()
     data class ToolResult(val id: String, val name: String, val result: String, val needsPermission: String? = null, val permissionRationale: String? = null) : AgentEvent()
+    /** Emitted by the UI after a permission was granted. The loop re-executes the named tool with the given args. */
+    data class PermissionGranted(val toolName: String, val arguments: String) : AgentEvent()
     data class Error(val code: String, val message: String, val retryable: Boolean) : AgentEvent()
     data class Result(val conversation: com.aura.agent.Conversation) : AgentEvent()
     data object Done : AgentEvent()
