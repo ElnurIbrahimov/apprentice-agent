@@ -7,10 +7,12 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Memory
@@ -31,6 +33,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aura.ui.screens.ChatScreen
+import com.aura.ui.screens.GraphScreen
 import com.aura.ui.screens.HomeScreen
 import com.aura.ui.screens.MemoryScreen
 import com.aura.ui.screens.SettingsScreen
@@ -40,9 +43,10 @@ sealed class TopLevelRoute(val route: String, val label: String, val selectedIco
     data object Chat : TopLevelRoute("chat", "Chat", Icons.Filled.Chat, Icons.Outlined.Chat)
     data object Memory : TopLevelRoute("memory", "Memory", Icons.Filled.Memory, Icons.Outlined.Memory)
     data object Settings : TopLevelRoute("settings", "Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
+    data object Graph : TopLevelRoute("graph", "Graph", Icons.Filled.AccountTree, Icons.Outlined.AccountTree)
 }
 
-private val topLevelRoutes = listOf(TopLevelRoute.Home, TopLevelRoute.Chat, TopLevelRoute.Memory, TopLevelRoute.Settings)
+private val topLevelRoutes = listOf(TopLevelRoute.Home, TopLevelRoute.Chat, TopLevelRoute.Memory, TopLevelRoute.Settings, TopLevelRoute.Graph)
 
 @Composable
 fun NavGraph() {
@@ -78,6 +82,7 @@ fun NavGraph() {
             composable(TopLevelRoute.Chat.route) { ChatScreen() }
             composable(TopLevelRoute.Memory.route) { MemoryScreen() }
             composable(TopLevelRoute.Settings.route) { SettingsScreen() }
+            composable(TopLevelRoute.Graph.route) { GraphScreen() }
         }
     }
 }
