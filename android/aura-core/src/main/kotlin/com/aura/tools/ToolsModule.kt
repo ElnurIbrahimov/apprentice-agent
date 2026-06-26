@@ -45,6 +45,8 @@ object ToolsModule {
         imageGen: ImageGenTool,
         transcription: TranscriptionTool,
         runHand: RunHandTool,
+        knowledgeGraph: KnowledgeGraphTool,
+        kgQuery: KgQueryTool,
     ): ToolRegistry {
         val registry = ToolRegistry()
         registry.register(webSearch.tool)
@@ -78,6 +80,8 @@ object ToolsModule {
         registry.register(imageGen.tool)
         registry.register(transcription.tool)
         registry.register(runHand.tool)
+        registry.register(knowledgeGraph.tool)
+        registry.register(kgQuery.tool)
         return registry
     }
 }
