@@ -5,7 +5,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.memory.MemoryEntity
 import com.aura.memory.MemoryStore
+import com.aura.proactive.ProactiveEventBus
+import com.aura.proactive.ProactiveEvents
 import com.aura.tasks.TaskDao
+import com.aura.tools.CalendarReadTool
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +27,7 @@ data class HomeUiState(
     val userName: String? = null,
     val hour: Int = 0,
     val loading: Boolean = true,
+    val proactiveEvent: ProactiveEventBus.Event? = null,
 )
 
 @HiltViewModel
@@ -31,12 +35,29 @@ class HomeViewModel @Inject constructor(
     application: Application,
     private val memoryStore: MemoryStore,
     private val taskDao: TaskDao,
+    private val proactiveEvents: ProactiveEvents,
+    private val calendarReadTool: CalendarReadTool,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
 
-    init { refresh() }
+    init {
+        refresh()
+        observeProactiveEvents()
+    }
+
+    private fun observeProactiveEvents() {
+        viewModelScope.launch {
+            proactiveEvents.latest.collect { event ->
+                _state.update { it.copy(proactiveEvent = event) }
+            }
+        }
+    }
+
+    fun dismissProactiveEvent() {
+        proactiveEvents.dismiss()
+    }
 
     fun refresh() {
         viewModelScope.launch {
@@ -57,9 +78,8 @@ class HomeViewModel @Inject constructor(
             }.firstOrNull()?.takeIf { it.isNotBlank() && it.length < 40 }
             // Tasks
             val tasks = taskDao.allPending().take(5).map { it.title }
-            // Calendar — best effort, ignore exceptions. Tool is invoked via
-            // dependency injection in a future day; for now leave the list empty.
-            val events: List<String> = emptyList()
+            // Calendar — best effort, ignore exceptions.
+            val events = runCatching { calendarReadTool.readTodaysEvents() }.getOrDefault(emptyList())
             _state.update {
                 it.copy(
                     today = events,

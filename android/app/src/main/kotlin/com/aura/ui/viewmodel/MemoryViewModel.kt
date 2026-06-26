@@ -28,7 +28,13 @@ class MemoryViewModel @Inject constructor(
     private val _state = MutableStateFlow(MemoryUiState())
     val state: StateFlow<MemoryUiState> = _state.asStateFlow()
 
-    init { refresh() }
+    init {
+        refresh()
+        // Auto-refresh whenever the memory count changes (new memory stored or deleted).
+        viewModelScope.launch {
+            memoryStore.observeCount().collect { refresh() }
+        }
+    }
 
     fun refresh() {
         viewModelScope.launch {

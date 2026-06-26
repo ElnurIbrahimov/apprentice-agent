@@ -1,6 +1,8 @@
 # Aura Android
 
-A native Android superapp — Kotlin + Jetpack Compose, cloud-powered, your data stays private.
+![CI](https://github.com/ElnurIbrahimov/aura-android/actions/workflows/ci.yml/badge.svg)
+
+A native Android superapp
 
 This is a port of the Python [Aura](https://github.com/ElnurIbrahimov/apprentice-agent) assistant to a native Android app. The goal is the full Aura capability surface: brain, agentic loop, 21 tools, memory stack, voice I/O, multi-agent routing, proactive monitors — all powered by cloud LLM providers.
 

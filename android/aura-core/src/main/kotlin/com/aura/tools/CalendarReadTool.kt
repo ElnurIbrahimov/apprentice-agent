@@ -108,6 +108,29 @@ class CalendarReadTool @Inject constructor(
         return out
     }
 
+    /**
+     * Read events for today (midnight to midnight) and return formatted strings
+     * suitable for the home screen. Wraps [readEvents] internally and never
+     * throws — returns an empty list on any error.
+     */
+    fun readTodaysEvents(limit: Int = 5): List<String> {
+        return try {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR)
+                != PackageManager.PERMISSION_GRANTED
+            ) return emptyList()
+            val events = readEvents(1, limit)
+            if (events.isEmpty()) return emptyList()
+            val df = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+            events.map { e ->
+                val time = if (e.allDay) "All day" else df.format(java.util.Date(e.begin))
+                val loc = if (e.location.isNotEmpty()) " @ ${e.location}" else ""
+                "· ${e.title} ($time)$loc"
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     private fun formatEvents(events: List<Event>): String {
         if (events.isEmpty()) return "No upcoming events in the next 7 days."
         val df = java.text.SimpleDateFormat("EEE MMM d, HH:mm", java.util.Locale.US)
