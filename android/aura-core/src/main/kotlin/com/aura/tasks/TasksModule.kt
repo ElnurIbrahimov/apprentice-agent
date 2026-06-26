@@ -17,7 +17,6 @@ object TasksModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): TaskDatabase =
         Room.databaseBuilder(context, TaskDatabase::class.java, "aura-tasks.db")
-            .fallbackToDestructiveMigration()
             .build()
 
     @Provides

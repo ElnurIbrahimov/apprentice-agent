@@ -17,7 +17,6 @@ object HandsModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): HandDatabase =
         Room.databaseBuilder(context, HandDatabase::class.java, "aura-hands.db")
-            .fallbackToDestructiveMigration()
             .build()
 
     @Provides

@@ -39,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,8 +69,8 @@ fun GraphScreen(viewModel: GraphViewModel = hiltViewModel()) {
 
     // Open sheet when selectedNode changes
     val currentSelected = state.selectedNode
-    if (currentSelected != null && !showSheet) {
-        showSheet = true
+    LaunchedEffect(currentSelected) {
+        if (currentSelected != null) showSheet = true
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
