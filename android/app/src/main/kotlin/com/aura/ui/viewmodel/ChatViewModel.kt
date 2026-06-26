@@ -1,14 +1,22 @@
 package com.aura.ui.viewmodel
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.net.Uri
+import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.agent.AgentEvent
 import com.aura.agent.MemoryAugmentedAgenticLoop
+import com.aura.agent.ToolCall
+import com.aura.agent.ToolContext
+import com.aura.agent.ToolRegistry
+import com.aura.agent.ToolResult
 import com.aura.providers.ProviderRegistry
 import com.aura.tools.Citation
 import com.aura.voice.TextToSpeech
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +27,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.ByteArrayOutputStream
+import java.util.UUID
 import javax.inject.Inject
 
 private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -65,6 +75,7 @@ class ChatViewModel @Inject constructor(
     application: Application,
     private val loop: MemoryAugmentedAgenticLoop,
     private val providerRegistry: ProviderRegistry,
+    private val toolRegistry: ToolRegistry,
     private val textToSpeech: TextToSpeech,
 ) : AndroidViewModel(application) {
 
@@ -160,7 +171,6 @@ class ChatViewModel @Inject constructor(
                             _state.update { it.copy(error = "${event.code}: ${event.message}") }
                         }
                         is AgentEvent.Done -> {
-                            // Auto-TTS: speak the final assistant turn if enabled
                             if (_state.value.ttsEnabled && currentResponseBuffer.isNotBlank()) {
                                 textToSpeech.speak(
                                     text = currentResponseBuffer.toString(),
@@ -181,5 +191,83 @@ class ChatViewModel @Inject constructor(
                 currentResponseBuffer = StringBuilder()
             }
         }
+    }
+
+    /**
+     * Capture/pick an image and ask the cloud vision model directly. The result is
+     * inserted as an assistant turn so the user can continue the conversation.
+     */
+    fun onImageCaptured(bitmap: Bitmap, question: String = "Describe this image in detail") {
+        viewModelScope.launch(Dispatchers.IO) {
+            val base64 = bitmap.toBase64Jpeg()
+            val tool = toolRegistry.get("vision") ?: run {
+                _state.update { it.copy(error = "vision tool not available") }
+                return@launch
+            }
+            _state.update {
+                it.conversation.addUser(question)
+                it.copy(conversation = it.conversation, streaming = true)
+            }
+            val result = tool.execute(
+                ToolCall(
+                    id = UUID.randomUUID().toString(),
+                    name = "vision",
+                    arguments = mapOf("image_base64" to base64, "prompt" to question),
+                ),
+                ToolContext(conversationId = _state.value.conversation.id),
+            )
+            val text = when (result) {
+                is ToolResult.Ok -> result.output
+                is ToolResult.Error -> "Vision error: ${result.message}"
+                is ToolResult.NeedsPermission -> "Permission needed: ${result.permission}"
+                is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
+            }
+            _state.value.conversation.addAssistant(text)
+            _state.update { it.copy(streaming = false) }
+        }
+    }
+
+    /**
+     * Transcribe an audio file picked by the user and insert the text as a user
+     * message so the agent can act on it.
+     */
+    fun onAudioPicked(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val bytes = try {
+                getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: return@launch
+            } catch (e: Exception) {
+                _state.update { it.copy(error = "failed to read audio: ${e.message}") }
+                return@launch
+            }
+            val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            val tool = toolRegistry.get("transcribe") ?: run {
+                _state.update { it.copy(error = "transcribe tool not available") }
+                return@launch
+            }
+            _state.update { it.copy(streaming = true) }
+            val result = tool.execute(
+                ToolCall(
+                    id = UUID.randomUUID().toString(),
+                    name = "transcribe",
+                    arguments = mapOf("audio_base64" to base64, "language" to "en"),
+                ),
+                ToolContext(conversationId = _state.value.conversation.id),
+            )
+            val text = when (result) {
+                is ToolResult.Ok -> result.output
+                is ToolResult.Error -> "Transcription error: ${result.message}"
+                is ToolResult.NeedsPermission -> "Permission needed: ${result.permission}"
+                is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
+            }
+            _state.value.conversation.addUser("🎤 $text")
+            _state.update { it.copy(streaming = false) }
+        }
+    }
+
+    private fun Bitmap.toBase64Jpeg(quality: Int = 85): String {
+        val stream = ByteArrayOutputStream()
+        compress(Bitmap.CompressFormat.JPEG, quality, stream)
+        return Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
     }
 }

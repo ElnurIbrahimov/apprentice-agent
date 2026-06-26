@@ -26,8 +26,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeOff
@@ -80,6 +83,43 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
     ) { granted ->
         hasMicPermission = granted
         if (granted) showVoiceOverlay = true
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap ->
+        bitmap?.let { viewModel.onImageCaptured(it) }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri?.let {
+            val bitmap = try {
+                android.graphics.ImageDecoder.decodeBitmap(
+                    android.graphics.ImageDecoder.createSource(context.contentResolver, it)
+                )
+            } catch (e: Exception) { null }
+            bitmap?.let { bmp -> viewModel.onImageCaptured(bmp) }
+        }
+    }
+
+    val audioLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { viewModel.onAudioPicked(it) }
+    }
+
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCameraPermission = granted
+        if (granted) cameraLauncher.launch(null)
     }
 
     // On first composition, consume any pending shared text from the share sheet
@@ -206,6 +246,15 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                     micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             },
+            onCameraClick = {
+                if (hasCameraPermission) {
+                    cameraLauncher.launch(null)
+                } else {
+                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                }
+            },
+            onGalleryClick = { galleryLauncher.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onAudioClick = { audioLauncher.launch("audio/*") },
         )
     }
 
@@ -412,6 +461,9 @@ private fun ChatInputBar(
     onSend: () -> Unit,
     onCancel: () -> Unit,
     onMicClick: () -> Unit,
+    onCameraClick: () -> Unit,
+    onGalleryClick: () -> Unit,
+    onAudioClick: () -> Unit,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -424,6 +476,17 @@ private fun ChatInputBar(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (!streaming) {
+                IconButton(onClick = onCameraClick) {
+                    Icon(Icons.Filled.AddAPhoto, contentDescription = "Camera", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                IconButton(onClick = onGalleryClick) {
+                    Icon(Icons.Filled.PhotoLibrary, contentDescription = "Gallery", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                IconButton(onClick = onAudioClick) {
+                    Icon(Icons.Filled.AudioFile, contentDescription = "Audio", tint = MaterialTheme.colorScheme.onSurface)
+                }
+            }
             OutlinedTextField(
                 value = draft,
                 onValueChange = onDraftChange,

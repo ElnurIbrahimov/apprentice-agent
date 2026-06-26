@@ -41,6 +41,9 @@ object ToolsModule {
         filePicker: FilePickerTool,
         firecrawlFetch: FirecrawlFetchTool,
         deepResearch: DeepResearchTool,
+        vision: VisionTool,
+        imageGen: ImageGenTool,
+        transcription: TranscriptionTool,
     ): ToolRegistry {
         val registry = ToolRegistry()
         registry.register(webSearch.tool)
@@ -70,6 +73,9 @@ object ToolsModule {
         registry.register(filePicker.tool)
         registry.register(firecrawlFetch.tool)
         registry.register(deepResearch.tool)
+        registry.register(vision.tool)
+        registry.register(imageGen.tool)
+        registry.register(transcription.tool)
         return registry
     }
 }
