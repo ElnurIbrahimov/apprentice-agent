@@ -64,4 +64,28 @@ object ProviderModule {
         httpClient = client,
     )
 
+    @Provides
+    @IntoMap
+    @StringKey("gemini")
+    fun provideGemini(client: OkHttpClient, keys: ProviderKeys): Provider = GeminiProvider(
+        providerKeys = keys,
+        httpClient = client,
+    )
+
+    @Provides
+    @IntoMap
+    @StringKey("groq")
+    fun provideGroq(client: OkHttpClient, keys: ProviderKeys): Provider = GroqProvider(
+        providerKeys = keys,
+        httpClient = client,
+    )
+
+    @Provides
+    @IntoMap
+    @StringKey("openrouter")
+    fun provideOpenRouter(client: OkHttpClient, keys: ProviderKeys): Provider = OpenRouterProvider(
+        providerKeys = keys,
+        httpClient = client,
+    )
+
 }

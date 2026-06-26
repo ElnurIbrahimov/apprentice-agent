@@ -27,6 +27,8 @@ data class SettingsUiState(
     val anthropicKey: String = "",
     val openaiKey: String = "",
     val deepseekKey: String = "",
+    val groqKey: String = "",
+    val openrouterKey: String = "",
     val defaultModel: String = "ollama:deepseek-v3.2:cloud",
     val firstRunComplete: Boolean = false,
     val configuredProviders: List<String> = emptyList(),
@@ -50,6 +52,8 @@ class SettingsViewModel @Inject constructor(
             val anthropic = providerKeys.keyFor("anthropic") ?: ""
             val openai = providerKeys.keyFor("openai") ?: ""
             val deepseek = providerKeys.keyFor("deepseek") ?: ""
+            val groq = providerKeys.keyFor("groq") ?: ""
+            val openrouter = providerKeys.keyFor("openrouter") ?: ""
             val configured = providerRegistry.configured().map { "${it.prefix} (${it.displayName})" }
             val prefs = context.auraPrefs.data.first()
             _state.value = SettingsUiState(
@@ -57,6 +61,8 @@ class SettingsViewModel @Inject constructor(
                 anthropicKey = anthropic,
                 openaiKey = openai,
                 deepseekKey = deepseek,
+                groqKey = groq,
+                openrouterKey = openrouter,
                 defaultModel = prefs[KEY_DEFAULT_MODEL] ?: "ollama:deepseek-v3.2:cloud",
                 firstRunComplete = prefs[KEY_FIRST_RUN] == "true",
                 configuredProviders = configured,
@@ -68,6 +74,8 @@ class SettingsViewModel @Inject constructor(
     fun saveAnthropicKey(k: String) = updateKey("anthropic", k) { _state.update { it.copy(anthropicKey = k) } }
     fun saveOpenaiKey(k: String) = updateKey("openai", k) { _state.update { it.copy(openaiKey = k) } }
     fun saveDeepseekKey(k: String) = updateKey("deepseek", k) { _state.update { it.copy(deepseekKey = k) } }
+    fun saveGroqKey(k: String) = updateKey("groq", k) { _state.update { it.copy(groqKey = k) } }
+    fun saveOpenrouterKey(k: String) = updateKey("openrouter", k) { _state.update { it.copy(openrouterKey = k) } }
 
     fun setDefaultModel(model: String) {
         viewModelScope.launch {

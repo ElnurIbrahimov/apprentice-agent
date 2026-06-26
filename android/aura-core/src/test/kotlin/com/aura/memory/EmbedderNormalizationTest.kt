@@ -1,5 +1,6 @@
 package com.aura.memory
 
+import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -7,16 +8,17 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Regression test for the Embedder. The previous implementation added a
- * positional cosine offset AFTER normalization, which meant the returned
- * vector was no longer unit-normalized and cosine similarity against
- * it was silently bounded below 1.0 for identical inputs.
+ * Regression test for the Embedder interface and LocalEmbedder.
+ * The previous implementation added a positional cosine offset AFTER
+ * normalization, which meant the returned vector was no longer
+ * unit-normalized and cosine similarity against it was silently
+ * bounded below 1.0 for identical inputs.
  */
 class EmbedderNormalizationTest {
 
     @Test
-    fun `embedder returns unit-normalized vector`() {
-        val emb = Embedder(384)
+    fun `local embedder returns unit-normalized vector`() = runTest {
+        val emb = LocalEmbedder(384)
         for (text in listOf("", "hello", "a longer sample sentence with more tokens", "x")) {
             val v = emb.embed(text)
             assertEquals(384, v.size, "vector should be 384-dim")
@@ -33,8 +35,8 @@ class EmbedderNormalizationTest {
     }
 
     @Test
-    fun `identical inputs produce identical vectors`() {
-        val emb = Embedder(384)
+    fun `identical inputs produce identical vectors`() = runTest {
+        val emb = LocalEmbedder(384)
         val a = emb.embed("remember that I prefer dark mode")
         val b = emb.embed("remember that I prefer dark mode")
         for (i in a.indices) {
@@ -43,8 +45,8 @@ class EmbedderNormalizationTest {
     }
 
     @Test
-    fun `cosine similarity between identical inputs is one`() {
-        val emb = Embedder(384)
+    fun `cosine similarity between identical inputs is one`() = runTest {
+        val emb = LocalEmbedder(384)
         val v = emb.embed("user drinks coffee every morning")
         var dot = 0f
         for (i in v.indices) dot += v[i] * v[i]

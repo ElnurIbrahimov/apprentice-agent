@@ -1,5 +1,6 @@
 package com.aura.memory
 
+import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -9,8 +10,8 @@ import kotlin.test.assertTrue
 class MemoryStoreTest {
 
     @Test
-    fun `Embedder produces normalized vector of correct dim`() {
-        val emb = Embedder(384)
+    fun `local embedder produces normalized vector of correct dim`() = runTest {
+        val emb = LocalEmbedder(384)
         val v = emb.embed("I prefer oat milk in my coffee")
         assertEquals(384, v.size)
         var norm = 0f
@@ -19,8 +20,8 @@ class MemoryStoreTest {
     }
 
     @Test
-    fun `Embedder produces different vectors for different texts`() {
-        val emb = Embedder(384)
+    fun `local embedder produces different vectors for different texts`() = runTest {
+        val emb = LocalEmbedder(384)
         val a = emb.embed("hello world")
         val b = emb.embed("completely different topic")
         var same = 0
@@ -36,9 +37,9 @@ class MemoryStoreTest {
     }
 
     @Test
-    fun `VectorIndex ranks closer vectors higher`() {
+    fun `VectorIndex ranks closer vectors higher`() = runTest {
         val idx = VectorIndex(384)
-        val emb = Embedder(384)
+        val emb = LocalEmbedder(384)
         val query = emb.embed("user likes coffee in the morning")
         val good = emb.embed("the user drinks coffee every morning")
         val bad = emb.embed("quantum chromodynamics experiments at CERN")
@@ -84,8 +85,8 @@ class MemoryStoreTest {
     }
 
     @Test
-    fun `Embedder byte roundtrip preserves values`() {
-        val emb = Embedder(384)
+    fun `Embedder byte roundtrip preserves values`() = runTest {
+        val emb = LocalEmbedder(384)
         val v = emb.embed("test roundtrip")
         val bytes = Embedder.toBytes(v)
         val v2 = Embedder.fromBytes(bytes)

@@ -12,8 +12,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Source of truth for cloud-provider API keys. Each key is the value the user
- * pasted into the Settings UI (Ollama Cloud, Anthropic, OpenAI, DeepSeek).
+ * Source of truth for cloud-provider API keys and embedding model settings.
+ * Each key is the value the user pasted into the Settings UI (Ollama Cloud,
+ * Anthropic, OpenAI, DeepSeek).
  *
  * Previously, [ProviderModule] read these from `System.getenv(...)` at Hilt
  * graph creation time, which meant the Settings UI was write-only — the user
@@ -35,6 +36,10 @@ class ProviderKeys @Inject constructor(
     private val _state = MutableStateFlow<Map<String, String>>(emptyMap())
     val state: StateFlow<Map<String, String>> = _state.asStateFlow()
 
+    /** Embedding model name (default: "nomic-embed-text"). */
+    private val _embeddingModel = MutableStateFlow(DEFAULT_EMBEDDING_MODEL)
+    val embeddingModel: String get() = _embeddingModel.value
+
     // Process-scoped: the @Singleton lives for the lifetime of the app, so we
     // don't need to cancel the scope explicitly.
     private val scope = CoroutineScope(
@@ -52,6 +57,7 @@ class ProviderKeys @Inject constructor(
     init {
         scope.launch {
             _state.value = loadAllKeys()
+            loadEmbeddingModel()
         }
     }
 
@@ -88,7 +94,27 @@ class ProviderKeys @Inject constructor(
         return out
     }
 
+    /** Load the embedding model from DataStore, falling back to default. */
+    private suspend fun loadEmbeddingModel() {
+        val saved = secureDataStore.getString("embedding_model")
+        if (!saved.isNullOrBlank()) {
+            _embeddingModel.value = saved
+        }
+    }
+
+    /** Persist a new embedding model name. */
+    suspend fun setEmbeddingModel(model: String) {
+        if (model.isBlank()) {
+            secureDataStore.removeString("embedding_model")
+            _embeddingModel.value = DEFAULT_EMBEDDING_MODEL
+        } else {
+            secureDataStore.putString("embedding_model", model)
+            _embeddingModel.value = model
+        }
+    }
+
     companion object {
-        val PREFIXES = listOf("ollama", "anthropic", "openai", "deepseek")
+        val PREFIXES = listOf("ollama", "anthropic", "openai", "deepseek", "gemini", "groq", "openrouter")
+        const val DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"
     }
 }

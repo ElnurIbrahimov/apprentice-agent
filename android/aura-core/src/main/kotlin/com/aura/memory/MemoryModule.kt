@@ -2,11 +2,13 @@ package com.aura.memory
 
 import android.content.Context
 import androidx.room.Room
+import com.aura.providers.ProviderKeys
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
 @Module
@@ -25,7 +27,15 @@ object MemoryModule {
 
     @Provides
     @Singleton
-    fun provideEmbedder(): Embedder = Embedder()
+    fun provideLocalEmbedder(): LocalEmbedder = LocalEmbedder()
+
+    @Provides
+    @Singleton
+    fun provideEmbedder(
+        localEmbedder: LocalEmbedder,
+        providerKeys: ProviderKeys,
+        httpClient: OkHttpClient,
+    ): Embedder = CloudEmbedder(localEmbedder, providerKeys, httpClient)
 
     @Provides
     @Singleton

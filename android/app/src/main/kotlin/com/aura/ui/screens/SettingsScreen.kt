@@ -121,6 +121,18 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             onValueChange = viewModel::saveDeepseekKey,
             helperText = "Get a key at platform.deepseek.com/api_keys",
         )
+        ProviderKeyField(
+            label = "Groq",
+            value = state.groqKey,
+            onValueChange = viewModel::saveGroqKey,
+            helperText = "Get a key at console.groq.com/keys",
+        )
+        ProviderKeyField(
+            label = "OpenRouter",
+            value = state.openrouterKey,
+            onValueChange = viewModel::saveOpenrouterKey,
+            helperText = "Get key at openrouter.ai/keys",
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
         HorizontalDivider()
