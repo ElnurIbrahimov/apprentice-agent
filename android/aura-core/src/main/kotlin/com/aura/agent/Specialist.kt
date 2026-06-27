@@ -49,7 +49,7 @@ data class Specialist(
                 sources and present a balanced view when sources disagree.
             """.trimIndent(),
             toolsAllowed = setOf("deep_research", "brave_search", "tavily_search"),
-            suggestedModel = "claude-sonnet-4-20250514",
+            suggestedModel = "moa:default",
         )
 
         /** Creative & image-generation specialist. */
@@ -63,13 +63,13 @@ data class Specialist(
                 images, craft detailed, evocative prompts.
             """.trimIndent(),
             toolsAllowed = setOf("image_gen", "image_input"),
-            suggestedModel = "claude-sonnet-4-20250514",
+            suggestedModel = "moa:default",
         )
 
         /** Executive assistant — calendar, contacts, tasks, memory. */
         val Executive = Specialist(
             name = "executive",
-            icon = "\uD83D\uDCC5", // 📅
+            icon = "\uD83D\uDCC5",
             systemPrompt = """
                 You are Aura's executive assistant. You manage the user's calendar,
                 contacts, tasks, and personal memory. Be brisk and efficient —
@@ -77,9 +77,8 @@ data class Specialist(
                 it clearly; when writing confirm what you did.
             """.trimIndent(),
             toolsAllowed = setOf("calendar_read", "calendar_write", "contacts_search", "remember", "recall"),
+            suggestedModel = "moa:default",
         )
-
-        /** Phone-native specialist — camera, gallery, location, notifications, app launch. */
         val PhoneNative = Specialist(
             name = "phone_native",
             icon = "\uD83D\uDCF1", // 📱

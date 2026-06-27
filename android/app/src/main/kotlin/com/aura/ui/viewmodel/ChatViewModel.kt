@@ -106,6 +106,16 @@ class ChatViewModel @Inject constructor(
 
     private var runJob: Job? = null
 
+    /** Track consecutive tool failures for adaptive MoA escalation. */
+    private var consecutiveFailures: Int = 0
+    private var lastUserMessage: String = ""
+
+    /** Known user correction patterns that suggest the model is struggling. */
+    private val correctionPatterns = listOf(
+        Regex("""\b(?:no|wrong|incorrect|not right|nope|that's wrong|bad answer)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:try again|redo|retry|do it again|another way)\b""", RegexOption.IGNORE_CASE),
+    )
+
     private fun saveConversation() {
         viewModelScope.launch {
             runCatching {
@@ -322,8 +332,19 @@ class ChatViewModel @Inject constructor(
         val text = current.draft.trim()
         if (text.isEmpty() || current.streaming) return
 
+        // Adaptive MoA escalation: if the user corrected the last response
+        // or the model has been struggling, auto-enable Deep Mode.
+        val userIsCorrecting = correctionPatterns.any { it.containsMatchIn(text) }
+        val shouldEscalate = !current.deepModeEnabled && (
+            userIsCorrecting || consecutiveFailures >= 3
+        )
+        if (shouldEscalate) {
+            _state.update { it.copy(deepModeEnabled = true) }
+        }
+        lastUserMessage = text
+
         // If Deep Mode is enabled, use the MoA provider for this turn.
-        val useMoa = current.deepModeEnabled
+        val useMoa = _state.value.deepModeEnabled
         val model = if (useMoa) "moa:default" else current.activeModel
 
         _state.update { it.copy(
@@ -374,7 +395,10 @@ class ChatViewModel @Inject constructor(
                                 }
                             }
                         }
-                        is AgentEvent.Error -> setErrorWithAutoDismiss("${event.code}: ${event.message}", retryable = event.retryable)
+                        is AgentEvent.Error -> {
+                            consecutiveFailures++
+                            setErrorWithAutoDismiss("${event.code}: ${event.message}", retryable = event.retryable)
+                        }
                         is AgentEvent.Result -> {
                             // Replace the conversation snapshot with the loop's final state
                             // which includes all tool calls, tool results, and assistant text.
@@ -383,6 +407,8 @@ class ChatViewModel @Inject constructor(
                             }
                         }
                         is AgentEvent.Done -> {
+                            // Reset failure counter on successful completion.
+                            consecutiveFailures = 0
                             if (_state.value.ttsEnabled && responseBuffer.isNotBlank()) {
                                 textToSpeech.speak(
                                     text = responseBuffer.toString(),
