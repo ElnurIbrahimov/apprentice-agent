@@ -14,16 +14,14 @@ import com.aura.agent.Specialist
 import com.aura.agent.SpecialistRouter
 import com.aura.agent.ToolCall
 import com.aura.agent.ToolContext
+import com.aura.agent.ToolExecutor
 import com.aura.agent.ToolRegistry
 import com.aura.agent.ToolResult
+import com.aura.kg.KnowledgeGraphRepository
 import com.aura.providers.ProviderRegistry
 import com.aura.tools.Citation
 import com.aura.voice.TextToSpeech
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +38,13 @@ import java.util.UUID
 import javax.inject.Inject
 
 private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+private fun formatToolResult(result: ToolResult): String = when (result) {
+    is ToolResult.Ok -> result.output
+    is ToolResult.Error -> "Error: ${result.message}"
+    is ToolResult.NeedsPermission -> "Still needs permission: ${result.permission}"
+    is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
+}
 
 private fun extractCitations(toolName: String, result: String): List<Citation> {
     return when (toolName) {
@@ -96,9 +101,12 @@ class ChatViewModel @Inject constructor(
     private val loop: MemoryAugmentedAgenticLoop,
     private val providerRegistry: ProviderRegistry,
     private val toolRegistry: ToolRegistry,
+    private val toolExecutor: ToolExecutor,
     private val textToSpeech: TextToSpeech,
     private val userPreferences: UserPreferences,
     private val memoryStore: com.aura.memory.MemoryStore,
+    private val conversationStore: ConversationStore,
+    private val knowledgeGraphRepository: KnowledgeGraphRepository,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -119,10 +127,7 @@ class ChatViewModel @Inject constructor(
     private fun saveConversation() {
         viewModelScope.launch {
             runCatching {
-                EntryPointAccessors.fromApplication(
-                    getApplication(),
-                    ConversationStoreEntryPoint::class.java,
-                ).conversationStore().save(_state.value.conversation)
+                conversationStore.save(_state.value.conversation)
             }
         }
     }
@@ -131,11 +136,7 @@ class ChatViewModel @Inject constructor(
         refreshModels()
         textToSpeech.initialize()
         viewModelScope.launch {
-            val store = EntryPointAccessors.fromApplication(
-                getApplication(),
-                ConversationStoreEntryPoint::class.java,
-            ).conversationStore()
-            val recent = store.mostRecent()
+            val recent = conversationStore.mostRecent()
             if (recent != null) {
                 _state.update { it.copy(conversation = recent) }
             } else {
@@ -157,25 +158,18 @@ class ChatViewModel @Inject constructor(
      * After the first conversation, create a memory that this user has
      * started using Aura, so future conversations can reference it.
      */
-    private fun onFirstConversationComplete() {
+    private suspend fun onFirstConversationComplete() {
         val count = runCatching {
-            kotlinx.coroutines.runBlocking {
-                EntryPointAccessors.fromApplication(
-                    getApplication(),
-                    ConversationStoreEntryPoint::class.java,
-                ).conversationStore().recent(2)
-            }
-        }.getOrDefault(emptyList()).size
+            conversationStore.recent(2).size
+        }.getOrDefault(0)
         if (count <= 1) {
-            viewModelScope.launch {
-                runCatching {
-                    memoryStore.store(
-                        content = "This user started using Aura. They went through the onboarding.",
-                        source = "system",
-                        category = "episode",
-                        importance = 0.8f,
-                    )
-                }
+            runCatching {
+                memoryStore.store(
+                    content = "This user started using Aura. They went through the onboarding.",
+                    source = "system",
+                    category = "episode",
+                    importance = 0.8f,
+                )
             }
         }
     }
@@ -240,11 +234,7 @@ class ChatViewModel @Inject constructor(
 
     fun loadConversation(id: String) {
         viewModelScope.launch {
-            val store = EntryPointAccessors.fromApplication(
-                getApplication(),
-                ConversationStoreEntryPoint::class.java,
-            ).conversationStore()
-            store.load(id)?.let { conv ->
+            conversationStore.load(id)?.let { conv ->
                 _state.update { it.copy(conversation = conv) }
             }
         }
@@ -258,7 +248,16 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(error = null, errorRetryable = false) }
     }
 
-    private fun refreshKgNodeCount() { viewModelScope.launch { runCatching { val entry = EntryPointAccessors.fromApplication(getApplication(), KgNodeCountEntryPoint::class.java); val count = entry.repository().stats().nodeCount; if (count > _state.value.kgNodeCount) _state.update { it.copy(kgNodeCount = count) } } } }
+    private fun refreshKgNodeCount() {
+        viewModelScope.launch {
+            runCatching {
+                val count = knowledgeGraphRepository.stats().nodeCount
+                if (count > _state.value.kgNodeCount) {
+                    _state.update { it.copy(kgNodeCount = count) }
+                }
+            }
+        }
+    }
 
     private fun setErrorWithAutoDismiss(error: String, retryable: Boolean = false) {
         _state.update { it.copy(error = error, errorRetryable = retryable) }
@@ -296,17 +295,8 @@ class ChatViewModel @Inject constructor(
         runJob = viewModelScope.launch {
             try {
                 val ctx = ToolContext(conversationId = _state.value.conversation.id)
-                val entryPoint = EntryPointAccessors.fromApplication(
-                    getApplication(),
-                    ToolExecutorEntryPoint::class.java,
-                )
-                val result = entryPoint.toolExecutor().execute(toolName, args, ctx)
-                val resultText = when (result) {
-                    is ToolResult.Ok -> result.output
-                    is ToolResult.Error -> "Error: ${result.message}"
-                    is ToolResult.NeedsPermission -> "Still needs permission: ${result.permission}"
-                    is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
-                }
+                val result = toolExecutor.execute(toolName, args, ctx)
+                val resultText = formatToolResult(result)
                 // Add the result as a tool turn so the model sees it in the right format
                 _state.update { old ->
                     val updated = old.conversation
@@ -523,22 +513,4 @@ class ChatViewModel @Inject constructor(
         compress(Bitmap.CompressFormat.JPEG, quality, stream)
         return Base64.encodeToString(stream.toByteArray(), Base64.NO_WRAP)
     }
-}
-
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface ConversationStoreEntryPoint {
-    fun conversationStore(): ConversationStore
-}
-
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface ToolExecutorEntryPoint {
-    fun toolExecutor(): com.aura.agent.ToolExecutor
-}
-
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface KgNodeCountEntryPoint {
-    fun repository(): com.aura.kg.KnowledgeGraphRepository
 }
