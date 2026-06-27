@@ -1,7 +1,7 @@
 package com.aura.hands
 
 import android.content.Context
-import androidx.room.Room
+import com.aura.data.RoomConfig
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -16,8 +16,12 @@ object HandsModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): HandDatabase =
-        Room.databaseBuilder(context, HandDatabase::class.java, "aura-hands.db")
-            .build()
+        RoomConfig.builder(
+            context,
+            HandDatabase::class.java,
+            "aura-hands.db",
+            migrations = emptyArray(),
+        ).build()
 
     @Provides
     fun provideHandDao(db: HandDatabase): HandDao = db.handDao()

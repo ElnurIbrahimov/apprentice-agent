@@ -27,9 +27,18 @@ android {
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     }
+    sourceSets {
+        // Adds exported Room schemas to the test assets for MigrationTestHelper.
+        getByName("androidTest") {
+            assets.srcDir(File(projectDir, "schemas"))
+        }
+    }
 }
 
 dependencies {
+    androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.core)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

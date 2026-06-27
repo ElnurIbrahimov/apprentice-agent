@@ -1,7 +1,7 @@
 package com.aura.proactive
 
 import android.content.Context
-import androidx.room.Room
+import com.aura.data.RoomConfig
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -15,7 +15,12 @@ object ProactiveEventModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): ProactiveEventDatabase =
-        Room.databaseBuilder(context, ProactiveEventDatabase::class.java, "aura-proactive.db").build()
+        RoomConfig.builder(
+            context,
+            ProactiveEventDatabase::class.java,
+            "aura-proactive.db",
+            migrations = emptyArray(),
+        ).build()
 
     @Provides
     fun provideProactiveEventDao(db: ProactiveEventDatabase): ProactiveEventDao = db.proactiveEventDao()

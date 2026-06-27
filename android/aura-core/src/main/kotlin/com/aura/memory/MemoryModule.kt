@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.aura.data.RoomConfig
 import com.aura.providers.ProviderKeys
 import dagger.Module
 import dagger.Provides
@@ -17,7 +18,7 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object MemoryModule {
 
-    private val MIGRATION_1_2 = object : Migration(1, 2) {
+    val MIGRATION_1_2 = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS kg_nodes (
@@ -49,9 +50,12 @@ object MemoryModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MemoryDatabase =
-        Room.databaseBuilder(context, MemoryDatabase::class.java, "aura-memory.db")
-            .addMigrations(MIGRATION_1_2)
-            .build()
+        RoomConfig.builder(
+            context,
+            MemoryDatabase::class.java,
+            "aura-memory.db",
+            migrations = arrayOf(MIGRATION_1_2),
+        ).build()
 
     @Provides
     fun provideMemoryDao(db: MemoryDatabase): MemoryDao = db.memoryDao()

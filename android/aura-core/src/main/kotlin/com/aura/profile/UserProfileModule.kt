@@ -1,7 +1,7 @@
 package com.aura.profile
 
 import android.content.Context
-import androidx.room.Room
+import com.aura.data.RoomConfig
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -14,7 +14,12 @@ import javax.inject.Singleton
 object UserProfileModule {
     @Provides @Singleton
     fun provideDb(@ApplicationContext ctx: Context): UserProfileDatabase =
-        Room.databaseBuilder(ctx, UserProfileDatabase::class.java, "aura-profile.db").build()
+        RoomConfig.builder(
+            ctx,
+            UserProfileDatabase::class.java,
+            "aura-profile.db",
+            migrations = emptyArray(),
+        ).build()
 
     @Provides fun provideDao(db: UserProfileDatabase): UserProfileDao = db.userProfileDao()
 }
