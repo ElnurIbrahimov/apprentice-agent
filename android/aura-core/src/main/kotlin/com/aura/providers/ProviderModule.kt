@@ -88,4 +88,11 @@ object ProviderModule {
         httpClient = client,
     )
 
+    @Provides
+    @IntoMap
+    @StringKey("moa")
+    fun provideMoa(registry: dagger.Lazy<ProviderRegistry>): Provider = MoaProvider(
+        registry = registry,
+    )
+
 }
