@@ -302,21 +302,21 @@ def handle_sessions(agent, arg, context) -> Optional[str]:
         if ctx and ctx.session:
             current_sid = getattr(ctx.session, 'session_id', "") or ""
         all_sessions = agentic_sessions + brain_conversations
-        result = pick_session(console, all_sessions, current_sid)
+        result = pick_session(_sessions_console, all_sessions, current_sid)
         if result and "__action__" not in result:
             sid = result.get("id", "")
             if sid and ctx and ctx.agentic_loop:
                 if ctx.agentic_loop.load_session(sid):
-                    console.print(f"  Switched to session: {result.get('title', 'Untitled')}")
+                    _sessions_console.print(f"  Switched to session: {result.get('title', 'Untitled')}")
                 else:
-                    console.print(f"  Failed to load session: {sid}")
+                    _sessions_console.print(f"  Failed to load session: {sid}")
         elif result and result.get("__action__") == "delete":
             target_session = result.get("session", {})
             target_id = target_session.get("id", "")
             if target_id and session_mgr.delete(target_id):
-                console.print(f"  Deleted session: {target_session.get('title', target_id)}")
+                _sessions_console.print(f"  Deleted session: {target_session.get('title', target_id)}")
             else:
-                console.print("  Failed to delete session.")
+                _sessions_console.print("  Failed to delete session.")
 
 
 @command("/clear",    "Clear conversation history",                      tier=TIER_STABLE)

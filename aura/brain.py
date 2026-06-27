@@ -133,7 +133,8 @@ class OllamaBrain(ConversationMixin, ModelRouterMixin):
         try:
             result = self.client.list()
             chat_models = [m.model for m in result.models
-                          if not any(x in m.model.lower() for x in ("embed", "nomic", "ocr"))]
+                          if m.model is not None
+                          and not any(x in m.model.lower() for x in ("embed", "nomic", "ocr"))]
             if chat_models:
                 if not self._local_ollama_ok:
                     logger.info(f"[BRAIN] Local Ollama has {len(chat_models)} chat models")
