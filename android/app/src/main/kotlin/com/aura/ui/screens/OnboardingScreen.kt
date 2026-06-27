@@ -360,6 +360,32 @@ private fun PageDone(
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
             textAlign = TextAlign.Center,
         )
+        Spacer(modifier = Modifier.height(16.dp))
+        // MoA introduction
+        Surface(
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "🧠 MoA — Mixture of Agents",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Aura can use 3 AI models together for harder problems. Tap \"🚀 Deep\" in chat to enable it — the models collaborate to give you better answers.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
         Spacer(modifier = Modifier.height(48.dp))
         Button(
             onClick = onFinish,

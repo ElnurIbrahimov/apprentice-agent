@@ -45,26 +45,23 @@ class MorningBriefWorker @AssistedInject constructor(
         val userMessage = "Give me my morning brief.\n\n# What I remember about you:\n$memories"
         val options = ChatOptions(temperature = 0.7, maxTokens = 500)
 
-        // 2) Pick the first configured provider. If none, this is a permanent
-        // skip (no key configured) — return success, not retry, so we don't
-        // burn battery every 7am forever.
-        val provider = providerRegistry.all().firstOrNull { it.isConfigured() }
-        if (provider == null) {
-            return Result.success()
-        }
-        // Resolve the model id properly. ProviderRegistry.parse() handles the
-        // "provider:model" prefix routing. We pass the user's selected default
-        // model id if it can be served by this provider, else fall back to the
-        // first model that this provider exposes.
-        val desiredId = defaultModelIdForProvider(provider.prefix)
-        val modelId = provider.listModels().firstOrNull()
-            ?.let { "${provider.prefix}:$it" }
-            ?: desiredId
-        val (_, model) = try {
-            providerRegistry.parse(modelId)
-        } catch (e: IllegalArgumentException) {
-            // Model prefix not registered. Skip silently.
-            return Result.success()
+        // 2) Try MoA first for richer morning briefs. Fall back to first
+        // configured solo provider if MoA isn't available.
+        val moaProvider = providerRegistry.get("moa")
+        val (provider, model) = if (moaProvider?.isConfigured() == true) {
+            providerRegistry.parse("moa:default")
+        } else {
+            val solo = providerRegistry.all().firstOrNull { it.isConfigured() }
+                ?: return Result.success()
+            val desiredId = defaultModelIdForProvider(solo.prefix)
+            val modelId = solo.listModels().firstOrNull()
+                ?.let { "${solo.prefix}:$it" }
+                ?: desiredId
+            try {
+                providerRegistry.parse(modelId)
+            } catch (e: IllegalArgumentException) {
+                return Result.success()
+            }
         }
         val conversation = Conversation(systemPrompt = systemPrompt).addUser(userMessage)
         val responseText = StringBuilder()
