@@ -40,7 +40,11 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         recallLimit: Int = 5,
         specialist: Specialist? = null,
     ): Flow<AgentEvent> = flow {
-        val tools = toolRegistry.definitions()
+        val tools = specialist?.let { s ->
+            val allowed = s.toolsAllowed
+            if (allowed.isEmpty()) toolRegistry.definitions()
+            else toolRegistry.definitions().filter { it.name in allowed }
+        } ?: toolRegistry.definitions()
         var step = 0
         var finished = false
         var lastUserMessage = ""
@@ -147,7 +151,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                 val needsPerm = if (result is ToolResult.NeedsPermission) result.permission else null
                 val permRationale = if (result is ToolResult.NeedsPermission) result.rationale else null
                 currentConversation = currentConversation.setToolResult(id, resultText)
-                emit(AgentEvent.ToolResult(id, name, resultText, needsPerm, permRationale))
+                emit(AgentEvent.ToolResult(id, name, args, resultText, needsPerm, permRationale))
             }
         }
 
@@ -191,7 +195,7 @@ sealed class AgentEvent {
     data class ToolCallStart(val id: String, val name: String) : AgentEvent()
     data class ToolCallEnd(val id: String, val name: String, val arguments: String) : AgentEvent()
     data class ToolExecuting(val id: String, val name: String, val arguments: String = "") : AgentEvent()
-    data class ToolResult(val id: String, val name: String, val result: String, val needsPermission: String? = null, val permissionRationale: String? = null) : AgentEvent()
+    data class ToolResult(val id: String, val name: String, val arguments: String, val result: String, val needsPermission: String? = null, val permissionRationale: String? = null) : AgentEvent()
     /** Emitted by the UI after a permission was granted. The loop re-executes the named tool with the given args. */
     data class PermissionGranted(val toolName: String, val arguments: String) : AgentEvent()
     data class Error(val code: String, val message: String, val retryable: Boolean) : AgentEvent()

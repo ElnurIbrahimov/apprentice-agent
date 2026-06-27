@@ -22,7 +22,7 @@ class AgentTextAccumulatorTest {
     }
 
     @Test fun `ToolResult does not change text`() {
-        assertEquals("abc", AgentTextAccumulator.apply("abc", AgentEvent.ToolResult("id1", "echo", "echoed out")))
+        assertEquals("abc", AgentTextAccumulator.apply("abc", AgentEvent.ToolResult("id1", "echo", "{}", "echoed out")))
     }
 
     @Test fun `Error does not change text`() {

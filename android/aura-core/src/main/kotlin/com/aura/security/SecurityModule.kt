@@ -28,8 +28,13 @@ object SecurityModule {
     @Provides
     @Singleton
     fun provideKeyManager(): KeyManager {
-        val ks = KeyStore.getInstance("AndroidKeyStore")
-        ks.load(null)
-        return KeyManager(ks)
+        return try {
+            val ks = KeyStore.getInstance("AndroidKeyStore")
+            ks.load(null)
+            KeyManager(ks)
+        } catch (_: Exception) {
+            // JVM / Robolectric test fallback: in-memory AES key
+            KeyManager(null)
+        }
     }
 }

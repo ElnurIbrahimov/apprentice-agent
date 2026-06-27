@@ -367,23 +367,35 @@ class ChatViewModel @Inject constructor(
                                 old.copy(conversation = updatedConversation)
                             }
                         }
-                        is AgentEvent.ToolExecuting, is AgentEvent.ToolResult -> {
-                            if (event is AgentEvent.ToolResult) {
-                                val citations = extractCitations(event.name, event.result)
-                                if (citations.isNotEmpty()) {
-                                    _state.update { old ->
-                                        old.copy(conversation = old.conversation.setCitations(citations))
-                                    }
-                                }
-                                if (event.needsPermission != null) {
-                                    _state.update { old ->
-                                        old.copy(
-                                            pendingPermission = event.needsPermission,
-                                            permissionRationale = event.permissionRationale,
-                                        )
-                                    }
+                        is AgentEvent.ToolResult -> {
+                            val citations = extractCitations(event.name, event.result)
+                            if (citations.isNotEmpty()) {
+                                _state.update { old ->
+                                    old.copy(conversation = old.conversation.setCitations(citations))
                                 }
                             }
+                            if (event.needsPermission != null) {
+                                _state.update { old ->
+                                    old.copy(
+                                        pendingPermission = event.needsPermission,
+                                        permissionRationale = event.permissionRationale,
+                                        pendingToolRetry = event.name to event.arguments,
+                                    )
+                                }
+                            } else if (event.result.startsWith("Still needs permission")) {
+                                // Fallback: parse permission back out of formatted tool result
+                                val perm = event.result.substringAfter("Still needs permission: ").trim()
+                                _state.update { old ->
+                                    old.copy(
+                                        pendingPermission = perm,
+                                        permissionRationale = "Permission is still required for ${event.name}.",
+                                        pendingToolRetry = event.name to event.arguments,
+                                    )
+                                }
+                            }
+                        }
+                        is AgentEvent.ToolExecuting -> {
+                            // not used in this collector
                         }
                         is AgentEvent.Error -> {
                             consecutiveFailures++

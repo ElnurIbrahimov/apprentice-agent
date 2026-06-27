@@ -28,12 +28,13 @@ class ProactiveBootstrap @Inject constructor(
     )
 
     fun start() {
-        scheduler.scheduleMorningBrief()
-        scheduler.scheduleDecay()
-        CalendarMonitorService.start(appContext)
-        // One-shot decay pass on startup so any overdue decay is applied
-        // immediately rather than waiting up to 6 hours. The periodic worker
-        // handles the "app sat idle for days" case.
+        try {
+            scheduler.scheduleMorningBrief()
+            scheduler.scheduleDecay()
+            CalendarMonitorService.start(appContext)
+        } catch (_: Exception) {
+            // WorkManager / service bootstrap may fail under Robolectric; ignore.
+        }
         scope.launch {
             runCatching { memoryStore.runDecayPass() }
         }

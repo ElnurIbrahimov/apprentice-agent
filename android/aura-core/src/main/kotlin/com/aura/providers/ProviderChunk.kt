@@ -29,4 +29,7 @@ data class ProviderError(
     val message: String,
     val retryable: Boolean = false,
     val cause: String? = null,
-)
+) {
+    fun toAuraError(providerId: String? = null): com.aura.core.error.AuraError =
+        com.aura.core.error.AuraError.Provider(message, providerCode = code, retryable = retryable)
+}

@@ -29,7 +29,11 @@ data class ToolCall(val id: String, val name: String, val arguments: Map<String,
 
 sealed class ToolResult {
     data class Ok(val output: String) : ToolResult()
-    data class Error(val message: String, val code: String = "tool_error") : ToolResult()
+    data class Error(
+        val message: String,
+        val code: String = "tool_error",
+        val typedError: com.aura.core.error.AuraError? = null,
+    ) : ToolResult()
     data class NeedsPermission(val permission: String, val rationale: String) : ToolResult()
     data class NeedsApproval(val rationale: String) : ToolResult()
 }
