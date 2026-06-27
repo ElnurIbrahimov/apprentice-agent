@@ -91,8 +91,12 @@ object ProviderModule {
     @Provides
     @IntoMap
     @StringKey("moa")
-    fun provideMoa(registry: dagger.Lazy<ProviderRegistry>): Provider = MoaProvider(
+    fun provideMoa(
+        registry: dagger.Lazy<ProviderRegistry>,
+        presetRepo: MoaPresetRepository,
+    ): Provider = MoaProvider(
         registry = registry,
+        presets = presetRepo.loadPresets(),
     )
 
 }

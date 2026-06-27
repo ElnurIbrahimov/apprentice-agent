@@ -20,6 +20,7 @@ class MoaProvider(
     override val prefix: String = "moa",
     override val displayName: String = "Mixture of Agents",
     private val registry: Lazy<ProviderRegistry>,
+    presets: Map<String, Preset> = emptyMap(),
 ) : Provider {
 
     /** Reference model descriptor — provider prefix + model name. */
@@ -35,9 +36,7 @@ class MoaProvider(
         val enabled: Boolean = true,
     )
 
-    // ── v1 hardcoded presets (mirrors Hermes config.yaml moa section) ──
-
-    private val defaultPreset = Preset(
+    private val defaultPreset = presets.values.firstOrNull { it.enabled } ?: Preset(
         name = "default",
         referenceModels = listOf(
             ModelRef("ollama", "glm-5.2"),
@@ -46,7 +45,7 @@ class MoaProvider(
         aggregator = ModelRef("deepseek", "deepseek-v4-pro"),
     )
 
-    private val presets: Map<String, Preset> = mapOf("default" to defaultPreset)
+    private val loadedPresets: Map<String, Preset> = presets.ifEmpty { mapOf("default" to defaultPreset) }
 
     // ── Provider contract ──
 
@@ -56,7 +55,7 @@ class MoaProvider(
         return runCatching { registry.get().parse(aggId) }.isSuccess
     }
 
-    override suspend fun listModels(): List<String> = presets.keys.toList()
+    override suspend fun listModels(): List<String> = loadedPresets.keys.toList()
 
     override suspend fun cancel() {
         // No long-lived state; cancellation is handled via coroutine scoping.
@@ -75,7 +74,7 @@ class MoaProvider(
         options: ChatOptions,
         tools: List<ToolDefinition>,
     ): Flow<ProviderChunk> = channelFlow {
-        val preset = presets[model] ?: defaultPreset
+        val preset = loadedPresets[model] ?: defaultPreset
         if (!preset.enabled) {
             // Disabled preset → aggregator acts alone.
             val aggId = "${preset.aggregator.providerPrefix}:${preset.aggregator.modelName}"
