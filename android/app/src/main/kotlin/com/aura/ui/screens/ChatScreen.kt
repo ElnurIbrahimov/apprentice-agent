@@ -65,6 +65,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
 import com.aura.IncomingShareStore
 import com.aura.agent.Specialist
+import com.aura.ui.components.MoaThinkingIndicator
 import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.components.SpecialistChips
 import com.aura.ui.viewmodel.ChatViewModel
@@ -217,6 +218,13 @@ fun ChatScreen(
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
             }
+        }
+
+        // MoA thinking indicator — shown during Deep Mode turns
+        if (state.deepModeActive) {
+            MoaThinkingIndicator(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            )
         }
 
         // Messages
