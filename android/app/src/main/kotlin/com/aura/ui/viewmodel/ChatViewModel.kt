@@ -84,6 +84,10 @@ data class ChatUiState(
     val pendingToolRetry: Pair<String, String>? = null,
     val errorRetryable: Boolean = false,
     val kgNodeCount: Int = 0,
+    /** True when user has toggled Deep Mode for the next turn. */
+    val deepModeEnabled: Boolean = false,
+    /** True when the current turn is running through MoA. */
+    val deepModeActive: Boolean = false,
 )
 
 @HiltViewModel
@@ -220,6 +224,10 @@ class ChatViewModel @Inject constructor(
         setTtsEnabled(!_state.value.ttsEnabled)
     }
 
+    fun toggleDeepMode() {
+        _state.update { it.copy(deepModeEnabled = !it.deepModeEnabled) }
+    }
+
     fun loadConversation(id: String) {
         viewModelScope.launch {
             val store = EntryPointAccessors.fromApplication(
@@ -314,11 +322,16 @@ class ChatViewModel @Inject constructor(
         val text = current.draft.trim()
         if (text.isEmpty() || current.streaming) return
 
+        // If Deep Mode is enabled, use the MoA provider for this turn.
+        val useMoa = current.deepModeEnabled
+        val model = if (useMoa) "moa:default" else current.activeModel
+
         _state.update { it.copy(
             conversation = it.conversation.addUser(text),
             draft = "",
             streaming = true,
             error = null,
+            deepModeActive = useMoa,
         ) }
         val specialist = current.selectedSpecialist
         var responseBuffer = StringBuilder()
@@ -328,7 +341,7 @@ class ChatViewModel @Inject constructor(
         runJob = viewModelScope.launch {
             try {
                 val conversation = _state.value.conversation
-                loop.run(conversation, model = current.activeModel, specialist = specialist).collect { event ->
+                loop.run(conversation, model = model, specialist = specialist).collect { event ->
                     when (event) {
                         is AgentEvent.TextDelta -> {
                             responseBuffer.append(event.text)
@@ -381,6 +394,8 @@ class ChatViewModel @Inject constructor(
                             // Check if KG learned new nodes
                             refreshKgNodeCount()
                             onFirstConversationComplete()
+                            // Reset Deep Mode after a successful MoA turn.
+                            _state.update { it.copy(deepModeEnabled = false, deepModeActive = false) }
                         }
                         else -> Unit
                     }
@@ -390,7 +405,7 @@ class ChatViewModel @Inject constructor(
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message ?: "unknown error") }
             } finally {
-                _state.update { it.copy(streaming = false) }
+                _state.update { it.copy(streaming = false, deepModeActive = false) }
             }
         }
     }

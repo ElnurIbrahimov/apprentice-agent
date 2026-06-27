@@ -196,6 +196,21 @@ fun ChatScreen(
                 IconButton(onClick = onNavigateHistory) {
                     Icon(Icons.Filled.History, contentDescription = "History", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 }
+                // Deep Mode chip — one-shot MoA toggle for the next turn
+                androidx.compose.material3.FilterChip(
+                    selected = state.deepModeEnabled,
+                    onClick = { viewModel.toggleDeepMode() },
+                    label = {
+                        Text(
+                            text = if (state.deepModeActive) "\uD83E\uDE84 Thinking..." else "\uD83D\uDE80 Deep",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    },
+                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
+                    ),
+                    modifier = Modifier.padding(end = 4.dp),
+                )
                 Icon(
                     imageVector = Icons.Filled.ArrowDropDown,
                     contentDescription = "Change model",
