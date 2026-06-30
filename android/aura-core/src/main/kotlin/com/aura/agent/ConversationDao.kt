@@ -27,6 +27,30 @@ interface ConversationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(rows: List<ConversationEntity>)
 
+    /**
+     * Full-text-ish search across conversation title + serialized turn
+     * content. Uses SQL LIKE because the turns are stored as a single
+     * JSON column — adding an FTS virtual table would require a
+     * migration and a per-turn indexer, which is overkill for personal
+     * use. LIKE is O(n) on a personal-size table (hundreds of rows),
+     * which is fine.
+     *
+     * [escapedQuery] must have `%`/`_`/`\` escaped (see
+     * [com.aura.memory.MemoryStore.escapeLikeWildcards]) so a user
+     * query containing those characters matches literally rather than
+     * acting as a pattern.
+     */
+    @Query(
+        """
+        SELECT * FROM conversations
+        WHERE title LIKE '%' || :escapedQuery || '%' ESCAPE '\'
+           OR turnsJson LIKE '%' || :escapedQuery || '%' ESCAPE '\'
+        ORDER BY updatedAt DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun search(escapedQuery: kotlin.String, limit: Int = 50): List<ConversationEntity>
+
     @Query("SELECT * FROM conversations ORDER BY updatedAt DESC LIMIT 1")
     suspend fun mostRecent(): ConversationEntity?
 
