@@ -6,7 +6,7 @@ import android.net.Uri
 import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.aura.UserPreferences
+import com.aura.data.UserPreferences
 import com.aura.agent.AgentEvent
 import com.aura.agent.ConversationStore
 import com.aura.agent.MemoryAugmentedAgenticLoop

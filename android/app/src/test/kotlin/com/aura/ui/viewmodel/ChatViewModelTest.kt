@@ -2,7 +2,7 @@ package com.aura.ui.viewmodel
 
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
-import com.aura.UserPreferences
+import com.aura.data.UserPreferences
 import com.aura.agent.AgentEvent
 import com.aura.agent.Conversation
 import com.aura.agent.ConversationStore

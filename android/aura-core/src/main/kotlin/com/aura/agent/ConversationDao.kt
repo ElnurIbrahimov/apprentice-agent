@@ -21,6 +21,12 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations ORDER BY updatedAt DESC LIMIT :limit")
     suspend fun recent(limit: Int = 50): List<ConversationEntity>
 
+    @Query("SELECT * FROM conversations ORDER BY createdAt ASC")
+    suspend fun allForExport(): List<ConversationEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(rows: List<ConversationEntity>)
+
     @Query("SELECT * FROM conversations ORDER BY updatedAt DESC LIMIT 1")
     suspend fun mostRecent(): ConversationEntity?
 
@@ -29,4 +35,7 @@ interface ConversationDao {
 
     @Query("DELETE FROM conversations WHERE id = :id")
     suspend fun delete(id: String)
+
+    @Query("DELETE FROM conversations")
+    suspend fun deleteAll()
 }

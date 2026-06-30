@@ -1,15 +1,11 @@
 package com.aura.ui.settings
 
-import android.content.Context
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aura.data.UserPreferences
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,10 +13,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-
-private val Context.auraPrefs by preferencesDataStore(name = "aura_settings")
-private val KEY_DEFAULT_MODEL = stringPreferencesKey("default_model")
-private val KEY_FIRST_RUN = stringPreferencesKey("first_run_complete")
 
 data class SettingsUiState(
     val ollamaKey: String = "",
@@ -36,9 +28,9 @@ data class SettingsUiState(
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val providerRegistry: ProviderRegistry,
     private val providerKeys: ProviderKeys,
+    private val userPreferences: UserPreferences,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -48,23 +40,18 @@ class SettingsViewModel @Inject constructor(
 
     fun reload() {
         viewModelScope.launch {
-            val ollama = providerKeys.keyFor("ollama") ?: ""
-            val anthropic = providerKeys.keyFor("anthropic") ?: ""
-            val openai = providerKeys.keyFor("openai") ?: ""
-            val deepseek = providerKeys.keyFor("deepseek") ?: ""
-            val groq = providerKeys.keyFor("groq") ?: ""
-            val openrouter = providerKeys.keyFor("openrouter") ?: ""
             val configured = providerRegistry.configured().map { "${it.prefix} (${it.displayName})" }
-            val prefs = context.auraPrefs.data.first()
+            val defaultModel = userPreferences.defaultModel.first()
+            val firstRunComplete = userPreferences.firstRunComplete.first()
             _state.value = SettingsUiState(
-                ollamaKey = ollama,
-                anthropicKey = anthropic,
-                openaiKey = openai,
-                deepseekKey = deepseek,
-                groqKey = groq,
-                openrouterKey = openrouter,
-                defaultModel = prefs[KEY_DEFAULT_MODEL] ?: "ollama:deepseek-v4-pro:cloud",
-                firstRunComplete = prefs[KEY_FIRST_RUN] == "true",
+                ollamaKey = providerKeys.keyFor("ollama") ?: "",
+                anthropicKey = providerKeys.keyFor("anthropic") ?: "",
+                openaiKey = providerKeys.keyFor("openai") ?: "",
+                deepseekKey = providerKeys.keyFor("deepseek") ?: "",
+                groqKey = providerKeys.keyFor("groq") ?: "",
+                openrouterKey = providerKeys.keyFor("openrouter") ?: "",
+                defaultModel = defaultModel,
+                firstRunComplete = firstRunComplete,
                 configuredProviders = configured,
             )
         }
@@ -79,14 +66,14 @@ class SettingsViewModel @Inject constructor(
 
     fun setDefaultModel(model: String) {
         viewModelScope.launch {
-            context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
+            userPreferences.setDefaultModel(model)
             _state.update { it.copy(defaultModel = model) }
         }
     }
 
     fun markFirstRunComplete() {
         viewModelScope.launch {
-            context.auraPrefs.edit { it[KEY_FIRST_RUN] = "true" }
+            userPreferences.setFirstRunComplete(true)
             _state.update { it.copy(firstRunComplete = true) }
         }
     }

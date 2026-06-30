@@ -22,6 +22,9 @@ interface HandDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(hand: Hand)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(hands: List<Hand>)
+
     @Update
     suspend fun update(hand: Hand)
 
@@ -30,4 +33,7 @@ interface HandDao {
 
     @Query("DELETE FROM hands WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM hands")
+    suspend fun deleteAll()
 }

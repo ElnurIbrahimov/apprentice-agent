@@ -1,6 +1,6 @@
 package com.aura.ui.viewmodel
 
-import com.aura.UserPreferences
+import com.aura.data.UserPreferences
 import com.aura.agent.ConversationStore
 import com.aura.agent.MemoryAugmentedAgenticLoop
 import com.aura.agent.ToolExecutor

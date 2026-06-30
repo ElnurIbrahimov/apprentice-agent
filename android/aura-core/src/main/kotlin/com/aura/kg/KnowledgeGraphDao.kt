@@ -57,4 +57,22 @@ interface KnowledgeGraphDao {
 
     @Query("SELECT COUNT(*) FROM kg_edges")
     suspend fun edgeCount(): Int
+
+    @Query("SELECT * FROM kg_nodes")
+    suspend fun allNodes(): List<NodeEntity>
+
+    @Query("SELECT * FROM kg_edges")
+    suspend fun allEdges(): List<EdgeEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllNodes(rows: List<NodeEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllEdges(rows: List<EdgeEntity>)
+
+    @Query("DELETE FROM kg_edges")
+    suspend fun deleteAllEdges()
+
+    @Query("DELETE FROM kg_nodes")
+    suspend fun deleteAllNodes()
 }

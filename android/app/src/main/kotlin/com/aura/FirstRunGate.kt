@@ -1,31 +1,26 @@
 package com.aura
 
-import android.content.Context
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.preferencesDataStore
-import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val Context.auraPrefs by preferencesDataStore(name = "aura_settings")
-private val KEY_FIRST_RUN = booleanPreferencesKey("first_run_complete")
-
 /**
  * Gate that blocks the main UI until the user has completed onboarding.
- * Reads a simple boolean flag from DataStore — the same flag that
- * SettingsViewModel writes when the user enters their first API key.
+ *
+ * The actual storage is in [com.aura.data.UserPreferences.firstRunComplete]
+ * — historically this class had its own `Context.auraPrefs` DataStore
+ * extension, but that collided with two other declarations of the
+ * same extension (and worse, used a different value type for the
+ * same logical key — string vs boolean), so writes from
+ * SettingsViewModel never reached this reader. The flag is now
+ * centralized on [com.aura.data.UserPreferences].
  */
 @Singleton
 class FirstRunGate @Inject constructor(
-    @ApplicationContext private val context: Context,
+    private val userPreferences: com.aura.data.UserPreferences,
 ) {
-    suspend fun isFirstRunComplete(): Boolean =
-        context.auraPrefs.data.map { it[KEY_FIRST_RUN] ?: false }.first()
+    suspend fun isFirstRunComplete(): Boolean = userPreferences.isFirstRunComplete()
 
     suspend fun markComplete() {
-        context.auraPrefs.edit { it[KEY_FIRST_RUN] = true }
+        userPreferences.setFirstRunComplete(true)
     }
 }
