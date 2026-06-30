@@ -32,11 +32,22 @@ class ProactiveBootstrap @Inject constructor(
             scheduler.scheduleMorningBrief()
             scheduler.scheduleDecay()
             CalendarMonitorService.start(appContext)
+            // Tell the home-screen widget (if installed) to refresh.
+            // We broadcast by action rather than by component so this
+            // call doesn't have a class dependency on the :app module
+            // from :aura-core. The widget receiver in :app picks this
+            // up and re-runs onUpdate.
+            val refresh = android.content.Intent(ACTION_REFRESH_WIDGET).apply {
+                setPackage(appContext.packageName)
+            }
+            appContext.sendBroadcast(refresh)
         } catch (_: Exception) {
             // WorkManager / service bootstrap may fail under Robolectric; ignore.
         }
-        scope.launch {
-            runCatching { memoryStore.runDecayPass() }
-        }
+    }
+
+    companion object {
+        /** Custom broadcast action the [com.aura.widget.AskAuraWidget] listens for. */
+        const val ACTION_REFRESH_WIDGET = "com.aura.action.REFRESH_WIDGET"
     }
 }

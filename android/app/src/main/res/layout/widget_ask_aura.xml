@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  4x2 home-screen widget layout. The widget shows a single card
+  with a header ("Aura") and a body. The body has two states:
+
+  - Default: shows the most recent memory (or a "No memories yet"
+    placeholder). A tap on the body opens Aura.
+  - Quick-ask: a single rounded button at the bottom labeled
+    "Ask Aura…" that launches Aura in ask mode.
+
+  The widget uses the system widget background and a subtle
+  Material 3 color scheme via android:colorBackground.
+
+  Layout reasoning:
+  - FrameLayout root so the entire widget can be a tap target.
+  - LinearLayout vertical for title + body.
+  - Body is a TextView with autoSizeTextType for text scaling.
+  - Bottom-right corner holds a small "Ask" button.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="@drawable/widget_background"
+    android:id="@+id/widget_root">
+
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Aura"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="@color/widget_text_primary"
+        android:alpha="0.7" />
+
+    <TextView
+        android:id="@+id/widget_memory_text"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="6dp"
+        android:text="No memories yet — start a chat to teach Aura about you."
+        android:textSize="14sp"
+        android:textColor="@color/widget_text_primary"
+        android:maxLines="4"
+        android:ellipsize="end" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:gravity="end">
+        <Button
+            android:id="@+id/widget_ask_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Ask Aura…"
+            android:textSize="12sp"
+            android:minHeight="32dp"
+            android:paddingHorizontal="12dp"
+            android:background="@drawable/widget_button_background"
+            android:textColor="@color/widget_text_primary"
+            android:stateListAnimator="@null" />
+    </LinearLayout>
+</LinearLayout>

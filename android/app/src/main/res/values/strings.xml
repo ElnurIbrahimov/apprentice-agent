@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Aura</string>
+    <string name="widget_ask_aura_description">Quick-access widget: tap to open Aura, or tap the Ask button to start a new question.</string>
+    <string name="widget_ask_aura_label">Aura</string>
 </resources>
