@@ -78,4 +78,16 @@ class MemoryViewModel @Inject constructor(
             refresh()
         }
     }
+
+    /**
+     * Edit a memory's content + category. Embedding is invalidated
+     * by the store; the next recall will re-embed on demand, or the
+     * user can run Settings → Memory → Rebuild embeddings.
+     */
+    fun update(id: String, content: String, category: String) {
+        viewModelScope.launch {
+            memoryStore.update(id, content, category)
+            refresh()
+        }
+    }
 }

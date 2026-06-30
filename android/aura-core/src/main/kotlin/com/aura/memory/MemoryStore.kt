@@ -113,6 +113,36 @@ class MemoryStore @Inject constructor(
     suspend fun get(id: String): MemoryEntity? = dao.getById(id)
     suspend fun forget(id: String) = dao.delete(id)
 
+    /**
+     * Update an existing memory's content + category. Used by the
+     * Memory edit UI when the user fixes a fact the model got wrong.
+     * The embedding is set to null — the next recall will trigger a
+     * lazy re-embed, or the user can hit Settings → Rebuild
+     * embeddings for a full sweep.
+     *
+     * If [id] does not exist this is a no-op (the user probably
+     * deleted the row from another path between opening the edit
+     * dialog and tapping Save). The refresh happens automatically
+     * via [observeCount] in the calling VM.
+     */
+    suspend fun update(id: String, content: String, category: String, importance: Float = 0.5f) {
+        val existing = dao.getById(id) ?: return
+        dao.update(
+            existing.copy(
+                content = content,
+                category = category,
+                importance = importance,
+                // Invalidate the embedding so the next recall re-embeds.
+                // We don't have an embedder call here; the MemoryEditViewModel
+                // (or the rebuild action) handles re-embedding.
+                embedding = null,
+                // Bump accessedAt so a freshly-edited memory ranks higher
+                // in the next recall.
+                accessedAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
     suspend fun touch(id: String) {
         dao.touch(id)
     }

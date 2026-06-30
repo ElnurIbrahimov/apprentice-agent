@@ -1,5 +1,9 @@
 package com.aura.memory
 
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -86,7 +90,7 @@ class MemoryStoreTest {
 
     @Test
     fun `Embedder byte roundtrip preserves values`() = runTest {
-        val emb = LocalEmbedder(384)
+        val emb = FakeEmbedder(384)
         val v = emb.embed("test roundtrip")
         val bytes = Embedder.toBytes(v)
         val v2 = Embedder.fromBytes(bytes)
@@ -94,5 +98,53 @@ class MemoryStoreTest {
         for (i in v.indices) {
             assertEquals(v[i], v2[i], 1e-6f, "mismatch at index $i")
         }
+    }
+
+    @Test
+    fun `update changes content and category, invalidates embedding`() = runTest {
+        // The store gets a local mock; the class field `memoryDao` is
+        // not used here. We re-bind via the captured slot pattern.
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val store = MemoryStore(
+            dao,
+            FakeEmbedder(384),
+            VectorIndex(384),
+            WriteGate(),
+        )
+        // Real implementation: capture the entity written.
+        val original = MemoryEntity(
+            id = "m1", content = "old", source = "user", category = "fact",
+            importance = 0.5f, embedding = byteArrayOf(1, 2, 3, 4),
+            createdAt = 1L, accessedAt = 1L, accessCount = 0, decayScore = 1.0f,
+            tags = "", metadata = "",
+        )
+        coEvery { dao.getById("m1") } returns original
+        val captured = slot<MemoryEntity>()
+        coEvery { dao.update(capture(captured)) } answers { Unit }
+
+        store.update("m1", "new content", "preference")
+
+        assertEquals("new content", captured.captured.content)
+        assertEquals("preference", captured.captured.category)
+        assertNull(captured.captured.embedding, "embedding should be invalidated so the next recall re-embeds")
+        assertTrue(captured.captured.accessedAt > original.accessedAt, "accessedAt should be bumped")
+        // Untouched fields preserved.
+        assertEquals("m1", captured.captured.id)
+        assertEquals("user", captured.captured.source)
+        assertEquals(1L, captured.captured.createdAt)
+    }
+
+    @Test
+    fun `update is a no-op when the id does not exist`() = runTest {
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val store = MemoryStore(
+            dao,
+            FakeEmbedder(384),
+            VectorIndex(384),
+            WriteGate(),
+        )
+        coEvery { dao.getById("missing") } returns null
+        store.update("missing", "x", "fact")
+        coVerify(exactly = 0) { dao.update(any()) }
     }
 }
