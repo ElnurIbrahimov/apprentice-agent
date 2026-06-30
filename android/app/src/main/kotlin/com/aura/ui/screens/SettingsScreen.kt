@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,25 +12,34 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.aura.ui.settings.BackupViewModel
 import com.aura.ui.settings.ProviderKeyField
 import com.aura.ui.settings.SettingsViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(
+    viewModel: SettingsViewModel = hiltViewModel(),
+    backupViewModel: BackupViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsState()
     Column(
         modifier = Modifier
@@ -169,6 +179,118 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                     ),
                 )
             }
+        }
+
+        // ── Backup & restore ──
+        val backupState by backupViewModel.state.collectAsState()
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+            contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+        ) { uri: android.net.Uri? ->
+            if (uri != null) backupViewModel.stageImport(uri)
+        }
+        val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+
+        Spacer(modifier = Modifier.height(8.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Backup & restore",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "Export everything (memories, conversations, knowledge graph, " +
+                "hands, tasks, user profile) to a JSON file. Imports add to " +
+                "what's already here — turn on 'purge first' to start fresh.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+        )
+        Spacer(Modifier.height(8.dp))
+
+        OutlinedButton(
+            onClick = {
+                coroutineScope.launch {
+                    val file = backupViewModel.prepareExportFile()
+                    val uri = androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        file,
+                    )
+                    val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "application/json"
+                        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(
+                        android.content.Intent.createChooser(share, "Share Aura backup")
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+            },
+            enabled = !backupState.exportInFlight,
+        ) {
+            Text(if (backupState.exportInFlight) "Exporting…" else "Export to JSON")
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        OutlinedButton(
+            onClick = {
+                importLauncher.launch(arrayOf("application/json", "*/*"))
+            },
+            enabled = !backupState.importInFlight,
+        ) {
+            Text(if (backupState.importInFlight) "Restoring…" else "Restore from JSON")
+        }
+
+        backupState.lastResult?.let { result ->
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = result,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { backupViewModel.clearResult() }) {
+                        Text("Dismiss")
+                    }
+                }
+            }
+        }
+
+        if (backupState.showImportConfirm) {
+            AlertDialog(
+                onDismissRequest = { backupViewModel.cancelImport() },
+                title = { Text("Restore from backup?") },
+                text = {
+                    Text(
+                        "This will add the rows from the backup file to " +
+                            "your existing data. Existing rows with the " +
+                            "same id are replaced; new rows are added. " +
+                            "Embeddings are NOT included — go to Memory " +
+                            "and tap 'Rebuild embeddings' after restoring.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { backupViewModel.confirmImport(purgeFirst = false) }) {
+                        Text("Add to existing")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { backupViewModel.cancelImport() }) {
+                        Text("Cancel")
+                    }
+                },
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
