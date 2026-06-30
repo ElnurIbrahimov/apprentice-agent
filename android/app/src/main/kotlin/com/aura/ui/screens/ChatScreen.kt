@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -199,6 +200,23 @@ fun ChatScreen(
                         imageVector = if (state.ttsEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
                         contentDescription = if (state.ttsEnabled) "TTS on, tap to mute" else "TTS off, tap to enable",
                         tint = if (state.ttsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        val text = viewModel.lastAssistantText()
+                        if (text.isNotBlank()) {
+                            val clip = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            clip.setPrimaryClip(android.content.ClipData.newPlainText("Aura response", text))
+                        }
+                    },
+                    enabled = viewModel.lastAssistantText().isNotBlank(),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ContentCopy,
+                        contentDescription = "Copy last response",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )
                 }
                 IconButton(onClick = onNavigateHistory) {

@@ -232,6 +232,26 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(deepModeEnabled = !it.deepModeEnabled) }
     }
 
+    /**
+     * Compute the most recent assistant text from the current
+     * conversation. Returns an empty string if the last turn is a
+     * user message (or the conversation is empty). Used by the
+     * 'Copy last response' button in the chat header.
+     */
+    fun lastAssistantText(): String {
+        val conv = _state.value.conversation
+        // Walk turns in reverse to find the most recent assistant
+        // text. We don't just take the last turn because the model
+        // may have returned an empty assistant text + a tool call
+        // — we want the last turn that actually had assistant
+        // content.
+        for (i in conv.turns.indices.reversed()) {
+            val assistant = conv.turns[i].assistant
+            if (!assistant.isNullOrBlank()) return assistant
+        }
+        return ""
+    }
+
     fun loadConversation(id: String) {
         viewModelScope.launch {
             conversationStore.load(id)?.let { conv ->
