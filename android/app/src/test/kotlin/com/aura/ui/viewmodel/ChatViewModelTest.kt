@@ -199,6 +199,84 @@ class ChatViewModelTest {
     }
 
     @Test
+    fun `toggleIncognito flips the flag in state`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        assertFalse(vm.state.value.incognitoMode)
+        vm.toggleIncognito()
+        assertTrue(vm.state.value.incognitoMode)
+        vm.toggleIncognito()
+        assertFalse(vm.state.value.incognitoMode)
+    }
+
+    @Test
+    fun `send with incognito on forwards memoryEnabled=false to the loop`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        coEvery { loop.run(any(), any(), any(), any(), any(), any(), any()) } returns flowOf(
+            AgentEvent.TextDelta("hi back"),
+            AgentEvent.Done,
+        )
+        coEvery { conversationStore.recent(2) } returns emptyList()
+
+        vm.toggleIncognito()
+        vm.setDraft("tell me a secret")
+        vm.send()
+        advanceUntilIdle()
+
+        // memoryEnabled = false (incognito on) must reach the loop.
+        io.mockk.verify {
+            loop.run(
+                conversation = any(),
+                model = any(),
+                maxSteps = any(),
+                options = any(),
+                recallLimit = any(),
+                specialist = any(),
+                memoryEnabled = false,
+            )
+        }
+    }
+
+    @Test
+    fun `send with incognito on skips conversation persistence`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        coEvery { loop.run(any(), any(), any(), any(), any(), any(), any()) } returns flowOf(
+            AgentEvent.TextDelta("hi"),
+            AgentEvent.Done,
+        )
+        coEvery { conversationStore.recent(2) } returns emptyList()
+
+        vm.toggleIncognito()
+        vm.setDraft("private question")
+        vm.send()
+        advanceUntilIdle()
+
+        // In incognito mode the conversation must NOT be persisted.
+        io.mockk.coVerify(exactly = 0) { conversationStore.save(any()) }
+    }
+
+    @Test
+    fun `send with incognito off still persists the conversation`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        coEvery { loop.run(any(), any(), any(), any(), any(), any(), any()) } returns flowOf(
+            AgentEvent.TextDelta("hi"),
+            AgentEvent.Done,
+        )
+        coEvery { conversationStore.recent(2) } returns emptyList()
+
+        // Default state: incognito off.
+        vm.setDraft("normal question")
+        vm.send()
+        advanceUntilIdle()
+
+        // Default path: conversation persisted at least once.
+        io.mockk.coVerify(atLeast = 1) { conversationStore.save(any()) }
+    }
+
+@Test
     fun `tts can be toggled`() = runTest(testDispatcher) {
         val vm = createViewModel()
         advanceUntilIdle()

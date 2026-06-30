@@ -39,6 +39,18 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         options: ChatOptions = ChatOptions(),
         recallLimit: Int = 5,
         specialist: Specialist? = null,
+        /**
+         * Session-level write flag. When false:
+         *   - The user message is NOT auto-stored.
+         *   - The assistant turn is NOT fed to the profile extractor.
+         *   - The knowledge-graph extractor does NOT run.
+         *   - WRITE_LOCAL tools (e.g. `remember`) are refused by ToolExecutor.
+         * Read-only tools (recall, web_search, kg_query) and the agent's
+         * general reasoning still run. Used by the incognito toggle in
+         * ChatScreen so the user can have a private session without any
+         * long-term writes.
+         */
+        memoryEnabled: Boolean = true,
     ): Flow<AgentEvent> = flow {
         val tools = specialist?.let { s ->
             val allowed = s.toolsAllowed
@@ -126,7 +138,11 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
 
             if (accumulatedText.isNotEmpty()) {
                 currentConversation = currentConversation.addAssistant(accumulatedText.toString())
-                kgExtractor.extract(accumulatedText.toString())
+                // KG extraction is gated by memoryEnabled: in incognito mode
+                // we must not learn entities / relations from this turn.
+                if (memoryEnabled) {
+                    kgExtractor.extract(accumulatedText.toString())
+                }
             }
             for ((id, args) in toolCalls) {
                 val name = toolCallStarts[id] ?: ""
@@ -141,7 +157,17 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             for ((id, args) in toolCalls) {
                 val name = toolCallStarts[id] ?: continue
                 emit(AgentEvent.ToolExecuting(id, name, args))
-                val result = toolExecutor.execute(name, args, ToolContext(conversationId = currentConversation.id))
+                // The memoryEnabled flag flows into ToolContext so ToolExecutor
+                // can refuse WRITE_LOCAL tools (e.g. `remember`) inside an
+                // incognito session. READ_ONLY tools still run.
+                val result = toolExecutor.execute(
+                    name = name,
+                    argumentsJson = args,
+                    ctx = ToolContext(
+                        conversationId = currentConversation.id,
+                        memoryEnabled = memoryEnabled,
+                    ),
+                )
                 val resultText = when (result) {
                     is ToolResult.Ok -> result.output
                     is ToolResult.Error -> "Error: ${result.message}"
@@ -156,13 +182,16 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         }
 
         // 4) Auto-store the user's last message via WriteGate (best-effort, non-blocking)
-        if (lastUserMessage.isNotBlank()) {
+        //    Skipped when memoryEnabled is false (incognito mode).
+        if (memoryEnabled && lastUserMessage.isNotBlank()) {
             runCatching { memoryStore.maybeStore(lastUserMessage, source = "user") }
         }
 
         // 5) Extract user profile from last assistant turn (name, traits, facts)
+        //    Skipped in incognito mode — we don't learn new things about the
+        //    user from a session they explicitly marked private.
         val lastAssistant = currentConversation.turns.lastOrNull()?.assistant
-        if (!lastAssistant.isNullOrBlank()) {
+        if (memoryEnabled && !lastAssistant.isNullOrBlank()) {
             runCatching { extractProfileFromText(lastAssistant) }
         }
 

@@ -43,6 +43,14 @@ data class ToolContext(
     val userId: String = "default",
     val permissions: Set<String> = emptySet(),
     val timeout: Long = 30_000L,
+    /**
+     * Session-level write flag. When false, the tool executor refuses to
+     * run tools whose risk >= WRITE_LOCAL — this is the privacy boundary
+     * used by the incognito toggle. READ_ONLY tools (e.g. recall, web_search)
+     * still run so the user can keep using the assistant without writing
+     * anything to local state.
+     */
+    val memoryEnabled: Boolean = true,
 )
 
 /**

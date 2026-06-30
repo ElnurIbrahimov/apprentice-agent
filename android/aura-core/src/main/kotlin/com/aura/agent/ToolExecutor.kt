@@ -31,6 +31,16 @@ class ToolExecutor @Inject constructor(
     suspend fun execute(name: String, argumentsJson: String, ctx: ToolContext): ToolResult {
         val tool = registry.get(name) ?: return ToolResult.Error("Unknown tool: $name", "unknown_tool")
 
+        // Privacy boundary: in an incognito session, refuse any tool that
+        // mutates local state. READ_ONLY tools (recall, web_search, kg_query)
+        // are still allowed so the user can keep asking questions.
+        if (!ctx.memoryEnabled && tool.risk.ordinal >= ToolRisk.WRITE_LOCAL.ordinal) {
+            return ToolResult.Error(
+                message = "Tool '$name' is disabled in incognito mode (would write to local state).",
+                code = "incognito_blocked",
+            )
+        }
+
         // Permission gate. We resolve against the live PackageManager state every
         // call so the model sees the freshest answer (user may have just granted
         // the permission via Settings).

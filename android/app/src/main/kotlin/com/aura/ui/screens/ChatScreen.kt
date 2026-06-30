@@ -237,6 +237,21 @@ fun ChatScreen(
                     ),
                     modifier = Modifier.padding(end = 4.dp),
                 )
+                // Incognito chip — session-scoped no-write toggle
+                androidx.compose.material3.FilterChip(
+                    selected = state.incognitoMode,
+                    onClick = { viewModel.toggleIncognito() },
+                    label = {
+                        Text(
+                            text = if (state.incognitoMode) "\uD83D\uDD75\uFE0F Incognito" else "\uD83D\uDC64",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    },
+                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f),
+                    ),
+                    modifier = Modifier.padding(end = 4.dp),
+                )
                 Icon(
                     imageVector = Icons.Filled.ArrowDropDown,
                     contentDescription = "Change model",
@@ -250,6 +265,28 @@ fun ChatScreen(
             MoaThinkingIndicator(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
+        }
+
+        // Incognito banner — shown above the message list whenever
+        // the toggle is on, so the user can see the chat is in
+        // no-write mode at a glance.
+        if (state.incognitoMode) {
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = "\uD83D\uDD75\uFE0F Incognito — nothing from this conversation is saved. " +
+                        "No memory, no profile facts, no knowledge-graph nodes, " +
+                        "and no conversation history. Read-only tools still work.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
         }
 
         // Messages

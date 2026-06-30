@@ -93,6 +93,14 @@ data class ChatUiState(
     val deepModeEnabled: Boolean = false,
     /** True when the current turn is running through MoA. */
     val deepModeActive: Boolean = false,
+    /**
+     * True when incognito mode is on. The agent still runs and
+     * reads memory (so the user can ask questions about their
+     * existing memories), but does not auto-store the user's
+     * message or extract profile facts from the assistant's
+     * response. Session-scoped — not persisted across app restarts.
+     */
+    val incognitoMode: Boolean = false,
 )
 
 @HiltViewModel
@@ -125,6 +133,7 @@ class ChatViewModel @Inject constructor(
     )
 
     private fun saveConversation() {
+        if (_state.value.incognitoMode) return
         viewModelScope.launch {
             runCatching {
                 conversationStore.save(_state.value.conversation)
@@ -157,8 +166,11 @@ class ChatViewModel @Inject constructor(
     /**
      * After the first conversation, create a memory that this user has
      * started using Aura, so future conversations can reference it.
+     * Skipped in incognito mode so a private first conversation doesn't
+     * leave a permanent "this user started using Aura" fact.
      */
     private suspend fun onFirstConversationComplete() {
+        if (_state.value.incognitoMode) return
         val count = runCatching {
             conversationStore.recent(2).size
         }.getOrDefault(0)
@@ -230,6 +242,16 @@ class ChatViewModel @Inject constructor(
 
     fun toggleDeepMode() {
         _state.update { it.copy(deepModeEnabled = !it.deepModeEnabled) }
+    }
+
+    /**
+     * Flip incognito mode. When on, the next send does not write
+     * to memory or extract profile facts. Toggling it mid-conversation
+     * takes effect on the next user message — the in-flight turn
+     * (if any) keeps the value it was started with.
+     */
+    fun toggleIncognito() {
+        _state.update { it.copy(incognitoMode = !it.incognitoMode) }
     }
 
     /**
@@ -372,7 +394,12 @@ class ChatViewModel @Inject constructor(
         runJob = viewModelScope.launch {
             try {
                 val conversation = _state.value.conversation
-                loop.run(conversation, model = model, specialist = specialist).collect { event ->
+                loop.run(
+                    conversation = conversation,
+                    model = model,
+                    specialist = specialist,
+                    memoryEnabled = !_state.value.incognitoMode,
+                ).collect { event ->
                     when (event) {
                         is AgentEvent.TextDelta -> {
                             responseBuffer.append(event.text)
