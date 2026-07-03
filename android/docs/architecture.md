@@ -9,7 +9,7 @@ Native Kotlin/Compose superapp — a full port of the Aura desktop application t
 The project is a 2-module Gradle build:
 
 1. **app** (`:app`) — Main application shell: Hilt graph, navigation graph, top-level UI scaffold, MainActivity, share-target Activity, settings UI, chat/home/memory screens. This is the user-facing module.
-2. **aura-core** (`:aura-core`) — Shared library: agentic loop (`Brain`, `MemoryAugmentedAgenticLoop`), provider SDK (Ollama, Anthropic, OpenAI, DeepSeek via `OllamaCloudProvider` + `AnthropicProvider`), tool registry with 23 phone-native tools, Room-backed memory + tasks, voice I/O (STT + TTS), proactive layer (morning brief + calendar monitor), DataStore preferences for API keys.
+2. **aura-core** (`:aura-core`) — Shared library: agentic loop (`Brain`, `MemoryAugmentedAgenticLoop`), provider SDK (Anthropic, Gemini, Groq, MoA, Ollama Cloud, OpenAI-compat, OpenRouter — 7 concrete providers behind a `Provider` interface), tool registry with 31 phone-native tools, Room-backed memory + tasks, voice I/O (STT + TTS), proactive layer (morning brief + calendar monitor), DataStore preferences for API keys.
 
 This document is a snapshot of the **actual** project state, not aspirational. The earlier version of this file described a 14-module plan that was never implemented; that description is removed.
 
@@ -40,7 +40,7 @@ This document is a snapshot of the **actual** project state, not aspirational. T
 │  ┌────▼────┐ ┌───▼────┐ ┌─────▼──────┐ ┌───▼────┐│
 │  │Memory  │ │Tool    │ │  Provider  │ │ Voice  ││
 │  │Store   │ │Registry│ │   SDK      │ │ I/O    ││
-│  │(Room)  │ │(23 tls)│ │ 4 providers│ │STT+TTS ││
+│  │(Room)  │ │(31 tls)│ │ 7 providers│ │STT+TTS ││
 │  └────────┘ └────────┘ └────────────┘ └────────┘│
 │                                                 │
 │  ┌──────────────────────────────────────────────┐│

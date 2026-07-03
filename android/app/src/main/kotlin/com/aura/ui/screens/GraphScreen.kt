@@ -283,8 +283,8 @@ fun GraphScreen(viewModel: GraphViewModel = hiltViewModel()) {
                     .padding(horizontal = 20.dp, vertical = 12.dp),
             ) {
                 // Path result section
-                if (state.path != null) {
-                    PathSection(path = state.path!!, onNodeClick = { node ->
+                state.path?.let { path ->
+                    PathSection(path = path, onNodeClick = { node ->
                         viewModel.selectNode(node.id)
                     })
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
