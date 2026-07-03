@@ -3,6 +3,7 @@ package com.aura.data
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -34,6 +35,7 @@ private val Context.auraPrefs by preferencesDataStore(name = "aura_settings")
 internal val KEY_DEFAULT_MODEL = stringPreferencesKey("default_model")
 internal val KEY_APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
 internal val KEY_FIRST_RUN_COMPLETE = booleanPreferencesKey("first_run_complete")
+internal val KEY_LAST_SEEN_PROACTIVE_AT = longPreferencesKey("last_seen_proactive_at")
 
 @Singleton
 class UserPreferences @Inject constructor(
@@ -64,6 +66,18 @@ class UserPreferences @Inject constructor(
         prefs[KEY_FIRST_RUN_COMPLETE] ?: false
     }
 
+    /**
+     * Last time the user opened the proactive history screen (or
+     * dismissed the proactive event card on Home). Used by
+     * [com.aura.proactive.ProactiveEvents] to compute the
+     * "unread proactive events" badge on Home. Default 0L means
+     * everything since the Unix epoch counts as unread on a fresh
+     * install — which is the right behavior for the first session.
+     */
+    val lastSeenProactiveAt: Flow<Long> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_LAST_SEEN_PROACTIVE_AT] ?: 0L
+    }
+
     suspend fun setDefaultModel(model: String) {
         context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
     }
@@ -74,6 +88,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun setFirstRunComplete(complete: Boolean) {
         context.auraPrefs.edit { it[KEY_FIRST_RUN_COMPLETE] = complete }
+    }
+
+    suspend fun setLastSeenProactiveAt(timestamp: Long) {
+        context.auraPrefs.edit { it[KEY_LAST_SEEN_PROACTIVE_AT] = timestamp }
     }
 
     /**

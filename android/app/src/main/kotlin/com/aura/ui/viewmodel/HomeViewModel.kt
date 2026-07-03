@@ -28,6 +28,12 @@ data class HomeUiState(
     val hour: Int = 0,
     val loading: Boolean = true,
     val proactiveEvent: ProactiveEventBus.Event? = null,
+    /**
+     * Count of proactive events emitted since the user last opened
+     * the history screen (or dismissed the Home card). Drives the
+     * "📬 N today" badge next to the proactive event card on Home.
+     */
+    val proactiveUnreadCount: Int = 0,
 )
 
 @HiltViewModel
@@ -55,10 +61,25 @@ class HomeViewModel @Inject constructor(
                 _state.update { it.copy(proactiveEvent = event) }
             }
         }
+        viewModelScope.launch {
+            proactiveEvents.unreadCount.collect { count ->
+                _state.update { it.copy(proactiveUnreadCount = count) }
+            }
+        }
     }
 
     fun dismissProactiveEvent() {
         proactiveEvents.dismiss()
+    }
+
+    /**
+     * Called when the user taps the proactive event card on Home
+     * (the in-place "see all" link) or navigates to the proactive
+     * history screen. Marks all currently-unread events as seen
+     * so the badge clears.
+     */
+    fun onProactiveHistoryOpened() {
+        proactiveEvents.markSeen()
     }
 
     private fun observeTasks() {

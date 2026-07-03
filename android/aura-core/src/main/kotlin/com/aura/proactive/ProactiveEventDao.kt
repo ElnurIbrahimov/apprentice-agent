@@ -11,4 +11,13 @@ interface ProactiveEventDao {
 
     @Query("SELECT * FROM proactive_events ORDER BY timestamp DESC LIMIT :limit")
     suspend fun recent(limit: Int = 100): List<ProactiveEventEntity>
+
+    /**
+     * Count of events with timestamp > [since]. Used by
+     * [com.aura.proactive.ProactiveEvents.unreadCount] to drive the
+     * Home-screen "📬 N today" badge. Pure SQL aggregate — the caller
+     * doesn't need to load the full event rows, just the integer.
+     */
+    @Query("SELECT COUNT(*) FROM proactive_events WHERE timestamp > :since")
+    suspend fun countSince(since: Long): Int
 }

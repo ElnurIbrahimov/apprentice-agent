@@ -22,6 +22,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -62,12 +63,29 @@ fun HomeScreen(
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // Proactive event card (if present)
-        state.proactiveEvent?.let { event ->
-            ProactiveEventCard(
-                event = event,
-                onDismiss = { viewModel.dismissProactiveEvent() },
-            )
+        // Proactive event card (if present) + "see all" link with
+        // unread count. The card renders the latest event; the link
+        // surfaces the total count and navigates to the history
+        // screen.
+        if (state.proactiveEvent != null || state.proactiveUnreadCount > 0) {
+            state.proactiveEvent?.let { event ->
+                ProactiveEventCard(
+                    event = event,
+                    onDismiss = { viewModel.dismissProactiveEvent() },
+                )
+            }
+            // "📬 N today · see all →" affordance — visible whenever
+            // there is at least 1 unread event, even if the latest
+            // event card has auto-dismissed.
+            if (state.proactiveUnreadCount > 0) {
+                ProactiveUnreadLink(
+                    count = state.proactiveUnreadCount,
+                    onClick = {
+                        viewModel.onProactiveHistoryOpened()
+                        onOpenProactive()
+                    },
+                )
+            }
         }
 
         // Greeting
@@ -234,6 +252,36 @@ private fun BriefCard(title: String, lines: List<String>) {
                 )
                 Spacer(modifier = Modifier.height(4.dp))
             }
+        }
+    }
+}
+
+/**
+ * "📬 N today · see all →" affordance for the proactive history
+ * screen. Rendered on Home whenever the user has at least one
+ * unread proactive event — independent of whether the latest-event
+ * card is currently displayed (it auto-dismisses after 30s).
+ *
+ * Tapping the row marks the events as seen, clears the badge, and
+ * navigates to the history screen via the provided callback.
+ */
+@Composable
+private fun ProactiveUnreadLink(count: Int, onClick: () -> Unit) {
+    val label = if (count == 1) "📬 1 today" else "📬 $count today"
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        TextButton(onClick = onClick) {
+            Text("see all →")
         }
     }
 }
