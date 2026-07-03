@@ -21,6 +21,23 @@ interface MemoryDao {
     @Query("SELECT * FROM memories ORDER BY createdAt DESC LIMIT :limit")
     suspend fun recent(limit: Int = 50): List<MemoryEntity>
 
+    /**
+     * Memories created at or after [sinceMs], newest first. Bounded by
+     * [limit] so the morning brief can show "what you learned in the
+     * last 24h" without scanning the full table on large installs.
+     */
+    @Query("SELECT * FROM memories WHERE createdAt >= :sinceMs ORDER BY createdAt DESC LIMIT :limit")
+    suspend fun recentSince(sinceMs: Long, limit: Int = 20): List<MemoryEntity>
+
+    /**
+     * Memories whose [MemoryEntity.decayScore] is at or below
+     * [threshold]. Used by the morning brief to surface "X memories
+     * are fading." Returns up to [limit] rows ordered by decayScore
+     * ASC (most-faded first).
+     */
+    @Query("SELECT * FROM memories WHERE decayScore <= :threshold ORDER BY decayScore ASC LIMIT :limit")
+    suspend fun decayedBelow(threshold: Float, limit: Int = 20): List<MemoryEntity>
+
     @Query("SELECT * FROM memories WHERE category = :category ORDER BY createdAt DESC LIMIT :limit")
     suspend fun byCategory(category: String, limit: Int = 50): List<MemoryEntity>
 

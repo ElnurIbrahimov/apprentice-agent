@@ -1,5 +1,6 @@
 package com.aura.kg
 
+import kotlinx.serialization.Serializable as KSerializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 
@@ -25,6 +26,7 @@ enum class EdgeType {
     }
 }
 
+@KSerializable
 data class KgNode(
     val id: String,
     val label: String,

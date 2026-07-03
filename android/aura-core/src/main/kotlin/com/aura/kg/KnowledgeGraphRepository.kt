@@ -51,6 +51,14 @@ class KnowledgeGraphRepository @Inject constructor(
     suspend fun recent(limit: Int = 50): List<KgNode> =
         dao.recentNodes(limit).map { KgNode.fromEntity(it) }
 
+    /**
+     * KG nodes whose updatedAt is at or after [sinceMs], newest
+     * first. Used by the morning brief to surface "X facts learned
+     * yesterday" without scanning the full graph.
+     */
+    suspend fun recentSince(sinceMs: Long, limit: Int = 20): List<KgNode> =
+        dao.recentNodesSince(sinceMs, limit).map { KgNode.fromEntity(it) }
+
     suspend fun getNode(id: String): KgNode? {
         val node = dao.getNode(id) ?: return null
         dao.incrementAccessCount(id)

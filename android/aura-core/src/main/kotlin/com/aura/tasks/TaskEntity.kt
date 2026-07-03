@@ -2,8 +2,10 @@ package com.aura.tasks
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 
 @Entity(tableName = "tasks")
+@Serializable
 data class TaskEntity(
     @PrimaryKey val id: String,
     val title: String,

@@ -27,6 +27,20 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE status = 'pending' ORDER BY createdAt DESC")
     suspend fun allPending(): List<TaskEntity>
 
+    /**
+     * Tasks that are pending and have [dueAt] in the inclusive range
+     * [startMs, endMs]. Used by the morning brief to surface
+     * "tasks due today" without scanning the full table. Ordered
+     * by dueAt ASC so the soonest-due task is first.
+     */
+    @Query("""
+        SELECT * FROM tasks
+        WHERE status = 'pending' AND dueAt IS NOT NULL
+          AND dueAt >= :startMs AND dueAt < :endMs
+        ORDER BY dueAt ASC
+    """)
+    suspend fun dueInRange(startMs: Long, endMs: Long): List<TaskEntity>
+
     @Query("SELECT * FROM tasks ORDER BY createdAt DESC")
     suspend fun all(): List<TaskEntity>
 

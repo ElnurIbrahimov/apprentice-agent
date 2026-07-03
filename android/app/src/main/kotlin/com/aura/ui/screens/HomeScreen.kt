@@ -172,6 +172,14 @@ private fun ProactiveEventCard(
         is ProactiveEventBus.Event.MorningBriefReady -> {
             Triple("☀️", "Morning brief", event.body)
         }
+        // The structured event fires alongside MorningBriefReady
+        // and carries the same body text the worker composed (LLM
+        // greeting + deterministic summary). The rich card UI for
+        // the structured version lives in the proactive history
+        // screen; here we just don't double-render the same data.
+        is ProactiveEventBus.Event.MorningBriefStructured -> {
+            Triple("☀️", "Morning brief", "Tap to see what changed today.")
+        }
         is ProactiveEventBus.Event.CalendarEventSoon -> {
             val minutes = event.minutesUntil
             val label = if (minutes < 60) "in $minutes min" else "in ${minutes / 60}h ${minutes % 60}m"

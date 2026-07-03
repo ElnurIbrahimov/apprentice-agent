@@ -22,6 +22,16 @@ private fun EventRow(event: ProactiveEventBus.Event) {
     val fmt = SimpleDateFormat("MMM d, HH:mm", Locale.US)
     val (icon, title, body) = when (event) {
         is ProactiveEventBus.Event.MorningBriefReady -> Triple("☀️", "Morning brief", event.body)
+        is ProactiveEventBus.Event.MorningBriefStructured -> {
+            val ctx = event.context
+            val lines = mutableListOf<String>()
+            if (ctx.decayedMemories.isNotEmpty()) lines += "💭 ${ctx.decayedMemories.size} fading"
+            if (ctx.newMemories.isNotEmpty()) lines += "🧠 ${ctx.newMemories.size} new"
+            if (ctx.newKgNodes.isNotEmpty()) lines += "🕸️ ${ctx.newKgNodes.size} facts"
+            if (ctx.tasksDueToday.isNotEmpty()) lines += "📋 ${ctx.tasksDueToday.size} tasks"
+            if (ctx.calendarToday.isNotEmpty()) lines += "📅 ${ctx.calendarToday.size} events"
+            Triple("☀️", "Morning brief", lines.joinToString(" · "))
+        }
         is ProactiveEventBus.Event.CalendarEventSoon -> Triple("📅", "Upcoming: ${event.title}", "in ${event.minutesUntil}m")
         is ProactiveEventBus.Event.LocationArrived -> Triple("📍", "Arrived: ${event.placeName}", "")
         is ProactiveEventBus.Event.MemoryDecayWarning -> Triple("💭", "Memory fading", event.preview)

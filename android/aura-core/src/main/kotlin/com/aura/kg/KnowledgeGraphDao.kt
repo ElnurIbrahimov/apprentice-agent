@@ -34,6 +34,14 @@ interface KnowledgeGraphDao {
     @Query("SELECT * FROM kg_nodes ORDER BY updatedAt DESC LIMIT :limit")
     suspend fun recentNodes(limit: Int = 50): List<NodeEntity>
 
+    /**
+     * KG nodes whose updatedAt is at or after [sinceMs], newest
+     * first. Bounded by [limit]. Used by the morning brief to
+     * surface "facts learned in the last 24h."
+     */
+    @Query("SELECT * FROM kg_nodes WHERE updatedAt >= :sinceMs ORDER BY updatedAt DESC LIMIT :limit")
+    suspend fun recentNodesSince(sinceMs: Long, limit: Int): List<NodeEntity>
+
     @Query("UPDATE kg_nodes SET accessCount = accessCount + 1, lastAccessed = :now WHERE id = :id")
     suspend fun incrementAccessCount(id: String, now: Long = System.currentTimeMillis())
 

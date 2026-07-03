@@ -108,6 +108,23 @@ class MemoryStore @Inject constructor(
         dao.byCategory(category, limit)
 
     suspend fun recent(limit: Int = 20): List<MemoryEntity> = dao.recent(limit)
+
+    /**
+     * Memories created in the last [sinceMs] ms, newest first. Used
+     * by the morning brief to surface "what you learned yesterday."
+     * Bounded by [limit] so a freshly-imported backup with 500
+     * new rows doesn't blow up the LLM prompt.
+     */
+    suspend fun recentSince(sinceMs: Long, limit: Int = 20): List<MemoryEntity> =
+        dao.recentSince(sinceMs, limit)
+
+    /**
+     * Memories whose decayScore is at or below [threshold]. The
+     * morning brief uses this for the "X memories are fading" line.
+     * Most-faded first.
+     */
+    suspend fun decayedBelow(threshold: Float, limit: Int = 20): List<MemoryEntity> =
+        dao.decayedBelow(threshold, limit)
     suspend fun byCategory(category: String, limit: Int = 20): List<MemoryEntity> = dao.byCategory(category, limit)
     suspend fun top(limit: Int = 20): List<MemoryEntity> = dao.top(limit)
     suspend fun get(id: String): MemoryEntity? = dao.getById(id)

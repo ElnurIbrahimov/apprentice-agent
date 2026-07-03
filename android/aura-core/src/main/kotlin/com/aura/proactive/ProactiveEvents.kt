@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,6 +31,13 @@ class ProactiveEvents(
     private val userPreferences: UserPreferences,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
+    /** JSON codec for serializing the structured brief context into the
+     *  `body` column of the MorningBriefStructured event row. */
+    private val briefContextJson: Json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
     @Inject constructor(
         bus: ProactiveEventBus,
         dao: ProactiveEventDao,
@@ -50,19 +58,15 @@ class ProactiveEvents(
 
     /**
      * Number of proactive events emitted since the user last opened
-     * the proactive history screen (or dismissed the Home card).
-     * Drives the "📬 N today" badge on Home.
+     * the history screen (or dismissed the Home card). Drives the
+     * "📬 N today" badge on Home.
      *
-     * Combines three sources:
-     *   - the refresh tick (re-fires when a new event lands or after
-     *     [markSeen] persists a new last-seen-at)
-     *   - the persisted `lastSeenProactiveAt` from DataStore
-     *   - the SQL `countSince(lastSeen)` aggregate
-     *
-     * On a fresh install `lastSeenProactiveAt` defaults to 0L, so
-     * the count covers everything since the Unix epoch — which is
-     * the right behavior for the first session (the user has never
-     * seen any of these).
+     * Implementation: combine the refresh tick (bumped on every
+     * event write and after [markSeen]) with the persisted
+     * `lastSeenProactiveAt` and re-query the SQL count whenever
+     * either changes. The query is wrapped in `runCatching` so a
+     * transient DB error doesn't crash the home screen — a missed
+     * count update is non-fatal; the next event will re-query.
      */
     val unreadCount: StateFlow<Int> = combine(
         _refreshTick,
@@ -125,6 +129,16 @@ class ProactiveEvents(
     private fun ProactiveEventEntity.toEvent(): ProactiveEventBus.Event? {
         return when (eventType) {
             "MorningBriefReady" -> ProactiveEventBus.Event.MorningBriefReady(title, body, timestamp)
+            "MorningBriefStructured" -> {
+                // The structured body is serialized as the entity's
+                // `body` field. Older rows that lack the structured
+                // blob are skipped — the legacy MorningBriefReady
+                // event is the fallback surface.
+                val ctx = runCatching {
+                    briefContextJson.decodeFromString<BriefContext>(body)
+                }.getOrNull() ?: return null
+                ProactiveEventBus.Event.MorningBriefStructured(ctx, timestamp)
+            }
             "CalendarEventSoon" -> {
                 val minutes = body.toIntOrNull() ?: return null
                 ProactiveEventBus.Event.CalendarEventSoon(title, minutes, timestamp)
@@ -138,6 +152,12 @@ class ProactiveEvents(
     private fun ProactiveEventBus.Event.toEntity(): ProactiveEventEntity = when (this) {
         is ProactiveEventBus.Event.MorningBriefReady -> ProactiveEventEntity(
             eventType = "MorningBriefReady", title = title, body = body, timestamp = timestamp,
+        )
+        is ProactiveEventBus.Event.MorningBriefStructured -> ProactiveEventEntity(
+            eventType = "MorningBriefStructured",
+            title = "Morning brief",
+            body = briefContextJson.encodeToString(BriefContext.serializer(), context),
+            timestamp = timestamp,
         )
         is ProactiveEventBus.Event.CalendarEventSoon -> ProactiveEventEntity(
             eventType = "CalendarEventSoon", title = title, body = minutesUntil.toString(), timestamp = timestamp,
