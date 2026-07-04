@@ -32,6 +32,19 @@ data class SettingsUiState(
      * backup so the choice survives reinstalls onto the same device.
      */
     val appLockEnabled: Boolean = false,
+    /**
+     * Whether the morning-brief WorkManager job is scheduled. When
+     * false, [com.aura.proactive.ProactiveBootstrap] cancels any
+     * previously-scheduled brief on app launch so the 7am
+     * notification stops firing. Default true (opt-out).
+     */
+    val morningBriefEnabled: Boolean = true,
+    /**
+     * Whether the calendar-monitor foreground service is running.
+     * When false, the FGS is stopped on app launch and the persistent
+     * notification goes away. Default true (opt-out).
+     */
+    val calendarMonitorEnabled: Boolean = true,
 )
 
 @HiltViewModel
@@ -52,6 +65,8 @@ class SettingsViewModel @Inject constructor(
             val defaultModel = userPreferences.defaultModel.first()
             val firstRunComplete = userPreferences.firstRunComplete.first()
             val appLockEnabled = userPreferences.appLockEnabled.first()
+            val morningBriefEnabled = userPreferences.morningBriefEnabled.first()
+            val calendarMonitorEnabled = userPreferences.calendarMonitorEnabled.first()
             _state.value = SettingsUiState(
                 ollamaKey = providerKeys.keyFor("ollama") ?: "",
                 anthropicKey = providerKeys.keyFor("anthropic") ?: "",
@@ -63,6 +78,8 @@ class SettingsViewModel @Inject constructor(
                 firstRunComplete = firstRunComplete,
                 configuredProviders = configured,
                 appLockEnabled = appLockEnabled,
+                morningBriefEnabled = morningBriefEnabled,
+                calendarMonitorEnabled = calendarMonitorEnabled,
             )
         }
     }
@@ -100,6 +117,34 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferences.setAppLockEnabled(enabled)
             _state.update { it.copy(appLockEnabled = enabled) }
+        }
+    }
+
+    /**
+     * Toggle the morning-brief schedule. The actual cancel /
+     * reschedule happens in [com.aura.proactive.ProactiveBootstrap]
+     * on the next app launch — toggling in Settings persists the
+     * choice, and the worker state converges when the app next
+     * starts. This is intentional: the Settings VM has no business
+     * touching WorkManager directly (it would couple the UI layer
+     * to the proactive subsystem).
+     */
+    fun setMorningBriefEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferences.setMorningBriefEnabled(enabled)
+            _state.update { it.copy(morningBriefEnabled = enabled) }
+        }
+    }
+
+    /**
+     * Toggle the calendar-monitor foreground service. Same pattern
+     * as [setMorningBriefEnabled]: persists the choice, bootstrap
+     * converges the actual FGS state on next app launch.
+     */
+    fun setCalendarMonitorEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferences.setCalendarMonitorEnabled(enabled)
+            _state.update { it.copy(calendarMonitorEnabled = enabled) }
         }
     }
 

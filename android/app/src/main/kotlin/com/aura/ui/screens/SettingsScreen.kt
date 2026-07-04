@@ -182,7 +182,7 @@ fun SettingsScreen(
             }
         }
 
-        // ── Privacy: biometric app lock ──
+        // ── Privacy: biometric app lock + proactive worker toggles ──
         Spacer(modifier = Modifier.height(8.dp))
         HorizontalDivider()
         Spacer(modifier = Modifier.height(4.dp))
@@ -193,26 +193,19 @@ fun SettingsScreen(
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            text = "Require biometric authentication to open Aura. The challenge fires on launch and after the app returns from background.",
+            text = "Require biometric authentication to open Aura. Toggle the proactive workers off if you don't want the 7am brief or the calendar monitor.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
         )
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Switch row — labeled on the left, the switch on the right.
-        // Toggling persists via SettingsViewModel.setAppLockEnabled.
-        // We do NOT re-challenge on toggle — the user is already
-        // authenticated to the OS session. The next cold start or
-        // foreground transition is what triggers the prompt.
+        // App lock row.
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "App lock",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+                Text(text = "App lock", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     text = if (state.appLockEnabled)
                         "Enabled — biometric required to open Aura"
@@ -225,6 +218,54 @@ fun SettingsScreen(
             Switch(
                 checked = state.appLockEnabled,
                 onCheckedChange = { viewModel.setAppLockEnabled(it) },
+            )
+        }
+
+        // Proactive worker toggles. Each is opt-out with a true
+        // default — a fresh install gets both workers. The actual
+        // worker state converges on the next app launch via
+        // ProactiveBootstrap; the Settings VM only persists the
+        // choice.
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Morning brief", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = if (state.morningBriefEnabled)
+                        "On — 7am daily summary"
+                    else
+                        "Off — no morning notification",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                )
+            }
+            Switch(
+                checked = state.morningBriefEnabled,
+                onCheckedChange = { viewModel.setMorningBriefEnabled(it) },
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Calendar monitor", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = if (state.calendarMonitorEnabled)
+                        "On — runs in background, shows notification"
+                    else
+                        "Off — stops the persistent foreground service",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                )
+            }
+            Switch(
+                checked = state.calendarMonitorEnabled,
+                onCheckedChange = { viewModel.setCalendarMonitorEnabled(it) },
             )
         }
 

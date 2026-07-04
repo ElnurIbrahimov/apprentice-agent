@@ -36,6 +36,8 @@ class SettingsViewModelAppLockTest {
     private val userPreferences = mockk<UserPreferences>(relaxed = true)
 
     private val appLockFlow = MutableStateFlow(false)
+    private val morningBriefFlow = MutableStateFlow(true)
+    private val calendarMonitorFlow = MutableStateFlow(true)
 
     @Before
     fun setUp() {
@@ -46,8 +48,16 @@ class SettingsViewModelAppLockTest {
         every { userPreferences.defaultModel } returns flowOf("ollama:deepseek-v4-pro:cloud")
         every { userPreferences.firstRunComplete } returns flowOf(true)
         every { userPreferences.appLockEnabled } returns appLockFlow
+        every { userPreferences.morningBriefEnabled } returns morningBriefFlow
+        every { userPreferences.calendarMonitorEnabled } returns calendarMonitorFlow
         coEvery { userPreferences.setAppLockEnabled(any()) } answers {
             appLockFlow.value = firstArg()
+        }
+        coEvery { userPreferences.setMorningBriefEnabled(any()) } answers {
+            morningBriefFlow.value = firstArg()
+        }
+        coEvery { userPreferences.setCalendarMonitorEnabled(any()) } answers {
+            calendarMonitorFlow.value = firstArg()
         }
     }
 
@@ -99,5 +109,46 @@ class SettingsViewModelAppLockTest {
         assertFalse(vm.state.value.appLockEnabled)
         coVerify(exactly = 1) { userPreferences.setAppLockEnabled(true) }
         coVerify(exactly = 1) { userPreferences.setAppLockEnabled(false) }
+    }
+
+    @Test
+    fun `morning brief defaults to enabled`() = runTest {
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        assertTrue(vm.state.value.morningBriefEnabled, "fresh install should default to morning brief on")
+    }
+
+    @Test
+    fun `setMorningBriefEnabled false persists and updates state`() = runTest {
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        vm.setMorningBriefEnabled(false)
+        coVerify(exactly = 1) { userPreferences.setMorningBriefEnabled(false) }
+        assertFalse(vm.state.value.morningBriefEnabled)
+        assertEquals(false, morningBriefFlow.value)
+    }
+
+    @Test
+    fun `setMorningBriefEnabled re-enabling flips state back`() = runTest {
+        morningBriefFlow.value = false
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        assertFalse(vm.state.value.morningBriefEnabled, "should read the persisted false on init")
+
+        vm.setMorningBriefEnabled(true)
+        assertTrue(vm.state.value.morningBriefEnabled)
+        coVerify(exactly = 1) { userPreferences.setMorningBriefEnabled(true) }
+    }
+
+    @Test
+    fun `calendar monitor defaults to enabled`() = runTest {
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        assertTrue(vm.state.value.calendarMonitorEnabled, "fresh install should default to calendar monitor on")
+    }
+
+    @Test
+    fun `setCalendarMonitorEnabled false persists and updates state`() = runTest {
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        vm.setCalendarMonitorEnabled(false)
+        coVerify(exactly = 1) { userPreferences.setCalendarMonitorEnabled(false) }
+        assertFalse(vm.state.value.calendarMonitorEnabled)
+        assertEquals(false, calendarMonitorFlow.value)
     }
 }

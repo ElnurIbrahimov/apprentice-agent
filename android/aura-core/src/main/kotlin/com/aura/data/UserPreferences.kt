@@ -36,6 +36,13 @@ internal val KEY_DEFAULT_MODEL = stringPreferencesKey("default_model")
 internal val KEY_APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
 internal val KEY_FIRST_RUN_COMPLETE = booleanPreferencesKey("first_run_complete")
 internal val KEY_LAST_SEEN_PROACTIVE_AT = longPreferencesKey("last_seen_proactive_at")
+/**
+ * Proactive worker gates. Both default to true so a fresh install
+ * gets the morning brief + calendar monitor out of the box. The
+ * Settings screen exposes toggles for each.
+ */
+internal val KEY_MORNING_BRIEF_ENABLED = booleanPreferencesKey("morning_brief_enabled")
+internal val KEY_CALENDAR_MONITOR_ENABLED = booleanPreferencesKey("calendar_monitor_enabled")
 
 @Singleton
 class UserPreferences @Inject constructor(
@@ -78,6 +85,27 @@ class UserPreferences @Inject constructor(
         prefs[KEY_LAST_SEEN_PROACTIVE_AT] ?: 0L
     }
 
+    /**
+     * Whether the user wants the daily morning brief. When false,
+     * [com.aura.proactive.ProactiveBootstrap] skips scheduling the
+     * WorkManager job and cancels any in-flight schedule. Default
+     * true — opt-out, not opt-in.
+     */
+    val morningBriefEnabled: Flow<Boolean> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_MORNING_BRIEF_ENABLED] ?: true
+    }
+
+    /**
+     * Whether the user wants the calendar monitor foreground
+     * service running. When false, [com.aura.proactive.ProactiveBootstrap]
+     * does not start the service on app launch. The user must
+     * toggle this off to dismiss the persistent notification.
+     * Default true — opt-out.
+     */
+    val calendarMonitorEnabled: Flow<Boolean> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_CALENDAR_MONITOR_ENABLED] ?: true
+    }
+
     suspend fun setDefaultModel(model: String) {
         context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
     }
@@ -92,6 +120,14 @@ class UserPreferences @Inject constructor(
 
     suspend fun setLastSeenProactiveAt(timestamp: Long) {
         context.auraPrefs.edit { it[KEY_LAST_SEEN_PROACTIVE_AT] = timestamp }
+    }
+
+    suspend fun setMorningBriefEnabled(enabled: Boolean) {
+        context.auraPrefs.edit { it[KEY_MORNING_BRIEF_ENABLED] = enabled }
+    }
+
+    suspend fun setCalendarMonitorEnabled(enabled: Boolean) {
+        context.auraPrefs.edit { it[KEY_CALENDAR_MONITOR_ENABLED] = enabled }
     }
 
     /**
