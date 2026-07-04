@@ -166,6 +166,14 @@ private fun HistoryRow(
                 Spacer(Modifier.height(2.dp))
                 Text(preview.take(80), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(2.dp))
+                Text(
+                    text = conv.model?.let { com.aura.ui.util.modelDisplayName(it) } ?: "Unknown model",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
                 Text(fmt.format(Date(conv.updatedAt)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
             }
             IconButton(onClick = onShare, modifier = Modifier.size(32.dp)) {

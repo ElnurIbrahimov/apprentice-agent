@@ -190,7 +190,7 @@ fun ChatScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = humanModelName(state.activeModel),
+                        text = com.aura.ui.util.modelDisplayName(state.activeModel),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )
@@ -451,18 +451,6 @@ fun ChatScreen(
                 }
             },
         )
-    }
-}
-
-private fun humanModelName(id: String): String {
-    val parts = id.split(":", limit = 2)
-    val provider = parts.getOrNull(0) ?: "?"
-    val model = parts.getOrNull(1) ?: id
-    return when (id) {
-        "ollama:deepseek-v4-pro:cloud" -> "DeepSeek V4 Pro · $provider"
-        "ollama:kimi-k2.7-code:cloud" -> "Kimi K2.7 · $provider"
-        "anthropic:claude-sonnet-4-5" -> "Claude Sonnet 4.5 · $provider"
-        else -> "$model · $provider"
     }
 }
 
