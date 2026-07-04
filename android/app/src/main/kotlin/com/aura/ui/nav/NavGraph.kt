@@ -117,6 +117,7 @@ fun NavGraph(
                             restoreState = true
                         }
                     },
+                    onOpenTasks = { navController.navigate("tasks") },
                 )
             }
             composable(

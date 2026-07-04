@@ -32,12 +32,15 @@ class TaskManagerTool @Inject constructor(
 ) {
     fun definition() = ToolDefinition(
         name = "manage_tasks",
-        description = "Create, list, complete, or delete tasks. Action is 'create'|'list'|'complete'|'delete'. For 'create', 'title' is required, 'when' is optional HH:mm for a reminder.",
+        description = "Create, list, complete, or delete tasks. Action is 'create'|'list'|'complete'|'delete'. For 'create', 'title' is required, 'description', 'priority' (0-3), 'tags' (comma separated), and 'when' (HH:mm reminder) are optional.",
         parameters = ToolParameters(
             properties = mapOf(
                 "action" to ToolProperty(type = "string", description = "create|list|complete|delete"),
                 "title" to ToolProperty(type = "string", description = "Task title (for create)"),
+                "description" to ToolProperty(type = "string", description = "Optional task description"),
                 "id" to ToolProperty(type = "string", description = "Task id (for complete/delete)"),
+                "priority" to ToolProperty(type = "integer", description = "Optional priority 0-3 (3=high)"),
+                "tags" to ToolProperty(type = "string", description = "Optional comma separated tags"),
                 "when" to ToolProperty(type = "string", description = "Optional reminder time HH:mm"),
             ),
             required = listOf("action"),
@@ -54,11 +57,23 @@ class TaskManagerTool @Inject constructor(
                 "create" -> {
                     val title = call.arguments["title"] as? String ?: return@Tool ToolResult.Error("missing 'title'", "bad_args")
                     val whenStr = call.arguments["when"] as? String
+                    val description = (call.arguments["description"] as? String)?.trim() ?: ""
+                    val priority = (call.arguments["priority"] as? Number)?.toInt()?.coerceIn(0, 3) ?: 0
+                    val tags = (call.arguments["tags"] as? String) ?: ""
                     try {
                         val id = java.util.UUID.randomUUID().toString()
                         val triggerAt = whenStr?.let { TimeParser.parse(it) }
                         taskDao.insert(
-                            TaskEntity(id = id, title = title, createdAt = System.currentTimeMillis(), dueAt = triggerAt, status = "pending")
+                            TaskEntity(
+                                id = id,
+                                title = title,
+                                createdAt = System.currentTimeMillis(),
+                                description = description,
+                                dueAt = triggerAt,
+                                status = "pending",
+                                priority = priority,
+                                tags = tags,
+                            )
                         )
                         if (triggerAt != null && triggerAt > System.currentTimeMillis()) {
                             val work = OneTimeWorkRequestBuilder<ReminderWorker>()

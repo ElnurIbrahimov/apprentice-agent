@@ -45,6 +45,7 @@ fun HomeScreen(
     onOpenChat: () -> Unit = {},
     onOpenProactive: () -> Unit = {},
     onOpenMemory: () -> Unit = {},
+    onOpenTasks: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val greeting = when (state.hour) {
@@ -153,6 +154,14 @@ fun HomeScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Open chat")
+        }
+        if (state.pendingTasks.isNotEmpty()) {
+            OutlinedButton(
+                onClick = onOpenTasks,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Open ${state.pendingTasks.size} task${if (state.pendingTasks.size == 1) "" else "s"}")
+            }
         }
         if (state.recentMemories.isNotEmpty()) {
             OutlinedButton(
