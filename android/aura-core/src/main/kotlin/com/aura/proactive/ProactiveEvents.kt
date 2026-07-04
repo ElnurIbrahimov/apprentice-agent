@@ -144,7 +144,7 @@ class ProactiveEvents(
                 ProactiveEventBus.Event.CalendarEventSoon(title, minutes, timestamp)
             }
             "LocationArrived" -> ProactiveEventBus.Event.LocationArrived(title, emptyList(), timestamp)
-            "MemoryDecayWarning" -> ProactiveEventBus.Event.MemoryDecayWarning("", title, timestamp)
+            "MemoryDecayWarning" -> ProactiveEventBus.Event.MemoryDecayWarning(body, title, timestamp)
             else -> null
         }
     }
@@ -152,21 +152,35 @@ class ProactiveEvents(
     private fun ProactiveEventBus.Event.toEntity(): ProactiveEventEntity = when (this) {
         is ProactiveEventBus.Event.MorningBriefReady -> ProactiveEventEntity(
             eventType = "MorningBriefReady", title = title, body = body, timestamp = timestamp,
+            payload = "",
         )
         is ProactiveEventBus.Event.MorningBriefStructured -> ProactiveEventEntity(
             eventType = "MorningBriefStructured",
             title = "Morning brief",
             body = briefContextJson.encodeToString(BriefContext.serializer(), context),
             timestamp = timestamp,
+            payload = "",
         )
         is ProactiveEventBus.Event.CalendarEventSoon -> ProactiveEventEntity(
-            eventType = "CalendarEventSoon", title = title, body = minutesUntil.toString(), timestamp = timestamp,
+            eventType = "CalendarEventSoon",
+            title = title,
+            body = minutesUntil.toString(),
+            timestamp = timestamp,
+            payload = "",
         )
         is ProactiveEventBus.Event.LocationArrived -> ProactiveEventEntity(
-            eventType = "LocationArrived", title = placeName, body = "", timestamp = timestamp,
+            eventType = "LocationArrived",
+            title = placeName,
+            body = "",
+            timestamp = timestamp,
+            payload = "",
         )
         is ProactiveEventBus.Event.MemoryDecayWarning -> ProactiveEventEntity(
-            eventType = "MemoryDecayWarning", title = memoryId, body = preview, timestamp = timestamp,
+            eventType = "MemoryDecayWarning",
+            title = preview,
+            body = memoryId,
+            timestamp = timestamp,
+            payload = "",
         )
     }
 }

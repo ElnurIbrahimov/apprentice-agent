@@ -25,32 +25,13 @@ import kotlinx.coroutines.coroutineScope
 
 /**
  * WorkManager job that runs at ~7am local time and posts a morning
- * brief based on the user's recent state. Mirrors
- * `aura/hands/morning_briefing.py` + `aura/proactive/`.
+ * brief based on the user's recent state.
  *
- * The brief is built in two passes:
- *
- *   1. **Structured context** — query the memories, knowledge graph,
- *      tasks, and calendar in parallel and assemble a [BriefContext].
- *      The brief shows a deterministic one-line summary per
- *      non-empty section (decayed memories, new facts, tasks due
- *      today, calendar) BEFORE the LLM is asked to write anything.
- *      The LLM only writes the greeting + opener.
- *
- *   2. **LLM greeting** — if the structured context has any
- *      non-empty section, send the context as a structured prompt
- *      and let the LLM write a 1-2 line warm opener that references
- *      the user's name + today's date. The opener + the
- *      deterministic summary are concatenated for the notification
- *      body.
- *
- * Both passes emit events on the proactive bus:
- *   - [ProactiveEventBus.Event.MorningBriefReady] — the LLM
- *     greeting + a one-line summary, used by the notification +
- *     the legacy "show the body string" UI.
- *   - [ProactiveEventBus.Event.MorningBriefStructured] — the
- *     full [BriefContext], used by the Home screen to render a
- *     rich card with all five sections.
+ * Notification actions:
+ *  - TELL_ME_MORE: opens chat with the brief context preloaded
+ *    as a user-facing summary so the user can ask follow-ups.
+ *  - SNOOZE: reschedules the same brief content in 1 hour via
+ *    WorkManager (using a unique work name with OneTimeWorkRequest).
  */
 @HiltWorker
 class MorningBriefWorker @AssistedInject constructor(
@@ -65,13 +46,8 @@ class MorningBriefWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        // 1) Build the structured context in parallel. Each query
-        // is best-effort: if any one fails, the section is empty
-        // and the brief still ships.
         val now = System.currentTimeMillis()
         val since24h = now - 24L * 60L * 60L * 1000L
-        // "Today" = local-time midnight to next midnight. Calendar
-        // (a java.util.Calendar) gives us the local TZ-aware window.
         val cal = java.util.Calendar.getInstance()
         cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
         cal.set(java.util.Calendar.MINUTE, 0)
@@ -112,14 +88,7 @@ class MorningBriefWorker @AssistedInject constructor(
             }
         }.getOrDefault(BriefContext())
 
-        // 2) Build the deterministic summary from the structured
-        // context. The notification body is this summary plus an
-        // optional LLM greeting on top.
         val summary = buildSummary(context, now)
-
-        // 3) If there's anything to say, ask the LLM for a 1-2 line
-        // warm opener referencing the user's name. Otherwise emit
-        // the deterministic summary alone.
         val greeting = if (context.isEmpty) "" else runCatching {
             llmGreeting(now)
         }.getOrDefault("").trim()
@@ -130,28 +99,21 @@ class MorningBriefWorker @AssistedInject constructor(
             .joinToString(separator = "\n\n")
 
         if (notificationBody.isBlank()) {
-            // Nothing to say today (no memories, no events, no
-            // anything). Don't spam a notification.
             return Result.success()
         }
 
-        // 4) Emit BOTH events: the legacy string body for the
-        // notification + HomeScreen's existing "show latest event"
-        // path, AND the structured BriefContext for the new
-        // rich-card surface.
         eventBus.emit(ProactiveEventBus.Event.MorningBriefReady(notificationTitle, notificationBody))
         eventBus.emit(ProactiveEventBus.Event.MorningBriefStructured(context))
 
-        // 5) Post the notification.
-        postNotification(applicationContext, notificationTitle, notificationBody)
+        postNotification(
+            applicationContext,
+            title = notificationTitle,
+            body = notificationBody,
+            summary = summary,
+        )
         return Result.success()
     }
 
-    /**
-     * Build the deterministic one-line-per-section summary. Used
-     * as the notification body (and as the bottom of the Home
-     * card) when the LLM is unavailable or returns nothing useful.
-     */
     private fun buildSummary(context: BriefContext, now: Long): String {
         val lines = mutableListOf<String>()
         if (context.decayedMemories.isNotEmpty()) {
@@ -179,13 +141,6 @@ class MorningBriefWorker @AssistedInject constructor(
         return lines.joinToString(separator = "\n")
     }
 
-    /**
-     * Ask the configured LLM (MoA first, then first solo provider)
-     * for a 1-2 line warm opener. The prompt is now minimal — the
-     * structured context is the body of the brief, not the LLM's
-     * imagination. Returns "" on any error so the deterministic
-     * summary still ships.
-     */
     private suspend fun llmGreeting(now: Long): String {
         val moaProvider = providerRegistry.get("moa")
         val (provider, model) = if (moaProvider?.isConfigured() == true) {
@@ -220,19 +175,11 @@ class MorningBriefWorker @AssistedInject constructor(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            // Network blip, 5xx, etc. Fall back to the deterministic
-            // summary alone.
             return ""
         }
         return text.toString().trim()
     }
 
-    /**
-     * Build a model id the provider can serve. SettingsViewModel
-     * persists a default in DataStore, but the worker doesn't
-     * depend on that state — it asks the provider for its model
-     * list and picks the first.
-     */
     private fun defaultModelIdForProvider(prefix: String): String =
         when (prefix) {
             "ollama" -> "ollama:deepseek-v4-pro:cloud"
@@ -243,7 +190,7 @@ class MorningBriefWorker @AssistedInject constructor(
             else -> "ollama:deepseek-v4-pro:cloud"
         }
 
-    private fun postNotification(ctx: Context, title: String, body: String) {
+    private fun postNotification(ctx: Context, title: String, body: String, summary: String) {
         val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
@@ -253,21 +200,55 @@ class MorningBriefWorker @AssistedInject constructor(
             )
             mgr.createNotificationChannel(ch)
         }
+
         val launchIntent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
             ?: Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
-        launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        val pi = PendingIntent.getActivity(
-            ctx, 0, launchIntent,
+
+        val packageName = ctx.packageName
+        val mainActivityClass = runCatching {
+            Class.forName("$packageName.MainActivity")
+        }.getOrNull() ?: android.app.Activity::class.java
+
+        // TELL_ME_MORE opens chat with the brief content preloaded.
+        val chatIntent = Intent(ctx, mainActivityClass).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            putExtra("openChat", true)
+            putExtra("morningBriefSummary", summary)
+        }
+        val chatPending = PendingIntent.getActivity(
+            ctx, REQUEST_CODE_CHAT, chatIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
+        // SNOOZE re-delivers the same summary in 1 hour.
+        val snoozeIntent = Intent(ctx, MorningBriefReceiver::class.java).apply {
+            action = ACTION_SNOOZE
+            putExtra("title", title)
+            putExtra("body", body)
+            putExtra("summary", summary)
+        }
+        val snoozePending = PendingIntent.getBroadcast(
+            ctx, REQUEST_CODE_SNOOZE, snoozeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val contentIntent = PendingIntent.getActivity(
+            ctx, 0, launchIntent.apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val n = NotificationCompat.Builder(ctx, "aura_morning_brief")
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setSmallIcon(R.drawable.ic_aura_notification)
-            .setContentIntent(pi)
+            .setContentIntent(contentIntent)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .addAction(R.drawable.ic_aura_notification, "Tell me more", chatPending)
+            .addAction(R.drawable.ic_aura_notification, "Snooze 1h", snoozePending)
             .build()
         mgr.notify(MORNING_BRIEF_ID, n)
     }
@@ -275,13 +256,10 @@ class MorningBriefWorker @AssistedInject constructor(
     companion object {
         const val MORNING_BRIEF_ID = 1001
         const val UNIQUE_NAME = "morning-brief-daily"
+        const val ACTION_SNOOZE = "com.aura.MORNING_BRIEF_SNOOZE"
+        const val REQUEST_CODE_CHAT = 2001
+        const val REQUEST_CODE_SNOOZE = 2002
 
-        /**
-         * Memories at or below this decay score count as "fading"
-         * for the morning brief. Matches the threshold used by
-         * the [com.aura.memory.MemoryStore.runDecayPass] warning
-         * system.
-         */
         private const val DECAY_THRESHOLD = 0.2f
     }
 }

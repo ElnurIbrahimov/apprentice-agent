@@ -23,6 +23,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -42,8 +43,8 @@ import com.aura.ui.screens.HomeScreen
 import com.aura.ui.screens.MemoryScreen
 import com.aura.ui.screens.ProactiveHistoryScreen
 import com.aura.ui.screens.ProfileScreen
-import com.aura.ui.screens.TasksScreen
 import com.aura.ui.screens.SettingsScreen
+import com.aura.ui.screens.TasksScreen
 
 sealed class TopLevelRoute(val route: String, val label: String, val selectedIcon: ImageVector, val unselectedIcon: ImageVector) {
     data object Home : TopLevelRoute("home", "Home", Icons.Filled.Home, Icons.Outlined.Home)
@@ -56,10 +57,32 @@ sealed class TopLevelRoute(val route: String, val label: String, val selectedIco
 private val topLevelRoutes = listOf(TopLevelRoute.Home, TopLevelRoute.Chat, TopLevelRoute.Memory, TopLevelRoute.Settings, TopLevelRoute.Graph)
 
 @Composable
-fun NavGraph() {
+fun NavGraph(
+    openChatOnLaunch: Boolean = false,
+    openMemoryOnLaunch: Boolean = false,
+) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+
+    LaunchedEffect(openChatOnLaunch) {
+        if (openChatOnLaunch) {
+            navController.navigate(TopLevelRoute.Chat.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+    LaunchedEffect(openMemoryOnLaunch) {
+        if (openMemoryOnLaunch) {
+            navController.navigate(TopLevelRoute.Memory.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -91,8 +114,10 @@ fun NavGraph() {
                 arguments = listOf(navArgument("convId") { type = NavType.StringType; nullable = true; defaultValue = null }),
             ) {
                 val convId = it.arguments?.getString("convId")
+                val summary = it.arguments?.getString("morningBriefSummary")
                 ChatScreen(
                     resumeConversationId = convId,
+                    morningBriefSummary = summary,
                     onNavigateHistory = { navController.navigate("history") },
                 )
             }

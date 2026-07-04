@@ -10,4 +10,5 @@ data class ProactiveEventEntity(
     val title: String,
     val body: String,
     val timestamp: Long,
+    val payload: String = "",
 )

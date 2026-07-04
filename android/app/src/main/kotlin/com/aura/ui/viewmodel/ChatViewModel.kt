@@ -359,6 +359,11 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(streaming = false) }
     }
 
+    fun onUserMessage(text: String) {
+        _state.update { it.copy(draft = text) }
+        send()
+    }
+
     fun send() {
         val current = _state.value
         val text = current.draft.trim()

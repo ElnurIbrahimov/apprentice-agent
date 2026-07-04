@@ -77,12 +77,17 @@ import dagger.hilt.android.EntryPointAccessors
 fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel(),
     resumeConversationId: String? = null,
+    morningBriefSummary: String? = null,
     onNavigateHistory: () -> Unit = {},
 ) {
-    // Load a specific conversation if resuming from history
     LaunchedEffect(resumeConversationId) {
         if (resumeConversationId != null) {
             viewModel.loadConversation(resumeConversationId)
+        }
+    }
+    LaunchedEffect(morningBriefSummary) {
+        if (!morningBriefSummary.isNullOrBlank()) {
+            viewModel.onUserMessage(morningBriefSummary)
         }
     }
     val state by viewModel.state.collectAsState()
