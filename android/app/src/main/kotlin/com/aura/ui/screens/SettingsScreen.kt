@@ -19,6 +19,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -179,6 +180,52 @@ fun SettingsScreen(
                     ),
                 )
             }
+        }
+
+        // ── Privacy: biometric app lock ──
+        Spacer(modifier = Modifier.height(8.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Privacy",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "Require biometric authentication to open Aura. The challenge fires on launch and after the app returns from background.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Switch row — labeled on the left, the switch on the right.
+        // Toggling persists via SettingsViewModel.setAppLockEnabled.
+        // We do NOT re-challenge on toggle — the user is already
+        // authenticated to the OS session. The next cold start or
+        // foreground transition is what triggers the prompt.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "App lock",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = if (state.appLockEnabled)
+                        "Enabled — biometric required to open Aura"
+                    else
+                        "Off — Aura opens straight to chat",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                )
+            }
+            Switch(
+                checked = state.appLockEnabled,
+                onCheckedChange = { viewModel.setAppLockEnabled(it) },
+            )
         }
 
         // ── Backup & restore ──

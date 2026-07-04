@@ -24,6 +24,14 @@ data class SettingsUiState(
     val defaultModel: String = "ollama:deepseek-v4-pro:cloud",
     val firstRunComplete: Boolean = false,
     val configuredProviders: List<String> = emptyList(),
+    /**
+     * Whether the biometric app lock is on. When true, MainActivity
+     * gates on a [androidx.biometric.BiometricPrompt] challenge
+     * before showing the rest of the UI. Persisted via
+     * [com.aura.data.UserPreferences] and round-tripped through
+     * backup so the choice survives reinstalls onto the same device.
+     */
+    val appLockEnabled: Boolean = false,
 )
 
 @HiltViewModel
@@ -43,6 +51,7 @@ class SettingsViewModel @Inject constructor(
             val configured = providerRegistry.configured().map { "${it.prefix} (${it.displayName})" }
             val defaultModel = userPreferences.defaultModel.first()
             val firstRunComplete = userPreferences.firstRunComplete.first()
+            val appLockEnabled = userPreferences.appLockEnabled.first()
             _state.value = SettingsUiState(
                 ollamaKey = providerKeys.keyFor("ollama") ?: "",
                 anthropicKey = providerKeys.keyFor("anthropic") ?: "",
@@ -53,6 +62,7 @@ class SettingsViewModel @Inject constructor(
                 defaultModel = defaultModel,
                 firstRunComplete = firstRunComplete,
                 configuredProviders = configured,
+                appLockEnabled = appLockEnabled,
             )
         }
     }
@@ -75,6 +85,21 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferences.setFirstRunComplete(true)
             _state.update { it.copy(firstRunComplete = true) }
+        }
+    }
+
+    /**
+     * Toggle the biometric app lock. The actual gate that enforces
+     * the lock lives in [com.aura.MainActivity]; this just persists
+     * the choice. We don't run a biometric challenge on toggle —
+     * the user is already in the app and authenticated to the OS
+     * session. The challenge fires the next time the app is
+     * launched (or resumed from background).
+     */
+    fun setAppLockEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferences.setAppLockEnabled(enabled)
+            _state.update { it.copy(appLockEnabled = enabled) }
         }
     }
 
