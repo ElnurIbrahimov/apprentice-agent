@@ -20,6 +20,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,6 +46,7 @@ fun HomeScreen(
     onOpenHands: () -> Unit = {},
     onOpenTasks: () -> Unit = {},
     onOpenProactive: () -> Unit = {},
+    onOpenMemory: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val greeting = when (state.hour) {
@@ -153,6 +155,14 @@ fun HomeScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Open chat")
+        }
+        if (state.recentMemories.isNotEmpty()) {
+            OutlinedButton(
+                onClick = onOpenMemory,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Go to memories")
+            }
         }
     }
 }

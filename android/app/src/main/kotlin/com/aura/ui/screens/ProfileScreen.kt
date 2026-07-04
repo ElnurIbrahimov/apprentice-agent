@@ -1,37 +1,15 @@
 package com.aura.ui.screens
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -39,14 +17,17 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.ui.viewmodel.ProfileViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(
-    onBack: () -> Unit,
     viewModel: ProfileViewModel = hiltViewModel(),
+    onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
-    var clearConfirm by remember { mutableStateOf(false) }
+    var name by remember(state.name) { mutableStateOf(state.name) }
+    var traitInput by remember { mutableStateOf("") }
+    var factInput by remember { mutableStateOf("") }
+    var showClearDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -57,148 +38,181 @@ fun ProfileScreen(
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    TextButton(onClick = { showClearDialog = true }) {
+                        Text("Clear", color = MaterialTheme.colorScheme.error)
+                    }
+                }
             )
-        },
+        }
     ) { padding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-                .padding(padding),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(padding)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                "What Aura knows about you",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                "Aura learns name, traits, and facts from conversation. Edit or clear anything that's wrong.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-            )
-
-            OutlinedTextField(
-                value = state.name,
-                onValueChange = { viewModel.setName(it) },
-                label = { Text("Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            Spacer(Modifier.height(4.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(4.dp))
-
-            EditableChipList(
-                title = "Traits",
-                items = state.traits,
-                onDelete = { viewModel.removeTrait(it) },
-                onAdd = { viewModel.addTrait(it) },
-            )
-
-            Spacer(Modifier.height(4.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(4.dp))
-
-            EditableChipList(
-                title = "Facts",
-                items = state.facts,
-                onDelete = { viewModel.removeFact(it) },
-                onAdd = { viewModel.addFact(it) },
-            )
-
-            Spacer(Modifier.height(16.dp))
-            TextButton(
-                onClick = { clearConfirm = true },
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            ) {
-                Text("Clear profile", color = MaterialTheme.colorScheme.error)
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Name",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("What Aura should call you") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Button(
+                    onClick = { viewModel.setName(name) },
+                    enabled = name != state.name,
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    Text("Save name")
+                }
             }
+
+            item {
+                Text(
+                    text = "Traits",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Short labels that shape Aura's tone (e.g. concise, technical, playful).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    state.traits.forEach { trait ->
+                        InputChip(
+                            selected = false,
+                            onClick = { },
+                            label = { Text(trait) },
+                            trailingIcon = {
+                                IconButton(onClick = { viewModel.removeTrait(trait) }) {
+                                    Icon(Icons.Filled.Delete, contentDescription = "Remove trait")
+                                }
+                            }
+                        )
+                    }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = traitInput,
+                        onValueChange = { traitInput = it },
+                        label = { Text("New trait") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = {
+                            viewModel.addTrait(traitInput)
+                            traitInput = ""
+                        },
+                        enabled = traitInput.isNotBlank(),
+                    ) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Add trait")
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "Facts",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Things Aura has learned about you. Edit or remove anything inaccurate.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.facts.forEach { fact ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "• $fact",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                IconButton(onClick = { viewModel.removeFact(fact) }) {
+                                    Icon(Icons.Filled.Delete, contentDescription = "Remove fact")
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = factInput,
+                        onValueChange = { factInput = it },
+                        label = { Text("New fact") },
+                        modifier = Modifier.weight(1f),
+                        minLines = 2,
+                        maxLines = 4,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = {
+                            viewModel.addFact(factInput)
+                            factInput = ""
+                        },
+                        enabled = factInput.isNotBlank(),
+                    ) {
+                        Icon(Icons.Filled.Edit, contentDescription = "Add fact")
+                    }
+                }
+            }
+
+            item { Spacer(modifier = Modifier.height(24.dp)) }
         }
     }
 
-    if (clearConfirm) {
+    if (showClearDialog) {
         AlertDialog(
-            onDismissRequest = { clearConfirm = false },
+            onDismissRequest = { showClearDialog = false },
             title = { Text("Clear profile?") },
-            text = { Text("This removes name, traits, and facts. It cannot be undone.") },
+            text = { Text("This removes your learned name, traits, and facts. It cannot be undone.") },
             confirmButton = {
                 TextButton(
                     onClick = {
                         viewModel.clear()
-                        clearConfirm = false
-                    },
-                ) { Text("Clear", color = MaterialTheme.colorScheme.error) }
+                        name = ""
+                        showClearDialog = false
+                    }
+                ) {
+                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                }
             },
             dismissButton = {
-                TextButton(onClick = { clearConfirm = false }) { Text("Cancel") }
-            },
-        )
-    }
-}
-
-@Composable
-private fun EditableChipList(
-    title: String,
-    items: List<String>,
-    onDelete: (String) -> Unit,
-    onAdd: (String) -> Unit,
-) {
-    var draft by remember { mutableStateOf("") }
-
-    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-    if (items.isEmpty()) {
-        Text(
-            "None yet",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-        )
-    } else {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            items.forEach { item ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        "• $item",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    IconButton(onClick = { onDelete(item) }) {
-                        Icon(
-                            imageVector = Icons.Filled.Delete,
-                            contentDescription = "Remove",
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                        )
-                    }
+                TextButton(onClick = { showClearDialog = false }) {
+                    Text("Cancel")
                 }
             }
-        }
-    }
-    Spacer(Modifier.height(8.dp))
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        TextField(
-            value = draft,
-            onValueChange = { draft = it },
-            label = { Text("Add new") },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(8.dp))
-        TextButton(
-            onClick = {
-                if (draft.isNotBlank()) {
-                    onAdd(draft.trim())
-                    draft = ""
-                }
-            },
-            enabled = draft.isNotBlank(),
-        ) { Text("Add") }
     }
 }

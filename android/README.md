@@ -25,7 +25,7 @@ This is my personal copy. The plan lives at `.hermes/plans/`.
 - User profile (learned from conversations via regex, injected into system prompt)
 - Onboarding wizard (paste API key + verify connectivity)
 - Biometric gate for sensitive tools
-- 250 unit tests passing across `:aura-core` (236) + `:app` (14)
+- 318 unit tests passing across `:aura-core` (304) + `:app` (14)
 
 Note: the app uses **cloud providers only** — there is no on-device model.
 
@@ -179,7 +179,7 @@ Scheduled via WorkManager. Re-scheduled on app start (idempotent, UPDATE policy)
 ```bash
 ./gradlew :app:assembleDebug          # debug APK
 ./gradlew :app:assembleRelease        # release APK (currently signed with debug key — sideload only)
-./gradlew :aura-core:testDebugUnitTest  # unit tests (236)
+./gradlew :aura-core:testDebugUnitTest  # unit tests (304)
 ./gradlew :app:testDebugUnitTest        # unit tests (14)
 ./gradlew :app:assembleDebug connectedAndroidTest  # androidTests (needs device)
 ```
@@ -227,4 +227,4 @@ android/
 
 ## Source of truth
 
-The build plan lives at `.hermes/plans/2026-06-27-android-everything-a.md`. Daily commits document what shipped; `git log --oneline` is the changelog.
+The build plan lives at `.hermes/plans/2026-07-05-tier-1-polish.md`. Daily commits document what shipped; `git log --oneline` is the changelog.

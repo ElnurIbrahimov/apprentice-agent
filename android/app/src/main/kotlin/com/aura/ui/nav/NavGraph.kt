@@ -102,13 +102,22 @@ fun NavGraph(
             modifier = Modifier.padding(padding),
         ) {
             composable(TopLevelRoute.Home.route) {
-                HomeScreen(onOpenChat = {
-                    navController.navigate(TopLevelRoute.Chat.route) {
-                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                })
+                HomeScreen(
+                    onOpenChat = {
+                        navController.navigate(TopLevelRoute.Chat.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    onOpenMemory = {
+                        navController.navigate(TopLevelRoute.Memory.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
             }
             composable(
                 route = "chat?convId={convId}",

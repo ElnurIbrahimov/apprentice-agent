@@ -73,7 +73,7 @@ These are features that earlier architecture plans mentioned but were never buil
 ## Security notes
 
 - API keys live in DataStore and are read at call time; no keys are compiled into the app.
-- `SecureDataStore` encrypts sensitive values with AES-256-GCM via Android Keystore.
+- `SecureDataStore` encrypts sensitive values with AES-256-GCM via Android Keystore (shipped; v1.5+ note in old docs was stale).
 - `KeyManager` generates/retrieves the Keystore-backed key lazily and surfaces a clear error on decryption failures rather than silently returning `null`.
 - The agent loop's `ToolExecutor` blocks `WRITE_LOCAL` tools when `memoryEnabled=false`, keeping incognito sessions from persisting data.
 - Backups intentionally exclude embeddings (model-specific) and API keys (security).
@@ -87,4 +87,4 @@ These are features that earlier architecture plans mentioned but were never buil
 
 `BuildConfig.VERSION_NAME` from `app/build.gradle.kts` (currently `0.1.0`).
 
-Source of truth: `.hermes/plans/2026-06-27-android-everything-a.md`
+Source of truth: `.hermes/plans/2026-07-05-tier-1-polish.md`

@@ -8,11 +8,7 @@ import com.aura.tasks.ReminderDao
 import com.aura.tasks.ReminderEntity
 import com.aura.tasks.TaskDao
 import com.aura.tasks.TaskEntity
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,32 +24,25 @@ data class TasksUiState(
     val loading: Boolean = true,
 )
 
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface TasksEntry {
-    fun taskDao(): TaskDao
-    fun reminderDao(): ReminderDao
-}
-
 @HiltViewModel
-class TasksViewModel @Inject constructor(app: Application) : AndroidViewModel(app) {
+class TasksViewModel @Inject constructor(
+    app: Application,
+    private val taskDao: TaskDao,
+    private val reminderDao: ReminderDao,
+) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(TasksUiState())
     val state: StateFlow<TasksUiState> = _state.asStateFlow()
-
-    private val entry = EntryPointAccessors.fromApplication(getApplication(), TasksEntry::class.java)
-    private fun taskDao() = entry.taskDao()
-    private fun reminderDao() = entry.reminderDao()
 
     init { load() }
 
     fun load() {
         _state.value = TasksUiState(loading = true)
         viewModelScope.launch {
-            val tasks = taskDao().all()
+            val tasks = taskDao.all()
             _state.value = TasksUiState(tasks = tasks, loading = false)
         }
         viewModelScope.launch {
-            reminderDao().observeUpcoming(System.currentTimeMillis()).collectLatest { reminders ->
+            reminderDao.observeUpcoming(System.currentTimeMillis()).collectLatest { reminders ->
                 _state.update { it.copy(reminders = reminders) }
             }
         }
@@ -61,9 +50,9 @@ class TasksViewModel @Inject constructor(app: Application) : AndroidViewModel(ap
 
     fun deleteTask(id: String) {
         viewModelScope.launch {
-            taskDao().delete(id)
+            taskDao.delete(id)
             // Any linked reminder is now obsolete.
-            reminderDao().deleteByTaskId(id)
+            reminderDao.deleteByTaskId(id)
             WorkManager.getInstance(getApplication()).cancelUniqueWork("task-$id")
             refreshTasks()
         }
@@ -71,8 +60,8 @@ class TasksViewModel @Inject constructor(app: Application) : AndroidViewModel(ap
 
     fun markDone(id: String) {
         viewModelScope.launch {
-            taskDao().markComplete(id, System.currentTimeMillis())
-            reminderDao().deleteByTaskId(id)
+            taskDao.markComplete(id, System.currentTimeMillis())
+            reminderDao.deleteByTaskId(id)
             WorkManager.getInstance(getApplication()).cancelUniqueWork("task-$id")
             refreshTasks()
         }
@@ -88,7 +77,7 @@ class TasksViewModel @Inject constructor(app: Application) : AndroidViewModel(ap
         if (title.isBlank()) return
         viewModelScope.launch {
             val id = UUID.randomUUID().toString()
-            taskDao().insert(
+            taskDao.insert(
                 TaskEntity(
                     id = id,
                     title = title.trim(),
@@ -106,7 +95,7 @@ class TasksViewModel @Inject constructor(app: Application) : AndroidViewModel(ap
 
     fun cancelReminder(id: String) {
         viewModelScope.launch {
-            reminderDao().delete(id)
+            reminderDao.delete(id)
             // Cancel by the work request id that the row stores.
             WorkManager.getInstance(getApplication()).cancelWorkById(UUID.fromString(id))
         }
@@ -114,7 +103,7 @@ class TasksViewModel @Inject constructor(app: Application) : AndroidViewModel(ap
 
     private fun refreshTasks() {
         viewModelScope.launch {
-            _state.update { it.copy(tasks = taskDao().all()) }
+            _state.update { it.copy(tasks = taskDao.all()) }
         }
     }
 }

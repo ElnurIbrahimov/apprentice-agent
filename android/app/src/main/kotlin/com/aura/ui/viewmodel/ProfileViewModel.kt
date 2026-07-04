@@ -5,15 +5,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.profile.UserProfile
 import com.aura.profile.UserProfileStore
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -23,18 +18,13 @@ data class ProfileUiState(
     val facts: List<String> = emptyList(),
 )
 
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface ProfileEntry {
-    fun userProfileStore(): UserProfileStore
-}
-
 @HiltViewModel
-class ProfileViewModel @Inject constructor(app: Application) : AndroidViewModel(app) {
+class ProfileViewModel @Inject constructor(
+    app: Application,
+    private val store: UserProfileStore,
+) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(ProfileUiState())
     val state: StateFlow<ProfileUiState> = _state.asStateFlow()
-
-    private val store = EntryPointAccessors.fromApplication(getApplication(), ProfileEntry::class.java).userProfileStore()
 
     init {
         viewModelScope.launch {
@@ -51,7 +41,12 @@ class ProfileViewModel @Inject constructor(app: Application) : AndroidViewModel(
     fun addTrait(trait: String) {
         val trimmed = trait.trim()
         if (trimmed.isBlank()) return
-        viewModelScope.launch { store.update(traits = listOf(trimmed)) }
+        viewModelScope.launch {
+            val current = store.profile.value
+            if (trimmed !in current.traits) {
+                store.update(traits = current.traits + trimmed)
+            }
+        }
     }
 
     fun removeTrait(trait: String) {
@@ -64,7 +59,12 @@ class ProfileViewModel @Inject constructor(app: Application) : AndroidViewModel(
     fun addFact(fact: String) {
         val trimmed = fact.trim()
         if (trimmed.isBlank()) return
-        viewModelScope.launch { store.update(facts = listOf(trimmed)) }
+        viewModelScope.launch {
+            val current = store.profile.value
+            if (trimmed !in current.facts) {
+                store.update(facts = current.facts + trimmed)
+            }
+        }
     }
 
     fun removeFact(fact: String) {

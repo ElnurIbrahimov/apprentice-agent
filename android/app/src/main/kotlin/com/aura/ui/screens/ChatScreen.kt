@@ -71,7 +71,16 @@ import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.components.SpecialistChips
 import com.aura.ui.viewmodel.ChatViewModel
 import com.aura.ui.voice.VoiceOverlay
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface HiltEntryPoint {
+    fun incomingShareStore(): IncomingShareStore
+}
 
 @Composable
 fun ChatScreen(
@@ -498,9 +507,9 @@ private fun MessageBubble(
                     ) {
                         Text(
                             text = "${citations.size} sources",
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                 }
@@ -512,22 +521,22 @@ private fun MessageBubble(
 @Composable
 private fun ToolCallBubble(name: String, result: String) {
     Surface(
-        color = MaterialTheme.colorScheme.tertiaryContainer,
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
         shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
+        modifier = Modifier.fillMaxWidth(0.85f).padding(start = 32.dp),
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text(
-                text = "🔧 $name",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                text = name,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = result.take(280) + if (result.length > 280) "…" else "",
+                text = result.take(280),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
             )
         }
     }
@@ -536,78 +545,24 @@ private fun ToolCallBubble(name: String, result: String) {
 @Composable
 private fun TypingIndicator() {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 4.dp),
+        modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(16.dp),
-        ) {
-            Text(
-                text = "● ● ●",
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                style = MaterialTheme.typography.bodyLarge,
-            )
-        }
+        Text(
+            text = "Aura is typing",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = "●●●",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+        )
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SourcesSheet(
-    citations: List<com.aura.tools.Citation>,
-    onDismiss: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-        ) {
-            Text(
-                text = "Sources",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(citations) { citation ->
-                    CitationRow(citation = citation)
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-    }
-}
-
-@Composable
-private fun CitationRow(citation: com.aura.tools.Citation) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-    ) {
-        Text(
-            text = "[${citation.index}] ${citation.title}",
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = citation.url,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
-    }
-}
-
 @Composable
 private fun ChatInputBar(
     draft: String,
@@ -620,62 +575,152 @@ private fun ChatInputBar(
     onGalleryClick: () -> Unit,
     onAudioClick: () -> Unit,
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showAttachmentSheet by remember { mutableStateOf(false) }
     Surface(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding(),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (!streaming) {
-                IconButton(onClick = onCameraClick) {
-                    Icon(Icons.Filled.AddAPhoto, contentDescription = "Camera", tint = MaterialTheme.colorScheme.onSurface)
-                }
-                IconButton(onClick = onGalleryClick) {
-                    Icon(Icons.Filled.PhotoLibrary, contentDescription = "Gallery", tint = MaterialTheme.colorScheme.onSurface)
-                }
-                IconButton(onClick = onAudioClick) {
-                    Icon(Icons.Filled.AudioFile, contentDescription = "Audio", tint = MaterialTheme.colorScheme.onSurface)
-                }
+            IconButton(onClick = { showAttachmentSheet = true }) {
+                Icon(Icons.Filled.AddAPhoto, contentDescription = "Attach")
             }
             OutlinedTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                modifier = Modifier.weight(1f),
                 placeholder = { Text("Ask Aura…") },
-                maxLines = 4,
-                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                maxLines = 5,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Send
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { onSend() }),
             )
-            Spacer(modifier = Modifier.width(4.dp))
-            IconButton(onClick = onMicClick) {
-                Icon(
-                    imageVector = Icons.Filled.Mic,
-                    contentDescription = "Voice input",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            Spacer(modifier = Modifier.width(4.dp))
             if (streaming) {
-                IconButton(
-                    onClick = onCancel,
-                    modifier = Modifier.background(MaterialTheme.colorScheme.error, RoundedCornerShape(50)),
-                ) {
-                    Icon(Icons.Filled.Stop, contentDescription = "Stop", tint = MaterialTheme.colorScheme.onError)
+                IconButton(onClick = onCancel) {
+                    Icon(Icons.Filled.Stop, contentDescription = "Stop", tint = MaterialTheme.colorScheme.error)
                 }
             } else {
+                IconButton(onClick = onMicClick) {
+                    Icon(Icons.Filled.Mic, contentDescription = "Voice input", tint = MaterialTheme.colorScheme.primary)
+                }
                 IconButton(
                     onClick = onSend,
                     enabled = draft.isNotBlank(),
-                    modifier = Modifier.background(
-                        if (draft.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        RoundedCornerShape(50),
-                    ),
                 ) {
-                    Icon(Icons.Filled.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.onPrimary)
+                    Icon(Icons.Filled.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+    }
+
+    if (showAttachmentSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showAttachmentSheet = false },
+            sheetState = sheetState,
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "Attach",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                AttachmentOption(
+                    icon = Icons.Filled.PhotoLibrary,
+                    label = "Gallery",
+                    onClick = {
+                        showAttachmentSheet = false
+                        onGalleryClick()
+                    }
+                )
+                AttachmentOption(
+                    icon = Icons.Filled.AddAPhoto,
+                    label = "Camera",
+                    onClick = {
+                        showAttachmentSheet = false
+                        onCameraClick()
+                    }
+                )
+                AttachmentOption(
+                    icon = Icons.Filled.AudioFile,
+                    label = "Audio",
+                    onClick = {
+                        showAttachmentSheet = false
+                        onAudioClick()
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttachmentOption(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(text = label, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SourcesSheet(citations: List<com.aura.tools.Citation>, onDismiss: () -> Unit) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+        ) {
+            Text(
+                text = "Sources",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            LazyColumn {
+                items(citations) { citation ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = citation.title ?: citation.url ?: "Source",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            citation.url?.let { url ->
+                                Text(
+                                    text = url,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
