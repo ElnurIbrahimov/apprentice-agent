@@ -13,16 +13,20 @@ import com.aura.agent.ToolRisk
 import com.aura.providers.ToolDefinition
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
+import com.aura.tasks.ReminderDao
+import com.aura.tasks.ReminderEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Schedule a reminder via WorkManager. The agent calls this with a time
+/** Schedule a reminder via WorkManager. The agent calls this with a time
  * (ISO 8601 or "HH:mm" for today) and a message. WorkManager fires the
  * reminder worker at the scheduled time, which posts a notification.
+ *
+ * A companion row in the reminders table gives the UI a stable list of
+ * upcoming reminders and lets the user cancel before they fire.
  *
  * Mirrors aura/tools/task_scheduler.py + notifications.py.
  * Risk: WRITE_LOCAL (schedules a system job).
@@ -30,6 +34,7 @@ import javax.inject.Singleton
 @Singleton
 class SetReminderTool @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val reminderDao: ReminderDao,
 ) {
     /** Monotonically increasing notification IDs for reminders. Starts
      * above the small system-reserved range to avoid collisions with
@@ -74,11 +79,19 @@ class SetReminderTool @Inject constructor(
                 .setConstraints(Constraints.NONE)
                 .addTag("reminder")
                 .build()
-            // Each reminder has a unique work name so simultaneous reminders
-            // don't coalesce. The REPLACE policy here is defensive only —
-            // uniqueness is already guaranteed by the timestamp suffix.
+            val workName = "reminder-${System.currentTimeMillis()}"
             WorkManager.getInstance(context)
-                .enqueueUniqueWork("reminder-${System.currentTimeMillis()}", ExistingWorkPolicy.REPLACE, work)
+                .enqueueUniqueWork(workName, ExistingWorkPolicy.REPLACE, work)
+            // Persist the metadata so the UI can list/cancel upcoming reminders.
+            runCatching {
+                reminderDao.insert(
+                    ReminderEntity(
+                        id = work.id.toString(),
+                        message = message,
+                        triggerAt = triggerAt,
+                    )
+                )
+            }
             ToolResult.Ok("Reminder set for ${TimeParser.format(triggerAt)}: $message")
         },
     )

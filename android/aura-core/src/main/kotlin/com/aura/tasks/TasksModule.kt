@@ -25,4 +25,7 @@ object TasksModule {
 
     @Provides
     fun provideTaskDao(db: TaskDatabase): TaskDao = db.taskDao()
+
+    @Provides
+    fun provideReminderDao(db: TaskDatabase): ReminderDao = db.reminderDao()
 }

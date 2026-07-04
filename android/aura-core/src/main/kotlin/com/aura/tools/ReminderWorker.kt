@@ -5,19 +5,25 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import androidx.core.app.NotificationCompat
+import androidx.hilt.work.HiltWorker
 import androidx.work.WorkerParameters
 import androidx.work.CoroutineWorker
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
+import com.aura.core.R
+import com.aura.tasks.ReminderDao
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
 
 /**
  * WorkManager worker that posts the reminder notification when the
  * scheduled time fires. CoroutineWorker so we could fetch memory
  * context in v1.5.
  */
-class ReminderWorker(
-    appContext: Context,
-    params: WorkerParameters,
+@HiltWorker
+class ReminderWorker @AssistedInject constructor(
+    @Assisted appContext: Context,
+    @Assisted params: WorkerParameters,
+    private val reminderDao: ReminderDao,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
@@ -32,6 +38,8 @@ class ReminderWorker(
             (h % REMINDER_ID_RANGE) + REMINDER_ID_START
         })
         postNotification(applicationContext, title, body, notificationId)
+        // Clean up the metadata row; the reminder has fired.
+        runCatching { reminderDao.delete(id.toString()) }
         return Result.success()
     }
 
