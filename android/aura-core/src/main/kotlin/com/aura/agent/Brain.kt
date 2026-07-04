@@ -57,7 +57,12 @@ sealed class BrainChunk {
     data class ToolCallDelta(val id: String, val argumentsDelta: String) : BrainChunk()
     data class ToolCallEnd(val id: String, val name: String, val arguments: String) : BrainChunk()
     data class Finished(val reason: String) : BrainChunk()
-    data class Error(val code: String, val message: String, val retryable: Boolean) : BrainChunk()
+    data class Error(
+        val code: String,
+        val message: String,
+        val retryable: Boolean,
+        val error: com.aura.providers.ProviderError? = null,
+    ) : BrainChunk()
 
     companion object {
         /**
@@ -75,7 +80,7 @@ sealed class BrainChunk {
          * `toolCallStarts[id]`).
          */
         fun fromProvider(p: com.aura.providers.ProviderChunk, nameById: MutableMap<String, String> = mutableMapOf()): BrainChunk {
-            p.error?.let { return Error(it.code, it.message, it.retryable) }
+            p.error?.let { return Error(it.code, it.message, it.retryable, error = it) }
             p.finishReason?.let { return Finished(it.name) }
             val tc = p.toolCall
             if (tc != null) {

@@ -43,8 +43,6 @@ import java.util.Locale
 fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
     onOpenChat: () -> Unit = {},
-    onOpenHands: () -> Unit = {},
-    onOpenTasks: () -> Unit = {},
     onOpenProactive: () -> Unit = {},
     onOpenMemory: () -> Unit = {},
 ) {

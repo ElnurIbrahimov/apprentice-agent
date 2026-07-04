@@ -17,6 +17,8 @@ import com.aura.agent.ToolContext
 import com.aura.agent.ToolExecutor
 import com.aura.agent.ToolRegistry
 import com.aura.agent.ToolResult
+import com.aura.agent.toAuraError
+import com.aura.core.error.AuraError
 import com.aura.kg.KnowledgeGraphRepository
 import com.aura.providers.ProviderRegistry
 import com.aura.tools.Citation
@@ -78,6 +80,7 @@ data class ChatUiState(
     val streaming: Boolean = false,
     val draft: String = "",
     val error: String? = null,
+    val errorTyped: AuraError? = null,
     val activeModel: String = "ollama:deepseek-v4-pro:cloud",
     val availableModels: List<String> = emptyList(),
     val ttsEnabled: Boolean = true,
@@ -287,7 +290,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun dismissError() {
-        _state.update { it.copy(error = null, errorRetryable = false) }
+        _state.update { it.copy(error = null, errorRetryable = false, errorTyped = null) }
     }
 
     private fun refreshKgNodeCount() {
@@ -301,13 +304,13 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    private fun setErrorWithAutoDismiss(error: String, retryable: Boolean = false) {
-        _state.update { it.copy(error = error, errorRetryable = retryable) }
+    private fun setErrorWithAutoDismiss(error: String, retryable: Boolean = false, typed: AuraError? = null) {
+        _state.update { it.copy(error = error, errorRetryable = retryable, errorTyped = typed) }
         // Auto-dismiss after 5 seconds
         viewModelScope.launch {
             kotlinx.coroutines.delay(5_000L)
             if (_state.value.error == error) {
-                _state.update { it.copy(error = null, errorRetryable = false) }
+                _state.update { it.copy(error = null, errorRetryable = false, errorTyped = null) }
             }
         }
     }
@@ -451,7 +454,9 @@ class ChatViewModel @Inject constructor(
                         }
                         is AgentEvent.Error -> {
                             consecutiveFailures++
-                            setErrorWithAutoDismiss("${event.code}: ${event.message}", retryable = event.retryable)
+                            val typed = event.typedError
+                            val display = typed?.formatUserMessage() ?: "${event.code}: ${event.message}"
+                            setErrorWithAutoDismiss(display, retryable = event.retryable, typed = typed)
                         }
                         is AgentEvent.Result -> {
                             // Replace the conversation snapshot with the loop's final state

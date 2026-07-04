@@ -107,6 +107,22 @@ sealed class AuraError(
         append(message)
         if (retryable) append(" (tap to retry)")
     }
+
+    companion object {
+        /** Map a raw HTTP-style code to a domain subtype. */
+        fun fromCode(code: String, message: String, retryable: Boolean = false): AuraError = when (code.lowercase()) {
+            "auth", "unauthorized", "invalid_api_key", "api_key" -> Auth(message, providerId = null)
+            "rate_limited", "rate_limit", "429", "quota" -> RateLimited(message, retryAfterMs = null, retryable = retryable)
+            "network", "timeout", "connect", "dns_error" -> Network(message, retryable = retryable)
+            "bad_arguments", "bad_args", "invalid_request" -> BadArguments(message)
+            "tool", "tool_error" -> Tool(message, retryable = retryable)
+            "storage" -> Storage(message, retryable = retryable)
+            "security" -> Security(message)
+            "needs_permission" -> NeedsPermission("", "")
+            "needs_approval" -> NeedsApproval("")
+            else -> Provider(message, providerCode = code, retryable = retryable)
+        }
+    }
 }
 
 /**

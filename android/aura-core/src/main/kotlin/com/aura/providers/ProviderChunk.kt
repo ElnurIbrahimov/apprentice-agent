@@ -31,5 +31,10 @@ data class ProviderError(
     val cause: String? = null,
 ) {
     fun toAuraError(providerId: String? = null): com.aura.core.error.AuraError =
-        com.aura.core.error.AuraError.Provider(message, providerCode = code, retryable = retryable)
+        code.toAuraError(message, retryable, providerId)
+
+    /** Map a raw error code to a typed domain error. */
+    private fun String.toAuraError(message: String, retryable: Boolean, providerId: String?): com.aura.core.error.AuraError =
+        com.aura.core.error.AuraError.fromCode(this, message, retryable)
+            .let { if (it is com.aura.core.error.AuraError.Provider && providerId != null) it.copy(providerCode = providerId) else it }
 }

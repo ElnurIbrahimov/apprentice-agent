@@ -131,7 +131,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                     is BrainChunk.Finished -> { finishReason = chunk.reason }
                     is BrainChunk.Error -> {
                         stepError = "${chunk.code}: ${chunk.message}"
-                        emit(AgentEvent.Error(chunk.code, chunk.message, chunk.retryable))
+                        emit(AgentEvent.Error(chunk.code, chunk.message, chunk.retryable, chunk.error?.toAuraError()))
                     }
                 }
             }
@@ -254,7 +254,7 @@ sealed class AgentEvent {
     data class ToolResult(val id: String, val name: String, val arguments: String, val result: String, val needsPermission: String? = null, val permissionRationale: String? = null) : AgentEvent()
     /** Emitted by the UI after a permission was granted. The loop re-executes the named tool with the given args. */
     data class PermissionGranted(val toolName: String, val arguments: String) : AgentEvent()
-    data class Error(val code: String, val message: String, val retryable: Boolean) : AgentEvent()
+    data class Error(val code: String, val message: String, val retryable: Boolean, val typedError: com.aura.core.error.AuraError? = null) : AgentEvent()
     data class Result(val conversation: com.aura.agent.Conversation) : AgentEvent()
     data object Done : AgentEvent()
 }
