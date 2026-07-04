@@ -18,6 +18,19 @@ data class MemoryUiState(
     /** When non-null, restricts the list to memories in this category. */
     val categoryFilter: String? = null,
     val loading: Boolean = true,
+    /**
+     * True while [rebuildEmbeddings] is in progress. Disables the
+     * button in the UI. After the rebuild completes, [rebuildResult]
+     * holds the count of rows re-embedded (or null if not run).
+     */
+    val rebuildInFlight: Boolean = false,
+    /**
+     * Most recent rebuild summary, e.g. "Rebuilt 142 of 142
+     * embeddings." Null until the first rebuild completes. The UI
+     * renders this as a snackbar-style banner; the user can dismiss
+     * it with [clearRebuildResult].
+     */
+    val rebuildResult: String? = null,
 )
 
 @HiltViewModel
@@ -82,12 +95,55 @@ class MemoryViewModel @Inject constructor(
     /**
      * Edit a memory's content + category. Embedding is invalidated
      * by the store; the next recall will re-embed on demand, or the
-     * user can run Settings → Memory → Rebuild embeddings.
+     * user can run the "Rebuild embeddings" action on this screen to
+     * sweep all invalidated rows in one pass.
      */
     fun update(id: String, content: String, category: String) {
         viewModelScope.launch {
             memoryStore.update(id, content, category)
             refresh()
         }
+    }
+
+    /**
+     * Re-embed every memory whose embedding is currently null.
+     * After a backup import, every row has embedding=null and the
+     * next recall would re-embed one at a time on demand — slow for
+     * a fresh restore with hundreds of rows. This sweeps them all in
+     * one pass.
+     *
+     * Idempotent: memories with an existing embedding are left
+     * alone, so running it twice is a no-op the second time.
+     *
+     * Safe to re-enter: the second call waits for the first to
+     * finish because [rebuildInFlight] is set synchronously at the
+     * start of the function and the button in the UI is disabled
+     * while true.
+     */
+    fun rebuildEmbeddings() {
+        if (_state.value.rebuildInFlight) return
+        _state.update { it.copy(rebuildInFlight = true) }
+        viewModelScope.launch {
+            val total = runCatching { memoryStore.count() }.getOrDefault(0)
+            val rebuilt = runCatching { memoryStore.rebuildEmbeddings() }
+                .getOrDefault(0)
+            val msg = when {
+                total == 0 -> "No memories to rebuild."
+                rebuilt == 0 -> "All $total memories already have embeddings."
+                rebuilt == total -> "Rebuilt $rebuilt embedding${if (rebuilt == 1) "" else "s"}."
+                else -> "Rebuilt $rebuilt of $total embeddings (some failed)."
+            }
+            _state.update {
+                it.copy(
+                    rebuildInFlight = false,
+                    rebuildResult = msg,
+                )
+            }
+            refresh()
+        }
+    }
+
+    fun clearRebuildResult() {
+        _state.update { it.copy(rebuildResult = null) }
     }
 }

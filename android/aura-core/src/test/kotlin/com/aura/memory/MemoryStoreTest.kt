@@ -147,4 +147,98 @@ class MemoryStoreTest {
         store.update("missing", "x", "fact")
         coVerify(exactly = 0) { dao.update(any()) }
     }
+
+    @Test
+    fun `rebuildEmbeddings re-embeds only rows with null embedding`() = runTest {
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val store = MemoryStore(
+            dao,
+            FakeEmbedder(384),
+            VectorIndex(384),
+            WriteGate(),
+        )
+        // Two rows have null embeddings (fresh from a backup import);
+        // one already has its embedding. The rebuild should touch only
+        // the two null ones.
+        val pending1 = MemoryEntity(id = "p1", content = "user likes coffee", source = "user", category = "preference", embedding = null)
+        val pending2 = MemoryEntity(id = "p2", content = "user lives in Baku", source = "user", category = "fact", embedding = null)
+        val ready = MemoryEntity(id = "r1", content = "user prefers dark mode", source = "user", category = "preference", embedding = byteArrayOf(1, 2, 3, 4))
+        coEvery { dao.allForExport() } returns listOf(pending1, pending2, ready)
+
+        val updated = mutableListOf<MemoryEntity>()
+        coEvery { dao.update(capture(updated)) } answers { Unit }
+
+        val rebuilt = store.rebuildEmbeddings()
+
+        assertEquals(2, rebuilt, "should re-embed the two null rows")
+        assertEquals(2, updated.size, "should write exactly two updates")
+        assertEquals(setOf("p1", "p2"), updated.map { it.id }.toSet())
+        // All updated rows have a non-null embedding now.
+        assertTrue(updated.all { it.embedding != null }, "all updated rows should have a fresh embedding")
+    }
+
+    @Test
+    fun `rebuildEmbeddings is a no-op when everything is already embedded`() = runTest {
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val store = MemoryStore(
+            dao,
+            FakeEmbedder(384),
+            VectorIndex(384),
+            WriteGate(),
+        )
+        coEvery { dao.allForExport() } returns listOf(
+            MemoryEntity(id = "r1", content = "a", source = "user", category = "fact", embedding = byteArrayOf(1, 2, 3, 4)),
+            MemoryEntity(id = "r2", content = "b", source = "user", category = "fact", embedding = byteArrayOf(5, 6, 7, 8)),
+        )
+
+        val rebuilt = store.rebuildEmbeddings()
+
+        assertEquals(0, rebuilt, "no rows to rebuild")
+        coVerify(exactly = 0) { dao.update(any()) }
+    }
+
+    @Test
+    fun `rebuildEmbeddings is a no-op on an empty table`() = runTest {
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val store = MemoryStore(
+            dao,
+            FakeEmbedder(384),
+            VectorIndex(384),
+            WriteGate(),
+        )
+        coEvery { dao.allForExport() } returns emptyList()
+
+        val rebuilt = store.rebuildEmbeddings()
+
+        assertEquals(0, rebuilt)
+        coVerify(exactly = 0) { dao.update(any()) }
+    }
+
+    @Test
+    fun `rebuildEmbeddings continues past a per-row failure`() = runTest {
+        // If one row's embedder call throws, the next row should still
+        // be re-embedded. The count returned reflects only the
+        // successes.
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val embedder = mockk<Embedder>()
+        val store = MemoryStore(
+            dao,
+            embedder,
+            VectorIndex(384),
+            WriteGate(),
+        )
+        val p1 = MemoryEntity(id = "p1", content = "a", source = "user", category = "fact", embedding = null)
+        val p2 = MemoryEntity(id = "p2", content = "b", source = "user", category = "fact", embedding = null)
+        val p3 = MemoryEntity(id = "p3", content = "c", source = "user", category = "fact", embedding = null)
+        coEvery { dao.allForExport() } returns listOf(p1, p2, p3)
+        coEvery { embedder.embed("a") } throws RuntimeException("network blip")
+        coEvery { embedder.embed("b") } returns FloatArray(384) { 0f }
+        coEvery { embedder.embed("c") } returns FloatArray(384) { 0f }
+        coEvery { dao.update(any()) } answers { Unit }
+
+        val rebuilt = store.rebuildEmbeddings()
+
+        assertEquals(2, rebuilt, "two of three should succeed; the failure is contained")
+        coVerify(exactly = 2) { dao.update(any()) }
+    }
 }

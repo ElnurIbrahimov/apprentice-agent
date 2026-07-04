@@ -276,8 +276,9 @@ fun SettingsScreen(
                         "This will add the rows from the backup file to " +
                             "your existing data. Existing rows with the " +
                             "same id are replaced; new rows are added. " +
-                            "Embeddings are NOT included — go to Memory " +
-                            "and tap 'Rebuild embeddings' after restoring.",
+                            "Embeddings are NOT included — after restoring, " +
+                            "go to the Memory tab and tap 'Rebuild embeddings' " +
+                            "to re-embed everything in one pass.",
                     )
                 },
                 confirmButton = {

@@ -131,11 +131,46 @@ class MemoryStore @Inject constructor(
     suspend fun forget(id: String) = dao.delete(id)
 
     /**
+     * Re-embed every memory that currently has a null embedding.
+     * Returns the number of rows that were re-embedded.
+     *
+     * Use case: after a backup restore (which intentionally drops
+     * embeddings — see [com.aura.backup.BackupManager.snapshot] for
+     * why), every imported row has embedding=null. The next recall
+     * would trigger a lazy re-embed per row, but that's slow when
+     * there are hundreds. The Memory screen exposes this as a
+     * "Rebuild embeddings" action so the user can do the sweep in
+     * one pass.
+     *
+     * Memories with a non-null embedding are left alone. Embeddings
+     * are model-specific so re-embedding with the current model is
+     * safe and the result is what future recalls will use.
+     *
+     * Failures on individual rows are swallowed and logged; the
+     * rebuild returns the count of successful re-embeds so the UI
+     * can show "Rebuilt 142 of 145".
+     */
+    suspend fun rebuildEmbeddings(): Int {
+        val pending = dao.allForExport().filter { it.embedding == null }
+        if (pending.isEmpty()) return 0
+        var rebuilt = 0
+        for (mem in pending) {
+            val ok = runCatching {
+                val vec = embedder.embed(mem.content)
+                dao.update(mem.copy(embedding = Embedder.toBytes(vec)))
+            }.isSuccess
+            if (ok) rebuilt += 1
+        }
+        return rebuilt
+    }
+
+    /**
      * Update an existing memory's content + category. Used by the
      * Memory edit UI when the user fixes a fact the model got wrong.
      * The embedding is set to null — the next recall will trigger a
-     * lazy re-embed, or the user can hit Settings → Rebuild
-     * embeddings for a full sweep.
+     * lazy re-embed, or the user can hit the Memory tab's
+     * "Rebuild embeddings" action to re-embed every invalidated row
+     * in one pass.
      *
      * If [id] does not exist this is a no-op (the user probably
      * deleted the row from another path between opening the edit
