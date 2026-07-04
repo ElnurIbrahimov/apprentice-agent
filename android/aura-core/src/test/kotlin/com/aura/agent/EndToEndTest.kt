@@ -62,7 +62,7 @@ class EndToEndTest {
                 BrainChunk.Finished(FinishReason.tool_calls.name),
             ),
             flowOf(
-                BrainChunk.Text("Got it \u2014 I'll remember that you prefer dark mode."),
+                BrainChunk.Text("Got it — I'll remember that you prefer dark mode."),
                 BrainChunk.Finished(FinishReason.stop.name),
             ),
         )
@@ -70,8 +70,10 @@ class EndToEndTest {
         val executor = ToolExecutor(toolRegistry, context = io.mockk.mockk(relaxed = true))
         val kgExtractor = io.mockk.mockk<com.aura.kg.ConversationKgExtractor>(relaxed = true)
         val userProfileStore = io.mockk.mockk<com.aura.profile.UserProfileStore>(relaxed = true)
+        val handRepository = io.mockk.mockk<com.aura.hands.HandRepository>(relaxed = true)
         io.mockk.every { userProfileStore.getSystemPrompt() } returns ""
-        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore)
+        io.mockk.coEvery { handRepository.getEnabled() } returns emptyList()
+        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore, handRepository)
 
         // 3. Run a conversation
         val conv = Conversation().addUser("I prefer dark mode")
@@ -127,8 +129,10 @@ class EndToEndTest {
         val executor = ToolExecutor(toolRegistry, context = io.mockk.mockk(relaxed = true))
         val kgExtractor = io.mockk.mockk<com.aura.kg.ConversationKgExtractor>(relaxed = true)
         val userProfileStore = io.mockk.mockk<com.aura.profile.UserProfileStore>(relaxed = true)
+        val handRepository = io.mockk.mockk<com.aura.hands.HandRepository>(relaxed = true)
         io.mockk.every { userProfileStore.getSystemPrompt() } returns ""
-        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore)
+        io.mockk.coEvery { handRepository.getEnabled() } returns emptyList()
+        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore, handRepository)
 
         val conv = Conversation().addUser("what do you remember about my preferences?")
         val events = mutableListOf<AgentEvent>()
@@ -160,8 +164,10 @@ class EndToEndTest {
         val executor = ToolExecutor(toolRegistry, context = io.mockk.mockk(relaxed = true))
         val kgExtractor = io.mockk.mockk<com.aura.kg.ConversationKgExtractor>(relaxed = true)
         val userProfileStore = io.mockk.mockk<com.aura.profile.UserProfileStore>(relaxed = true)
+        val handRepository = io.mockk.mockk<com.aura.hands.HandRepository>(relaxed = true)
         io.mockk.every { userProfileStore.getSystemPrompt() } returns ""
-        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore)
+        io.mockk.coEvery { handRepository.getEnabled() } returns emptyList()
+        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore, handRepository)
 
         val conv = Conversation().addUser("my name is Elnur")
         loop.run(conv, model = "test:model", maxSteps = 2).collect { /* discard */ }

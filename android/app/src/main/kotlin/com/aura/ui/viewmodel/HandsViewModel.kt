@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.agent.ToolContext
 import com.aura.agent.ToolExecutor
+import com.aura.agent.ToolRegistry
 import com.aura.agent.ToolResult
 import com.aura.hands.Hand
 import com.aura.hands.HandDao
@@ -28,6 +29,7 @@ class HandsViewModel @Inject constructor(
     app: Application,
     private val handDao: HandDao,
     private val toolExecutor: ToolExecutor,
+    val toolRegistry: ToolRegistry,
 ) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(HandsUiState())

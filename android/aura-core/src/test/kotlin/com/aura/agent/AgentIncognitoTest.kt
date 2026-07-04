@@ -35,6 +35,7 @@ class AgentIncognitoTest {
     private val memoryStore = mockk<MemoryStore>(relaxed = true)
     private val kgExtractor = mockk<ConversationKgExtractor>(relaxed = true)
     private val userProfileStore = mockk<UserProfileStore>(relaxed = true)
+    private val handRepository = mockk<com.aura.hands.HandRepository>(relaxed = true)
 
     private fun makeLoop(): MemoryAugmentedAgenticLoop =
         MemoryAugmentedAgenticLoop(
@@ -44,6 +45,7 @@ class AgentIncognitoTest {
             memoryStore = memoryStore,
             kgExtractor = kgExtractor,
             userProfileStore = userProfileStore,
+            handRepository = handRepository,
         )
 
     @Test
@@ -58,6 +60,7 @@ class AgentIncognitoTest {
         coEvery { memoryStore.maybeStore(any(), any()) } returns "new_id"
         coEvery { userProfileStore.update(any(), any(), any(), any()) } returns Unit
         coEvery { kgExtractor.extract(any()) } returns Unit
+        coEvery { handRepository.getEnabled() } returns emptyList()
 
         val loop = makeLoop()
         val events = loop.run(
@@ -82,6 +85,7 @@ class AgentIncognitoTest {
         }
         coEvery { memoryStore.query(any(), any()) } returns emptyList()
         coEvery { kgExtractor.extract(any()) } returns Unit
+        coEvery { handRepository.getEnabled() } returns emptyList()
 
         val loop = makeLoop()
         val events = loop.run(
@@ -108,6 +112,7 @@ class AgentIncognitoTest {
         }
         coEvery { memoryStore.query(any(), any()) } returns emptyList()
         coEvery { kgExtractor.extract(any()) } returns Unit
+        coEvery { handRepository.getEnabled() } returns emptyList()
 
         val loop = makeLoop()
         val events = loop.run(
@@ -127,5 +132,34 @@ class AgentIncognitoTest {
             events.any { it is AgentEvent.Done },
             "loop should still terminate with Done even in incognito mode",
         )
+    }
+
+    @Test
+    fun `trigger phrase is injected into context when user message matches`() = runTest {
+        val hand = com.aura.hands.Hand(
+            id = "h1",
+            name = "standup",
+            triggerPhrase = "daily standup",
+            steps = "[{\"tool\":\"send_message\",\"args\":{\"to\":\"slack\",\"body\":\"done\"}}]",
+        )
+        coEvery { handRepository.getEnabled() } returns listOf(hand)
+        every { brain.stream(any(), any(), any(), any()) } returns flow {
+            emit(BrainChunk.Text("Running standup hand"))
+            emit(BrainChunk.Finished("stop"))
+        }
+        coEvery { memoryStore.query(any(), any()) } returns emptyList()
+        coEvery { kgExtractor.extract(any()) } returns Unit
+
+        val loop = makeLoop()
+        val events = loop.run(
+            conversation = Conversation(
+                id = "c1", title = "t", createdAt = 0L, updatedAt = 0L,
+                turns = listOf(Turn(user = "give me my daily standup", assistant = null)),
+            ),
+            model = "ollama:deepseek-v4-pro:cloud",
+        ).toList()
+
+        val assistant = events.filterIsInstance<AgentEvent.TextDelta>().joinToString("") { it.text }
+        assertEquals("Running standup hand", assistant)
     }
 }

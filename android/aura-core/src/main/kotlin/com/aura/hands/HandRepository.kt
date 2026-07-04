@@ -26,6 +26,8 @@ class HandRepository @Inject constructor(
 
     suspend fun getByName(name: String): Hand? = dao.getByName(name)
 
+    suspend fun getEnabled(): List<Hand> = dao.getEnabled()
+
     suspend fun insert(hand: Hand) = dao.insert(hand)
 
     suspend fun update(hand: Hand) = dao.update(hand)
@@ -50,10 +52,8 @@ class HandRepository @Inject constructor(
         }
         val outputs = mutableListOf<String>()
         for ((i, step) in steps.withIndex()) {
-            val toolName = step["tool"] ?: return ToolResult.Error(
-                "Step ${i + 1}: missing 'tool' in $step", "bad_step"
-            )
-            val args = step["args"] ?: "{}"
+            val toolName = step.tool
+            val args = step.args.toJsonString()
             val result = executor.execute(toolName, args, ctx)
             when (result) {
                 is ToolResult.Ok -> outputs.add("Step ${i + 1} ($toolName): ${result.output}")
@@ -69,7 +69,11 @@ class HandRepository @Inject constructor(
         )
     }
 
-    private fun parseSteps(stepsJson: String): List<Map<String, String>> {
+    /**
+     * Parse a hand's steps into typed [HandStep]s. Returns an empty list on
+     * malformed JSON so callers can decide how to surface the error.
+     */
+    fun parseSteps(stepsJson: String): List<HandStep> {
         val element = try {
             json.parseToJsonElement(stepsJson)
         } catch (_: Exception) {
@@ -79,11 +83,29 @@ class HandRepository @Inject constructor(
         return arr.mapNotNull { elem ->
             val obj = elem.jsonObject
             val tool = obj["tool"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-            val args = when (val a = obj["args"]) {
-                null -> "{}"
-                else -> (a as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: a.toString()
+            val rawArgs = obj["args"]
+            val args = when (rawArgs) {
+                is JsonObject -> rawArgs.mapValues { (_, v) ->
+                    v.jsonPrimitive.contentOrNull ?: v.toString()
+                }
+                is kotlinx.serialization.json.JsonPrimitive -> {
+                    // Legacy: args is a stringified JSON object (e.g. from older tests/hand JSON).
+                    val parsed = try { json.parseToJsonElement(rawArgs.content).jsonObject } catch (_: Exception) { JsonObject(emptyMap()) }
+                    parsed.mapValues { (_, v) ->
+                        v.jsonPrimitive.contentOrNull ?: v.toString()
+                    }
+                }
+                else -> emptyMap()
             }
-            mapOf("tool" to tool, "args" to args)
+            HandStep(tool = tool, args = args)
         }
+    }
+
+    /**
+     * Serialize a list of [HandStep] to the repository's expected JSON format.
+     */
+    fun stepsToJson(steps: List<HandStep>): String {
+        val array = kotlinx.serialization.json.JsonArray(steps.map { it.toJsonObject() })
+        return array.toString()
     }
 }

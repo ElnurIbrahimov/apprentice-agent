@@ -27,6 +27,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
     private val memoryStore: MemoryStore,
     private val kgExtractor: ConversationKgExtractor,
     private val userProfileStore: com.aura.profile.UserProfileStore,
+    private val handRepository: com.aura.hands.HandRepository,
 ) {
     /**
      * Run the agentic loop, optionally overriding the base system prompt
@@ -68,6 +69,17 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
 
             // 1) Recall relevant memories for the last user message
             lastUserMessage = currentConversation.turns.lastOrNull { it.user != null }?.user ?: ""
+
+            // 1b) Trigger-phrase hand check: if an enabled hand's phrase is a
+            // substring of the user's message, prepend a run_hand tool call
+            // so the model executes it. This is the wiring that makes a
+            // hand's advertised trigger phrase actually fire.
+            val handTrigger = findMatchingHand(lastUserMessage)
+            val handContext = handTrigger?.let { hand ->
+                "\n\n# Triggered automation:\nThe user triggered hand '${hand.name}'. " +
+                    "Run it with run_hand(name=\"${hand.name}\")."
+            } ?: ""
+
             val memoryContext = if (lastUserMessage.isNotBlank()) {
                 val hits = memoryStore.query(lastUserMessage, recallLimit)
                 if (hits.isNotEmpty()) {
@@ -85,7 +97,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                     currentConversation.systemPrompt,
                     brain.identity.ifBlank { null },
                     userProfileStore.getSystemPrompt().ifBlank { null },
-                ).joinToString("\n\n") + memoryContext
+                ).joinToString("\n\n") + memoryContext + handContext
                 if (sys.isNotBlank()) add(ProviderMessage(role = Role.system, content = sys))
                 addAll(currentConversation.toMessages())
             }
@@ -216,6 +228,21 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         Regex("""(?:i (?:prefer|like|love))\s+(.+?)(?:\.|,|\s+(?:and|but|so|because)|\s*$)""", RegexOption.IGNORE_CASE)
             .find(text)?.groupValues?.getOrNull(1)?.let { pref -> facts.add("Prefers ${pref.trim()}") }
         if (facts.isNotEmpty()) userProfileStore.update(facts = facts)
+    }
+
+    /**
+     * Find the first enabled hand whose trigger phrase is contained in the
+     * user's message. Substring match; case-insensitive; blank phrases are
+     * ignored. If multiple hands match, the newest one wins (getEnabled
+     * orders by createdAt DESC).
+     */
+    private suspend fun findMatchingHand(userMessage: String): com.aura.hands.Hand? {
+        if (userMessage.isBlank()) return null
+        val lower = userMessage.lowercase()
+        return handRepository.getEnabled().firstOrNull { hand ->
+            hand.triggerPhrase.isNotBlank() &&
+                lower.contains(hand.triggerPhrase.lowercase())
+        }
     }
 }
 
