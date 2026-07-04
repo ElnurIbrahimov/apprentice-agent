@@ -62,22 +62,29 @@ This document is a snapshot of the **actual** project state, not aspirational. T
 - **Compose Material 3**: Following Material You design language.
 - **Coroutines + Flow**: Async throughout; StateFlow for UI state, SharedFlow for one-shot events.
 
-## What is NOT in this codebase (despite earlier docs)
+## What is NOT in this codebase (deliberate non-goals / later versions)
 
-These are features that the architecture plan mentioned but were never built. Listing them explicitly so future readers don't go looking:
+These are features that earlier architecture plans mentioned but were never built. Listing them explicitly so future readers don't go looking:
 
-- No Tink encryption — keys are stored in DataStore in plaintext. Encryption is a v1.5+ task.
-- No sqlite-vec — vector search is an in-memory `VectorIndex` over a deterministic SHA-256-projection `Embedder` (384-dim, not a real semantic model). Real embedding is v1.5+.
-- No CameraX — `ImageInputTool` opens the system camera via `ACTION_IMAGE_CAPTURE`.
-- No Coil — image rendering uses Compose `Image` directly.
-- No kotlinx-datetime — `java.util.Calendar` and `SimpleDateFormat` throughout.
 - No cross-device sync, no Bluetooth, no USB bridge, no nearby share.
 - No document ingestion / FTS pipeline.
-- No biometric UI — `BiometricPromptTool` is a `NeedsApproval` marker; the real `BiometricPrompt` API requires a `FragmentActivity` reference, which the agent loop doesn't carry.
 - No `aura-assistant` / `aura-knowledge` / `aura-automation` / `aura-files` / `aura-media` / `aura-connect` / `aura-location` / `aura-calendar` / `aura-contacts` / `aura-sync` modules. Two-module build.
+
+## Security notes
+
+- API keys live in DataStore and are read at call time; no keys are compiled into the app.
+- `SecureDataStore` encrypts sensitive values with AES-256-GCM via Android Keystore.
+- `KeyManager` generates/retrieves the Keystore-backed key lazily and surfaces a clear error on decryption failures rather than silently returning `null`.
+- The agent loop's `ToolExecutor` blocks `WRITE_LOCAL` tools when `memoryEnabled=false`, keeping incognito sessions from persisting data.
+- Backups intentionally exclude embeddings (model-specific) and API keys (security).
+
+## Privacy notes
+
+- All user data (memories, tasks, conversations, profile) stays in local Room/SQLite.
+- Cloud LLMs are opt-in and user-keyed; the app does not ship with bundled providers or analytics.
 
 ## Version
 
 `BuildConfig.VERSION_NAME` from `app/build.gradle.kts` (currently `0.1.0`).
 
-Source of truth: `.hermes/plans/2026-06-25_161811-aura-android-superapp.md`
+Source of truth: `.hermes/plans/2026-06-27-android-everything-a.md`
