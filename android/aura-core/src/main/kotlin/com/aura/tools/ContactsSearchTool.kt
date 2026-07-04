@@ -9,6 +9,7 @@ import com.aura.agent.Tool
 import com.aura.agent.ToolContext
 import com.aura.agent.ToolResult
 import com.aura.agent.ToolRisk
+import com.aura.memory.escapeLikeWildcards
 import com.aura.providers.ToolDefinition
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
@@ -62,8 +63,9 @@ class ContactsSearchTool @Inject constructor(
 
     private fun search(query: String): List<Contact> {
         val out = mutableListOf<Contact>()
-        val selection = "${ContactsContract.Contacts.DISPLAY_NAME} LIKE ?"
-        val args = arrayOf("%$query%")
+        val escaped = escapeLikeWildcards(query)
+        val selection = "${ContactsContract.Contacts.DISPLAY_NAME} LIKE ? ESCAPE '\\'"
+        val args = arrayOf("%$escaped%")
         context.contentResolver.query(
             ContactsContract.Contacts.CONTENT_URI,
             arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.DISPLAY_NAME, ContactsContract.Contacts.HAS_PHONE_NUMBER),

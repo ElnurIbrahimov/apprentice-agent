@@ -20,9 +20,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * Google Gemini provider (Text-only).
  *
  * Uses the [streamGenerateContent] endpoint which returns newline-delimited
- * JSON objects (not SSE). The API key is passed as a query parameter.
+ * JSON objects (not SSE). The API key is passed via the `X-Goog-Api-Key`
+ * header.
  *
- * API: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?key={apiKey}
+ * API: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent
  *
  * Text-only (no image support in this pass). Image support will be added in
  * Task 4.1 via a [ProviderMessage.imageData] field.

@@ -15,6 +15,7 @@ import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,6 +31,11 @@ import javax.inject.Singleton
 class SetReminderTool @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
+    /** Monotonically increasing notification IDs for reminders. Starts
+     * above the small system-reserved range to avoid collisions with
+     * morning-brief / proactive notifications. */
+    private val nextNotificationId = AtomicInteger(NOTIFICATION_ID_START)
+
     fun definition() = ToolDefinition(
         name = "set_reminder",
         description = "Schedule a reminder. 'when' is HH:mm (24h, today or tomorrow) or an ISO 8601 datetime. Message is the reminder body.",
@@ -55,12 +61,14 @@ class SetReminderTool @Inject constructor(
                 return@Tool ToolResult.Error("could not parse 'when': $whenStr (use HH:mm or ISO 8601)", "bad_args")
             }
             val delayMs = (triggerAt - System.currentTimeMillis()).coerceAtLeast(0L)
+            val notificationId = nextNotificationId.getAndIncrement()
             val work = OneTimeWorkRequestBuilder<ReminderWorker>()
                 .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
                 .setInputData(
                     Data.Builder()
                         .putString("title", "⏰ Reminder")
                         .putString("body", message)
+                        .putInt("notificationId", notificationId)
                         .build()
                 )
                 .setConstraints(Constraints.NONE)
@@ -74,4 +82,9 @@ class SetReminderTool @Inject constructor(
             ToolResult.Ok("Reminder set for ${TimeParser.format(triggerAt)}: $message")
         },
     )
+
+    companion object {
+        /** Reserved notification ID space: 1000..9999 for reminders. */
+        private const val NOTIFICATION_ID_START = 1000
+    }
 }
