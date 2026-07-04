@@ -28,9 +28,9 @@ class UserProfileStore @Inject constructor(
         val current = _profile.value
         val merged = UserProfile(
             name = name ?: current.name,
-            traits = (current.traits + (traits ?: emptyList())).distinct().take(20),
+            traits = traits ?: current.traits,
             preferences = current.preferences + (preferences ?: emptyMap()),
-            facts = (current.facts + (facts ?: emptyList())).distinct().take(50),
+            facts = facts ?: current.facts,
         )
         _profile.value = merged
         dao.upsert(UserProfile.toEntity(merged))

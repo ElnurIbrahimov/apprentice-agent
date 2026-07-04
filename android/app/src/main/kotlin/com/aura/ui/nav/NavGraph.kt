@@ -41,6 +41,7 @@ import com.aura.ui.screens.HistoryScreen
 import com.aura.ui.screens.HomeScreen
 import com.aura.ui.screens.MemoryScreen
 import com.aura.ui.screens.ProactiveHistoryScreen
+import com.aura.ui.screens.ProfileScreen
 import com.aura.ui.screens.TasksScreen
 import com.aura.ui.screens.SettingsScreen
 
@@ -96,7 +97,9 @@ fun NavGraph() {
                 )
             }
             composable(TopLevelRoute.Memory.route) { MemoryScreen() }
-            composable(TopLevelRoute.Settings.route) { SettingsScreen() }
+            composable(TopLevelRoute.Settings.route) {
+                SettingsScreen(onNavigateProfile = { navController.navigate("profile") })
+            }
             composable(TopLevelRoute.Graph.route) { GraphScreen() }
             composable("history") {
                 HistoryScreen(onSelect = { convId ->
@@ -110,6 +113,9 @@ fun NavGraph() {
             composable("hands") { HandsScreen() }
             composable("tasks") { TasksScreen() }
             composable("proactive") { ProactiveHistoryScreen() }
+            composable("profile") {
+                ProfileScreen(onBack = { navController.popBackStack() })
+            }
         }
     }
 }

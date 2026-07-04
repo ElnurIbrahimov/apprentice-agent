@@ -12,7 +12,8 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object UserProfileModule {
-    @Provides @Singleton
+    @Provides
+    @Singleton
     fun provideDb(@ApplicationContext ctx: Context): UserProfileDatabase =
         RoomConfig.builder(
             ctx,
@@ -21,5 +22,11 @@ object UserProfileModule {
             migrations = emptyArray(),
         ).build()
 
-    @Provides fun provideDao(db: UserProfileDatabase): UserProfileDao = db.userProfileDao()
+    @Provides
+    fun provideDao(db: UserProfileDatabase): UserProfileDao = db.userProfileDao()
+
+    @Singleton
+    @Provides
+    fun provideUserProfileStore(dao: UserProfileDao): UserProfileStore =
+        UserProfileStore(dao)
 }

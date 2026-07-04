@@ -38,6 +38,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
+    onNavigateProfile: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
     backupViewModel: BackupViewModel = hiltViewModel(),
 ) {
@@ -219,6 +220,23 @@ fun SettingsScreen(
                 checked = state.appLockEnabled,
                 onCheckedChange = { viewModel.setAppLockEnabled(it) },
             )
+        }
+
+        // Profile row.
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Profile", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = "Name, traits, and facts Aura has learned",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                )
+            }
+            TextButton(onClick = onNavigateProfile) { Text("Edit") }
         }
 
         // Proactive worker toggles. Each is opt-out with a true
