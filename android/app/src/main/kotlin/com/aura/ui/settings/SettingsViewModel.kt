@@ -24,27 +24,15 @@ data class SettingsUiState(
     val defaultModel: String = "ollama:deepseek-v4-pro:cloud",
     val firstRunComplete: Boolean = false,
     val configuredProviders: List<String> = emptyList(),
-    /**
-     * Whether the biometric app lock is on. When true, MainActivity
-     * gates on a [androidx.biometric.BiometricPrompt] challenge
-     * before showing the rest of the UI. Persisted via
-     * [com.aura.data.UserPreferences] and round-tripped through
-     * backup so the choice survives reinstalls onto the same device.
-     */
     val appLockEnabled: Boolean = false,
-    /**
-     * Whether the morning-brief WorkManager job is scheduled. When
-     * false, [com.aura.proactive.ProactiveBootstrap] cancels any
-     * previously-scheduled brief on app launch so the 7am
-     * notification stops firing. Default true (opt-out).
-     */
     val morningBriefEnabled: Boolean = true,
-    /**
-     * Whether the calendar-monitor foreground service is running.
-     * When false, the FGS is stopped on app launch and the persistent
-     * notification goes away. Default true (opt-out).
-     */
     val calendarMonitorEnabled: Boolean = true,
+    /**
+     * Current embedding model id, persisted via ProviderKeys. Used
+     * to drive the Settings embedding-model picker and to restore
+     * the choice after backup import.
+     */
+    val embeddingModel: String = ProviderKeys.DEFAULT_EMBEDDING_MODEL,
 )
 
 @HiltViewModel
@@ -67,6 +55,7 @@ class SettingsViewModel @Inject constructor(
             val appLockEnabled = userPreferences.appLockEnabled.first()
             val morningBriefEnabled = userPreferences.morningBriefEnabled.first()
             val calendarMonitorEnabled = userPreferences.calendarMonitorEnabled.first()
+            val embeddingModel = providerKeys.embeddingModel
             _state.value = SettingsUiState(
                 ollamaKey = providerKeys.keyFor("ollama") ?: "",
                 anthropicKey = providerKeys.keyFor("anthropic") ?: "",
@@ -80,6 +69,7 @@ class SettingsViewModel @Inject constructor(
                 appLockEnabled = appLockEnabled,
                 morningBriefEnabled = morningBriefEnabled,
                 calendarMonitorEnabled = calendarMonitorEnabled,
+                embeddingModel = embeddingModel,
             )
         }
     }
@@ -145,6 +135,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferences.setCalendarMonitorEnabled(enabled)
             _state.update { it.copy(calendarMonitorEnabled = enabled) }
+        }
+    }
+
+    fun setEmbeddingModel(model: String) {
+        viewModelScope.launch {
+            providerKeys.setEmbeddingModel(model)
+            _state.update { it.copy(embeddingModel = model) }
         }
     }
 

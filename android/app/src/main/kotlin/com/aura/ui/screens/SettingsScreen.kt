@@ -183,6 +183,37 @@ fun SettingsScreen(
             }
         }
 
+        Text(
+            text = "Embedding model",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "Used to turn memories into vectors locally. Current: ${state.embeddingModel}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(
+                "nomic-embed-text" to "Nomic Embed (default)",
+                "mxbai-embed-large" to "mixed-bread large",
+                "all-minilm" to "all-MiniLM",
+                "snowflake-arctic-embed" to "Snowflake Arctic",
+            ).forEach { (id, label) ->
+                AssistChip(
+                    onClick = { viewModel.setEmbeddingModel(id) },
+                    label = { Text(label) },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = if (state.embeddingModel == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        labelColor = if (state.embeddingModel == id) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                )
+            }
+        }
+
         // ── Privacy: biometric app lock + proactive worker toggles ──
         Spacer(modifier = Modifier.height(8.dp))
         HorizontalDivider()
