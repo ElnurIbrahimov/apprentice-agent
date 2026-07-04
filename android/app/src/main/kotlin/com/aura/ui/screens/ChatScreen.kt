@@ -1,10 +1,6 @@
 package com.aura.ui.screens
 
-import android.Manifest
-import android.app.Activity
-import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +33,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,7 +43,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -61,9 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.navigation.compose.rememberNavController
 import com.aura.IncomingShareStore
 import com.aura.agent.Specialist
 import com.aura.ui.components.MoaThinkingIndicator
@@ -90,87 +84,51 @@ fun ChatScreen(
     onNavigateHistory: () -> Unit = {},
 ) {
     LaunchedEffect(resumeConversationId) {
-        if (resumeConversationId != null) {
-            viewModel.loadConversation(resumeConversationId)
-        }
+        if (resumeConversationId != null) viewModel.loadConversation(resumeConversationId)
     }
     LaunchedEffect(morningBriefSummary) {
-        if (!morningBriefSummary.isNullOrBlank()) {
-            viewModel.onUserMessage(morningBriefSummary)
-        }
+        if (!morningBriefSummary.isNullOrBlank()) viewModel.onUserMessage(morningBriefSummary)
     }
+
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
     val context = LocalContext.current
+
     var showModelPicker by remember { mutableStateOf(false) }
     var showSources by remember { mutableStateOf(false) }
     var showVoiceOverlay by remember { mutableStateOf(false) }
-    var hasMicPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        )
-    }
+    var showAttachmentSheet by remember { mutableStateOf(false) }
+
+    val hasMicPermission = rememberMicPermission()
     val micPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        hasMicPermission = granted
-        if (granted) showVoiceOverlay = true
-    }
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) showVoiceOverlay = true }
 
     val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap ->
-        bitmap?.let { viewModel.onImageCaptured(it) }
-    }
+        contract = androidx.activity.result.contract.ActivityResultContracts.TakePicturePreview()
+    ) { bitmap -> bitmap?.let { viewModel.onImageCaptured(it) } }
 
     val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
+        contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         uri?.let {
-            val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                try {
-                    android.graphics.ImageDecoder.decodeBitmap(
-                        android.graphics.ImageDecoder.createSource(context.contentResolver, it)
-                    )
-                } catch (e: Exception) { null }
-            } else {
-                try {
-                    @Suppress("DEPRECATION")
-                    android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, it)
-                } catch (e: Exception) { null }
-            }
-            bitmap?.let { bmp -> viewModel.onImageCaptured(bmp) }
+            val bmp = decodeBitmap(context, it)
+            bmp?.let(viewModel::onImageCaptured)
         }
     }
 
     val audioLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let { viewModel.onAudioPicked(it) }
-    }
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri -> uri?.let(viewModel::onAudioPicked) }
 
-    var hasCameraPermission by remember {
-        mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        )
-    }
+    val hasCameraPermission = rememberCameraPermission()
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
-        hasCameraPermission = granted
         if (granted) cameraLauncher.launch(null)
     }
 
-    // On first composition, consume any pending shared text from the share sheet
-    // and pre-fill the chat draft. IncomingShareStore is a Hilt singleton.
-    LaunchedEffect(Unit) {
-        val store = EntryPointAccessors.fromApplication<HiltEntryPoint>(context.applicationContext as android.app.Application)
-            .incomingShareStore()
-        val pending = store.consume()
-        if (!pending.isNullOrBlank()) {
-            viewModel.setDraft(pending)
-        }
-    }
+    ConsumeIncomingShare(context, viewModel)
 
     LaunchedEffect(state.conversation.turns.size) {
         if (state.conversation.turns.isNotEmpty()) {
@@ -184,191 +142,52 @@ fun ChatScreen(
             .imePadding()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        // Header
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 1.dp,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier
-                    .clickable { showModelPicker = true }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Aura",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = com.aura.ui.util.modelDisplayName(state.activeModel),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    )
-                }
-                IconButton(onClick = { viewModel.toggleTts() }) {
-                    Icon(
-                        imageVector = if (state.ttsEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
-                        contentDescription = if (state.ttsEnabled) "TTS on, tap to mute" else "TTS off, tap to enable",
-                        tint = if (state.ttsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                    )
-                }
-                IconButton(
-                    onClick = {
-                        val text = viewModel.lastAssistantText()
-                        if (text.isNotBlank()) {
-                            val clip = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                                as android.content.ClipboardManager
-                            clip.setPrimaryClip(android.content.ClipData.newPlainText("Aura response", text))
-                        }
-                    },
-                    enabled = viewModel.lastAssistantText().isNotBlank(),
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.ContentCopy,
-                        contentDescription = "Copy last response",
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    )
-                }
-                IconButton(onClick = onNavigateHistory) {
-                    Icon(Icons.Filled.History, contentDescription = "History", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                }
-                // Deep Mode chip — one-shot MoA toggle for the next turn
-                androidx.compose.material3.FilterChip(
-                    selected = state.deepModeEnabled,
-                    onClick = { viewModel.toggleDeepMode() },
-                    label = {
-                        Text(
-                            text = if (state.deepModeActive) "\uD83E\uDE84 Thinking..." else "\uD83D\uDE80 Deep",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    },
-                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
-                    ),
-                    modifier = Modifier.padding(end = 4.dp),
-                )
-                // Incognito chip — session-scoped no-write toggle
-                androidx.compose.material3.FilterChip(
-                    selected = state.incognitoMode,
-                    onClick = { viewModel.toggleIncognito() },
-                    label = {
-                        Text(
-                            text = if (state.incognitoMode) "\uD83D\uDD75\uFE0F Incognito" else "\uD83D\uDC64",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    },
-                    colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f),
-                    ),
-                    modifier = Modifier.padding(end = 4.dp),
-                )
-                Icon(
-                    imageVector = Icons.Filled.ArrowDropDown,
-                    contentDescription = "Change model",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
-            }
-        }
+        ChatHeader(
+            activeModel = state.activeModel,
+            ttsEnabled = state.ttsEnabled,
+            deepModeEnabled = state.deepModeEnabled,
+            deepModeActive = state.deepModeActive,
+            incognitoMode = state.incognitoMode,
+            onToggleTts = viewModel::toggleTts,
+            onCopyLast = { copyToClipboard(context, viewModel.lastAssistantText()) },
+            onHistory = onNavigateHistory,
+            onToggleDeepMode = viewModel::toggleDeepMode,
+            onToggleIncognito = viewModel::toggleIncognito,
+            onShowModelPicker = { showModelPicker = true },
+        )
 
-        // MoA thinking indicator — shown during Deep Mode turns
         if (state.deepModeActive) {
             MoaThinkingIndicator(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
 
-        // Incognito banner — shown above the message list whenever
-        // the toggle is on, so the user can see the chat is in
-        // no-write mode at a glance.
         if (state.incognitoMode) {
-            Surface(
-                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    text = "\uD83D\uDD75\uFE0F Incognito — nothing from this conversation is saved. " +
-                        "No memory, no profile facts, no knowledge-graph nodes, " +
-                        "and no conversation history. Read-only tools still work.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                )
-            }
+            IncognitoBanner()
         }
 
-        // Messages
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            items(state.conversation.turns) { turn ->
-                turn.user?.let { userMsg ->
-                    MessageBubble(text = userMsg, isUser = true)
-                }
-                turn.assistant?.let { assistantMsg ->
-                    MessageBubble(
-                        text = assistantMsg,
-                        isUser = false,
-                        citations = turn.citations,
-                        onShowSources = { showSources = true },
-                    )
-                }
-                for (toolTurn in turn.toolTurns) {
-                    if (toolTurn.result.isNotEmpty()) {
-                        ToolCallBubble(name = toolTurn.name, result = toolTurn.result)
-                    }
-                }
-            }
-            if (state.streaming && state.conversation.turns.lastOrNull()?.assistant.isNullOrBlank()) {
-                item { TypingIndicator() }
-            }
-        }
+        ChatMessageList(
+            state = state,
+            listState = listState,
+            onShowSources = { showSources = true },
+            modifier = Modifier.weight(1f),
+        )
 
-        // Error banner
         state.error?.let { err ->
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                shape = RoundedCornerShape(8.dp),
-            ) {
-                Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = err,
-                        modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    if (state.errorRetryable) {
-                        TextButton(onClick = { viewModel.retryLast() }) {
-                            Text("Retry", color = MaterialTheme.colorScheme.onErrorContainer)
-                        }
-                    }
-                    TextButton(onClick = { viewModel.dismissError() }) {
-                        Text("✕", color = MaterialTheme.colorScheme.onErrorContainer)
-                    }
-                }
-            }
+            ErrorBanner(
+                error = err,
+                retryable = state.errorRetryable,
+                typedError = state.errorTyped,
+                onRetry = viewModel::retryLast,
+                onDismiss = viewModel::dismissError,
+            )
         }
 
-        // Specialist chip row — shown when draft has content or a specialist is selected
         if (state.draft.isNotBlank() || state.selectedSpecialist != null) {
             SpecialistChips(
                 selected = state.selectedSpecialist,
                 suggested = state.suggestedSpecialist,
-                onSelect = { specialist ->
-                    viewModel.setSpecialist(specialist)
-                },
+                onSelect = viewModel::setSpecialist,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             )
         }
@@ -380,21 +199,17 @@ fun ChatScreen(
             onSend = viewModel::send,
             onCancel = viewModel::cancel,
             onMicClick = {
-                if (hasMicPermission) {
-                    showVoiceOverlay = true
-                } else {
-                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
+                if (hasMicPermission) showVoiceOverlay = true
+                else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
             },
             onCameraClick = {
-                if (hasCameraPermission) {
-                    cameraLauncher.launch(null)
-                } else {
-                    cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                }
+                if (hasCameraPermission) cameraLauncher.launch(null)
+                else cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
             },
-            onGalleryClick = { galleryLauncher.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onGalleryClick = { galleryLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) },
             onAudioClick = { audioLauncher.launch("audio/*") },
+            showAttachmentSheet = showAttachmentSheet,
+            onAttachmentSheetChange = { showAttachmentSheet = it },
         )
     }
 
@@ -415,56 +230,203 @@ fun ChatScreen(
         )
     }
 
-    if (showVoiceOverlay) {
-        if (hasMicPermission) {
-            VoiceOverlay(
-                onTranscript = { transcript ->
-                    viewModel.setDraft(transcript)
-                    viewModel.send()
-                },
-                onDismiss = { showVoiceOverlay = false },
-            )
-        } else {
-            LaunchedEffect(Unit) {
-                showVoiceOverlay = false
-            }
-        }
+    if (showVoiceOverlay && hasMicPermission) {
+        VoiceOverlay(
+            onTranscript = { transcript ->
+                viewModel.setDraft(transcript)
+                viewModel.send()
+            },
+            onDismiss = { showVoiceOverlay = false },
+        )
+    } else if (showVoiceOverlay) {
+        LaunchedEffect(Unit) { showVoiceOverlay = false }
     }
 
-    // Permission request dialog — shown when a tool returns NeedsPermission
-    val pendingPerm = state.pendingPermission
-    if (pendingPerm != null) {
-        val permLauncher = rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission()
-        ) { granted ->
-            if (granted) {
-                viewModel.retryAfterPermission(pendingPerm)
+    PermissionDialog(
+        permission = state.pendingPermission,
+        rationale = state.permissionRationale,
+        onGrant = viewModel::retryAfterPermission,
+        onDismiss = viewModel::dismissPermission,
+    )
+}
+
+@Composable
+private fun ChatHeader(
+    activeModel: String,
+    ttsEnabled: Boolean,
+    deepModeEnabled: Boolean,
+    deepModeActive: Boolean,
+    incognitoMode: Boolean,
+    onToggleTts: () -> Unit,
+    onCopyLast: () -> Unit,
+    onHistory: () -> Unit,
+    onToggleDeepMode: () -> Unit,
+    onToggleIncognito: () -> Unit,
+    onShowModelPicker: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .clickable { onShowModelPicker() }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Aura",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = com.aura.ui.util.modelDisplayName(activeModel),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+            IconButton(onClick = onToggleTts) {
+                Icon(
+                    imageVector = if (ttsEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+                    contentDescription = if (ttsEnabled) "TTS on, tap to mute" else "TTS off, tap to enable",
+                    tint = if (ttsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                )
+            }
+            IconButton(onClick = onCopyLast) {
+                Icon(
+                    imageVector = Icons.Filled.ContentCopy,
+                    contentDescription = "Copy last response",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+            IconButton(onClick = onHistory) {
+                Icon(Icons.Filled.History, contentDescription = "History", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            }
+            FilterChip(
+                selected = deepModeEnabled,
+                label = if (deepModeActive) "🪩 Thinking..." else "🚀 Deep",
+                onClick = onToggleDeepMode,
+            )
+            FilterChip(
+                selected = incognitoMode,
+                label = if (incognitoMode) "🕵️ Incognito" else "👤",
+                onClick = onToggleIncognito,
+            )
+            Icon(
+                imageVector = Icons.Filled.ArrowDropDown,
+                contentDescription = "Change model",
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun FilterChip(selected: Boolean, label: String, onClick: () -> Unit) {
+    androidx.compose.material3.FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(text = label, style = MaterialTheme.typography.labelSmall) },
+        colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
+            selectedContainerColor = if (label.contains("Deep")) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
             } else {
-                viewModel.dismissPermission()
+                MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f)
+            },
+        ),
+        modifier = Modifier.padding(end = 4.dp),
+    )
+}
+
+@Composable
+private fun IncognitoBanner() {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Text(
+            text = "🕵️ Incognito — nothing from this conversation is saved. " +
+                "No memory, no profile facts, no knowledge-graph nodes, " +
+                "and no conversation history. Read-only tools still work.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun ChatMessageList(
+    state: com.aura.ui.viewmodel.ChatUiState,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    onShowSources: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        state = listState,
+        modifier = modifier
+            .fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        items(state.conversation.turns) { turn ->
+            turn.user?.let { MessageBubble(text = it, isUser = true) }
+            turn.assistant?.let {
+                MessageBubble(
+                    text = it,
+                    isUser = false,
+                    citations = turn.citations,
+                    onShowSources = onShowSources,
+                )
+            }
+            for (toolTurn in turn.toolTurns) {
+                if (toolTurn.result.isNotEmpty()) {
+                    ToolCallBubble(name = toolTurn.name, result = toolTurn.result)
+                }
             }
         }
-        AlertDialog(
-            onDismissRequest = { viewModel.dismissPermission() },
-            title = { Text("Permission needed") },
-            text = {
-                Text(
-                    buildString {
-                        append(state.permissionRationale ?: "Aura needs access to continue.")
-                        append("\n\nPermission: $pendingPerm")
-                    }
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { permLauncher.launch(pendingPerm) }) {
-                    Text("Grant")
+        if (state.streaming && state.conversation.turns.lastOrNull()?.assistant.isNullOrBlank()) {
+            item { TypingIndicator() }
+        }
+    }
+}
+
+@Composable
+private fun ErrorBanner(
+    error: String,
+    retryable: Boolean,
+    typedError: com.aura.core.error.AuraError?,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val display = typedError?.formatUserMessage() ?: error
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = display,
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (retryable || typedError?.retryable == true) {
+                TextButton(onClick = onRetry) {
+                    Text("Retry", color = MaterialTheme.colorScheme.onErrorContainer)
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.dismissPermission() }) {
-                    Text("Deny")
-                }
-            },
-        )
+            }
+            TextButton(onClick = onDismiss) {
+                Text("✕", color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
     }
 }
 
@@ -574,9 +536,10 @@ private fun ChatInputBar(
     onCameraClick: () -> Unit,
     onGalleryClick: () -> Unit,
     onAudioClick: () -> Unit,
+    showAttachmentSheet: Boolean,
+    onAttachmentSheetChange: (Boolean) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var showAttachmentSheet by remember { mutableStateOf(false) }
     Surface(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,
@@ -588,7 +551,7 @@ private fun ChatInputBar(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { showAttachmentSheet = true }) {
+            IconButton(onClick = { onAttachmentSheetChange(true) }) {
                 Icon(Icons.Filled.AddAPhoto, contentDescription = "Attach")
             }
             OutlinedTextField(
@@ -622,7 +585,7 @@ private fun ChatInputBar(
 
     if (showAttachmentSheet) {
         ModalBottomSheet(
-            onDismissRequest = { showAttachmentSheet = false },
+            onDismissRequest = { onAttachmentSheetChange(false) },
             sheetState = sheetState,
         ) {
             Column(
@@ -638,7 +601,7 @@ private fun ChatInputBar(
                     icon = Icons.Filled.PhotoLibrary,
                     label = "Gallery",
                     onClick = {
-                        showAttachmentSheet = false
+                        onAttachmentSheetChange(false)
                         onGalleryClick()
                     }
                 )
@@ -646,7 +609,7 @@ private fun ChatInputBar(
                     icon = Icons.Filled.AddAPhoto,
                     label = "Camera",
                     onClick = {
-                        showAttachmentSheet = false
+                        onAttachmentSheetChange(false)
                         onCameraClick()
                     }
                 )
@@ -654,7 +617,7 @@ private fun ChatInputBar(
                     icon = Icons.Filled.AudioFile,
                     label = "Audio",
                     onClick = {
-                        showAttachmentSheet = false
+                        onAttachmentSheetChange(false)
                         onAudioClick()
                     }
                 )
@@ -725,4 +688,93 @@ private fun SourcesSheet(citations: List<com.aura.tools.Citation>, onDismiss: ()
             }
         }
     }
+}
+
+@Composable
+private fun ConsumeIncomingShare(context: android.content.Context, viewModel: ChatViewModel) {
+    LaunchedEffect(Unit) {
+        val store = EntryPointAccessors.fromApplication<HiltEntryPoint>(context.applicationContext as android.app.Application)
+            .incomingShareStore()
+        store.consume()?.let(viewModel::setDraft)
+    }
+}
+
+@Composable
+private fun rememberMicPermission(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.RECORD_AUDIO,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+}
+
+@Composable
+private fun rememberCameraPermission(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.CAMERA,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+}
+
+private fun decodeBitmap(context: android.content.Context, uri: android.net.Uri): android.graphics.Bitmap? {
+    return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+        runCatching {
+            android.graphics.ImageDecoder.decodeBitmap(
+                android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
+            )
+        }.getOrNull()
+    } else {
+        runCatching {
+            @Suppress("DEPRECATION")
+            android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+        }.getOrNull()
+    }
+}
+
+private fun copyToClipboard(context: android.content.Context, text: String) {
+    if (text.isBlank()) return
+    val clip = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    clip.setPrimaryClip(android.content.ClipData.newPlainText("Aura response", text))
+}
+
+@Composable
+private fun PermissionDialog(
+    permission: String?,
+    rationale: String?,
+    onGrant: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (permission == null) return
+    val permLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) onGrant(permission) else onDismiss()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Permission needed") },
+        text = {
+            Text(
+                buildString {
+                    append(rationale ?: "Aura needs access to continue.")
+                    append("\n\nPermission: $permission")
+                }
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { permLauncher.launch(permission) }) {
+                Text("Grant")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Deny")
+            }
+        },
+    )
 }

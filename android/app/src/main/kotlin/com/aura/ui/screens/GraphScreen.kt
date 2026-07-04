@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.kg.KgNode
 import com.aura.kg.KnowledgeGraphRepository
+import com.aura.ui.viewmodel.GraphUiState
 import com.aura.ui.viewmodel.GraphViewModel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -67,242 +68,344 @@ fun GraphScreen(viewModel: GraphViewModel = hiltViewModel()) {
     var selectedNodeSet by remember { mutableStateOf(setOf<String>()) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // Open sheet when selectedNode changes
     val currentSelected = state.selectedNode
     LaunchedEffect(currentSelected) {
         if (currentSelected != null) showSheet = true
     }
 
+    GraphContent(
+        state = state,
+        selectedNodeSet = selectedNodeSet,
+        onQueryChange = viewModel::onQueryChange,
+        onSearch = viewModel::search,
+        onNodeClick = { nodeId ->
+            selectedNodeSet = emptySet()
+            viewModel.selectNode(nodeId)
+        },
+        onNodeLongClick = { nodeId ->
+            selectedNodeSet = if (nodeId in selectedNodeSet) {
+                selectedNodeSet - nodeId
+            } else if (selectedNodeSet.size >= 2) {
+                setOf(nodeId)
+            } else {
+                selectedNodeSet + nodeId
+            }
+        },
+        onFindPath = { startId, endId ->
+            viewModel.findPath(startId, endId)
+            selectedNodeSet = emptySet()
+            showSheet = true
+        },
+        onClearSelection = { selectedNodeSet = emptySet() },
+    )
+
+    if (showSheet && (state.selectedNode != null || state.path != null)) {
+        NodeBottomSheet(
+            state = state,
+            sheetState = sheetState,
+            onNodeClick = viewModel::selectNode,
+            onDismiss = {
+                showSheet = false
+                viewModel.clearSelection()
+            },
+        )
+    }
+}
+
+@Composable
+private fun GraphContent(
+    state: GraphUiState,
+    selectedNodeSet: Set<String>,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onNodeClick: (String) -> Unit,
+    onNodeLongClick: (String) -> Unit,
+    onFindPath: (String, String) -> Unit,
+    onClearSelection: () -> Unit,
+) {
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
         ) {
-            Text(
-                text = "Knowledge Graph",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            Text(
-                text = "${state.nodes.size} nodes in view",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-            )
+            GraphHeader(nodeCount = state.nodes.size)
             Spacer(modifier = Modifier.height(12.dp))
-
-            // Search bar
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = state.query,
-                    onValueChange = { viewModel.onQueryChange(it) },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Search nodes…") },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        imeAction = androidx.compose.ui.text.input.ImeAction.Search,
-                    ),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                        onSearch = { viewModel.search() },
-                    ),
-                )
-                Spacer(modifier = Modifier.size(8.dp))
-                IconButton(
-                    onClick = { viewModel.search() },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape),
-                ) {
-                    Icon(
-                        Icons.Filled.Search,
-                        contentDescription = "Search",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
-            }
+            SearchBar(
+                query = state.query,
+                onQueryChange = onQueryChange,
+                onSearch = onSearch,
+            )
             Spacer(modifier = Modifier.height(12.dp))
             HorizontalDivider()
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Loading
-            if (state.loading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (state.nodes.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "🗂️",
-                            style = MaterialTheme.typography.displayLarge,
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No nodes yet",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
-                        )
-                        Text(
-                            text = "The knowledge graph populates as you chat with Aura.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-                        )
-                    }
-                }
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(state.nodes, key = { it.id }) { node ->
-                        val isSelectedForPath = node.id in selectedNodeSet
-                        NodeCard(
-                            node = node,
-                            isSelectedForPath = isSelectedForPath,
-                            selectedCount = selectedNodeSet.size,
-                            onClick = {
-                                selectedNodeSet = emptySet()
-                                viewModel.selectNode(node.id)
-                            },
-                            onLongClick = {
-                                selectedNodeSet = if (node.id in selectedNodeSet) {
-                                    selectedNodeSet - node.id
-                                } else if (selectedNodeSet.size >= 2) {
-                                    setOf(node.id)
-                                } else {
-                                    selectedNodeSet + node.id
-                                }
-                            },
-                        )
-                    }
-                }
-            }
-        }
-
-        // Error banner
-        state.error?.let { err ->
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                shape = RoundedCornerShape(8.dp),
-            ) {
-                Text(
-                    text = err,
-                    modifier = Modifier.padding(12.dp),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.bodySmall,
+            when {
+                state.loading -> GraphLoading()
+                state.nodes.isEmpty() -> GraphEmptyState()
+                else -> NodeList(
+                    nodes = state.nodes,
+                    selectedNodeSet = selectedNodeSet,
+                    onNodeClick = onNodeClick,
+                    onNodeLongClick = onNodeLongClick,
                 )
             }
         }
 
-        // Find Path FAB when 2 nodes selected
-        if (selectedNodeSet.size == 2) {
-            FloatingActionButton(
-                onClick = {
-                    val ids = selectedNodeSet.toList()
-                    viewModel.findPath(ids[0], ids[1])
-                    selectedNodeSet = emptySet()
-                    showSheet = true
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp),
-                containerColor = MaterialTheme.colorScheme.primary,
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Filled.Route,
-                        contentDescription = "Find path",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        "Find Path",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
-            }
+        state.error?.let { err ->
+            ErrorBanner(error = err)
         }
 
-        // Selected node count chip
         if (selectedNodeSet.isNotEmpty()) {
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = 16.dp, top = 104.dp),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer,
+            SelectionChip(
+                count = selectedNodeSet.size,
+                onClear = onClearSelection,
+            )
+        }
+
+        if (selectedNodeSet.size == 2) {
+            val ids = selectedNodeSet.toList()
+            FindPathFab(onClick = { onFindPath(ids[0], ids[1]) })
+        }
+    }
+}
+
+// ── Graph Header ─────────────────────────────────────────────────────────────
+
+@Composable
+private fun GraphHeader(nodeCount: Int) {
+    Column {
+        Text(
+            text = "Knowledge Graph",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Text(
+            text = "$nodeCount nodes in view",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+        )
+    }
+}
+
+// ── Search Bar ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun SearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.weight(1f),
+            placeholder = { Text("Search nodes…") },
+            singleLine = true,
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                imeAction = androidx.compose.ui.text.input.ImeAction.Search,
+            ),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                onSearch = { onSearch() },
+            ),
+        )
+        Spacer(modifier = Modifier.size(8.dp))
+        IconButton(
+            onClick = onSearch,
+            modifier = Modifier
+                .size(48.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape),
+        ) {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = "Search",
+                tint = MaterialTheme.colorScheme.onPrimary,
+            )
+        }
+    }
+}
+
+// ── Loading & Empty States ───────────────────────────────────────────────────
+
+@Composable
+private fun GraphLoading() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator()
+    }
+}
+
+@Composable
+private fun GraphEmptyState() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "🗂️",
+                style = MaterialTheme.typography.displayLarge,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "No nodes yet",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Text(
+                text = "The knowledge graph populates as you chat with Aura.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+            )
+        }
+    }
+}
+
+// ── Node List ────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun NodeList(
+    nodes: List<KgNode>,
+    selectedNodeSet: Set<String>,
+    onNodeClick: (String) -> Unit,
+    onNodeLongClick: (String) -> Unit,
+) {
+    LazyColumn(
+        contentPadding = PaddingValues(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(nodes, key = { it.id }) { node ->
+            NodeCard(
+                node = node,
+                isSelectedForPath = node.id in selectedNodeSet,
+                selectedCount = selectedNodeSet.size,
+                onClick = { onNodeClick(node.id) },
+                onLongClick = { onNodeLongClick(node.id) },
+            )
+        }
+    }
+}
+
+// ── Overlays ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ErrorBanner(error: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Text(
+            text = error,
+            modifier = Modifier.padding(12.dp),
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+@Composable
+private fun FindPathFab(onClick: () -> Unit) {
+    FloatingActionButton(
+        onClick = onClick,
+        modifier = Modifier
+            .padding(16.dp),
+        containerColor = MaterialTheme.colorScheme.primary,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Route,
+                contentDescription = "Find path",
+                tint = MaterialTheme.colorScheme.onPrimary,
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                "Find Path",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectionChip(
+    count: Int,
+    onClear: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .padding(end = 16.dp, top = 104.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "$count selected",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            IconButton(
+                onClick = onClear,
+                modifier = Modifier.size(20.dp),
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "${selectedNodeSet.size} selected",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    IconButton(
-                        onClick = { selectedNodeSet = emptySet() },
-                        modifier = Modifier.size(20.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Close,
-                            contentDescription = "Clear selection",
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                        )
-                    }
-                }
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "Clear selection",
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
             }
         }
     }
+}
 
-    // Bottom sheet
-    if (showSheet && (state.selectedNode != null || state.path != null)) {
-        ModalBottomSheet(
-            onDismissRequest = {
-                showSheet = false
-                viewModel.clearSelection()
-            },
-            sheetState = sheetState,
-            containerColor = MaterialTheme.colorScheme.surface,
+// ── Bottom Sheet ─────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NodeBottomSheet(
+    state: GraphUiState,
+    sheetState: androidx.compose.material3.SheetState,
+    onNodeClick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-            ) {
-                // Path result section
-                state.path?.let { path ->
-                    PathSection(path = path, onNodeClick = { node ->
-                        viewModel.selectNode(node.id)
-                    })
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                }
-
-                // Node detail section
-                state.selectedNode?.let { node ->
-                    NodeDetailSheet(
-                        node = node,
-                        neighbors = state.neighbors,
-                        onRelatedNodeClick = { relatedId ->
-                            viewModel.selectNode(relatedId)
-                        },
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
+            state.path?.let { path ->
+                PathSection(
+                    path = path,
+                    onNodeClick = { node -> onNodeClick(node.id) },
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
             }
+
+            state.selectedNode?.let { node ->
+                NodeDetailSheet(
+                    node = node,
+                    neighbors = state.neighbors,
+                    onRelatedNodeClick = onNodeClick,
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -385,7 +488,7 @@ private fun NodeCard(
             }
             if (isSelectedForPath) {
                 Text(
-                    text = "#${selectedCount}",
+                    text = "#$selectedCount",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
