@@ -283,23 +283,44 @@ private fun MemoryRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     )
                     Text(
-                        text = "  ·  ${mem.source}",
+                        text = "  \u00B7  ${mem.source}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                     )
                     Text(
-                        text = "  ·  $ageDisplay",
+                        text = "  \u00B7  $ageDisplay",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     )
                     if (mem.decayScore < 0.5f) {
                         Text(
-                            text = "  ·  fading",
+                            text = "  \u00B7  fading",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
                             fontWeight = FontWeight.Medium,
                         )
                     }
+                }
+                // Second metadata line: importance + recall count + tags.
+                // These fields are used by the RRF retrieval engine but
+                // were previously invisible to the user.
+                val metaParts = mutableListOf<String>()
+                if (mem.importance != 0.5f) {
+                    metaParts += "${"%.0f".format(mem.importance * 100)}% important"
+                }
+                if (mem.accessCount > 0) {
+                    metaParts += if (mem.accessCount == 1) "recalled 1\u00D7" else "recalled ${mem.accessCount}\u00D7"
+                }
+                if (mem.tags.isNotBlank()) {
+                    metaParts += mem.tags
+                }
+                if (metaParts.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = metaParts.joinToString("  \u00B7  "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    )
                 }
             }
             IconButton(onClick = onEdit) {
