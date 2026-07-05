@@ -171,6 +171,13 @@ class ChatViewModel @Inject constructor(
                 _state.update { it.copy(ttsEnabled = enabled) }
             }
         }
+        // Restore persisted incognito default. The session toggle still
+        // works on top of this — it's just the starting value.
+        viewModelScope.launch {
+            userPreferences.incognitoDefault.collect { default ->
+                _state.update { it.copy(incognitoMode = default) }
+            }
+        }
     }
 
     /**

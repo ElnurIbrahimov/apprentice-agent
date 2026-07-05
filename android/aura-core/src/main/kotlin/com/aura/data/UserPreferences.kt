@@ -44,6 +44,7 @@ internal val KEY_LAST_SEEN_PROACTIVE_AT = longPreferencesKey("last_seen_proactiv
 internal val KEY_MORNING_BRIEF_ENABLED = booleanPreferencesKey("morning_brief_enabled")
 internal val KEY_CALENDAR_MONITOR_ENABLED = booleanPreferencesKey("calendar_monitor_enabled")
 internal val KEY_TTS_ENABLED = booleanPreferencesKey("tts_enabled")
+internal val KEY_INCOGNITO_DEFAULT = booleanPreferencesKey("incognito_default")
 
 @Singleton
 class UserPreferences @Inject constructor(
@@ -117,6 +118,18 @@ class UserPreferences @Inject constructor(
         prefs[KEY_TTS_ENABLED] ?: true
     }
 
+    /**
+     * Whether incognito mode is on by default for new sessions.
+     * The chat screen's incognito toggle still works on top of this
+     * default — it's the starting value for each new app launch.
+     * Defaults to false (off) for a fresh install. A privacy-conscious
+     * user can set this to true in Settings so every session starts
+     * in incognito without re-toggling.
+     */
+    val incognitoDefault: Flow<Boolean> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_INCOGNITO_DEFAULT] ?: false
+    }
+
     suspend fun setDefaultModel(model: String) {
         context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
     }
@@ -143,6 +156,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun setTtsEnabled(enabled: Boolean) {
         context.auraPrefs.edit { it[KEY_TTS_ENABLED] = enabled }
+    }
+
+    suspend fun setIncognitoDefault(enabled: Boolean) {
+        context.auraPrefs.edit { it[KEY_INCOGNITO_DEFAULT] = enabled }
     }
 
     /**
