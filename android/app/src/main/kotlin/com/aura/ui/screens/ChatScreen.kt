@@ -144,6 +144,7 @@ fun ChatScreen(
     ) {
         ChatHeader(
             activeModel = state.activeModel,
+            conversationModel = state.conversation.model,
             ttsEnabled = state.ttsEnabled,
             deepModeEnabled = state.deepModeEnabled,
             deepModeActive = state.deepModeActive,
@@ -253,6 +254,7 @@ fun ChatScreen(
 @Composable
 private fun ChatHeader(
     activeModel: String,
+    conversationModel: String?,
     ttsEnabled: Boolean,
     deepModeEnabled: Boolean,
     deepModeActive: Boolean,
@@ -282,11 +284,25 @@ private fun ChatHeader(
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
+                // Show the conversation's model if it differs from the
+                // active selection — the user reopened an old conversation
+                // that used a different model and needs to know which model
+                // produced the responses they're reading.
+                val displayModel = conversationModel ?: activeModel
+                val modelMismatch = conversationModel != null && conversationModel != activeModel
                 Text(
-                    text = com.aura.ui.util.modelDisplayName(activeModel),
+                    text = com.aura.ui.util.modelDisplayName(displayModel),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    color = if (modelMismatch) MaterialTheme.colorScheme.tertiary
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
+                if (modelMismatch && conversationModel != null) {
+                    Text(
+                        text = "was ${com.aura.ui.util.modelDisplayName(conversationModel)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    )
+                }
             }
             IconButton(onClick = onToggleTts) {
                 Icon(
