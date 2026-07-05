@@ -129,6 +129,7 @@ fun AuraRoot() {
     var firstRunComplete by remember { mutableStateOf<Boolean?>(null) }
     var appLockEnabled by remember { mutableStateOf(false) }
     var unlocked by remember { mutableStateOf(false) }
+    var themeMode by remember { mutableStateOf("system") }
 
     LaunchedEffect(Unit) {
         val entry = EntryPointAccessors.fromApplication(
@@ -141,6 +142,7 @@ fun AuraRoot() {
         )
         firstRunComplete = entry.firstRunGate().isFirstRunComplete()
         appLockEnabled = mainEntry.userPreferences().appLockEnabled.first()
+        themeMode = mainEntry.userPreferences().themeMode.first()
         if (!appLockEnabled) unlocked = true
     }
 
@@ -154,7 +156,7 @@ fun AuraRoot() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    AuraTheme {
+    AuraTheme(themeMode = themeMode) {
         Surface(
             modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
             color = MaterialTheme.colorScheme.background,

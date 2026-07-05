@@ -50,6 +50,7 @@ class SettingsViewModelAppLockTest {
         every { userPreferences.appLockEnabled } returns appLockFlow
         every { userPreferences.morningBriefEnabled } returns morningBriefFlow
         every { userPreferences.calendarMonitorEnabled } returns calendarMonitorFlow
+        every { userPreferences.themeMode } returns flowOf("system")
         coEvery { userPreferences.setAppLockEnabled(any()) } answers {
             appLockFlow.value = firstArg()
         }

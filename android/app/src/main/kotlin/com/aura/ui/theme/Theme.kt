@@ -57,11 +57,17 @@ private val DarkColors = darkColorScheme(
 
 @Composable
 fun AuraTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: String = "system",
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val systemDark = isSystemInDarkTheme()
+    val darkTheme = when (themeMode) {
+        "light" -> false
+        "dark" -> true
+        else -> systemDark // "system" or any unrecognized value
+    }
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)

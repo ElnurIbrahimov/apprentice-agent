@@ -45,6 +45,7 @@ internal val KEY_MORNING_BRIEF_ENABLED = booleanPreferencesKey("morning_brief_en
 internal val KEY_CALENDAR_MONITOR_ENABLED = booleanPreferencesKey("calendar_monitor_enabled")
 internal val KEY_TTS_ENABLED = booleanPreferencesKey("tts_enabled")
 internal val KEY_INCOGNITO_DEFAULT = booleanPreferencesKey("incognito_default")
+internal val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
 
 @Singleton
 class UserPreferences @Inject constructor(
@@ -130,6 +131,15 @@ class UserPreferences @Inject constructor(
         prefs[KEY_INCOGNITO_DEFAULT] ?: false
     }
 
+    /**
+     * Theme mode: "system" (follow system dark/light), "light", or
+     * "dark". Defaults to "system" so a fresh install respects the
+     * device's current setting. The user can override in Settings.
+     */
+    val themeMode: Flow<String> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_THEME_MODE] ?: "system"
+    }
+
     suspend fun setDefaultModel(model: String) {
         context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
     }
@@ -160,6 +170,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun setIncognitoDefault(enabled: Boolean) {
         context.auraPrefs.edit { it[KEY_INCOGNITO_DEFAULT] = enabled }
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        context.auraPrefs.edit { it[KEY_THEME_MODE] = mode }
     }
 
     /**

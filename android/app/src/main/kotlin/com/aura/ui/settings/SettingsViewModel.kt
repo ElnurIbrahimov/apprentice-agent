@@ -33,6 +33,7 @@ data class SettingsUiState(
      * the choice after backup import.
      */
     val embeddingModel: String = ProviderKeys.DEFAULT_EMBEDDING_MODEL,
+    val themeMode: String = "system",
 )
 
 @HiltViewModel
@@ -56,6 +57,7 @@ class SettingsViewModel @Inject constructor(
             val morningBriefEnabled = userPreferences.morningBriefEnabled.first()
             val calendarMonitorEnabled = userPreferences.calendarMonitorEnabled.first()
             val embeddingModel = providerKeys.embeddingModel
+            val themeMode = userPreferences.themeMode.first()
             _state.value = SettingsUiState(
                 ollamaKey = providerKeys.keyFor("ollama") ?: "",
                 anthropicKey = providerKeys.keyFor("anthropic") ?: "",
@@ -70,6 +72,7 @@ class SettingsViewModel @Inject constructor(
                 morningBriefEnabled = morningBriefEnabled,
                 calendarMonitorEnabled = calendarMonitorEnabled,
                 embeddingModel = embeddingModel,
+                themeMode = themeMode,
             )
         }
     }
@@ -142,6 +145,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             providerKeys.setEmbeddingModel(model)
             _state.update { it.copy(embeddingModel = model) }
+        }
+    }
+
+    fun setThemeMode(mode: String) {
+        viewModelScope.launch {
+            userPreferences.setThemeMode(mode)
+            _state.update { it.copy(themeMode = mode) }
         }
     }
 

@@ -214,6 +214,41 @@ fun SettingsScreen(
             }
         }
 
+        // ── Appearance: theme mode ──
+        Spacer(modifier = Modifier.height(8.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            text = "Appearance",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "Choose light, dark, or follow the system theme.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf(
+                "system" to "System",
+                "light" to "Light",
+                "dark" to "Dark",
+            ).forEach { (id, label) ->
+                AssistChip(
+                    onClick = { viewModel.setThemeMode(id) },
+                    label = { Text(label) },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = if (state.themeMode == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        labelColor = if (state.themeMode == id) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    ),
+                )
+            }
+        }
+
         // ── Privacy: biometric app lock + proactive worker toggles ──
         Spacer(modifier = Modifier.height(8.dp))
         HorizontalDivider()
