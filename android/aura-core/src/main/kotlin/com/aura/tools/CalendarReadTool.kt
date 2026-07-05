@@ -19,7 +19,10 @@ import java.util.Calendar
 import java.util.TimeZone
 
 /**
- * Read calendar events. v1: from now to 7 days ahead. v1.5: configurable range.
+ * Read calendar events. Default range: today + next 7 days (configurable
+ * via the `days` parameter, max 30). The companion method
+ * [readTodaysEvents] is a convenience wrapper that reads only today's
+ * events (midnight to midnight) for the home screen and morning brief.
  * Mirrors aura/tools/calendar_tool.py.
  * Risk: PRIVACY (READ_CALENDAR).
  */

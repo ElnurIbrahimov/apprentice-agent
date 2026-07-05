@@ -103,9 +103,28 @@ class ProactiveBootstrapTest {
         // so the broadcast / FGS calls don't trip AbstractMethodError.
         // The Throwable-catch in start() absorbs any stub blowups,
         // so the gate decision itself is what we verify.
+        //
+        // start() now launches its gate-read+apply on Dispatchers.IO
+        // (previously used runBlocking on the calling thread). We poll
+        // briefly for the scheduler call because the IO dispatcher
+        // runs asynchronously from the test thread.
         val bootstrap = ProactiveBootstrap(context, scheduler, memoryStore, userPreferences)
         bootstrap.start()
-        verify(exactly = 1) { scheduler.scheduleMorningBrief() }
+        // Wait for the async gate read + apply to complete. The IO
+        // dispatcher typically resolves this in <50ms; we poll up to
+        // 2s to avoid flakiness on CI.
+        val deadline = System.currentTimeMillis() + 2_000L
+        var scheduled = false
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                verify(exactly = 1) { scheduler.scheduleMorningBrief() }
+                scheduled = true
+                break
+            } catch (_: AssertionError) {
+                Thread.sleep(20)
+            }
+        }
+        assertTrue(scheduled, "scheduleMorningBrief was not called within 2s — the async gate read may not have completed")
         verify(exactly = 1) { scheduler.scheduleDecay() }
     }
 }

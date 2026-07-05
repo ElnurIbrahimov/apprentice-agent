@@ -3,6 +3,7 @@ package com.aura.tools
 import com.aura.agent.Tool
 import com.aura.agent.ToolResult
 import com.aura.agent.ToolRisk
+import com.aura.core.url.SsrfGuard
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
@@ -14,9 +15,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.net.InetAddress
-import java.net.URI
-import java.net.UnknownHostException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -52,33 +50,10 @@ class FirecrawlFetchTool @Inject constructor(
             val url = call.arguments["url"] as? String
                 ?: return@Tool ToolResult.Error("missing 'url' argument", "bad_args")
 
-            // --- SSRF guard: parse URL ---
-            val uri = try {
-                URI(url)
-            } catch (e: Exception) {
-                return@Tool ToolResult.Error("invalid URL: ${e.message}", "bad_args")
-            }
-
-            val scheme = uri.scheme ?: ""
-            if (scheme != "http" && scheme != "https") {
-                return@Tool ToolResult.Error("only http/https URLs are allowed", "ssrf_guard")
-            }
-
-            val host = uri.host ?: return@Tool ToolResult.Error("URL has no host", "ssrf_guard")
-
-            // Reject bare localhost hostnames
-            if (host == "localhost" || host == "localhost.localdomain") {
-                return@Tool ToolResult.Error("access to localhost is not allowed", "ssrf_guard")
-            }
-
-            // Resolve and check for private / loopback / link-local IPs
-            try {
-                val addr = InetAddress.getByName(host)
-                if (isPrivateAddress(addr)) {
-                    return@Tool ToolResult.Error("access to private IP is not allowed", "ssrf_guard")
-                }
-            } catch (_: UnknownHostException) {
-                return@Tool ToolResult.Error("could not resolve host", "dns_error")
+            // --- SSRF guard ---
+            val ssrfError = SsrfGuard.validate(url)
+            if (ssrfError != null) {
+                return@Tool ToolResult.Error(ssrfError, "ssrf_guard")
             }
 
             // --- API key check ---
@@ -140,30 +115,6 @@ class FirecrawlFetchTool @Inject constructor(
         } else {
             markdown
         }
-    }
-
-    // ------------------------------------------------------------------
-    // SSRF helpers
-    // ------------------------------------------------------------------
-
-    /**
-     * Returns true if [addr] is a private, loopback, link-local, or
-     * unique-local IPv6 address — i.e. something that should never be
-     * reachable from a cloud service.
-     */
-    private fun isPrivateAddress(addr: InetAddress): Boolean {
-        // Covers 127.x.x.x, ::1
-        if (addr.isLoopbackAddress) return true
-        // Covers 169.254.x.x, fe80::/10
-        if (addr.isLinkLocalAddress) return true
-        // Covers 10.x.x.x, 172.16-31.x.x, 192.168.x.x, fec0::/10
-        if (addr.isSiteLocalAddress) return true
-
-        // IPv6 unique local address range fc00::/7
-        val raw = addr.address ?: return false
-        if (raw.size == 16 && (raw[0].toInt() and 0xfe) == 0xfc) return true
-
-        return false
     }
 
     companion object {

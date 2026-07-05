@@ -4,6 +4,7 @@ import com.aura.agent.Tool
 import com.aura.agent.ToolContext
 import com.aura.agent.ToolResult
 import com.aura.agent.ToolRisk
+import com.aura.core.url.SsrfGuard
 import com.aura.providers.ChatOptions
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderMessage
@@ -287,6 +288,13 @@ class DeepResearchTool @Inject constructor(
     }
 
     private fun fetchDirect(url: String): String? {
+        // SSRF guard: reject non-http(s) schemes, localhost, and private IPs.
+        // This is the same check FirecrawlFetchTool applies; without it, a
+        // search result URL pointing at an internal address would be fetched
+        // directly, leaking internal network state.
+        val ssrfError = SsrfGuard.validate(url)
+        if (ssrfError != null) return null
+
         try {
             val req = Request.Builder()
                 .url(url)

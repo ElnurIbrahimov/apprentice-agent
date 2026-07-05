@@ -36,66 +36,72 @@ class ProactiveBootstrap @Inject constructor(
 ) {
     /**
      * Internal scope used to fire-and-forget the startup decay
-     * pass. Keeping it scoped to the singleton (SupervisorJob on
-     * IO) means we don't leak a coroutine when the process is
-     * about to die and we don't block the main thread on the
-     * Room query.
+     * pass and the async gate reads. Keeping it scoped to the
+     * singleton (SupervisorJob on IO) means we don't leak a
+     * coroutine when the process is about to die and we don't
+     * block the main thread on the DataStore / Room reads.
      */
     private val scope = kotlinx.coroutines.CoroutineScope(
         kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
     )
 
     fun start() {
-        // Read both gates once at bootstrap. First-launch users get
-        // the defaults (true, true). If the user has toggled one off
-        // since the last launch, we cancel it here rather than
-        // scheduling-and-immediately-cancelling (which would burn a
-        // WorkManager scheduling round-trip and an FGS start).
-        val morningBriefOn = runCatching {
-            kotlinx.coroutines.runBlocking { userPreferences.morningBriefEnabled.first() }
-        }.getOrDefault(true)
-        val calendarMonitorOn = runCatching {
-            kotlinx.coroutines.runBlocking { userPreferences.calendarMonitorEnabled.first() }
-        }.getOrDefault(true)
-
-        // Apply the gates. The split method is the testable seam:
-        // it doesn't touch the Android Context, so a pure-JVM test
-        // can verify scheduling/cancellation decisions without
-        // needing Robolectric or a Context mock.
-        val decisions = applyGates(morningBriefOn, calendarMonitorOn)
-
-        // One-shot memory decay pass on startup. The original
-        // comment promised this but the scope was never launched;
-        // we're wiring it up properly here so the decay score
-        // actually moves on cold start instead of waiting for the
-        // 6h DecayWorker. Best-effort — failure is logged and
-        // dropped, the next DecayWorker tick will catch up.
+        // Read both gates asynchronously. We do NOT use runBlocking
+        // here because start() is called from AuraApp.onCreate() on
+        // the main thread — a blocking DataStore read on the main
+        // thread risks an ANR on slow devices or first launch when
+        // the DataStore file is being created.
+        //
+        // The defaults (both on) are applied immediately so a fresh
+        // install gets proactive scheduling without waiting for the
+        // DataStore read. If the user has toggled one off, the async
+        // correction path cancels the schedule and stops the FGS.
         scope.launch {
-            runCatching { memoryStore.runDecayPass() }
-        }
+            val morningBriefOn = runCatching {
+                userPreferences.morningBriefEnabled.first()
+            }.getOrDefault(true)
+            val calendarMonitorOn = runCatching {
+                userPreferences.calendarMonitorEnabled.first()
+            }.getOrDefault(true)
 
-        // Side effects that DO need a Context (FGS start/stop,
-        // widget-refresh broadcast). All wrapped in Throwable-catch
-        // because a missing WorkManager or stubbed Context in a test
-        // environment should not crash the process.
-        try {
-            if (decisions.calendarMonitorShouldRun) {
-                CalendarMonitorService.start(appContext)
-            } else {
-                appContext.stopService(
-                    Intent(appContext, CalendarMonitorService::class.java),
-                )
+            // Apply the gates. The split method is the testable seam:
+            // it doesn't touch the Android Context, so a pure-JVM test
+            // can verify scheduling/cancellation decisions without
+            // needing Robolectric or a Context mock.
+            val decisions = applyGates(morningBriefOn, calendarMonitorOn)
+
+            // One-shot memory decay pass on startup. Best-effort —
+            // failure is logged, the next DecayWorker tick catches up.
+            runCatching { memoryStore.runDecayPass() }
+                .onFailure { e ->
+                    try {
+                        android.util.Log.w("ProactiveBootstrap", "startup decay pass failed: ${e.message}")
+                    } catch (_: RuntimeException) {}
+                }
+
+            // Side effects that DO need a Context (FGS start/stop,
+            // widget-refresh broadcast). All wrapped in Throwable-catch
+            // because a missing WorkManager or stubbed Context in a test
+            // environment should not crash the process.
+            try {
+                if (decisions.calendarMonitorShouldRun) {
+                    CalendarMonitorService.start(appContext)
+                } else {
+                    appContext.stopService(
+                        Intent(appContext, CalendarMonitorService::class.java),
+                    )
+                }
+                val refresh = Intent(ACTION_REFRESH_WIDGET).apply {
+                    setPackage(appContext.packageName)
+                }
+                appContext.sendBroadcast(refresh)
+            } catch (_: Throwable) {
+                // WorkManager / service bootstrap may fail under Robolectric
+                // or in any environment where the Android framework methods
+                // are partially mocked. Silently swallowing is the right
+                // behavior — proactive scheduling is best-effort and a
+                // missing schedule is recoverable on the next app launch.
             }
-            val refresh = Intent(ACTION_REFRESH_WIDGET).apply {
-                setPackage(appContext.packageName)
-            }
-            appContext.sendBroadcast(refresh)
-        } catch (_: Throwable) {
-            // WorkManager / service bootstrap may fail under Robolectric
-            // or in any environment where the Android framework methods
-            // are partially mocked. Silently swallowing is the right
-            // behavior — proactive scheduling is best-effort and a
-            // missing schedule is recoverable on the next app launch.
         }
     }
 

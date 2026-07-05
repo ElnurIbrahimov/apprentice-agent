@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
 import androidx.activity.ComponentActivity
+import androidx.core.content.IntentCompat
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -25,7 +26,7 @@ class ShareReceiverActivity : ComponentActivity() {
         if (intent == null) return ""
         return when (intent.action) {
             Intent.ACTION_SEND -> {
-                val imageUri: Uri? = intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                val imageUri: Uri? = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
                 if (imageUri != null) {
                     val base64 = try {
                         contentResolver.openInputStream(imageUri)?.use {

@@ -91,6 +91,10 @@ class SetReminderTool @Inject constructor(
                         triggerAt = triggerAt,
                     )
                 )
+            }.onFailure { e ->
+                try {
+                    android.util.Log.w("SetReminderTool", "failed to persist reminder metadata: ${e.message}")
+                } catch (_: RuntimeException) {}
             }
             ToolResult.Ok("Reminder set for ${TimeParser.format(triggerAt)}: $message")
         },

@@ -40,6 +40,11 @@ class ReminderWorker @AssistedInject constructor(
         postNotification(applicationContext, title, body, notificationId)
         // Clean up the metadata row; the reminder has fired.
         runCatching { reminderDao.delete(id.toString()) }
+            .onFailure { e ->
+                try {
+                    android.util.Log.w("ReminderWorker", "failed to delete reminder metadata for ${id}: ${e.message}")
+                } catch (_: RuntimeException) {}
+            }
         return Result.success()
     }
 

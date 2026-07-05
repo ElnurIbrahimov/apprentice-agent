@@ -34,7 +34,7 @@ class CalendarMonitor @Inject constructor(
     @ApplicationContext private val context: Context,
     private val eventBus: ProactiveEventBus,
 ) {
-    private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    @Volatile private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var pollJob: Job? = null
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
