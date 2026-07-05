@@ -164,6 +164,13 @@ class ChatViewModel @Inject constructor(
                 _state.update { it.copy(activeModel = model) }
             }
         }
+        // Restore persisted TTS preference so the user's mute/unmute
+        // choice survives app restarts. Defaults to true (on).
+        viewModelScope.launch {
+            userPreferences.ttsEnabled.collect { enabled ->
+                _state.update { it.copy(ttsEnabled = enabled) }
+            }
+        }
     }
 
     /**
@@ -237,6 +244,7 @@ class ChatViewModel @Inject constructor(
     fun setTtsEnabled(enabled: Boolean) {
         _state.update { it.copy(ttsEnabled = enabled) }
         if (!enabled) textToSpeech.stop()
+        viewModelScope.launch { userPreferences.setTtsEnabled(enabled) }
     }
 
     fun toggleTts() {

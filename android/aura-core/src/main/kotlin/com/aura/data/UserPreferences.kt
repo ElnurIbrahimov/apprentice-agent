@@ -43,6 +43,7 @@ internal val KEY_LAST_SEEN_PROACTIVE_AT = longPreferencesKey("last_seen_proactiv
  */
 internal val KEY_MORNING_BRIEF_ENABLED = booleanPreferencesKey("morning_brief_enabled")
 internal val KEY_CALENDAR_MONITOR_ENABLED = booleanPreferencesKey("calendar_monitor_enabled")
+internal val KEY_TTS_ENABLED = booleanPreferencesKey("tts_enabled")
 
 @Singleton
 class UserPreferences @Inject constructor(
@@ -106,6 +107,16 @@ class UserPreferences @Inject constructor(
         prefs[KEY_CALENDAR_MONITOR_ENABLED] ?: true
     }
 
+    /**
+     * Whether TTS (text-to-speech) is enabled. The chat screen
+     * auto-reads assistant responses aloud when this is true.
+     * Defaults to true for a fresh install; persisted so the user's
+     * mute preference survives app restarts.
+     */
+    val ttsEnabled: Flow<Boolean> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_TTS_ENABLED] ?: true
+    }
+
     suspend fun setDefaultModel(model: String) {
         context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
     }
@@ -128,6 +139,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun setCalendarMonitorEnabled(enabled: Boolean) {
         context.auraPrefs.edit { it[KEY_CALENDAR_MONITOR_ENABLED] = enabled }
+    }
+
+    suspend fun setTtsEnabled(enabled: Boolean) {
+        context.auraPrefs.edit { it[KEY_TTS_ENABLED] = enabled }
     }
 
     /**
