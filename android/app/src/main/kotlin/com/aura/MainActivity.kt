@@ -1,6 +1,7 @@
 package com.aura
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -106,9 +107,13 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun handleSharedText(intent: Intent?) {
-        val sharedText = intent?.getStringExtra(ShareReceiverActivity.EXTRA_SHARED_TEXT) ?: return
-        if (sharedText.isNotBlank()) {
+        val sharedText = intent?.getStringExtra(ShareReceiverActivity.EXTRA_SHARED_TEXT)
+        if (!sharedText.isNullOrBlank()) {
             incomingShareStore.set(sharedText)
+        }
+        val sharedImageUri = intent?.getParcelableExtra<Uri>(ShareReceiverActivity.EXTRA_SHARED_IMAGE_URI)
+        if (sharedImageUri != null) {
+            incomingShareStore.setImageUri(sharedImageUri)
         }
     }
 

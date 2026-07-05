@@ -695,7 +695,22 @@ private fun ConsumeIncomingShare(context: android.content.Context, viewModel: Ch
     LaunchedEffect(Unit) {
         val store = EntryPointAccessors.fromApplication<HiltEntryPoint>(context.applicationContext as android.app.Application)
             .incomingShareStore()
+        // Text share → set as draft
         store.consume()?.let(viewModel::setDraft)
+        // Image share → decode Bitmap and route through onImageCaptured
+        // so the vision tool analyzes it instead of dumping base64
+        // text into the chat input.
+        store.consumeImageUri()?.let { uri ->
+            val bitmap = try {
+                android.graphics.ImageDecoder.decodeBitmap(
+                    android.graphics.ImageDecoder.createSource(context.contentResolver, uri),
+                ) { decoder, _, _ ->
+                    // Cap at 1024px to avoid OOM on large photos
+                    decoder.setTargetSize(1024, 1024)
+                }
+            } catch (_: Exception) { null }
+            bitmap?.let { viewModel.onImageCaptured(it) }
+        }
     }
 }
 
