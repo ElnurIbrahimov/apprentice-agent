@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.proactive.ProactiveEventBus
+import com.aura.ui.util.toSummary
 import com.aura.ui.viewmodel.HomeViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -189,13 +190,12 @@ private fun ProactiveEventCard(
         is ProactiveEventBus.Event.MorningBriefReady -> {
             Triple("☀️", "Morning brief", event.body)
         }
-        // The structured event fires alongside MorningBriefReady
-        // and carries the same body text the worker composed (LLM
-        // greeting + deterministic summary). The rich card UI for
-        // the structured version lives in the proactive history
-        // screen; here we just don't double-render the same data.
+        // The structured event fires alongside MorningBriefReady.
+        // Render the deterministic summary from BriefContext so the
+        // Home card shows what actually changed today instead of a
+        // generic placeholder.
         is ProactiveEventBus.Event.MorningBriefStructured -> {
-            Triple("☀️", "Morning brief", "Tap to see what changed today.")
+            Triple("\u2600\uFE0F", "Morning brief", event.context.toSummary())
         }
         is ProactiveEventBus.Event.CalendarEventSoon -> {
             val minutes = event.minutesUntil
