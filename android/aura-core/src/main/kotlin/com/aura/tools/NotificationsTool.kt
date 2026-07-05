@@ -15,6 +15,7 @@ import com.aura.providers.ToolDefinition
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,6 +31,15 @@ class NotificationsTool @Inject constructor(
     companion object {
         const val CHANNEL_ID = "aura_general"
         const val CHANNEL_NAME = "Aura Assistant"
+        /**
+         * Notification IDs for ad-hoc [post] calls. Uses a monotonic
+         * counter starting at 2000 — above the reminder range (1000-1999)
+         * and below the morning-brief (1001) / calendar-monitor (1002)
+         * constants. This avoids the collision + negative-wrap problem
+         * that [System.currentTimeMillis].toInt() has (wraps after ~25
+         * days, collides within the same millisecond).
+         */
+        private val nextNotificationId = AtomicInteger(2000)
     }
 
     init {
@@ -90,6 +100,6 @@ class NotificationsTool @Inject constructor(
             .setAutoCancel(true)
             .build()
         val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        mgr.notify(System.currentTimeMillis().toInt(), n)
+        mgr.notify(nextNotificationId.getAndIncrement(), n)
     }
 }
