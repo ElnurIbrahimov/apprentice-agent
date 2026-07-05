@@ -79,11 +79,25 @@ fun ProactiveHistoryScreen(
 }
 
 private fun ProactiveEventBus.Event.toCardModel(context: android.content.Context): HistoryCardModel = when (this) {
-    is ProactiveEventBus.Event.MorningBriefReady,
-    is ProactiveEventBus.Event.MorningBriefStructured -> HistoryCardModel(
-        icon = "☀️",
+    is ProactiveEventBus.Event.MorningBriefReady -> HistoryCardModel(
+        icon = "\u2600\uFE0F",
         title = "Morning brief",
-        body = if (this is ProactiveEventBus.Event.MorningBriefReady) body else "Tap for details",
+        body = body,
+        tapHint = "Tap to chat",
+        timestamp = timestamp,
+        onClick = {
+            context.startActivity(
+                Intent(context, com.aura.MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                    putExtra("openChat", true)
+                }
+            )
+        },
+    )
+    is ProactiveEventBus.Event.MorningBriefStructured -> HistoryCardModel(
+        icon = "\u2600\uFE0F",
+        title = "Morning brief",
+        body = buildStructuredSummary(),
         tapHint = "Tap to chat",
         timestamp = timestamp,
         onClick = {
@@ -138,6 +152,37 @@ private fun ProactiveEventBus.Event.toCardModel(context: android.content.Context
             )
         },
     )
+}
+
+/**
+ * Render a [BriefContext] as a compact multi-line summary for the
+ * proactive history card. Each non-empty section gets one line.
+ */
+private fun ProactiveEventBus.Event.MorningBriefStructured.buildStructuredSummary(): String {
+    val lines = mutableListOf<String>()
+    if (context.decayedMemories.isNotEmpty()) {
+        val n = context.decayedMemories.size
+        val preview = context.decayedMemories.take(3)
+            .joinToString(" \u00B7 ") { it.content.take(40) }
+        lines += if (n == 1) "1 memory fading: $preview" else "$n memories fading: $preview"
+    }
+    if (context.newMemories.isNotEmpty()) {
+        val n = context.newMemories.size
+        lines += if (n == 1) "1 new thing you told me" else "$n new things you told me"
+    }
+    if (context.newKgNodes.isNotEmpty()) {
+        val n = context.newKgNodes.size
+        lines += if (n == 1) "1 fact learned" else "$n facts learned"
+    }
+    if (context.tasksDueToday.isNotEmpty()) {
+        val n = context.tasksDueToday.size
+        val titles = context.tasksDueToday.take(3).joinToString(" \u00B7 ") { it.title }
+        lines += if (n == 1) "1 task due today: $titles" else "$n tasks due today: $titles"
+    }
+    if (context.calendarToday.isNotEmpty()) {
+        lines += "Today: ${context.calendarToday.take(3).joinToString(" \u00B7 ")}"
+    }
+    return lines.joinToString("\n")
 }
 
 @Composable
