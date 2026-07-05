@@ -93,14 +93,13 @@ class MemoryViewModel @Inject constructor(
     }
 
     /**
-     * Edit a memory's content + category. Embedding is invalidated
-     * by the store; the next recall will re-embed on demand, or the
-     * user can run the "Rebuild embeddings" action on this screen to
-     * sweep all invalidated rows in one pass.
+     * Edit a memory's content + category + importance + tags. Embedding
+     * is invalidated by the store; the next recall will re-embed on
+     * demand, or the user can run the "Rebuild embeddings" action.
      */
-    fun update(id: String, content: String, category: String) {
+    fun update(id: String, content: String, category: String, importance: Float, tags: String) {
         viewModelScope.launch {
-            memoryStore.update(id, content, category)
+            memoryStore.update(id, content, category, importance, tags)
             refresh()
         }
     }

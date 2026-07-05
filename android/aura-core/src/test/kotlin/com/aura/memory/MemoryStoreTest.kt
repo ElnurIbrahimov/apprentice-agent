@@ -135,6 +135,26 @@ class MemoryStoreTest {
     }
 
     @Test
+    fun `update saves importance and tags`() = runTest {
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val store = MemoryStore(dao, FakeEmbedder(384), VectorIndex(384), WriteGate())
+        val original = MemoryEntity(
+            id = "m1", content = "old", source = "user", category = "fact",
+            importance = 0.3f, embedding = ByteArray(384 * 4),
+            createdAt = 1L, accessedAt = 1L, accessCount = 0, decayScore = 1.0f,
+            tags = "old", metadata = "",
+        )
+        coEvery { dao.getById("m1") } returns original
+        val captured = slot<MemoryEntity>()
+        coEvery { dao.update(capture(captured)) } answers { Unit }
+
+        store.update("m1", "new content", "preference", 0.9f, "work,urgent")
+
+        assertEquals(0.9f, captured.captured.importance)
+        assertEquals("work,urgent", captured.captured.tags)
+    }
+
+    @Test
     fun `update is a no-op when the id does not exist`() = runTest {
         val dao = mockk<MemoryDao>(relaxed = true)
         val store = MemoryStore(

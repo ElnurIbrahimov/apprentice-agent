@@ -36,6 +36,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -208,8 +209,8 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
         EditMemoryDialog(
             memory = mem,
             onDismiss = { editingMemory = null },
-            onSave = { newContent, newCategory ->
-                viewModel.update(mem.id, newContent, newCategory)
+            onSave = { newContent, newCategory, newImportance, newTags ->
+                viewModel.update(mem.id, newContent, newCategory, newImportance, newTags)
                 editingMemory = null
             },
         )
@@ -323,10 +324,12 @@ private fun MemoryRow(
 private fun EditMemoryDialog(
     memory: MemoryEntity,
     onDismiss: () -> Unit,
-    onSave: (content: String, category: String) -> Unit,
+    onSave: (content: String, category: String, importance: Float, tags: String) -> Unit,
 ) {
     var content by remember(memory.id) { mutableStateOf(memory.content) }
     var category by remember(memory.id) { mutableStateOf(memory.category) }
+    var importance by remember(memory.id) { mutableStateOf(memory.importance) }
+    var tags by remember(memory.id) { mutableStateOf(memory.tags) }
     var categoryMenuOpen by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -351,7 +354,7 @@ private fun EditMemoryDialog(
                         readOnly = true,
                         trailingIcon = {
                             TextButton(onClick = { categoryMenuOpen = true }) {
-                                Text("▾")
+                                Text("\u25BE")
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -372,8 +375,28 @@ private fun EditMemoryDialog(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = tags,
+                    onValueChange = { tags = it },
+                    label = { Text("Tags (comma-separated)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Embedding will be re-computed on next recall.",
+                    text = "Importance: ${"%.0f".format(importance * 100)}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+                Slider(
+                    value = importance,
+                    onValueChange = { importance = it },
+                    valueRange = 0f..1f,
+                    steps = 9,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Higher importance = ranks higher in recall. Embedding is re-computed on next recall.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
@@ -381,8 +404,13 @@ private fun EditMemoryDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(content.trim(), category) },
-                enabled = content.trim().isNotBlank() && content.trim() != memory.content || category != memory.category,
+                onClick = { onSave(content.trim(), category, importance, tags.trim()) },
+                enabled = content.trim().isNotBlank() && (
+                    content.trim() != memory.content ||
+                    category != memory.category ||
+                    importance != memory.importance ||
+                    tags.trim() != memory.tags
+                ),
             ) {
                 Text("Save")
             }

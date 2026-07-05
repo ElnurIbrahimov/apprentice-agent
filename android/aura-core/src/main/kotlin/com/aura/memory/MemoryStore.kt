@@ -177,16 +177,15 @@ class MemoryStore @Inject constructor(
      * dialog and tapping Save). The refresh happens automatically
      * via [observeCount] in the calling VM.
      */
-    suspend fun update(id: String, content: String, category: String, importance: Float = 0.5f) {
+    suspend fun update(id: String, content: String, category: String, importance: Float = 0.5f, tags: String = "") {
         val existing = dao.getById(id) ?: return
         dao.update(
             existing.copy(
                 content = content,
                 category = category,
                 importance = importance,
+                tags = tags,
                 // Invalidate the embedding so the next recall re-embeds.
-                // We don't have an embedder call here; the MemoryEditViewModel
-                // (or the rebuild action) handles re-embedding.
                 embedding = null,
                 // Bump accessedAt so a freshly-edited memory ranks higher
                 // in the next recall.

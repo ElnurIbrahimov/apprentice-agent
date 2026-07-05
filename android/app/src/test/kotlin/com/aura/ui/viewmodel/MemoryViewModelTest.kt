@@ -159,9 +159,9 @@ class MemoryViewModelTest {
         // DAO round-trip internally. From the VM's perspective, all we
         // need to confirm is that the call goes through with the
         // right arguments.
-        coEvery { memoryStore.update(any(), any(), any()) } returns Unit
+        coEvery { memoryStore.update(any(), any(), any(), any(), any()) } returns Unit
         val vm = MemoryViewModel(memoryStore)
-        vm.update("m1", "new content", "preference")
-        coVerify { memoryStore.update("m1", "new content", "preference") }
+        vm.update("m1", "new content", "preference", 0.8f, "work,urgent")
+        coVerify { memoryStore.update("m1", "new content", "preference", 0.8f, "work,urgent") }
     }
 }
