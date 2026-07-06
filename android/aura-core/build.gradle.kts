@@ -44,6 +44,9 @@ android {
         // Adds exported Room schemas to the test assets for migration tests.
         getByName("androidTest").assets.srcDir("schemas")
     }
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
 }
 
 dependencies {

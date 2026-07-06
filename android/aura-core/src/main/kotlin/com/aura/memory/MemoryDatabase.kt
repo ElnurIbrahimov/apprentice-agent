@@ -6,7 +6,7 @@ import com.aura.kg.EdgeEntity
 import com.aura.kg.KnowledgeGraphDao
 import com.aura.kg.NodeEntity
 
-@Database(entities = [MemoryEntity::class, NodeEntity::class, EdgeEntity::class], version = 2, exportSchema = false)
+@Database(entities = [MemoryEntity::class, NodeEntity::class, EdgeEntity::class], version = 2, exportSchema = true)
 abstract class MemoryDatabase : RoomDatabase() {
     abstract fun memoryDao(): MemoryDao
     abstract fun knowledgeGraphDao(): KnowledgeGraphDao

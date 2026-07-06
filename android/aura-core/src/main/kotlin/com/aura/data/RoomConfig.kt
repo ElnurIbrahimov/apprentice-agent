@@ -12,10 +12,8 @@ import com.aura.core.BuildConfig
  * Applies:
  * - Schema export (production builds validate migrations).
  * - Explicit migrations.
- * - Debug-only destructive fallback so developers don't get blocked during schema churn.
- *
- * Debug destructive fallback is gated by [BuildConfig.DEBUG]; production builds
- * must provide explicit migrations for every version bump.
+ * - Debug-only destructive fallback on downgrade so developers don't get blocked
+ *   during schema churn; upgrades always require explicit migrations.
  */
 object RoomConfig {
 
@@ -29,7 +27,7 @@ object RoomConfig {
             .addMigrations(*migrations)
             .apply {
                 if (BuildConfig.DEBUG) {
-                    fallbackToDestructiveMigration()
+                    fallbackToDestructiveMigrationOnDowngrade()
                 }
             }
         return builder
