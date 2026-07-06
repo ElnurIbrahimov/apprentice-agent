@@ -34,6 +34,7 @@ data class SettingsUiState(
      */
     val embeddingModel: String = ProviderKeys.DEFAULT_EMBEDDING_MODEL,
     val themeMode: String = "system",
+    val customIdentity: String = "",
 )
 
 @HiltViewModel
@@ -58,6 +59,7 @@ class SettingsViewModel @Inject constructor(
             val calendarMonitorEnabled = userPreferences.calendarMonitorEnabled.first()
             val embeddingModel = providerKeys.embeddingModel
             val themeMode = userPreferences.themeMode.first()
+            val customIdentity = userPreferences.customIdentity.first()
             _state.value = SettingsUiState(
                 ollamaKey = providerKeys.keyFor("ollama") ?: "",
                 anthropicKey = providerKeys.keyFor("anthropic") ?: "",
@@ -73,6 +75,7 @@ class SettingsViewModel @Inject constructor(
                 calendarMonitorEnabled = calendarMonitorEnabled,
                 embeddingModel = embeddingModel,
                 themeMode = themeMode,
+                customIdentity = customIdentity,
             )
         }
     }
@@ -152,6 +155,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferences.setThemeMode(mode)
             _state.update { it.copy(themeMode = mode) }
+        }
+    }
+
+    fun setCustomIdentity(identity: String) {
+        viewModelScope.launch {
+            userPreferences.setCustomIdentity(identity)
+            _state.update { it.copy(customIdentity = identity) }
         }
     }
 

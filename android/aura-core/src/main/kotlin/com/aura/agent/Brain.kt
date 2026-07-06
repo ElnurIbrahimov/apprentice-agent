@@ -1,10 +1,12 @@
 package com.aura.agent
 
+import com.aura.data.UserPreferences
 import com.aura.providers.ChatOptions
 import com.aura.providers.ProviderMessage
 import com.aura.providers.ProviderRegistry
 import com.aura.providers.ToolDefinition
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,8 +19,25 @@ import javax.inject.Singleton
 @Singleton
 class Brain @Inject constructor(
     private val providerRegistry: ProviderRegistry,
+    private val userPreferences: UserPreferences,
 ) {
+    /** Built-in identity, always present. */
     val identity: String = IDENTITY.trimIndent()
+
+    /**
+     * Resolved system prompt: built-in identity + user's custom
+     * identity override (if set). The custom prompt is prepended so
+     * the user can set tone/language/persona before the default
+     * instructions kick in.
+     */
+    suspend fun resolvedIdentity(): String {
+        val custom = userPreferences.customIdentity.first()
+        return if (custom.isNotBlank()) {
+            "$custom\n\n$identity"
+        } else {
+            identity
+        }
+    }
 
     companion object {
         val IDENTITY = """

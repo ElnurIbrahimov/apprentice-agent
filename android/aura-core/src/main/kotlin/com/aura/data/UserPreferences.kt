@@ -46,6 +46,7 @@ internal val KEY_CALENDAR_MONITOR_ENABLED = booleanPreferencesKey("calendar_moni
 internal val KEY_TTS_ENABLED = booleanPreferencesKey("tts_enabled")
 internal val KEY_INCOGNITO_DEFAULT = booleanPreferencesKey("incognito_default")
 internal val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+internal val KEY_CUSTOM_IDENTITY = stringPreferencesKey("custom_identity")
 
 @Singleton
 class UserPreferences @Inject constructor(
@@ -140,6 +141,17 @@ class UserPreferences @Inject constructor(
         prefs[KEY_THEME_MODE] ?: "system"
     }
 
+    /**
+     * User-provided custom system prompt / identity override. When
+     * non-blank, the [com.aura.agent.Brain] prepends this to the
+     * default [Brain.IDENTITY], giving the user a way to personalize
+     * Aura's persona without editing code. Defaults to blank (use
+     * built-in identity only).
+     */
+    val customIdentity: Flow<String> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_CUSTOM_IDENTITY] ?: ""
+    }
+
     suspend fun setDefaultModel(model: String) {
         context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
     }
@@ -174,6 +186,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun setThemeMode(mode: String) {
         context.auraPrefs.edit { it[KEY_THEME_MODE] = mode }
+    }
+
+    suspend fun setCustomIdentity(identity: String) {
+        context.auraPrefs.edit { it[KEY_CUSTOM_IDENTITY] = identity }
     }
 
     /**

@@ -95,7 +95,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                 val sys = listOfNotNull(
                     specialist?.systemPrompt,
                     currentConversation.systemPrompt,
-                    brain.identity.ifBlank { null },
+                    brain.resolvedIdentity().ifBlank { null },
                     userProfileStore.getSystemPrompt().ifBlank { null },
                 ).joinToString("\n\n") + memoryContext + handContext
                 if (sys.isNotBlank()) add(ProviderMessage(role = Role.system, content = sys))
