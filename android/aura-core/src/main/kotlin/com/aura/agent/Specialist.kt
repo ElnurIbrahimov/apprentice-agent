@@ -100,5 +100,17 @@ data class Specialist(
 
         /** Lookup by name. */
         fun byName(name: String): Specialist? = ALL.find { it.name == name }
+
+        /**
+         * Apply user overrides to the built-in specialists. Returns
+         * the specialist with its systemPrompt replaced if an
+         * override exists in the map, otherwise the original.
+         */
+        fun applyOverrides(overrides: Map<String, String>): List<Specialist> =
+            ALL.map { s ->
+                val custom = overrides[s.name]
+                if (custom.isNullOrBlank()) s
+                else s.copy(systemPrompt = custom)
+            }
     }
 }

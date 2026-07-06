@@ -52,6 +52,7 @@ class SettingsViewModelAppLockTest {
         every { userPreferences.calendarMonitorEnabled } returns calendarMonitorFlow
         every { userPreferences.themeMode } returns flowOf("system")
         every { userPreferences.customIdentity } returns flowOf("")
+        every { userPreferences.specialistOverrides } returns flowOf("{}")
         every { userPreferences.ttsEnabled } returns flowOf(true)
         every { userPreferences.incognitoDefault } returns flowOf(false)
         every { userPreferences.lastSeenProactiveAt } returns flowOf(0L)

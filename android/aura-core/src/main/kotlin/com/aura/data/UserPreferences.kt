@@ -47,6 +47,7 @@ internal val KEY_TTS_ENABLED = booleanPreferencesKey("tts_enabled")
 internal val KEY_INCOGNITO_DEFAULT = booleanPreferencesKey("incognito_default")
 internal val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
 internal val KEY_CUSTOM_IDENTITY = stringPreferencesKey("custom_identity")
+internal val KEY_SPECIALIST_OVERRIDES = stringPreferencesKey("specialist_overrides")
 
 @Singleton
 class UserPreferences @Inject constructor(
@@ -152,6 +153,16 @@ class UserPreferences @Inject constructor(
         prefs[KEY_CUSTOM_IDENTITY] ?: ""
     }
 
+    /**
+     * JSON map of specialist name → custom system prompt. When a
+     * specialist is selected, its entry here overrides the built-in
+     * [com.aura.agent.Specialist.systemPrompt]. Empty string or
+     * missing key = use the built-in prompt.
+     */
+    val specialistOverrides: Flow<String> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_SPECIALIST_OVERRIDES] ?: "{}"
+    }
+
     suspend fun setDefaultModel(model: String) {
         context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
     }
@@ -190,6 +201,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun setCustomIdentity(identity: String) {
         context.auraPrefs.edit { it[KEY_CUSTOM_IDENTITY] = identity }
+    }
+
+    suspend fun setSpecialistOverrides(json: String) {
+        context.auraPrefs.edit { it[KEY_SPECIALIST_OVERRIDES] = json }
     }
 
     /**

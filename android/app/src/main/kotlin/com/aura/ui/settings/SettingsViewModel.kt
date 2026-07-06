@@ -35,6 +35,7 @@ data class SettingsUiState(
     val embeddingModel: String = ProviderKeys.DEFAULT_EMBEDDING_MODEL,
     val themeMode: String = "system",
     val customIdentity: String = "",
+    val specialistOverrides: String = "{}",
 )
 
 @HiltViewModel
@@ -60,6 +61,7 @@ class SettingsViewModel @Inject constructor(
             val embeddingModel = providerKeys.embeddingModel
             val themeMode = userPreferences.themeMode.first()
             val customIdentity = userPreferences.customIdentity.first()
+            val specialistOverrides = userPreferences.specialistOverrides.first()
             _state.value = SettingsUiState(
                 ollamaKey = providerKeys.keyFor("ollama") ?: "",
                 anthropicKey = providerKeys.keyFor("anthropic") ?: "",
@@ -76,6 +78,7 @@ class SettingsViewModel @Inject constructor(
                 embeddingModel = embeddingModel,
                 themeMode = themeMode,
                 customIdentity = customIdentity,
+                specialistOverrides = specialistOverrides,
             )
         }
     }
@@ -162,6 +165,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferences.setCustomIdentity(identity)
             _state.update { it.copy(customIdentity = identity) }
+        }
+    }
+
+    fun setSpecialistOverrides(json: String) {
+        viewModelScope.launch {
+            userPreferences.setSpecialistOverrides(json)
+            _state.update { it.copy(specialistOverrides = json) }
         }
     }
 

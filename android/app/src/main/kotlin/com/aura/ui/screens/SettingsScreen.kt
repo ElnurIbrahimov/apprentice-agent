@@ -34,6 +34,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.ui.settings.BackupViewModel
@@ -255,7 +258,7 @@ fun SettingsScreen(
             }
         }
 
-        // ── Persona: custom identity override ──
+        // ── Persona: custom identity + specialist overrides ──
         Spacer(modifier = Modifier.height(8.dp))
         HorizontalDivider()
         Spacer(modifier = Modifier.height(4.dp))
@@ -293,6 +296,79 @@ fun SettingsScreen(
             Button(onClick = { viewModel.setCustomIdentity(identityText.trim()) }) {
                 Text("Save")
             }
+        }
+
+        // ── Specialist prompt overrides ──
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = "Specialist prompts",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "Override the built-in system prompt for each specialist. Tap a specialist to edit its prompt.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Parse current overrides
+        val overridesMap = remember(state.specialistOverrides) {
+            try { Json.decodeFromString<Map<String, String>>(state.specialistOverrides) }
+            catch (e: Exception) { emptyMap() }
+        }
+        var editingSpecialist by remember { mutableStateOf<com.aura.agent.Specialist?>(null) }
+
+        for (specialist in com.aura.agent.Specialist.ALL) {
+            val hasOverride = overridesMap.containsKey(specialist.name) && !overridesMap[specialist.name].isNullOrBlank()
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(text = "${specialist.icon} ${specialist.name.replaceFirstChar { it.uppercase() }}", style = MaterialTheme.typography.bodyLarge)
+                Spacer(modifier = Modifier.weight(1f))
+                if (hasOverride) Text("✏️", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                TextButton(onClick = { editingSpecialist = specialist }) { Text(if (hasOverride) "Edit" else "Default") }
+            }
+        }
+
+        // Edit dialog
+        editingSpecialist?.let { specialist ->
+            var promptText by remember(specialist) {
+                mutableStateOf(overridesMap[specialist.name] ?: specialist.systemPrompt)
+            }
+            AlertDialog(
+                onDismissRequest = { editingSpecialist = null },
+                title = { Text("${specialist.icon} ${specialist.name.replaceFirstChar { it.uppercase() }}") },
+                text = {
+                    OutlinedTextField(
+                        value = promptText,
+                        onValueChange = { promptText = it },
+                        label = { Text("System prompt") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 4,
+                        maxLines = 12,
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        val updated = overridesMap.toMutableMap().apply { put(specialist.name, promptText.trim()) }
+                        viewModel.setSpecialistOverrides(Json.encodeToString(MapSerializer(String.serializer(), String.serializer()), updated))
+                        editingSpecialist = null
+                    }) { Text("Save") }
+                },
+                dismissButton = {
+                    Row {
+                        TextButton(onClick = {
+                            val updated = overridesMap.toMutableMap().apply { remove(specialist.name) }
+                            viewModel.setSpecialistOverrides(Json.encodeToString(MapSerializer(String.serializer(), String.serializer()), updated))
+                            editingSpecialist = null
+                        }) { Text("Reset to default") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = { editingSpecialist = null }) { Text("Cancel") }
+                    }
+                },
+            )
         }
 
         // ── Privacy: biometric app lock + proactive worker toggles ──

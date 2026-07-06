@@ -28,6 +28,7 @@ fun SpecialistChips(
     suggested: Specialist?,
     onSelect: (Specialist?) -> Unit,
     modifier: Modifier = Modifier,
+    specialists: List<Specialist> = Specialist.ALL,
 ) {
     Row(
         modifier = modifier
@@ -35,7 +36,7 @@ fun SpecialistChips(
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        for (specialist in Specialist.ALL) {
+        for (specialist in specialists) {
             val isSelected = specialist == selected
             val isSuggested = !isSelected && specialist == suggested
 

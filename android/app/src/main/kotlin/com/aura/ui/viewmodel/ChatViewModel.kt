@@ -29,6 +29,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -417,10 +418,19 @@ class ChatViewModel @Inject constructor(
         runJob = viewModelScope.launch {
             try {
                 val conversation = _state.value.conversation
+                // Apply user-defined specialist prompt overrides
+                val resolvedSpecialist = specialist?.let { s ->
+                    val overridesJson = userPreferences.specialistOverrides.first()
+                    try {
+                        val overrides = kotlinx.serialization.json.Json.decodeFromString<Map<String, String>>(overridesJson)
+                        val custom = overrides[s.name]
+                        if (custom.isNullOrBlank()) s else s.copy(systemPrompt = custom)
+                    } catch (e: Exception) { s }
+                }
                 loop.run(
                     conversation = conversation,
                     model = model,
-                    specialist = specialist,
+                    specialist = resolvedSpecialist,
                     memoryEnabled = !_state.value.incognitoMode,
                 ).collect { event ->
                     when (event) {
