@@ -118,6 +118,13 @@ fun NavGraph(
                         }
                     },
                     onOpenTasks = { navController.navigate("tasks") },
+                    onOpenCalendar = {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                            data = android.net.Uri.parse("content://com.android.calendar/time/${System.currentTimeMillis()}")
+                            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        navController.context.startActivity(intent)
+                    },
                 )
             }
             composable(

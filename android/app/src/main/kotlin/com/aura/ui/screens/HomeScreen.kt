@@ -1,5 +1,6 @@
 package com.aura.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +48,7 @@ fun HomeScreen(
     onOpenProactive: () -> Unit = {},
     onOpenMemory: () -> Unit = {},
     onOpenTasks: () -> Unit = {},
+    onOpenCalendar: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val greeting = when (state.hour) {
@@ -71,9 +73,17 @@ fun HomeScreen(
         // screen.
         if (state.proactiveEvent != null || state.proactiveUnreadCount > 0) {
             state.proactiveEvent?.let { event ->
+                val onTap = when (event) {
+                    is ProactiveEventBus.Event.MorningBriefReady,
+                    is ProactiveEventBus.Event.MorningBriefStructured -> onOpenChat
+                    is ProactiveEventBus.Event.CalendarEventSoon -> onOpenCalendar
+                    is ProactiveEventBus.Event.MemoryDecayWarning -> onOpenMemory
+                    is ProactiveEventBus.Event.LocationArrived -> { {} }
+                }
                 ProactiveEventCard(
                     event = event,
                     onDismiss = { viewModel.dismissProactiveEvent() },
+                    onTap = onTap,
                 )
             }
             // "📬 N today · see all →" affordance — visible whenever
@@ -179,6 +189,7 @@ fun HomeScreen(
 private fun ProactiveEventCard(
     event: ProactiveEventBus.Event,
     onDismiss: () -> Unit,
+    onTap: () -> Unit = {},
 ) {
     // Auto-dismiss after 30 seconds
     LaunchedEffect(event) {
@@ -213,7 +224,9 @@ private fun ProactiveEventCard(
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer,
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onTap() },
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
