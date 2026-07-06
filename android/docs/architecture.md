@@ -77,6 +77,7 @@ These are features that earlier architecture plans mentioned but were never buil
 - `KeyManager` generates/retrieves the Keystore-backed key lazily and surfaces a clear error on decryption failures rather than silently returning `null`.
 - The agent loop's `ToolExecutor` blocks `WRITE_LOCAL` tools when `memoryEnabled=false`, keeping incognito sessions from persisting data.
 - Backups intentionally exclude embeddings (model-specific) and API keys (security).
+- Backup export files are plaintext JSON containing all conversations, memories, tasks, hands, profile, and preferences. They do NOT include API keys or embeddings, but the exported data is still sensitive (personal conversations, memory contents, profile facts). **Keep backup files private — do not share or commit them.** Store them in app-private storage or transfer directly to a secure location.
 
 ## Privacy notes
 

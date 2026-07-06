@@ -68,6 +68,10 @@ class BackupManager @Inject constructor(
      * Snapshot every persisted table into an [AuraBackup]. Caller is
      * responsible for serializing (e.g. via [encodeToJson]) and
      * writing to disk / sharing via Intent.
+     *
+     * WARNING: The exported JSON is plaintext. It contains all
+     * conversations, memories, tasks, profile facts, and preferences
+     * (but NOT API keys or embeddings). Treat the file as sensitive.
      */
     suspend fun snapshot(
         appVersionName: String,
