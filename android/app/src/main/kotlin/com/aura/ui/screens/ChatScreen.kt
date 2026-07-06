@@ -717,14 +717,7 @@ private fun ConsumeIncomingShare(context: android.content.Context, viewModel: Ch
         // so the vision tool analyzes it instead of dumping base64
         // text into the chat input.
         store.consumeImageUri()?.let { uri ->
-            val bitmap = try {
-                android.graphics.ImageDecoder.decodeBitmap(
-                    android.graphics.ImageDecoder.createSource(context.contentResolver, uri),
-                ) { decoder, _, _ ->
-                    // Cap at 1024px to avoid OOM on large photos
-                    decoder.setTargetSize(1024, 1024)
-                }
-            } catch (_: Exception) { null }
+            val bitmap = decodeSharedImage(context, uri)
             bitmap?.let { viewModel.onImageCaptured(it) }
         }
     }
@@ -749,6 +742,44 @@ private fun rememberCameraPermission(): Boolean {
             context,
             android.Manifest.permission.CAMERA,
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+}
+
+private fun decodeSharedImage(context: android.content.Context, uri: android.net.Uri): android.graphics.Bitmap? {
+    return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+        runCatching {
+            android.graphics.ImageDecoder.decodeBitmap(
+                android.graphics.ImageDecoder.createSource(context.contentResolver, uri),
+            ) { decoder, _, _ ->
+                // Cap at 1024px to avoid OOM on large photos
+                decoder.setTargetSize(1024, 1024)
+            }
+        }.getOrNull()
+    } else {
+        // API 26–27 fallback: decode through the content resolver and downsample.
+        runCatching {
+            @Suppress("DEPRECATION")
+            android.graphics.BitmapFactory.decodeStream(
+                context.contentResolver.openInputStream(uri),
+                null,
+                android.graphics.BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                },
+            )
+            android.graphics.BitmapFactory.Options().apply {
+                val target = 1024
+                var dim = 1.coerceAtLeast(outWidth.coerceAtLeast(outHeight))
+                while (dim > target * 2) { dim /= 2; inSampleSize *= 2 }
+                inJustDecodeBounds = false
+            }.let { opts ->
+                @Suppress("DEPRECATION")
+                android.graphics.BitmapFactory.decodeStream(
+                    context.contentResolver.openInputStream(uri),
+                    null,
+                    opts,
+                )
+            }
+        }.getOrNull()
     }
 }
 

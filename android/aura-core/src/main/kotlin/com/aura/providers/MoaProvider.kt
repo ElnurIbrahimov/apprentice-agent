@@ -1,10 +1,15 @@
 package com.aura.providers
 
 import dagger.Lazy
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.isActive
 
 /**
  * Mixture of Agents virtual provider.
@@ -47,6 +52,10 @@ class MoaProvider(
 
     private val loadedPresets: Map<String, Preset> = presets.ifEmpty { mapOf("default" to defaultPreset) }
 
+    // Parent job for all in-flight MoA work. Cancelling it tears down the
+    // aggregator stream and every reference-model coroutine launched in it.
+    private var activeJob: Job? = null
+
     // ── Provider contract ──
 
     override fun isConfigured(): Boolean {
@@ -58,7 +67,8 @@ class MoaProvider(
     override suspend fun listModels(): List<String> = loadedPresets.keys.toList()
 
     override suspend fun cancel() {
-        // No long-lived state; cancellation is handled via coroutine scoping.
+        activeJob?.cancel()
+        activeJob = null
     }
 
     /**
@@ -67,6 +77,10 @@ class MoaProvider(
      * 2. Run reference models in parallel (no tools).
      * 3. Inject reference outputs into the last user message.
      * 4. Call the aggregator with full tools.
+     *
+     * Cancellation is cooperative: the caller coroutine owns the [scope];
+     * cancelling it stops both the reference model collection and the
+     * aggregator stream.
      */
     override fun chat(
         model: String,          // preset name: "default"
@@ -75,6 +89,10 @@ class MoaProvider(
         tools: List<ToolDefinition>,
     ): Flow<ProviderChunk> = channelFlow {
         val preset = loadedPresets[model] ?: defaultPreset
+        val scope = this
+        activeJob = scope.coroutineContext[Job]
+        ensureActive()
+
         if (!preset.enabled) {
             // Disabled preset → aggregator acts alone.
             val aggId = "${preset.aggregator.providerPrefix}:${preset.aggregator.modelName}"
@@ -85,7 +103,8 @@ class MoaProvider(
         // 1) Run reference models in parallel — each gets the full message
         //    list but WITHOUT tool schemas, saving tokens and avoiding
         //    strict-provider rejections on tool definitions they don't support.
-        val referenceOutputs = runReferenceModels(preset, messages, options)
+        val referenceOutputs = runReferenceModels(scope, preset, messages, options)
+        ensureActive()
 
         // 2) Build the aggregator message list: inject reference outputs
         //    into the last user message as private context.
@@ -100,16 +119,18 @@ class MoaProvider(
     // ── Reference model execution ──
 
     private suspend fun runReferenceModels(
+        scope: CoroutineScope,
         preset: Preset,
         messages: List<ProviderMessage>,
         options: ChatOptions,
-    ): List<ReferenceOutput> = coroutineScope {
+    ): List<ReferenceOutput> = scope.run {
         preset.referenceModels.map { ref ->
             async {
                 runReference(ref, messages, options.copy(temperature = preset.referenceTemperature))
             }
         }.map { deferred ->
             runCatching { deferred.await() }.getOrElse { e ->
+                if (e is CancellationException) throw e
                 ReferenceOutput(
                     providerPrefix = "error",
                     modelName = "error",
@@ -129,11 +150,14 @@ class MoaProvider(
         val text = StringBuilder()
         try {
             registry.get().chat(modelId, messages, options, emptyList()).collect { chunk ->
+                if (!currentCoroutineContext().isActive) return@collect
                 chunk.text?.let { text.append(it) }
                 if (chunk.error != null) {
                     text.append("\n[Error: ${chunk.error.message}]")
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             text.append("\n[Exception: ${e.message}]")
         }

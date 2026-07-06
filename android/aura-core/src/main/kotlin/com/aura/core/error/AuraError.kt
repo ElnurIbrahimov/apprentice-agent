@@ -124,24 +124,3 @@ sealed class AuraError(
         }
     }
 }
-
-/**
- * Convert the serializable provider error DTO into a typed [AuraError].
- */
-fun com.aura.providers.ProviderError.toAuraError(providerId: String? = null): AuraError = when (code.lowercase()) {
-    "auth", "unauthorized", "invalid_api_key", "api_key" -> AuraError.Auth(message, providerId)
-    "rate_limited", "rate_limit", "429", "quota" -> AuraError.RateLimited(message, retryAfterMs = null, retryable = retryable)
-    "network", "timeout", "connect", "dns_error" -> AuraError.Network(message, retryable = retryable)
-    "bad_arguments", "bad_args", "invalid_request" -> AuraError.BadArguments(message)
-    "tool", "tool_error" -> AuraError.Tool(message, retryable = retryable)
-    "storage" -> AuraError.Storage(message, retryable = retryable)
-    else -> AuraError.Provider(message, providerCode = code, retryable = retryable)
-}
-
-/**
- * Convert a [Throwable] to a typed [AuraError].
- */
-fun Throwable.toAuraError(): AuraError = AuraError.Unknown(
-    message = message ?: "Unexpected error",
-    cause = this,
-)
