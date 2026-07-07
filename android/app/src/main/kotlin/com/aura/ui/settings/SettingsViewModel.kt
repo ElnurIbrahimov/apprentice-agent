@@ -36,6 +36,12 @@ data class SettingsUiState(
     val themeMode: String = "system",
     val customIdentity: String = "",
     val specialistOverrides: String = "{}",
+    /**
+     * Per-provider verify result: prefix → "✓ Verified — N models"
+     * or "✗ Failed: ...". Null = not tested yet.
+     */
+    val verifyResults: Map<String, String> = emptyMap(),
+    val verifying: String? = null,
 )
 
 @HiltViewModel
@@ -179,6 +185,30 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             providerKeys.set(prefix, value)
             refresh()
+        }
+    }
+
+    /**
+     * Verify the saved API key by hitting the provider's models endpoint.
+     * If the call succeeds, the key is good. Same pattern as
+     * OnboardingScreen.OnboardingViewModel.verifyKey.
+     */
+    fun verifyKey(prefix: String) {
+        if (providerRegistry.configured().none { it.prefix == prefix }) {
+            _state.update { it.copy(verifyResults = it.verifyResults + (prefix to "✗ No key saved for $prefix")) }
+            return
+        }
+        _state.update { it.copy(verifying = prefix) }
+        viewModelScope.launch {
+            val provider = providerRegistry.all().firstOrNull { it.prefix == prefix }
+            val result = if (provider == null) {
+                "✗ Provider $prefix not found"
+            } else {
+                runCatching { provider.listModels() }
+                    .map { "✓ Verified — ${it.size} models available" }
+                    .getOrElse { "✗ Failed: ${it.message?.take(80)}" }
+            }
+            _state.update { it.copy(verifying = null, verifyResults = it.verifyResults + (prefix to result)) }
         }
     }
 }

@@ -47,6 +47,8 @@ object ToolsModule {
         runHand: RunHandTool,
         knowledgeGraph: KnowledgeGraphTool,
         kgQuery: KgQueryTool,
+        timer: TimerTool,
+        weather: WeatherTool,
     ): ToolRegistry {
         val registry = ToolRegistry()
         registry.register(webSearch.tool)
@@ -82,6 +84,8 @@ object ToolsModule {
         registry.register(runHand.tool)
         registry.register(knowledgeGraph.tool)
         registry.register(kgQuery.tool)
+        registry.register(timer.tool)
+        registry.register(weather.tool)
         return registry
     }
 }

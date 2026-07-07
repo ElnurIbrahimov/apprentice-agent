@@ -8,6 +8,7 @@ import com.aura.tasks.ReminderDao
 import com.aura.tasks.ReminderEntity
 import com.aura.tasks.TaskDao
 import com.aura.tasks.TaskEntity
+import com.aura.tools.ReminderWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -160,5 +161,45 @@ class TasksViewModel @Inject constructor(
             reminderDao.delete(id)
             WorkManager.getInstance(getApplication()).cancelWorkById(UUID.fromString(id))
         }
+    }
+
+    /**
+     * Create a reminder from the UI (AddReminderDialog). Same pattern as
+     * SetReminderTool but called directly by the user instead of the agent.
+     * Schedules a [ReminderWorker] via WorkManager and persists a
+     * [ReminderEntity] so the reminder shows in the upcoming list.
+     */
+    fun createReminder(message: String, triggerAt: Long) {
+        if (message.isBlank()) return
+        viewModelScope.launch {
+            val delayMs = (triggerAt - System.currentTimeMillis()).coerceAtLeast(0L)
+            val notificationId = nextNotificationId.getAndIncrement()
+            val work = androidx.work.OneTimeWorkRequestBuilder<ReminderWorker>()
+                .setInitialDelay(delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .setInputData(
+                    androidx.work.Data.Builder()
+                        .putString("title", "⏰ Reminder")
+                        .putString("body", message)
+                        .putInt("notificationId", notificationId)
+                        .build()
+                )
+                .addTag("reminder")
+                .build()
+            androidx.work.WorkManager.getInstance(getApplication())
+                .enqueueUniqueWork("reminder-${work.id}", androidx.work.ExistingWorkPolicy.REPLACE, work)
+            runCatching {
+                reminderDao.insert(
+                    ReminderEntity(
+                        id = work.id.toString(),
+                        message = message,
+                        triggerAt = triggerAt,
+                    )
+                )
+            }
+        }
+    }
+
+    companion object {
+        private val nextNotificationId = java.util.concurrent.atomic.AtomicInteger(1000)
     }
 }

@@ -26,6 +26,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -35,6 +37,9 @@ fun ProviderKeyField(
     onValueChange: (String) -> Unit,
     helperText: String? = null,
     modifier: Modifier = Modifier,
+    onVerify: (() -> Unit)? = null,
+    verifyResult: String? = null,
+    verifying: Boolean = false,
 ) {
     var visible by remember { mutableStateOf(false) }
     Column(modifier = modifier.fillMaxWidth().padding(vertical = 6.dp)) {
@@ -78,6 +83,31 @@ fun ProviderKeyField(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
+        }
+        if (onVerify != null && value.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextButton(onClick = onVerify, enabled = !verifying) {
+                    if (verifying) {
+                        CircularProgressIndicator(modifier = Modifier.height(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Test")
+                    }
+                }
+                if (verifyResult != null) {
+                    Text(
+                        text = verifyResult,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (verifyResult.startsWith("✓"))
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
     }
 }

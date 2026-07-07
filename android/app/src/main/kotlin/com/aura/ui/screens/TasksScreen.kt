@@ -71,6 +71,7 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
     var showAdd by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<TaskEntity?>(null) }
     var showClearConfirm by remember { mutableStateOf(false) }
+    var showAddReminder by remember { mutableStateOf(false) }
 
     Scaffold(
         floatingActionButton = {
@@ -136,7 +137,7 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (state.reminders.isNotEmpty() && state.statusFilter != "done") {
-                        item { RemindersHeader() }
+                        item { RemindersHeader(onAddReminder = { showAddReminder = true }) }
                         items(state.reminders, key = { "reminder-${it.id}" }) { reminder ->
                             ReminderRow(
                                 reminder = reminder,
@@ -144,6 +145,21 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                             )
                         }
                         item { Spacer(Modifier.height(8.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp)) }
+                    } else if (state.statusFilter != "done") {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("Upcoming reminders", style = MaterialTheme.typography.titleSmall)
+                                TextButton(onClick = { showAddReminder = true }) {
+                                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Add")
+                                }
+                            }
+                        }
                     }
 
                     if (state.tasks.isEmpty()) {
@@ -211,16 +227,37 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
             },
         )
     }
+
+    if (showAddReminder) {
+        AddReminderDialog(
+            onDismiss = { showAddReminder = false },
+            onAdd = { message, triggerAt ->
+                viewModel.createReminder(message, triggerAt)
+                showAddReminder = false
+            },
+        )
+    }
 }
 
 @Composable
-private fun RemindersHeader() {
-    Text(
-        "Upcoming reminders",
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.primary,
-    )
+private fun RemindersHeader(onAddReminder: () -> Unit = {}) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Upcoming reminders",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        TextButton(onClick = onAddReminder) {
+            Icon(Icons.Filled.Add, contentDescription = "Add reminder", modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("Add")
+        }
+    }
 }
 
 @Composable
@@ -547,5 +584,113 @@ private fun PriorityOption(label: String, selected: Boolean, onClick: () -> Unit
         Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
             Text(label, style = MaterialTheme.typography.labelMedium)
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddReminderDialog(
+    onDismiss: () -> Unit,
+    onAdd: (message: String, triggerAt: Long) -> Unit,
+) {
+    var message by remember { mutableStateOf("") }
+    var showTimePicker by remember { mutableStateOf(false) }
+    var selectedHour by remember { mutableIntStateOf(-1) }
+    var selectedMinute by remember { mutableIntStateOf(-1) }
+    var selectedDateMillis by remember { mutableStateOf(0L) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add reminder") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = message,
+                    onValueChange = { message = it },
+                    label = { Text("Reminder message") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    OutlinedButton(
+                        onClick = { showDatePicker = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            if (selectedDateMillis > 0)
+                                SimpleDateFormat("MMM d", Locale.US).format(Date(selectedDateMillis))
+                            else "Date"
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { showTimePicker = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            if (selectedHour >= 0) String.format("%02d:%02d", selectedHour, selectedMinute)
+                            else "Time"
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (message.isBlank() || selectedHour < 0 || selectedDateMillis == 0L) return@TextButton
+                    val cal = Calendar.getInstance().apply {
+                        timeInMillis = selectedDateMillis
+                        set(Calendar.HOUR_OF_DAY, selectedHour)
+                        set(Calendar.MINUTE, selectedMinute)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }
+                    onAdd(message.trim(), cal.timeInMillis)
+                },
+                enabled = message.isNotBlank() && selectedHour >= 0 && selectedDateMillis > 0L,
+            ) { Text("Add") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+
+    if (showDatePicker) {
+        val dpState = rememberDatePickerState()
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    dpState.selectedDateMillis?.let { selectedDateMillis = it }
+                    showDatePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            },
+        ) { DatePicker(state = dpState) }
+    }
+
+    if (showTimePicker) {
+        val tpState = rememberTimePickerState()
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            title = { Text("Select time") },
+            text = { TimePicker(state = tpState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedHour = tpState.hour
+                    selectedMinute = tpState.minute
+                    showTimePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+            },
+        )
     }
 }
