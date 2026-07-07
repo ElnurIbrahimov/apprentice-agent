@@ -73,15 +73,25 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(horizontal = 20.dp)
     ) {
-        Text("Memory", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-        Text(
-            text = "${state.memories.size} memories" + (state.categoryFilter?.let { " · filter: $it" } ?: ""),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-        )
-        Spacer(modifier = Modifier.height(12.dp))
+        // ── Header ─────────────────────────────────────────────────────
+        Column(modifier = Modifier.padding(top = 16.dp, bottom = 12.dp)) {
+            Text(
+                text = "Memory",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            val filterText = state.categoryFilter?.let { " · $it" } ?: ""
+            Text(
+                text = "${state.memories.size} things I remember$filterText",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
 
         // Rebuild-embeddings banner — shown after the user has run the
         // action. Dismissible. The text comes from the VM so the

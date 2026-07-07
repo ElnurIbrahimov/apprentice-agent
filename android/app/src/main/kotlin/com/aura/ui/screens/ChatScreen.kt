@@ -80,6 +80,14 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -107,6 +115,7 @@ fun ChatScreen(
 
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
     var showModelPicker by remember { mutableStateOf(false) }
@@ -176,17 +185,33 @@ fun ChatScreen(
 
     ConsumeIncomingShare(context, viewModel)
 
-    LaunchedEffect(state.conversation.turns.size) {
+    // Auto-scroll on:
+    // 1. New turn added (size change)
+    // 2. Streaming token arrives on the last turn (assistant length change)
+    // 3. First message after send
+    val lastTurn = state.conversation.turns.lastOrNull()
+    val assistantLen = lastTurn?.assistant?.length ?: 0
+    LaunchedEffect(state.conversation.turns.size, assistantLen) {
         if (state.conversation.turns.isNotEmpty()) {
-            listState.animateScrollToItem(state.conversation.turns.size - 1)
+            val target = state.conversation.turns.size - 1
+            // Only auto-scroll if user is near the bottom. If they've
+            // scrolled up to read old messages, don't yank them back.
+            val visible = listState.layoutInfo.visibleItemsInfo
+            val lastVisible = visible.lastOrNull()?.index ?: 0
+            if (lastVisible >= target - 1) {
+                listState.animateScrollToItem(target)
+            }
         }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
             .background(MaterialTheme.colorScheme.background),
+    ) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
     ) {
         ChatHeader(
             activeModel = state.activeModel,
@@ -352,6 +377,50 @@ fun ChatScreen(
                 }
             },
         )
+    }
+
+    // Scroll-to-bottom FAB — appears when the user has scrolled
+    // away from the bottom of the conversation. Tapping snaps
+    // back to the latest message with a smooth animation.
+    val isNearBottom by remember {
+        derivedStateOf {
+            val total = listState.layoutInfo.totalItemsCount
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            total == 0 || last >= total - 2
+        }
+    }
+    AnimatedVisibility(
+        visible = !isNearBottom && state.conversation.turns.isNotEmpty(),
+        enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.8f),
+        exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut(targetScale = 0.8f),
+        modifier = Modifier
+            .align(androidx.compose.ui.Alignment.BottomEnd)
+            .padding(end = 16.dp, bottom = 88.dp),
+    ) {
+        Surface(
+            onClick = {
+                coroutineScope.launch {
+                    if (state.conversation.turns.isNotEmpty()) {
+                        listState.animateScrollToItem(state.conversation.turns.size - 1)
+                    }
+                }
+            },
+            color = MaterialTheme.colorScheme.primary,
+            shape = androidx.compose.foundation.shape.CircleShape,
+            tonalElevation = 4.dp,
+            shadowElevation = 6.dp,
+            modifier = Modifier.size(48.dp),
+        ) {
+            Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
+                Icon(
+                    imageVector = androidx.compose.material.icons.Icons.Filled.KeyboardArrowDown,
+                    contentDescription = "Scroll to bottom",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+    }
     }
 }
 
@@ -607,11 +676,13 @@ private fun MessageBubble(
     onShowSources: () -> Unit = {},
     isStreaming: Boolean = false,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.surfaceVariant
     val textColor = if (isUser) MaterialTheme.colorScheme.onPrimary
         else MaterialTheme.colorScheme.onSurfaceVariant
     val alignment = if (isUser) Alignment.End else Alignment.Start
+    var copied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalAlignment = alignment,
@@ -654,6 +725,52 @@ private fun MessageBubble(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
+                }
+            }
+        }
+        // Action row under the bubble — copy button for assistant
+        // messages. Only shown when not streaming.
+        if (!isUser && !isStreaming && text.isNotBlank()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+            ) {
+                Surface(
+                    onClick = {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Aura", text))
+                        copied = true
+                    },
+                    color = androidx.compose.ui.graphics.Color.Transparent,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Filled.ContentCopy,
+                            contentDescription = "Copy",
+                            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+                androidx.compose.runtime.LaunchedEffect(copied) {
+                    if (copied) {
+                        kotlinx.coroutines.delay(1500)
+                        copied = false
+                    }
+                }
+                if (copied) {
+                    Text(
+                        text = "Copied",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                    )
                 }
             }
         }

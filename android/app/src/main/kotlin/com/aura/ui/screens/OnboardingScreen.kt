@@ -55,6 +55,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.layout.Box
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
 
 data class OnboardingUiState(
     val ollamaKey: String = "",
@@ -193,33 +199,92 @@ private fun PageWelcome(onNext: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(
-            text = "👋",
-            style = MaterialTheme.typography.displayLarge,
+        // Animated brand mark — primary teal circle with a star
+        // inside. The whole thing pulses gently to feel alive.
+        val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "brand")
+        val scale by transition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.05f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                animation = androidx.compose.animation.core.tween(2000),
+                repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+            ),
+            label = "brand-scale",
         )
-        Spacer(modifier = Modifier.height(24.dp))
+        Surface(
+            color = MaterialTheme.colorScheme.primary,
+            shape = androidx.compose.foundation.shape.CircleShape,
+            shadowElevation = 12.dp,
+            modifier = Modifier
+                .size(112.dp)
+                .scale(scale),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = "✦",
+                    style = MaterialTheme.typography.displayLarge,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(32.dp))
         Text(
-            text = "Welcome to Aura",
-            style = MaterialTheme.typography.headlineLarge,
+            text = "Aura",
+            style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "A personal AI assistant that runs on your phone. It remembers things, manages tasks, delegates work to specialists, and can see your calendar, photos, and notifications.\n\nTo think, it needs an LLM. You can use Ollama Cloud, Anthropic, OpenAI, or DeepSeek.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+            text = "Your personal AI assistant",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
         )
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(32.dp))
+        // Feature pills — three short promises
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            FeaturePill(icon = "🧠", text = "Remembers what matters to you")
+            FeaturePill(icon = "🎯", text = "Manages tasks and calendar")
+            FeaturePill(icon = "🔌", text = "Connects to the best models")
+            FeaturePill(icon = "🔒", text = "Keys stay on your device")
+        }
+        Spacer(modifier = Modifier.height(40.dp))
         Button(
             onClick = onNext,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = RoundedCornerShape(16.dp),
         ) {
-            Text("Set up a provider")
-            Spacer(modifier = Modifier.width(8.dp))
-            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+            Text(
+                text = "Get started",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
+    }
+}
+
+@Composable
+private fun FeaturePill(icon: String, text: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = androidx.compose.foundation.shape.CircleShape,
+            modifier = Modifier.size(36.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(text = icon, style = MaterialTheme.typography.titleMedium)
+            }
+        }
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f),
+        )
     }
 }
 
