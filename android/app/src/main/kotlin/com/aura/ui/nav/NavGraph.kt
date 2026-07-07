@@ -46,6 +46,8 @@ import com.aura.ui.screens.ProactiveHistoryScreen
 import com.aura.ui.screens.ProfileScreen
 import com.aura.ui.screens.SettingsScreen
 import com.aura.ui.screens.TasksScreen
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.unit.dp
 
 sealed class TopLevelRoute(val route: String, val label: String, val selectedIcon: ImageVector, val unselectedIcon: ImageVector) {
     data object Home : TopLevelRoute("home", "Home", Icons.Filled.Home, Icons.Outlined.Home)
@@ -165,7 +167,10 @@ fun NavGraph(
 
 @Composable
 private fun AuraBottomBar(navController: NavHostController, currentRoute: String?) {
-    NavigationBar {
+    NavigationBar(
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp,
+    ) {
         topLevelRoutes.forEach { route ->
             val selected = currentRoute == route.route
             NavigationBarItem(
@@ -183,9 +188,17 @@ private fun AuraBottomBar(navController: NavHostController, currentRoute: String
                     Icon(
                         imageVector = if (selected) route.selectedIcon else route.unselectedIcon,
                         contentDescription = route.label,
+                        tint = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     )
                 },
-                label = { Text(route.label) },
+                label = {
+                    Text(
+                        route.label,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    )
+                },
             )
         }
     }

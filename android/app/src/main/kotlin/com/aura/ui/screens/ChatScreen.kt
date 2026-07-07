@@ -364,35 +364,32 @@ private fun ChatHeader(
     onShowModelPicker: () -> Unit,
     onVoiceMode: () -> Unit = {},
 ) {
+    val displayModel = conversationModel ?: activeModel
+    val modelMismatch = conversationModel != null && conversationModel != activeModel
+
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
+        tonalElevation = 2.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
                 .clickable { onShowModelPicker() }
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Aura",
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                // Show the conversation's model if it differs from the
-                // active selection — the user reopened an old conversation
-                // that used a different model and needs to know which model
-                // produced the responses they're reading.
-                val displayModel = conversationModel ?: activeModel
-                val modelMismatch = conversationModel != null && conversationModel != activeModel
                 Text(
                     text = com.aura.ui.util.modelDisplayName(displayModel),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (modelMismatch) MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 )
                 if (modelMismatch && conversationModel != null) {
                     Text(
@@ -576,38 +573,40 @@ private fun MessageBubble(
     citations: List<com.aura.tools.Citation> = emptyList(),
     onShowSources: () -> Unit = {},
 ) {
-    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val textColor = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.surfaceVariant
+    val textColor = if (isUser) MaterialTheme.colorScheme.onPrimary
+        else MaterialTheme.colorScheme.onSurfaceVariant
     val alignment = if (isUser) Alignment.End else Alignment.Start
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalAlignment = alignment,
     ) {
         Surface(
             color = bubbleColor,
             shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp,
+                topStart = 20.dp,
+                topEnd = 20.dp,
+                bottomStart = if (isUser) 20.dp else 4.dp,
+                bottomEnd = if (isUser) 4.dp else 20.dp,
             ),
-            modifier = Modifier.widthIn(max = 320.dp),
+            modifier = Modifier.widthIn(max = 340.dp),
         ) {
-            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 if (isUser) {
                     Text(
                         text = text.ifBlank { "…" },
                         color = textColor,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                     )
                 } else {
                     MarkdownText(
                         text = text.ifBlank { "…" },
-                        style = MaterialTheme.typography.bodyMedium.copy(color = textColor),
+                        style = MaterialTheme.typography.bodyLarge.copy(color = textColor),
                     )
                 }
                 if (!isUser && citations.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Surface(
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
                         shape = RoundedCornerShape(8.dp),
@@ -617,7 +616,7 @@ private fun MessageBubble(
                             text = "${citations.size} sources",
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }
@@ -629,8 +628,8 @@ private fun MessageBubble(
 @Composable
 private fun ToolCallBubble(name: String, result: String) {
     Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth(0.85f).padding(start = 32.dp),
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
