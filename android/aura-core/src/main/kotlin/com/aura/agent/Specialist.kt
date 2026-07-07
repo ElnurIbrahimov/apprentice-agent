@@ -35,7 +35,6 @@ data class Specialist(
                 apply them. Be precise — explain the fix, not just the code.
             """.trimIndent(),
             toolsAllowed = setOf("brave_search", "tavily_search", "fetch_url"),
-            suggestedModel = "claude-sonnet-4-20250514",
         )
 
         /** Deep-research & fact-finding specialist. */
@@ -49,7 +48,6 @@ data class Specialist(
                 sources and present a balanced view when sources disagree.
             """.trimIndent(),
             toolsAllowed = setOf("deep_research", "brave_search", "tavily_search"),
-            suggestedModel = "moa:default",
         )
 
         /** Creative & image-generation specialist. */
@@ -63,7 +61,6 @@ data class Specialist(
                 images, craft detailed, evocative prompts.
             """.trimIndent(),
             toolsAllowed = setOf("image_gen", "image_input"),
-            suggestedModel = "moa:default",
         )
 
         /** Executive assistant — calendar, contacts, tasks, memory. */
@@ -77,7 +74,6 @@ data class Specialist(
                 it clearly; when writing confirm what you did.
             """.trimIndent(),
             toolsAllowed = setOf("calendar_read", "calendar_write", "contacts_search", "remember", "recall"),
-            suggestedModel = "moa:default",
         )
         val PhoneNative = Specialist(
             name = "phone_native",
