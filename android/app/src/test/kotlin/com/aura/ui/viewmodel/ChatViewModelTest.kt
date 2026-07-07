@@ -72,6 +72,8 @@ class ChatViewModelTest {
 
         every { userPreferences.defaultModel } returns MutableStateFlow("ollama:deepseek-v4-pro:cloud")
         every { providerRegistry.all() } returns emptyList()
+        every { providerRegistry.configured() } returns emptyList()
+        every { providerRegistry.get("moa") } returns null
         every { toolRegistry.definitions() } returns emptyList()
         coEvery { conversationStore.mostRecent() } returns null
         coEvery { knowledgeGraphRepository.stats() } returns KnowledgeGraphRepository.Stats(nodeCount = 0, edgeCount = 0)
@@ -284,6 +286,68 @@ class ChatViewModelTest {
         vm.toggleTts()
         assertFalse(vm.state.value.ttsEnabled)
         verify { textToSpeech.stop() }
+    }
+
+    @Test
+    fun `newConversation creates fresh conversation and clears state`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        // Set some state first
+        vm.setDraft("hello world")
+        vm.toggleDeepMode()
+        advanceUntilIdle()
+        assertEquals("hello world", vm.state.value.draft)
+        assertTrue(vm.state.value.deepModeEnabled)
+
+        vm.newConversation()
+        advanceUntilIdle()
+
+        assertEquals("New conversation", vm.state.value.conversation.title)
+        assertEquals("", vm.state.value.draft)
+        assertFalse(vm.state.value.deepModeEnabled)
+        assertFalse(vm.state.value.deepModeActive)
+        assertEquals(null, vm.state.value.selectedSpecialist)
+    }
+
+    @Test
+    fun `auto-title sets conversation title from first user message`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        coEvery { loop.run(any(), any(), any(), any(), any(), any(), any()) } returns flowOf(
+            AgentEvent.TextDelta("response"),
+            AgentEvent.Done,
+        )
+        coEvery { conversationStore.recent(2) } returns emptyList()
+
+        vm.setDraft("How do I configure Gradle Kotlin DSL build types?")
+        vm.send()
+        advanceUntilIdle()
+
+        val title = vm.state.value.conversation.title
+        assertTrue(title.startsWith("How do I configure Gradle Kotlin"))
+        assertTrue(title != "New conversation")
+    }
+
+    @Test
+    fun `auto-title truncates long messages`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        coEvery { loop.run(any(), any(), any(), any(), any(), any(), any()) } returns flowOf(
+            AgentEvent.TextDelta("response"),
+            AgentEvent.Done,
+        )
+        coEvery { conversationStore.recent(2) } returns emptyList()
+
+        // Use a message where the first 6 words exceed 60 chars
+        val longMsg = "Understanding supercalifragilisticexpialidocious implementation methodologies in modern distributed systems architecture and design patterns"
+        vm.setDraft(longMsg)
+        vm.send()
+        advanceUntilIdle()
+
+        val title = vm.state.value.conversation.title
+        assertTrue(title.length <= 63, "title length was ${title.length}: '$title'")
+        assertTrue(title.endsWith("..."))
+        assertTrue(title != "New conversation")
     }
 }
 

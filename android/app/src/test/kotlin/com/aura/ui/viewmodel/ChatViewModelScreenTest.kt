@@ -54,6 +54,8 @@ class ChatViewModelScreenTest {
 
         every { userPreferences.defaultModel } returns MutableStateFlow("ollama:deepseek-v4-pro:cloud")
         every { providerRegistry.all() } returns emptyList()
+        every { providerRegistry.configured() } returns emptyList()
+        every { providerRegistry.get("moa") } returns null
         every { toolRegistry.definitions() } returns emptyList()
         coEvery { conversationStore.mostRecent() } returns null
         coEvery { knowledgeGraphRepository.stats() } returns KnowledgeGraphRepository.Stats(0, 0)

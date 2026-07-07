@@ -65,6 +65,8 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
     var editingMemory by remember { mutableStateOf<MemoryEntity?>(null) }
     var showRebuildConfirm by remember { mutableStateOf(false) }
+    var showClearAllConfirm by remember { mutableStateOf(false) }
+    var showClearCategoryConfirm by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -174,6 +176,41 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
             }
         }
         Spacer(modifier = Modifier.height(8.dp))
+
+        // Bulk delete actions. "Clear category" only shows when a
+        // category filter is active. Both show a confirm dialog.
+        if (state.categoryFilter != null) {
+            OutlinedButton(
+                onClick = { showClearCategoryConfirm = true },
+                enabled = state.memories.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text("Clear ${state.categoryFilter} memories", color = MaterialTheme.colorScheme.error)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        OutlinedButton(
+            onClick = { showClearAllConfirm = true },
+            enabled = state.memories.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Delete,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.error,
+            )
+            Spacer(modifier = Modifier.size(8.dp))
+            Text("Clear all memories", color = MaterialTheme.colorScheme.error)
+        }
+        Spacer(modifier = Modifier.height(8.dp))
         HorizontalDivider()
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -239,6 +276,54 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
             },
             dismissButton = {
                 TextButton(onClick = { showRebuildConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // Clear all memories confirmation. Irreversible.
+    if (showClearAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearAllConfirm = false },
+            title = { Text("Clear all memories?") },
+            text = {
+                Text(
+                    "This will permanently delete all ${state.memories.size} memories. " +
+                        "This cannot be undone. Consider exporting a backup first.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearAllConfirm = false
+                    viewModel.forgetAll()
+                }) { Text("Delete all", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // Clear category confirmation. Irreversible.
+    if (showClearCategoryConfirm) {
+        val cat = state.categoryFilter ?: ""
+        val count = state.memories.size
+        AlertDialog(
+            onDismissRequest = { showClearCategoryConfirm = false },
+            title = { Text("Clear $cat memories?") },
+            text = {
+                Text(
+                    "This will permanently delete all $count memories in the " +
+                        "\"$cat\" category. This cannot be undone.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearCategoryConfirm = false
+                    viewModel.forgetByCategory(cat)
+                }) { Text("Delete $count", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCategoryConfirm = false }) { Text("Cancel") }
             },
         )
     }

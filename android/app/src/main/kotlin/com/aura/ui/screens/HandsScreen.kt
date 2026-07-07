@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,6 +32,7 @@ fun HandsScreen(
     val state by viewModel.state.collectAsState()
     val toolRegistry = viewModel.toolRegistry
     var showAddDialog by remember { mutableStateOf(false) }
+    var editingHand by remember { mutableStateOf<Hand?>(null) }
 
     Scaffold(
         floatingActionButton = {
@@ -61,6 +63,7 @@ fun HandsScreen(
                         isRunning = state.running == h.name,
                         onRun = { viewModel.runHand(h) },
                         onToggle = { viewModel.toggle(h) },
+                        onEdit = { editingHand = h },
                         onDelete = { viewModel.delete(h.name) },
                     )
                 }
@@ -78,10 +81,22 @@ fun HandsScreen(
             },
         )
     }
+
+    editingHand?.let { hand ->
+        EditHandDialog(
+            hand = hand,
+            toolDefinitions = toolRegistry.definitions(),
+            onDismiss = { editingHand = null },
+            onSave = { name, trigger, steps ->
+                viewModel.update(hand, name, trigger, steps)
+                editingHand = null
+            },
+        )
+    }
 }
 
 @Composable
-private fun HandRow(hand: Hand, isRunning: Boolean, onRun: () -> Unit, onToggle: () -> Unit, onDelete: () -> Unit) {
+private fun HandRow(hand: Hand, isRunning: Boolean, onRun: () -> Unit, onToggle: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Build, null, tint = if (hand.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(24.dp))
@@ -93,7 +108,7 @@ private fun HandRow(hand: Hand, isRunning: Boolean, onRun: () -> Unit, onToggle:
             Switch(checked = hand.enabled, onCheckedChange = { onToggle() })
             Spacer(Modifier.width(4.dp))
             FilledIconButton(onClick = onRun, enabled = hand.enabled && !isRunning) { Icon(Icons.Filled.PlayArrow, "Run", tint = MaterialTheme.colorScheme.onPrimary) }
-            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Edit, "Edit", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), modifier = Modifier.size(18.dp)) }
             IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f), modifier = Modifier.size(18.dp)) }
         }
     }
@@ -189,6 +204,135 @@ internal fun AddHandDialog(
                                 val v = argValues[argName]
                                 if (v.isNullOrBlank() && def.parameters.required.contains(argName)) null
                                 else if (v.isNullOrBlank()) null
+                                else argName to v
+                            }.toMap()
+                            steps = steps + HandStep(tool = def.name, args = args)
+                            selectedTool = null
+                            argValues = emptyMap()
+                        },
+                        modifier = Modifier.align(Alignment.End),
+                    ) { Text("Add step") }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.isNotBlank(),
+                onClick = { onSave(name.trim(), trigger.trim(), stepsToJson(steps)) },
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun EditHandDialog(
+    hand: Hand,
+    toolDefinitions: List<com.aura.providers.ToolDefinition>,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String) -> Unit,
+) {
+    var name by remember { mutableStateOf(hand.name) }
+    var trigger by remember { mutableStateOf(hand.triggerPhrase) }
+    var steps by remember {
+        mutableStateOf(
+            runCatching {
+                kotlinx.serialization.json.Json.parseToJsonElement(hand.steps)
+                    .let { element ->
+                        element.let { je ->
+                            (je as? kotlinx.serialization.json.JsonArray)?.map { item ->
+                                val obj = item as? kotlinx.serialization.json.JsonObject
+                                    ?: kotlinx.serialization.json.JsonObject(emptyMap())
+                                val tool = obj["tool"]?.toString()?.trim('"') ?: ""
+                                val args = (obj["args"] as? kotlinx.serialization.json.JsonObject)
+                                    ?.entries?.associate { (k, v) -> k to v.toString().trim('"') }
+                                    ?: emptyMap()
+                                HandStep(tool = tool, args = args)
+                            } ?: emptyList()
+                        }
+                    }
+            }.getOrDefault(emptyList())
+        )
+    }
+    var selectedTool by remember { mutableStateOf<com.aura.providers.ToolDefinition?>(null) }
+    var argValues by remember { mutableStateOf(mapOf<String, String>()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit hand") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+            ) {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true)
+                OutlinedTextField(
+                    value = trigger,
+                    onValueChange = { trigger = it },
+                    label = { Text("Trigger phrase (optional)") },
+                    singleLine = true,
+                    supportingText = { Text("What the user says to trigger it (wires to chat loop)") },
+                )
+
+                HorizontalDivider()
+                Text("Steps", fontWeight = FontWeight.SemiBold)
+                if (steps.isEmpty()) {
+                    Text("No steps. Pick a tool below.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f))
+                } else {
+                    steps.forEachIndexed { idx, step ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("${idx + 1}. ${step.tool}", fontWeight = FontWeight.Medium)
+                                    if (step.args.isNotEmpty()) {
+                                        Text(step.args.entries.joinToString { "${it.key}=${it.value}" }, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                                TextButton(onClick = { steps = steps.toMutableList().apply { removeAt(idx) } }) { Text("Remove") }
+                            }
+                        }
+                    }
+                }
+
+                var expanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+                    OutlinedTextField(
+                        value = selectedTool?.name ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Add tool step") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.menuAnchor(),
+                    )
+                    ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        toolDefinitions.forEach { def ->
+                            DropdownMenuItem(
+                                text = { Text(def.name) },
+                                onClick = {
+                                    selectedTool = def
+                                    argValues = emptyMap()
+                                    expanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                selectedTool?.let { def ->
+                    Text(def.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f))
+                    def.parameters.properties.forEach { (argName, prop) ->
+                        ArgField(name = argName, property = prop, value = argValues[argName] ?: "", onValueChange = { argValues = argValues + (argName to it) })
+                    }
+                    Button(
+                        onClick = {
+                            val args = def.parameters.properties.mapNotNull { (argName, _) ->
+                                val v = argValues[argName]
+                                if (v.isNullOrBlank()) null
                                 else argName to v
                             }.toMap()
                             steps = steps + HandStep(tool = def.name, args = args)

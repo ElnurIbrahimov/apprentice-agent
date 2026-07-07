@@ -16,6 +16,11 @@ class MemoryStore @Inject constructor(
     suspend fun maybeStore(content: String, source: String = "user"): String? {
         val decision = writeGate.evaluate(content, source)
         if (!decision.shouldStore) return null
+        // Dedup: skip if an identical memory already exists. This
+        // prevents "I prefer dark mode" from being stored 3 times
+        // across 3 conversations, which would waste recall slots
+        // and skew the RRF ranking with duplicate hits.
+        if (dao.existsByContent(content) > 0) return null
         val id = UUID.randomUUID().toString()
         val embedding = embedder.embed(content)
         val now = System.currentTimeMillis()
@@ -107,6 +112,18 @@ class MemoryStore @Inject constructor(
     suspend fun listByCategory(category: String, limit: Int = 50): List<MemoryEntity> =
         dao.byCategory(category, limit)
 
+    /**
+     * Fast text-only search via SQL LIKE. No embedding, no cloud
+     * call, no RRF — just a substring match on content. Used by the
+     * Memory screen's search bar for instant browsing. The semantic
+     * [query] method is still available for the agentic loop's
+     * recall, which needs the full RRF pipeline.
+     */
+    suspend fun searchByText(text: String, limit: Int = 50): List<MemoryEntity> {
+        val escaped = escapeLikeWildcards(text)
+        return dao.searchByText("%$escaped%", limit)
+    }
+
     suspend fun recent(limit: Int = 20): List<MemoryEntity> = dao.recent(limit)
 
     /**
@@ -129,6 +146,22 @@ class MemoryStore @Inject constructor(
     suspend fun top(limit: Int = 20): List<MemoryEntity> = dao.top(limit)
     suspend fun get(id: String): MemoryEntity? = dao.getById(id)
     suspend fun forget(id: String) = dao.delete(id)
+
+    /**
+     * Delete all memories. Irreversible. Used by the "Clear all"
+     * action in the Memory screen.
+     */
+    suspend fun forgetAll() = dao.deleteAll()
+
+    /**
+     * Delete all memories in a given category. Irreversible. Used
+     * by the "Clear category" action when the user wants to prune
+     * a whole class (e.g. all "episode" memories that turned out
+     * to be noise).
+     */
+    suspend fun forgetByCategory(category: String) {
+        dao.deleteByCategory(category)
+    }
 
     /**
      * Re-embed every memory that currently has a null embedding.

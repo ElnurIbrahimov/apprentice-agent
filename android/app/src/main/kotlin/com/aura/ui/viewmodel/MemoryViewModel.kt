@@ -55,7 +55,7 @@ class MemoryViewModel @Inject constructor(
             val current = _state.value
             val results = when {
                 current.categoryFilter != null -> memoryStore.listByCategory(current.categoryFilter, 100)
-                current.query.isNotBlank() -> memoryStore.query(current.query, 50)
+                current.query.isNotBlank() -> memoryStore.searchByText(current.query, 50)
                 else -> memoryStore.recent(100)
             }
             _state.update { it.copy(memories = results, loading = false) }
@@ -88,6 +88,28 @@ class MemoryViewModel @Inject constructor(
     fun forget(id: String) {
         viewModelScope.launch {
             memoryStore.forget(id)
+            refresh()
+        }
+    }
+
+    /**
+     * Delete all memories. Irreversible — the UI shows a confirm
+     * dialog before calling this.
+     */
+    fun forgetAll() {
+        viewModelScope.launch {
+            memoryStore.forgetAll()
+            _state.update { it.copy(categoryFilter = null, query = "") }
+            refresh()
+        }
+    }
+
+    /**
+     * Delete all memories in [category]. Irreversible.
+     */
+    fun forgetByCategory(category: String) {
+        viewModelScope.launch {
+            memoryStore.forgetByCategory(category)
             refresh()
         }
     }

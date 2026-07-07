@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.ContentCopy
@@ -98,6 +100,7 @@ fun ChatScreen(
     var showSources by remember { mutableStateOf(false) }
     var showVoiceOverlay by remember { mutableStateOf(false) }
     var showAttachmentSheet by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val hasMicPermission = rememberMicPermission()
     val micPermissionLauncher = rememberLauncherForActivityResult(
@@ -152,6 +155,8 @@ fun ChatScreen(
             onToggleTts = viewModel::toggleTts,
             onCopyLast = { copyToClipboard(context, viewModel.lastAssistantText()) },
             onHistory = onNavigateHistory,
+            onNewConversation = viewModel::newConversation,
+            onDeleteConversation = { showDeleteConfirm = true },
             onToggleDeepMode = viewModel::toggleDeepMode,
             onToggleIncognito = viewModel::toggleIncognito,
             onShowModelPicker = { showModelPicker = true },
@@ -180,6 +185,7 @@ fun ChatScreen(
                 retryable = state.errorRetryable,
                 typedError = state.errorTyped,
                 onRetry = viewModel::retryLast,
+                onSwitchModel = { showModelPicker = true },
                 onDismiss = viewModel::dismissError,
             )
         }
@@ -249,6 +255,27 @@ fun ChatScreen(
         onGrant = viewModel::retryAfterPermission,
         onDismiss = viewModel::dismissPermission,
     )
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete conversation?") },
+            text = { Text("This conversation will be permanently deleted. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    viewModel.deleteCurrentConversation()
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -262,6 +289,8 @@ private fun ChatHeader(
     onToggleTts: () -> Unit,
     onCopyLast: () -> Unit,
     onHistory: () -> Unit,
+    onNewConversation: () -> Unit,
+    onDeleteConversation: () -> Unit,
     onToggleDeepMode: () -> Unit,
     onToggleIncognito: () -> Unit,
     onShowModelPicker: () -> Unit,
@@ -315,6 +344,20 @@ private fun ChatHeader(
                 Icon(
                     imageVector = Icons.Filled.ContentCopy,
                     contentDescription = "Copy last response",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+            IconButton(onClick = onNewConversation) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = "New conversation",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+            IconButton(onClick = onDeleteConversation) {
+                Icon(
+                    imageVector = Icons.Filled.DeleteOutline,
+                    contentDescription = "Delete conversation",
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
             }
@@ -419,6 +462,7 @@ private fun ErrorBanner(
     retryable: Boolean,
     typedError: com.aura.core.error.AuraError?,
     onRetry: () -> Unit,
+    onSwitchModel: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val display = typedError?.formatUserMessage() ?: error
@@ -437,6 +481,9 @@ private fun ErrorBanner(
             if (retryable || typedError?.retryable == true) {
                 TextButton(onClick = onRetry) {
                     Text("Retry", color = MaterialTheme.colorScheme.onErrorContainer)
+                }
+                TextButton(onClick = onSwitchModel) {
+                    Text("Switch model", color = MaterialTheme.colorScheme.onErrorContainer)
                 }
             }
             TextButton(onClick = onDismiss) {

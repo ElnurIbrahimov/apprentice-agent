@@ -55,6 +55,13 @@ class HandsViewModel @Inject constructor(
         }
     }
 
+    fun update(hand: Hand, name: String, triggerPhrase: String, stepsJson: String) {
+        viewModelScope.launch {
+            handDao.update(hand.copy(name = name, triggerPhrase = triggerPhrase, steps = stepsJson))
+            load()
+        }
+    }
+
     fun toggle(hand: Hand) {
         viewModelScope.launch {
             handDao.update(hand.copy(enabled = !hand.enabled))

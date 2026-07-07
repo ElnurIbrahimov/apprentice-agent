@@ -211,19 +211,22 @@ class ChatViewModel @Inject constructor(
 
     fun refreshModels() {
         viewModelScope.launch {
-            val all = providerRegistry.all().flatMap { p ->
+            // Only show models from configured providers (where an API
+            // key is present). Showing models for unconfigured providers
+            // leads to a 401 on first send — confusing UX.
+            val configuredProviders = providerRegistry.configured()
+            val all = configuredProviders.flatMap { p ->
                 runCatching {
                     p.listModels()
                 }.getOrDefault(emptyList()).map { "${p.prefix}:$it" }
             }
-            val defaults = listOf(
-                "ollama:deepseek-v4-pro:cloud",
-                "ollama:kimi-k2.7-code:cloud",
-                "anthropic:claude-sonnet-4-5",
-                "ollama:minimax-m2.7:cloud",
-                "ollama:qwen3.5:cloud",
-            )
-            val merged = (defaults + all).distinct()
+            // Keep MoA in the list if its aggregator is configured.
+            val moaModels = providerRegistry.get("moa")?.let { moa ->
+                if (moa.isConfigured()) {
+                    runCatching { moa.listModels() }.getOrDefault(emptyList()).map { "moa:$it" }
+                } else emptyList()
+            } ?: emptyList()
+            val merged = (all + moaModels).distinct()
             _state.update { it.copy(availableModels = merged) }
         }
     }
@@ -301,12 +304,87 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Start a fresh conversation. Clears the current conversation,
+     * resets the draft, and creates a new empty one with the default
+     * system prompt. The old conversation is NOT deleted — it stays
+     * in History. Cancels any in-flight streaming first.
+     */
+    fun newConversation() {
+        cancel()
+        _state.update {
+            it.copy(
+                conversation = com.aura.agent.Conversation(
+                    systemPrompt = "You are Aura, a personal AI assistant. Be concise and direct. Ask what they need help with.",
+                    title = "New conversation",
+                ),
+                draft = "",
+                error = null,
+                errorRetryable = false,
+                errorTyped = null,
+                deepModeEnabled = false,
+                deepModeActive = false,
+                selectedSpecialist = null,
+                suggestedSpecialist = null,
+            )
+        }
+    }
+
+    /**
+     * Delete the current conversation from the store and start a
+     * fresh one. The deleted conversation is gone for good — no
+     * undo. In incognito mode the conversation was never persisted
+     * so we just reset the UI state.
+     */
+    fun deleteCurrentConversation() {
+        cancel()
+        val convId = _state.value.conversation.id
+        viewModelScope.launch {
+            if (!_state.value.incognitoMode) {
+                runCatching { conversationStore.delete(convId) }
+            }
+            _state.update {
+                it.copy(
+                    conversation = com.aura.agent.Conversation(
+                        systemPrompt = "You are Aura, a personal AI assistant. Be concise and direct. Ask what they need help with.",
+                        title = "New conversation",
+                    ),
+                    draft = "",
+                    error = null,
+                    errorRetryable = false,
+                    errorTyped = null,
+                    deepModeEnabled = false,
+                    deepModeActive = false,
+                    selectedSpecialist = null,
+                    suggestedSpecialist = null,
+                )
+            }
+        }
+    }
+
     fun dismissPermission() {
         _state.update { it.copy(pendingPermission = null, permissionRationale = null) }
     }
 
     fun dismissError() {
         _state.update { it.copy(error = null, errorRetryable = false, errorTyped = null) }
+    }
+
+    /**
+     * Generate a short conversation title from the first user message.
+     * Takes the first 6 words, truncates to 60 chars, capitalizes the
+     * first letter. No LLM call — deterministic and instant.
+     */
+    private fun generateTitle(text: String): String {
+        val words = text.trim().split(Regex("\\s+")).take(6)
+        var title = words.joinToString(" ")
+        if (title.length > 60) {
+            title = title.take(57) + "..."
+        }
+        if (title.isNotEmpty()) {
+            title = title[0].uppercaseChar() + title.substring(1)
+        }
+        return title.ifBlank { "New conversation" }
     }
 
     private fun refreshKgNodeCount() {
@@ -375,6 +453,13 @@ class ChatViewModel @Inject constructor(
     fun cancel() {
         runJob?.cancel()
         runJob = null
+        // Save the partial response rather than discarding it. The
+        // streaming text was already appended to the conversation's
+        // last turn via replaceLastTurn, so the partial assistant text
+        // is in _state.value.conversation. We just need to persist it.
+        if (!_state.value.incognitoMode && _state.value.conversation.turns.isNotEmpty()) {
+            saveConversation()
+        }
         _state.update { it.copy(streaming = false) }
     }
 
@@ -410,6 +495,22 @@ class ChatViewModel @Inject constructor(
             error = null,
             deepModeActive = useMoa,
         ) }
+
+        // Auto-title: if this is the first user message and the title
+        // is still a default placeholder, generate a short title from
+        // the first 6 words. No LLM call — fast, deterministic, good
+        // enough for History browsing. The title is part of the
+        // conversation object so it persists on the next
+        // saveConversation() call.
+        val isDefaultTitle = _state.value.conversation.title == "New conversation" ||
+            _state.value.conversation.title == "Welcome"
+        if (isDefaultTitle &&
+            _state.value.conversation.turns.count { it.user != null } == 1
+        ) {
+            val title = generateTitle(text)
+            _state.update { it.copy(conversation = it.conversation.copy(title = title)) }
+        }
+
         val specialist = current.selectedSpecialist
         var responseBuffer = StringBuilder()
 

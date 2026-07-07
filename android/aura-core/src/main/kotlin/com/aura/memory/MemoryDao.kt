@@ -72,6 +72,13 @@ interface MemoryDao {
     @Query("DELETE FROM memories")
     suspend fun deleteAll()
 
+    /**
+     * Delete all memories in a given category. Used by the bulk
+     * "clear category" action in the Memory screen.
+     */
+    @Query("DELETE FROM memories WHERE category = :category")
+    suspend fun deleteByCategory(category: String)
+
     @Query("UPDATE memories SET decayScore = decayScore * :factor WHERE createdAt < :cutoff")
     suspend fun applyDecay(cutoff: Long, factor: Float)
 
@@ -80,4 +87,13 @@ interface MemoryDao {
 
     @Query("SELECT COUNT(*) FROM memories")
     suspend fun countOnce(): Int
+
+    /**
+     * Check whether a memory with the exact content already exists.
+     * Used by [MemoryStore.maybeStore] to deduplicate — if the user
+     * says "I prefer dark mode" across three conversations, only the
+     * first one should be stored.
+     */
+    @Query("SELECT COUNT(*) FROM memories WHERE content = :content LIMIT 1")
+    suspend fun existsByContent(content: String): Int
 }
