@@ -62,4 +62,19 @@ interface ConversationDao {
 
     @Query("DELETE FROM conversations")
     suspend fun deleteAll()
+
+    /**
+     * All conversations that have a non-null embedding. Used by
+     * [ConversationStore.semanticSearch] to scan for cosine similarity
+     * matches.
+     */
+    @Query("SELECT * FROM conversations WHERE embedding IS NOT NULL ORDER BY updatedAt DESC")
+    suspend fun allWithEmbeddings(): List<ConversationEntity>
+
+    /**
+     * Update just the embedding column for a conversation. Used by
+     * the lazy embedding population path in semantic search.
+     */
+    @Query("UPDATE conversations SET embedding = :embedding WHERE id = :id")
+    suspend fun updateEmbedding(id: String, embedding: ByteArray)
 }

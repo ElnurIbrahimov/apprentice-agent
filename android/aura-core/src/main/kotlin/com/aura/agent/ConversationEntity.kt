@@ -14,4 +14,17 @@ data class ConversationEntity(
     val metadataJson: String = "{}",
     /** The full turn list serialized as JSON via kotlinx.serialization. */
     val turnsJson: String = "[]",
-)
+    /**
+     * Embedding of the conversation's last user message, used for
+     * semantic search. Null until the first semantic search is
+     * performed — lazy population to avoid embedding every save.
+     */
+    val embedding: ByteArray? = null,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is ConversationEntity) return false
+        return id == other.id
+    }
+    override fun hashCode(): Int = id.hashCode()
+}

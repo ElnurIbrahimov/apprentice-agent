@@ -10,6 +10,7 @@ private val convJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 @Singleton
 class ConversationStore @Inject constructor(
     private val dao: ConversationDao,
+    private val embedder: com.aura.memory.Embedder,
 ) {
     suspend fun save(conversation: Conversation) {
         val entity = ConversationEntity(
@@ -58,6 +59,39 @@ class ConversationStore @Inject constructor(
     suspend fun delete(id: String) = dao.delete(id)
 
     suspend fun deleteAll() = dao.deleteAll()
+
+    /**
+     * Semantic search across conversations. Embeds the query and
+     * compares against conversation embeddings (lazy-populated from
+     * the last user message). Falls back to SQL LIKE search if no
+     * conversations have embeddings yet.
+     *
+     * The embedding scan is O(n) over conversations with embeddings.
+     * For personal use (hundreds of conversations) this is fast.
+     */
+    suspend fun semanticSearch(query: String, limit: Int = 20): List<Conversation> {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return emptyList()
+
+        val existing = runCatching { dao.allWithEmbeddings() }.getOrDefault(emptyList())
+        if (existing.isEmpty()) {
+            // No embeddings yet — fall back to LIKE search.
+            return search(trimmed, limit)
+        }
+
+        val queryEmbedding = runCatching { embedder.embed(trimmed) }.getOrNull()
+            ?: return search(trimmed, limit)
+
+        // Rank conversations by cosine similarity to the query.
+        data class Scored(val conv: ConversationEntity, val score: Float)
+        val scored = existing.mapNotNull { entity ->
+            val emb = entity.embedding ?: return@mapNotNull null
+            val score = cosineSimilarity(queryEmbedding, com.aura.memory.Embedder.fromBytes(emb))
+            if (score > 0.05f) Scored(entity, score) else null
+        }.sortedByDescending { it.score }.take(limit)
+
+        return scored.map { entityToConversation(it.conv) }
+    }
 
     /**
      * Fork a conversation from a specific turn index. Creates a new
@@ -124,4 +158,22 @@ class ConversationStore @Inject constructor(
             turns = turns,
         )
     }
+}
+
+
+/** Fast cosine similarity between two same-dimension float arrays. */
+private fun cosineSimilarity(a: FloatArray, b: FloatArray): Float {
+    if (a.size != b.size) return 0f
+    var dot = 0f
+    var aNorm = 0f
+    var bNorm = 0f
+    for (i in a.indices) {
+        dot += a[i] * b[i]
+        aNorm += a[i] * a[i]
+        bNorm += b[i] * b[i]
+    }
+    val aN = kotlin.math.sqrt(aNorm)
+    val bN = kotlin.math.sqrt(bNorm)
+    if (aN == 0f || bN == 0f) return 0f
+    return dot / (aN * bN)
 }

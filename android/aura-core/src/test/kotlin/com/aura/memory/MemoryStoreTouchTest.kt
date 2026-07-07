@@ -22,6 +22,7 @@ import kotlin.test.assertNotNull
  * promise was structurally broken.
  */
 class MemoryStoreTouchTest {
+    private val memoryEditDao = mockk<MemoryEditDao>(relaxed = true)
 
     private fun mem(id: String, content: String) = MemoryEntity(
         id = id,
@@ -43,7 +44,7 @@ class MemoryStoreTouchTest {
         coEvery { vectorIndex.search(any(), any(), any()) } returns emptyList()
 
         val writeGate = mockk<WriteGate>(relaxed = true)
-        val store = MemoryStore(dao, embedder, vectorIndex, writeGate)
+        val store = MemoryStore(dao, embedder, vectorIndex, writeGate, memoryEditDao)
 
         val results = store.query("dark", limit = 5)
         assertEquals(2, results.size, "query should return both hits")
@@ -67,6 +68,7 @@ class MemoryStoreTouchTest {
             embedder,
             mockk<VectorIndex>(relaxed = true),
             mockk<WriteGate>(relaxed = true),
+            memoryEditDao = memoryEditDao,
         )
 
         val results = store.query("nothing", limit = 5)
@@ -87,6 +89,7 @@ class MemoryStoreTouchTest {
             mockk<Embedder>(relaxed = true),
             mockk<VectorIndex>(relaxed = true),
             mockk<WriteGate>(relaxed = true),
+            memoryEditDao = memoryEditDao,
         )
 
         store.listByCategory("preference", 10)
@@ -103,6 +106,7 @@ class MemoryStoreTouchTest {
             mockk<Embedder>(relaxed = true),
             mockk<VectorIndex>(relaxed = true),
             mockk<WriteGate>(relaxed = true),
+            memoryEditDao = memoryEditDao,
         )
 
         val results = store.listByCategory("fact", 10)

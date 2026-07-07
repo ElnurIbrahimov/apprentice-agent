@@ -12,6 +12,7 @@ class MemoryStore @Inject constructor(
     private val embedder: Embedder,
     private val vectorIndex: VectorIndex,
     private val writeGate: WriteGate,
+    private val memoryEditDao: MemoryEditDao,
 ) {
     suspend fun maybeStore(content: String, source: String = "user"): String? {
         val decision = writeGate.evaluate(content, source)
@@ -277,6 +278,19 @@ class MemoryStore @Inject constructor(
      */
     suspend fun update(id: String, content: String, category: String, importance: Float = 0.5f, tags: String = "") {
         val existing = dao.getById(id) ?: return
+        // Record the edit in the audit trail before applying it.
+        runCatching {
+            memoryEditDao.insert(
+                MemoryEditEntity(
+                    memoryId = id,
+                    oldContent = existing.content,
+                    newContent = content,
+                    oldCategory = existing.category,
+                    newCategory = category,
+                    editedBy = "user",
+                )
+            )
+        }
         dao.update(
             existing.copy(
                 content = content,
@@ -294,6 +308,14 @@ class MemoryStore @Inject constructor(
 
     suspend fun touch(id: String) {
         dao.touch(id)
+    }
+
+    /**
+     * Get the edit history for a memory. Returns entries newest-first.
+     * Used by the Memory edit dialog to show what changed and when.
+     */
+    suspend fun getEditHistory(memoryId: String): List<MemoryEditEntity> {
+        return runCatching { memoryEditDao.getForMemory(memoryId) }.getOrDefault(emptyList())
     }
 
     fun observeCount(): Flow<Int> = dao.count()

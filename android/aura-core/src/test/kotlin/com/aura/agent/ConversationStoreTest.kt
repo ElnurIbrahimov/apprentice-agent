@@ -1,5 +1,6 @@
 package com.aura.agent
 
+import com.aura.memory.Embedder
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -12,10 +13,11 @@ import kotlin.test.assertNull
 
 class ConversationStoreTest {
     private val dao = mockk<ConversationDao>(relaxed = true)
+    private val embedder = mockk<Embedder>(relaxed = true)
 
     @Test
     fun `save then load returns equivalent conversation`() = runTest {
-        val store = ConversationStore(dao)
+        val store = ConversationStore(dao, embedder)
         val conv = Conversation(
             id = "test-id",
             title = "Test chat",
@@ -42,28 +44,28 @@ class ConversationStoreTest {
 
     @Test
     fun `mostRecent returns null when DAO is empty`() = runTest {
-        val store = ConversationStore(dao)
+        val store = ConversationStore(dao, embedder)
         coEvery { dao.mostRecent() } returns null
         assertNull(store.mostRecent())
     }
 
     @Test
     fun `mostRecent returns null when entity is missing`() = runTest {
-        val store = ConversationStore(dao)
+        val store = ConversationStore(dao, embedder)
         coEvery { dao.getById("missing") } returns null
         assertNull(store.load("missing"))
     }
 
     @Test
     fun `load returns null for missing id`() = runTest {
-        val store = ConversationStore(dao)
+        val store = ConversationStore(dao, embedder)
         coEvery { dao.getById("nope") } returns null
         assertNull(store.load("nope"))
     }
 
     @Test
     fun `delete delegates to DAO`() = runTest {
-        val store = ConversationStore(dao)
+        val store = ConversationStore(dao, embedder)
         coEvery { dao.delete("id1") } returns Unit
         store.delete("id1")
         coVerify { dao.delete("id1") }
@@ -71,7 +73,7 @@ class ConversationStoreTest {
 
     @Test
     fun `recent maps DAO entities to Conversations`() = runTest {
-        val store = ConversationStore(dao)
+        val store = ConversationStore(dao, embedder)
         coEvery { dao.recent(50) } returns listOf(
             ConversationEntity(id = "1", title = "First", createdAt = 1L, updatedAt = 2L, systemPrompt = null, model = null, metadataJson = "{}", turnsJson = "[]"),
             ConversationEntity(id = "2", title = "Second", createdAt = 3L, updatedAt = 4L, systemPrompt = null, model = null, metadataJson = "{}", turnsJson = "[]"),

@@ -47,6 +47,28 @@ object MemoryModule {
         }
     }
 
+    val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // memory_edits table: audit trail for memory edits.
+            // ForeignKey CASCADE on memoryId so deleting a memory
+            // also cleans up its edit history.
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS memory_edits (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    memoryId TEXT NOT NULL,
+                    oldContent TEXT NOT NULL,
+                    newContent TEXT NOT NULL,
+                    oldCategory TEXT NOT NULL,
+                    newCategory TEXT NOT NULL,
+                    editedAt INTEGER NOT NULL DEFAULT 0,
+                    editedBy TEXT NOT NULL DEFAULT 'user',
+                    FOREIGN KEY(memoryId) REFERENCES memories(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_memory_edits_memoryId ON memory_edits(memoryId)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MemoryDatabase =
@@ -54,11 +76,14 @@ object MemoryModule {
             context,
             MemoryDatabase::class.java,
             "aura-memory.db",
-            migrations = arrayOf(MIGRATION_1_2),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3),
         ).build()
 
     @Provides
     fun provideMemoryDao(db: MemoryDatabase): MemoryDao = db.memoryDao()
+
+    @Provides
+    fun provideMemoryEditDao(db: MemoryDatabase): MemoryEditDao = db.memoryEditDao()
 
     @Provides
     @Singleton
