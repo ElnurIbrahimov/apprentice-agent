@@ -59,9 +59,12 @@ class MemoryStoreTouchTest {
     fun `query does not touch on empty result`() = runTest {
         val dao = mockk<MemoryDao>(relaxed = true)
         coEvery { dao.searchByText("%nothing%", any()) } returns emptyList()
+        coEvery { dao.allForExport() } returns emptyList()
+        val embedder = mockk<Embedder>(relaxed = true)
+        coEvery { embedder.embed(any()) } returns FloatArray(384) { 0f }
         val store = MemoryStore(
             dao,
-            mockk<Embedder>(relaxed = true),
+            embedder,
             mockk<VectorIndex>(relaxed = true),
             mockk<WriteGate>(relaxed = true),
         )

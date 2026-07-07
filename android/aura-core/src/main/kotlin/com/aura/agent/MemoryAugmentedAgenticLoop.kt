@@ -10,6 +10,9 @@ import com.aura.providers.ProviderMessage.Role
 import com.aura.providers.ToolDefinition
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.coroutineContext
@@ -155,7 +158,13 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                 currentConversation = currentConversation.addAssistant(accumulatedText.toString())
                 // KG extraction is gated by memoryEnabled: in incognito mode
                 // we must not learn entities / relations from this turn.
+                // Extract from BOTH the user's message and the assistant's
+                // response — the user shares facts ("I work at Google"),
+                // the assistant synthesizes and confirms them.
                 if (memoryEnabled) {
+                    if (lastUserMessage.isNotBlank()) {
+                        kgExtractor.extract(lastUserMessage)
+                    }
                     kgExtractor.extract(accumulatedText.toString())
                 }
             }
@@ -169,20 +178,27 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                 break
             }
 
-            for ((id, args) in toolCalls) {
-                val name = toolCallStarts[id] ?: continue
-                emit(AgentEvent.ToolExecuting(id, name, args))
-                // The memoryEnabled flag flows into ToolContext so ToolExecutor
-                // can refuse WRITE_LOCAL tools (e.g. `remember`) inside an
-                // incognito session. READ_ONLY tools still run.
-                val result = toolExecutor.execute(
-                    name = name,
-                    argumentsJson = args,
-                    ctx = ToolContext(
-                        conversationId = currentConversation.id,
-                        memoryEnabled = memoryEnabled,
-                    ),
-                )
+            // Execute tool calls in parallel. The model sends them in one
+            // batch, meaning it doesn't expect one's output to feed into
+            // the next. Running them concurrently cuts wall time for
+            // multi-tool turns (e.g. two web searches in 1 turn = half
+            // the latency). coroutineScope ensures all complete before
+            // we process results and continue the loop.
+            val ctx = ToolContext(
+                conversationId = currentConversation.id,
+                memoryEnabled = memoryEnabled,
+            )
+            val toolResults = coroutineScope {
+                toolCalls.map { (id, args) ->
+                    val name = toolCallStarts[id] ?: return@map null
+                    emit(AgentEvent.ToolExecuting(id, name, args))
+                    async {
+                        Triple(id, name to args, toolExecutor.execute(name, args, ctx))
+                    }
+                }.filterNotNull().awaitAll()
+            }
+            for ((id, nameAndArgs, result) in toolResults) {
+                val (name, args) = nameAndArgs
                 val resultText = when (result) {
                     is ToolResult.Ok -> result.output
                     is ToolResult.Error -> "Error: ${result.message}"
@@ -207,7 +223,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                 val gate = LlmWriteGate(
                     heuristic = WriteGate(),
                     registry = providerRegistry,
-                    modelId = model,
+                    modelId = "ollama:qwen2:1.5b:cloud",
                 )
                 val decision = gate.evaluate(lastUserMessage, "user")
                 if (decision.shouldStore) {
@@ -221,9 +237,14 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             }
         }
 
-        // 5) Extract user profile from last assistant turn (name, traits, facts)
-        //    Skipped in incognito mode — we don't learn new things about the
-        //    user from a session they explicitly marked private.
+        // 5) Extract user profile from the conversation.
+        //    First-person patterns ("my name is", "I live in", "I prefer")
+        //    are in the USER's text, not the assistant's response. Run
+        //    extraction on the user message first, then on the assistant
+        //    text as a secondary path (the assistant may echo user facts).
+        if (memoryEnabled && lastUserMessage.isNotBlank()) {
+            runCatching { extractProfileFromText(lastUserMessage) }
+        }
         val lastAssistant = currentConversation.turns.lastOrNull()?.assistant
         if (memoryEnabled && !lastAssistant.isNullOrBlank()) {
             runCatching { extractProfileFromText(lastAssistant) }

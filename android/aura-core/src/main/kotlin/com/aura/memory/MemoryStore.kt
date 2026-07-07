@@ -70,8 +70,25 @@ class MemoryStore @Inject constructor(
         // how useful it actually is to the model.
         val escapedText = escapeLikeWildcards(text)
         val textHits = dao.searchByText("%$escapedText%", limit * 3)
-        if (textHits.isEmpty()) return emptyList()
         val qVec = embedder.embed(text)
+
+        if (textHits.isEmpty()) {
+            // Vector fallback: no text overlap between query and any stored
+            // memory. But the query might still be semantically similar to
+            // a memory (e.g. query "programming languages I enjoy" vs stored
+            // "I love Kotlin" — zero shared words, but vectors are close).
+            // Scan all memories with embeddings and rank by cosine similarity.
+            val all = dao.allForExport().filter { it.embedding != null }
+            if (all.isEmpty()) return emptyList()
+            val scored = all.map { mem ->
+                val embedding = Embedder.fromBytes(mem.embedding!!)
+                ScoredMemory(memory = mem, textScore = 0f, vectorScore = cosineSimilarity(qVec, embedding))
+            }.filter { it.vectorScore > 0.05f }
+            if (scored.isEmpty()) return emptyList()
+            val results = Retrieval.rankCandidates(text, qVec, scored, limit)
+            for (mem in results) { runCatching { touch(mem.id) } }
+            return results
+        }
 
         // Build [ScoredMemory] candidates with text and vector similarity scores.
         val queryTokens = text.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }.toSet()

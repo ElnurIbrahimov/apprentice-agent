@@ -3,7 +3,6 @@ package com.aura.widget
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.RemoteViews
@@ -13,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -20,11 +20,11 @@ import androidx.lifecycle.lifecycleScope
 import com.aura.R
 import com.aura.agent.Conversation
 import com.aura.providers.ChatOptions
-import com.aura.providers.ProviderMessage
-import com.aura.providers.ProviderRegistry
 import com.aura.data.UserPreferences
+import com.aura.providers.ProviderRegistry
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,6 +39,12 @@ import javax.inject.Inject
  *
  * After the response arrives, the widget body is updated with the
  * last Q&A pair so the answer persists on the home screen.
+ *
+ * State management: [responseFlow] and [loadingFlow] are
+ * MutableStateFlows on the Activity, collected by the Compose
+ * content via collectAsState(). This bridges the async LLM call
+ * (launched in lifecycleScope) to the Compose UI without a shared
+ * ViewModel.
  */
 @AndroidEntryPoint
 class QuickAskActivity : ComponentActivity() {
@@ -46,10 +52,11 @@ class QuickAskActivity : ComponentActivity() {
     @Inject lateinit var providerRegistry: ProviderRegistry
     @Inject lateinit var userPreferences: UserPreferences
 
+    private val responseFlow = MutableStateFlow<String?>(null)
+    private val loadingFlow = MutableStateFlow(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Transparent window, no history, dim background slightly
         window.setDimAmount(0.5f)
         window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         window.setStatusBarColor(android.graphics.Color.TRANSPARENT)
@@ -57,6 +64,8 @@ class QuickAskActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 QuickAskContent(
+                    responseFlow = responseFlow,
+                    loadingFlow = loadingFlow,
                     onSend = { query -> askQuery(query) },
                     onDismiss = { finish() },
                 )
@@ -64,12 +73,10 @@ class QuickAskActivity : ComponentActivity() {
         }
     }
 
-    private var lastQuery: String? = null
-    private var lastResponse: String? = null
-
     private fun askQuery(query: String) {
+        loadingFlow.value = true
+        responseFlow.value = null
         lifecycleScope.launch {
-            lastQuery = query
             val model = userPreferences.defaultModel.first()
             val response = withContext(Dispatchers.IO) {
                 val conversation = Conversation(
@@ -90,7 +97,8 @@ class QuickAskActivity : ComponentActivity() {
                 }
                 text.toString().trim().ifBlank { "No response." }
             }
-            lastResponse = response
+            responseFlow.value = response
+            loadingFlow.value = false
             updateWidgetWithResponse(query, response)
         }
     }
@@ -110,12 +118,14 @@ class QuickAskActivity : ComponentActivity() {
 
 @Composable
 private fun QuickAskContent(
+    responseFlow: MutableStateFlow<String?>,
+    loadingFlow: MutableStateFlow<Boolean>,
     onSend: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    var response by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    val response by responseFlow.collectAsState()
+    val loading by loadingFlow.collectAsState()
 
     Surface(
         modifier = Modifier
@@ -149,7 +159,6 @@ private fun QuickAskContent(
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(
                     onSend = {
                         if (query.isNotBlank() && !loading) {
-                            loading = true
                             onSend(query.trim())
                         }
                     },
@@ -184,13 +193,7 @@ private fun QuickAskContent(
                 Button(
                     onClick = {
                         if (query.isNotBlank() && !loading) {
-                            loading = true
                             onSend(query.trim())
-                            // The response callback happens async; we can't
-                            // easily set loading=false from onSend. Use a
-                            // LaunchedEffect to poll or just let the response
-                            // appear. For simplicity, loading stays true until
-                            // response is set.
                         }
                     },
                     enabled = query.isNotBlank() && !loading,

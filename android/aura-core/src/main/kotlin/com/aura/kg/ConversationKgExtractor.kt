@@ -90,6 +90,6 @@ class ConversationKgExtractor private constructor(
     }
 
     companion object {
-        private const val DEBOUNCE_MS = 5_000L
+        private const val DEBOUNCE_MS = 2_000L
     }
 }
