@@ -118,6 +118,7 @@ data class Turn(
     val toolTurns: List<ToolTurn> = emptyList(),
     val citations: List<Citation> = emptyList(),
     val imageUri: String? = null,
+    val timestamp: Long = System.currentTimeMillis(),
 )
 
 @Serializable

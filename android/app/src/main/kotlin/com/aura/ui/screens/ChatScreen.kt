@@ -88,6 +88,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.animateFloat
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -204,6 +206,18 @@ fun ChatScreen(
         }
     }
 
+    // Haptic feedback — when streaming finishes, the phone gives a
+    // short vibration so the user can feel the response arrived.
+    // Uses a counter to avoid firing on every recomposition.
+    val hapticView = androidx.compose.ui.platform.LocalView.current
+    var lastStreamingSnapshot by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(state.streaming) }
+    androidx.compose.runtime.LaunchedEffect(state.streaming) {
+        if (lastStreamingSnapshot && !state.streaming) {
+            com.aura.ui.util.Haptics.receive(hapticView)
+        }
+        lastStreamingSnapshot = state.streaming
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -272,6 +286,7 @@ fun ChatScreen(
         }
 
         ChatInputBar(
+            hapticView = hapticView,
             draft = state.draft,
             streaming = state.streaming,
             onDraftChange = viewModel::setDraft,
@@ -605,7 +620,7 @@ private fun ChatMessageList(
                 enter = fadeIn() + slideInVertically { it / 4 },
             ) {
                 Column {
-                    turn.user?.let { MessageBubble(text = it, isUser = true) }
+                    turn.user?.let { MessageBubble(text = it, isUser = true, timestamp = turn.timestamp) }
                     turn.assistant?.let {
                         val isLast = turn === state.conversation.turns.lastOrNull()
                         val isStreaming = state.streaming && isLast
@@ -615,6 +630,7 @@ private fun ChatMessageList(
                             citations = turn.citations,
                             onShowSources = onShowSources,
                             isStreaming = isStreaming,
+                            timestamp = turn.timestamp,
                         )
                     }
                     for (toolTurn in turn.toolTurns) {
@@ -675,6 +691,7 @@ private fun MessageBubble(
     citations: List<com.aura.tools.Citation> = emptyList(),
     onShowSources: () -> Unit = {},
     isStreaming: Boolean = false,
+    timestamp: Long = 0L,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary
@@ -683,6 +700,11 @@ private fun MessageBubble(
         else MaterialTheme.colorScheme.onSurfaceVariant
     val alignment = if (isUser) Alignment.End else Alignment.Start
     var copied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showFullTime by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val timeText = if (timestamp > 0) {
+        if (showFullTime) com.aura.ui.util.formatClockTime(timestamp)
+        else com.aura.ui.util.formatRelativeTime(timestamp)
+    } else ""
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalAlignment = alignment,
@@ -772,6 +794,22 @@ private fun MessageBubble(
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
                     )
                 }
+                if (timestamp > 0 && !isStreaming) {
+                    // Tap the timestamp to toggle between relative
+                    // ("5m") and full clock time ("3:42 PM").
+                    Surface(
+                        onClick = { showFullTime = !showFullTime },
+                        color = androidx.compose.ui.graphics.Color.Transparent,
+                        shape = RoundedCornerShape(6.dp),
+                    ) {
+                        Text(
+                            text = timeText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                    }
+                }
             }
         }
     }
@@ -803,27 +841,58 @@ private fun ToolCallBubble(name: String, result: String) {
 
 @Composable
 private fun TypingIndicator() {
+    // Three animated dots in a bubble — like iMessage / WhatsApp.
+    // Each dot pulses with a 200ms stagger so the eye sees a wave.
     Row(
-        modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
+            .background(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
+            )
+            .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
-        Text(
-            text = "Aura is typing",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = "●●●",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-        )
+        for (i in 0 until 3) {
+            val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "dot-$i")
+            val offset by transition.animateFloat(
+                initialValue = 0f,
+                targetValue = -6f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                    animation = androidx.compose.animation.core.tween(500),
+                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+                    initialStartOffset = androidx.compose.animation.core.StartOffset(i * 150),
+                ),
+                label = "y-$i",
+            )
+            val alpha by transition.animateFloat(
+                initialValue = 0.4f,
+                targetValue = 1f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                    animation = androidx.compose.animation.core.tween(500),
+                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+                    initialStartOffset = androidx.compose.animation.core.StartOffset(i * 150),
+                ),
+                label = "alpha-$i",
+            )
+            Box(
+                modifier = Modifier
+                    .graphicsLayer { translationY = offset }
+                    .size(7.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                    ),
+            )
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatInputBar(
+    hapticView: android.view.View,
     draft: String,
     streaming: Boolean,
     onDraftChange: (String) -> Unit,
@@ -904,7 +973,10 @@ private fun ChatInputBar(
                     )
                 }
                 IconButton(
-                    onClick = onSend,
+                    onClick = {
+                        com.aura.ui.util.Haptics.send(hapticView)
+                        onSend()
+                    },
                     enabled = draft.isNotBlank(),
                     modifier = Modifier
                         .size(44.dp)

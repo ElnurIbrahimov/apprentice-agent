@@ -390,16 +390,49 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Generate a short conversation title from the first user message.
-     * Takes the first 6 words, truncates to 60 chars, capitalizes the
-     * first letter. No LLM call — deterministic and instant.
+     * Smarter than just first-6-words:
+     * - strips conversational starters ("can you", "please", "i want to")
+     * - uses up to the first question mark
+     * - falls back to first 6 content words
+     * - truncates to 50 chars
+     * - capitalizes the first letter
+     * No LLM call — deterministic and instant.
      */
     private fun generateTitle(text: String): String {
-        val words = text.trim().split(Regex("\\s+")).take(6)
-        var title = words.joinToString(" ")
-        if (title.length > 60) {
-            title = title.take(57) + "..."
+        val raw = text.trim()
+        if (raw.isEmpty()) return "New conversation"
+
+        // Cut at the first sentence terminator if it exists and is short.
+        val firstSentence = raw.split(Regex("[.!?\\n]")).firstOrNull()?.trim().orEmpty()
+
+        // Strip conversational starters so "Can you help me plan my day" →
+        // "Plan my day" rather than "Can you help".
+        val starterPatterns = listOf(
+            "can you", "could you", "would you", "will you",
+            "please", "hey", "hi ", "hello", "yo ",
+            "i want to", "i need to", "i'd like to", "i would like to",
+            "help me", "i have a question", "i was wondering",
+        )
+        val lowered = firstSentence.lowercase()
+        var cleaned = firstSentence
+        for (starter in starterPatterns) {
+            if (lowered.startsWith(starter)) {
+                cleaned = firstSentence.substring(starter.length).trimStart(' ', ',', '.')
+                break
+            }
         }
-        if (title.isNotEmpty()) {
+
+        // Take first 6 content words (filter very short ones).
+        val words = cleaned
+            .split(Regex("\\s+"))
+            .filter { it.length > 1 || it.all(Char::isLetter) }
+            .take(6)
+        var title = words.joinToString(" ").trim().ifBlank { raw.take(50) }
+
+        if (title.length > 50) {
+            title = title.take(47) + "…"
+        }
+        if (title.isNotEmpty() && title[0].isLowerCase()) {
             title = title[0].uppercaseChar() + title.substring(1)
         }
         return title.ifBlank { "New conversation" }

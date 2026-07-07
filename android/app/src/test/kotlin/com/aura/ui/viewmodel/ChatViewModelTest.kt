@@ -349,8 +349,8 @@ class ChatViewModelTest {
         advanceUntilIdle()
 
         val title = vm.state.value.conversation.title
-        assertTrue(title.length <= 63, "title length was ${title.length}: '$title'")
-        assertTrue(title.endsWith("..."))
+        assertTrue(title.length <= 50, "title length was ${title.length}: '$title'")
+        assertTrue(title.endsWith("…"))
         assertTrue(title != "New conversation")
     }
 }
