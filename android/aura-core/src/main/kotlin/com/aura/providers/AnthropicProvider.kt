@@ -134,9 +134,30 @@ class AnthropicProvider(
         }
     }
 
-    override suspend fun listModels(): List<String> = listOf(
-        "claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"
-    )
+    override suspend fun listModels(): List<String> {
+        // Call the Anthropic /v1/models endpoint to get the live list.
+        // Falls back to a minimal hardcoded list only if the API call fails.
+        return try {
+            val req = Request.Builder()
+                .url("https://api.anthropic.com/v1/models?limit=100")
+                .addHeader("x-api-key", apiKey)
+                .addHeader("anthropic-version", "2023-06-01")
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return fallbackModels
+                val body = resp.body?.string() ?: return fallbackModels
+                val obj = Json.parseToJsonElement(body).jsonObject
+                val data = (obj["data"] as? kotlinx.serialization.json.JsonArray) ?: return fallbackModels
+                data.mapNotNull { (it as? JsonObject)?.get("id")?.let { id -> (id as? JsonPrimitive)?.content }
+                    ?.let { mid -> mid.removePrefix("claude-") }
+                }
+            }
+        } catch (e: Exception) {
+            fallbackModels
+        }
+    }
+
+    private val fallbackModels = listOf("claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5")
 
     override suspend fun cancel() {
         activeCall?.cancel()

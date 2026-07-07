@@ -49,13 +49,12 @@ class GroqProviderTest {
     }
 
     @Test
-    fun `listModels returns default Groq models`() = kotlinx.coroutines.runBlocking {
+    fun `listModels returns empty when API call fails`() = kotlinx.coroutines.runBlocking {
+        // No defaultModels anymore — listModels() calls the live API.
+        // Without a real server, it returns empty.
         val provider = createProvider(configured = true)
         val models = provider.listModels()
-        assertEquals(
-            listOf("llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"),
-            models,
-        )
+        assertEquals(emptyList(), models)
     }
 
     @Test

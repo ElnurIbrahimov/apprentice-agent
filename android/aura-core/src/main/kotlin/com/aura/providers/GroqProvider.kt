@@ -21,9 +21,4 @@ class GroqProvider(
     baseUrl = "https://api.groq.com/openai/v1",
     providerKeys = providerKeys,
     httpClient = httpClient,
-    defaultModels = listOf(
-        "llama-3.3-70b-versatile",
-        "mixtral-8x7b-32768",
-        "gemma2-9b-it",
-    ),
 )

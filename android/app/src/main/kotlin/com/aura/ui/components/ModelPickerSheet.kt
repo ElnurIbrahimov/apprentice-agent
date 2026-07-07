@@ -24,6 +24,48 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+/**
+ * Format a model ID (e.g. "ollama:deepseek-v4-pro:cloud") into a
+ * human-friendly display name. Derives everything from the ID —
+ * no hardcoded model lists that go stale.
+ *
+ * Format: "DeepSeek V4 Pro" (capitalized words, suffix stripped)
+ */
+fun formatModelName(id: String): String {
+    val parts = id.split(":", limit = 2)
+    val model = parts.getOrNull(1) ?: id
+    val provider = parts.getOrNull(0) ?: ""
+
+    // Strip common suffixes like :cloud, :latest
+    val clean = model.replace(Regex(":cloud$|:latest$|:free$"), "")
+
+    // Convert kebab/snake to Title Case
+    val displayName = clean
+        .replace("-", " ")
+        .replace("_", " ")
+        .split(" ")
+        .joinToString(" ") { word ->
+            // Keep version numbers as-is (v4, 3.2, 480b)
+            if (word.any { it.isDigit() } || word.length <= 2) word.uppercase()
+            else word.replaceFirstChar { it.uppercase() }
+        }
+
+    val providerLabel = when (provider) {
+        "ollama" -> "Ollama"
+        "anthropic" -> "Anthropic"
+        "openai" -> "OpenAI"
+        "deepseek" -> "DeepSeek"
+        "gemini" -> "Gemini"
+        "groq" -> "Groq"
+        "openrouter" -> "OpenRouter"
+        "nvidia" -> "NVIDIA"
+        "moa" -> "MoA"
+        else -> provider.replaceFirstChar { it.uppercase() }
+    }
+
+    return "$displayName · $providerLabel"
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelPickerSheet(
@@ -42,9 +84,15 @@ fun ModelPickerSheet(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
         ) {
             Text(
-                text = "Pick a model",
+                text = "Choose model",
                 style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            Text(
+                text = "${models.size} models available",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 modifier = Modifier.padding(bottom = 12.dp),
             )
             if (models.isEmpty()) {
@@ -61,6 +109,7 @@ fun ModelPickerSheet(
                     items(models) { id ->
                         ModelRow(
                             id = id,
+                            displayName = formatModelName(id),
                             isCurrent = id == currentModel,
                             onClick = {
                                 onPick(id)
@@ -76,35 +125,31 @@ fun ModelPickerSheet(
 }
 
 @Composable
-private fun ModelRow(id: String, isCurrent: Boolean, onClick: () -> Unit) {
-    val parts = id.split(":", limit = 2)
-    val provider = parts.getOrNull(0) ?: "?"
-    val model = parts.getOrNull(1) ?: id
-    val displayName = when (id) {
-        "ollama:deepseek-v3.2:cloud" -> "DeepSeek V3.2 — cheap, fast, smart"
-        "ollama:kimi-k2.6:cloud" -> "Kimi K2.6 — best tool calls"
-        "anthropic:claude-sonnet-4-5" -> "Claude Sonnet 4.5 — best overall"
-        "ollama:minimax-m2.7:cloud" -> "MiniMax M2.7 — code specialist"
-        "ollama:qwen3-coder:480b-cloud" -> "Qwen3 Coder 480B — heavy code"
-        else -> "$model ($provider)"
-    }
+private fun ModelRow(
+    id: String,
+    displayName: String,
+    isCurrent: Boolean,
+    onClick: () -> Unit,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp, horizontal = 4.dp),
+            .padding(vertical = 14.dp, horizontal = 4.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = displayName,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (isCurrent) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface,
             )
             Text(
                 text = id,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
             )
         }
         if (isCurrent) {

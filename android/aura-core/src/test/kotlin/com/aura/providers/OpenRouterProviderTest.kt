@@ -49,13 +49,13 @@ class OpenRouterProviderTest {
     }
 
     @Test
-    fun `listModels returns hardcoded OpenRouter models`() = kotlinx.coroutines.runBlocking {
-        val provider = createProvider(configured = true)
+    fun `listModels returns models from live API`() = kotlinx.coroutines.runBlocking {
+        // OpenRouter's /v1/models endpoint is public — it returns models
+        // even without an API key. This test verifies the live API works.
+        // Skip if offline.
+        val provider = createProvider(configured = false)
         val models = provider.listModels()
-        assertEquals(
-            listOf("gpt-4o", "claude-3.5-sonnet", "deepseek-v3"),
-            models,
-        )
+        assertTrue(models.isNotEmpty(), "OpenRouter should return models from /v1/models")
     }
 
     @Test

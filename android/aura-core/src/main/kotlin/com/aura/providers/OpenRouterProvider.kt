@@ -38,9 +38,4 @@ class OpenRouterProvider(
             chain.proceed(request)
         })
         .build(),
-    defaultModels = listOf(
-        "gpt-4o",
-        "claude-3.5-sonnet",
-        "deepseek-v3",
-    ),
 )
