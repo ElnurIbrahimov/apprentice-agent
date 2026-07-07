@@ -164,6 +164,38 @@ class TasksViewModel @Inject constructor(
     }
 
     /**
+     * Update an existing reminder's message and/or time. Cancels the
+     * old WorkManager job and schedules a new one with the updated
+     * values. The reminder ID stays the same — we update the Room row
+     * and replace the WorkManager work.
+     */
+    fun updateReminder(id: String, message: String, triggerAt: Long) {
+        viewModelScope.launch {
+            // Cancel the old work
+            WorkManager.getInstance(getApplication()).cancelWorkById(UUID.fromString(id))
+            // Update the Room row
+            val existing = reminderDao.get(id) ?: return@launch
+            reminderDao.insert(existing.copy(message = message, triggerAt = triggerAt))
+            // Schedule new work with the same ID
+            val delayMs = (triggerAt - System.currentTimeMillis()).coerceAtLeast(0L)
+            val notificationId = nextNotificationId.getAndIncrement()
+            val work = androidx.work.OneTimeWorkRequestBuilder<ReminderWorker>()
+                .setInitialDelay(delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .setInputData(
+                    androidx.work.Data.Builder()
+                        .putString("title", "⏰ Reminder")
+                        .putString("body", message)
+                        .putInt("notificationId", notificationId)
+                        .build()
+                )
+                .addTag("reminder")
+                .build()
+            androidx.work.WorkManager.getInstance(getApplication())
+                .enqueueUniqueWork("reminder-$id", androidx.work.ExistingWorkPolicy.REPLACE, work)
+        }
+    }
+
+    /**
      * Create a reminder from the UI (AddReminderDialog). Same pattern as
      * SetReminderTool but called directly by the user instead of the agent.
      * Schedules a [ReminderWorker] via WorkManager and persists a

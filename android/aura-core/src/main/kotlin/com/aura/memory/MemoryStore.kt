@@ -213,6 +213,22 @@ class MemoryStore @Inject constructor(
     }
 
     /**
+     * Rename a category — updates all memories in [oldCategory] to
+     * [newCategory]. Used by the Memory screen's category management.
+     */
+    suspend fun renameCategory(oldCategory: String, newCategory: String) {
+        dao.updateCategory(oldCategory, newCategory)
+    }
+
+    /**
+     * Merge [source] category into [target] — all memories in source
+     * are moved to target. Source becomes empty.
+     */
+    suspend fun mergeCategories(source: String, target: String) {
+        dao.updateCategory(source, target)
+    }
+
+    /**
      * Re-embed every memory that currently has a null embedding.
      * Returns the number of rows that were re-embedded.
      *

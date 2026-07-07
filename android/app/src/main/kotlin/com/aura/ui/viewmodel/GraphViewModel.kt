@@ -20,7 +20,23 @@ data class GraphUiState(
     val path: List<KgNode>? = null,
     val loading: Boolean = false,
     val error: String? = null,
-)
+    /**
+     * Set of node types to show. Empty = show all. When non-empty,
+     * nodes whose type is not in the set are filtered out.
+     */
+    val typeFilter: Set<com.aura.kg.NodeType> = emptySet(),
+    /** All distinct node types present in the current graph. */
+    val availableTypes: List<com.aura.kg.NodeType> = emptyList(),
+) {
+
+    /**
+     * Nodes filtered by the current type filter. If no filter is set,
+     * returns all nodes.
+     */
+    val filteredNodes: List<KgNode>
+        get() = if (typeFilter.isEmpty()) nodes
+                else nodes.filter { it.type in typeFilter }
+}
 
 @HiltViewModel
 class GraphViewModel @Inject constructor(
@@ -39,10 +55,27 @@ class GraphViewModel @Inject constructor(
             _state.update { it.copy(loading = true, error = null) }
             try {
                 val nodes = repository.recent(50)
-                _state.update { it.copy(nodes = nodes, loading = false) }
+                val types = nodes.map { it.type }.distinct().sorted()
+                _state.update { it.copy(nodes = nodes, loading = false, availableTypes = types) }
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message, loading = false) }
             }
+        }
+    }
+
+    /**
+     * Toggle a node type in the filter set. If the type is already
+     * in the filter, it's removed; if not, it's added. Empty filter
+     * = show all types.
+     */
+    fun toggleTypeFilter(type: com.aura.kg.NodeType) {
+        _state.update { state ->
+            val newFilter = if (type in state.typeFilter) {
+                state.typeFilter - type
+            } else {
+                state.typeFilter + type
+            }
+            state.copy(typeFilter = newFilter)
         }
     }
 

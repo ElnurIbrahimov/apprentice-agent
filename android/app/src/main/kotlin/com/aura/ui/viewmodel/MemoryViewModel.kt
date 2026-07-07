@@ -238,4 +238,18 @@ class MemoryViewModel @Inject constructor(
             refresh()
         }
     }
+
+    fun renameCategory(oldCategory: String, newCategory: String) {
+        viewModelScope.launch {
+            runCatching { memoryStore.renameCategory(oldCategory, newCategory) }
+            refresh()
+        }
+    }
+
+    fun mergeCategories(source: String, target: String) {
+        viewModelScope.launch {
+            runCatching { memoryStore.mergeCategories(source, target) }
+            refresh()
+        }
+    }
 }

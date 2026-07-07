@@ -50,6 +50,7 @@ internal val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
 internal val KEY_CUSTOM_IDENTITY = stringPreferencesKey("custom_identity")
 internal val KEY_SPECIALIST_OVERRIDES = stringPreferencesKey("specialist_overrides")
 internal val KEY_MORNING_BRIEF_HOUR = intPreferencesKey("morning_brief_hour")
+internal val KEY_SPECIALIST_TOOL_OVERRIDES = stringPreferencesKey("specialist_tool_overrides")
 
 @Singleton
 class UserPreferences @Inject constructor(
@@ -173,6 +174,15 @@ class UserPreferences @Inject constructor(
         prefs[KEY_MORNING_BRIEF_HOUR] ?: 7
     }
 
+    /**
+     * JSON map of specialist name → set of allowed tool names.
+     * When a specialist is selected, its toolsAllowed is replaced
+     * with this set if present. Empty map = use built-in defaults.
+     */
+    val specialistToolOverrides: Flow<String> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_SPECIALIST_TOOL_OVERRIDES] ?: "{}"
+    }
+
     suspend fun setDefaultModel(model: String) {
         context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
     }
@@ -215,6 +225,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun setSpecialistOverrides(json: String) {
         context.auraPrefs.edit { it[KEY_SPECIALIST_OVERRIDES] = json }
+    }
+
+    suspend fun setSpecialistToolOverrides(json: String) {
+        context.auraPrefs.edit { it[KEY_SPECIALIST_TOOL_OVERRIDES] = json }
     }
 
     suspend fun setMorningBriefHour(hour: Int) {

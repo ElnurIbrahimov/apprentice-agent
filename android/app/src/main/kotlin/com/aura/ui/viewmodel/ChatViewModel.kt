@@ -545,10 +545,17 @@ class ChatViewModel @Inject constructor(
                 // Apply user-defined specialist prompt overrides
                 val resolvedSpecialist = specialist?.let { s ->
                     val overridesJson = userPreferences.specialistOverrides.first()
+                    val toolOverridesJson = userPreferences.specialistToolOverrides.first()
                     try {
-                        val overrides = kotlinx.serialization.json.Json.decodeFromString<Map<String, String>>(overridesJson)
-                        val custom = overrides[s.name]
-                        if (custom.isNullOrBlank()) s else s.copy(systemPrompt = custom)
+                        val promptOverrides = kotlinx.serialization.json.Json.decodeFromString<Map<String, String>>(overridesJson)
+                        val toolOverrides = if (toolOverridesJson.isNotBlank() && toolOverridesJson != "{}") {
+                            kotlinx.serialization.json.Json.decodeFromString<Map<String, List<String>>>(toolOverridesJson)
+                                .mapValues { it.value.toSet() }
+                        } else emptyMap()
+                        val customPrompt = promptOverrides[s.name]
+                        val customTools = toolOverrides[s.name]
+                        val withPrompt = if (customPrompt.isNullOrBlank()) s else s.copy(systemPrompt = customPrompt)
+                        if (customTools != null && customTools.isNotEmpty()) withPrompt.copy(toolsAllowed = customTools) else withPrompt
                     } catch (e: Exception) { s }
                 }
                 loop.run(

@@ -106,4 +106,11 @@ interface MemoryDao {
      */
     @Query("SELECT * FROM memories WHERE embedding IS NOT NULL ORDER BY createdAt DESC")
     suspend fun allWithEmbeddings(): List<MemoryEntity>
+
+    /**
+     * Update the category of all memories currently in [oldCategory].
+     * Used by the rename and merge category actions in the Memory screen.
+     */
+    @Query("UPDATE memories SET category = :newCategory WHERE category = :oldCategory")
+    suspend fun updateCategory(oldCategory: String, newCategory: String)
 }

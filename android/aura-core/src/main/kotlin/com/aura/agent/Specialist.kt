@@ -112,5 +112,17 @@ data class Specialist(
                 if (custom.isNullOrBlank()) s
                 else s.copy(systemPrompt = custom)
             }
+
+        /**
+         * Apply user-defined tool overrides. Returns specialists with
+         * their toolsAllowed replaced if an override exists in the map.
+         * Empty map or missing key = keep the default toolsAllowed.
+         */
+        fun applyToolOverrides(overrides: Map<String, Set<String>>): List<Specialist> =
+            ALL.map { s ->
+                val customTools = overrides[s.name]
+                if (customTools == null || customTools.isEmpty()) s
+                else s.copy(toolsAllowed = customTools)
+            }
     }
 }
