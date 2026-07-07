@@ -41,6 +41,8 @@ class MemoryViewModel @Inject constructor(
     private val _state = MutableStateFlow(MemoryUiState())
     val state: StateFlow<MemoryUiState> = _state.asStateFlow()
 
+    private var searchJob: kotlinx.coroutines.Job? = null
+
     init {
         refresh()
         // Auto-refresh whenever the memory count changes (new memory stored or deleted).
@@ -62,8 +64,33 @@ class MemoryViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Debounced text search. 250ms keeps Room from being hammered
+     * on every keystroke. When the query is cleared, immediately
+     * shows the recent list. When a category filter is active, the
+     * text search is ignored (the two are mutually exclusive in v1).
+     */
     fun setQuery(q: String) {
         _state.update { it.copy(query = q) }
+        searchJob?.cancel()
+        val trimmed = q.trim()
+        if (trimmed.isEmpty()) {
+            viewModelScope.launch {
+                val results = if (_state.value.categoryFilter != null) {
+                    memoryStore.listByCategory(_state.value.categoryFilter!!, 100)
+                } else {
+                    memoryStore.recent(100)
+                }
+                _state.update { it.copy(memories = results, loading = false) }
+            }
+            return
+        }
+        searchJob = viewModelScope.launch {
+            _state.update { it.copy(loading = true) }
+            kotlinx.coroutines.delay(250)
+            val results = memoryStore.searchByText(trimmed, 50)
+            _state.update { it.copy(memories = results, loading = false) }
+        }
     }
 
     /**

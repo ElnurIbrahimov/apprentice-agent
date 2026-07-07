@@ -22,6 +22,8 @@ data class TasksUiState(
     val tasks: List<TaskEntity> = emptyList(),
     val reminders: List<ReminderEntity> = emptyList(),
     val loading: Boolean = true,
+    /** Filter: "all", "pending", "done" */
+    val statusFilter: String = "all",
 )
 
 @HiltViewModel
@@ -36,15 +38,32 @@ class TasksViewModel @Inject constructor(
     init { load() }
 
     fun load() {
-        _state.value = TasksUiState(loading = true)
+        _state.value = _state.value.copy(loading = true)
         viewModelScope.launch {
             val tasks = taskDao.all()
-            _state.value = TasksUiState(tasks = tasks, loading = false)
+            _state.update { it.copy(tasks = tasks, loading = false) }
         }
         viewModelScope.launch {
             reminderDao.observeUpcoming(System.currentTimeMillis()).collectLatest { reminders ->
                 _state.update { it.copy(reminders = reminders) }
             }
+        }
+    }
+
+    fun setStatusFilter(filter: String) {
+        _state.update { it.copy(statusFilter = filter) }
+        refreshTasks()
+    }
+
+    private fun refreshTasks() {
+        viewModelScope.launch {
+            val all = taskDao.all()
+            val filtered = when (_state.value.statusFilter) {
+                "pending" -> all.filter { it.status != "done" }
+                "done" -> all.filter { it.status == "done" }
+                else -> all
+            }
+            _state.update { it.copy(tasks = filtered) }
         }
     }
 
@@ -63,6 +82,49 @@ class TasksViewModel @Inject constructor(
             taskDao.markComplete(id, System.currentTimeMillis())
             reminderDao.deleteByTaskId(id)
             WorkManager.getInstance(getApplication()).cancelUniqueWork("task-$id")
+            refreshTasks()
+        }
+    }
+
+    /**
+     * Reopen a completed task — flip status back to "pending".
+     * The "undo" for accidental mark-done taps.
+     */
+    fun reopenTask(id: String) {
+        viewModelScope.launch {
+            val task = taskDao.get(id) ?: return@launch
+            taskDao.update(task.copy(status = "pending", completedAt = null))
+            refreshTasks()
+        }
+    }
+
+    /**
+     * Update a task's editable fields. Used by the edit dialog.
+     */
+    fun updateTask(id: String, title: String, description: String, dueAt: Long?, priority: Int, tags: String) {
+        viewModelScope.launch {
+            val task = taskDao.get(id) ?: return@launch
+            taskDao.update(task.copy(
+                title = title.trim(),
+                description = description.trim(),
+                dueAt = dueAt,
+                priority = priority.coerceIn(0, 3),
+                tags = tags,
+            ))
+            refreshTasks()
+        }
+    }
+
+    /**
+     * Delete all completed tasks. Cleans up the graveyard of done
+     * items that accumulate over weeks of use.
+     */
+    fun clearCompleted() {
+        viewModelScope.launch {
+            val done = taskDao.all().filter { it.status == "done" }
+            for (task in done) {
+                taskDao.delete(task.id)
+            }
             refreshTasks()
         }
     }
@@ -96,14 +158,7 @@ class TasksViewModel @Inject constructor(
     fun cancelReminder(id: String) {
         viewModelScope.launch {
             reminderDao.delete(id)
-            // Cancel by the work request id that the row stores.
             WorkManager.getInstance(getApplication()).cancelWorkById(UUID.fromString(id))
-        }
-    }
-
-    private fun refreshTasks() {
-        viewModelScope.launch {
-            _state.update { it.copy(tasks = taskDao.all()) }
         }
     }
 }

@@ -18,7 +18,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -66,6 +69,8 @@ import java.util.Locale
 fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
     var showAdd by remember { mutableStateOf(false) }
+    var editingTask by remember { mutableStateOf<TaskEntity?>(null) }
+    var showClearConfirm by remember { mutableStateOf(false) }
 
     Scaffold(
         floatingActionButton = {
@@ -80,13 +85,48 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                 .padding(16.dp)
                 .padding(padding),
         ) {
-            Text("Tasks", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Tasks", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                val doneCount = state.tasks.count { it.status == "done" }
+                if (doneCount > 0 && state.statusFilter != "pending") {
+                    TextButton(onClick = { showClearConfirm = true }) {
+                        Text("Clear $doneCount done", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
             Text(
                 "${state.tasks.size} task${if (state.tasks.size == 1) "" else "s"}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Status filter chips
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                AssistChip(
+                    onClick = { viewModel.setStatusFilter("all") },
+                    label = { Text("All") },
+                    colors = if (state.statusFilter == "all")
+                        AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.primary, labelColor = MaterialTheme.colorScheme.onPrimary)
+                    else AssistChipDefaults.assistChipColors(),
+                )
+                AssistChip(
+                    onClick = { viewModel.setStatusFilter("pending") },
+                    label = { Text("Pending") },
+                    colors = if (state.statusFilter == "pending")
+                        AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.primary, labelColor = MaterialTheme.colorScheme.onPrimary)
+                    else AssistChipDefaults.assistChipColors(),
+                )
+                AssistChip(
+                    onClick = { viewModel.setStatusFilter("done") },
+                    label = { Text("Done") },
+                    colors = if (state.statusFilter == "done")
+                        AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.primary, labelColor = MaterialTheme.colorScheme.onPrimary)
+                    else AssistChipDefaults.assistChipColors(),
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
 
             if (state.loading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -95,7 +135,7 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                     contentPadding = PaddingValues(vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (state.reminders.isNotEmpty()) {
+                    if (state.reminders.isNotEmpty() && state.statusFilter != "done") {
                         item { RemindersHeader() }
                         items(state.reminders, key = { "reminder-${it.id}" }) { reminder ->
                             ReminderRow(
@@ -109,7 +149,13 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                     if (state.tasks.isEmpty()) {
                         item {
                             Box(Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
-                                Text("No tasks yet", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f))
+                                Text(
+                                    if (state.statusFilter == "done") "No completed tasks"
+                                    else if (state.statusFilter == "pending") "No pending tasks"
+                                    else "No tasks yet",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                                )
                             }
                         }
                     } else {
@@ -118,6 +164,8 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                                 task = task,
                                 onDelete = { viewModel.deleteTask(task.id) },
                                 onDone = { viewModel.markDone(task.id) },
+                                onReopen = { viewModel.reopenTask(task.id) },
+                                onEdit = { editingTask = task },
                             )
                         }
                     }
@@ -132,6 +180,34 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
             onAdd = { title, description, dueAt, priority, tags ->
                 viewModel.addTask(title, description, dueAt, priority, tags)
                 showAdd = false
+            },
+        )
+    }
+
+    editingTask?.let { task ->
+        EditTaskDialog(
+            task = task,
+            onDismiss = { editingTask = null },
+            onSave = { title, description, dueAt, priority, tags ->
+                viewModel.updateTask(task.id, title, description, dueAt, priority, tags)
+                editingTask = null
+            },
+        )
+    }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text("Clear completed tasks?") },
+            text = { Text("This will permanently delete all completed tasks. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearConfirm = false
+                    viewModel.clearCompleted()
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
             },
         )
     }
@@ -192,6 +268,8 @@ private fun TaskRow(
     task: TaskEntity,
     onDelete: () -> Unit,
     onDone: () -> Unit,
+    onReopen: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     val fmt = SimpleDateFormat("MMM d, HH:mm", Locale.US)
     Surface(
@@ -204,7 +282,12 @@ private fun TaskRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(task.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    task.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    textDecoration = if (task.status == "done") androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                )
                 if (task.description.isNotBlank()) {
                     Spacer(Modifier.height(2.dp))
                     Text(
@@ -239,8 +322,17 @@ private fun TaskRow(
                     }
                 }
             }
-            if (task.status != "done") {
+            if (task.status == "done") {
+                TextButton(onClick = onReopen) { Text("Reopen") }
+            } else {
                 TextButton(onClick = onDone) { Text("Done") }
+            }
+            IconButton(onClick = onEdit) {
+                Icon(
+                    imageVector = Icons.Filled.Edit,
+                    contentDescription = "Edit",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
             }
             IconButton(onClick = onDelete) {
                 Icon(
@@ -261,12 +353,6 @@ private fun PriorityChip(priority: Int) {
         1 -> "Low"
         else -> "None"
     }
-    val tint = when (priority) {
-        3 -> MaterialTheme.colorScheme.error
-        2 -> MaterialTheme.colorScheme.tertiary
-        1 -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.outline
-    }
     InputChip(
         selected = false,
         onClick = { },
@@ -281,13 +367,59 @@ private fun AddTaskDialog(
     onDismiss: () -> Unit,
     onAdd: (title: String, description: String, dueAt: Long?, priority: Int, tags: String) -> Unit,
 ) {
-    var title by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var priority by remember { mutableIntStateOf(0) }
-    var tags by remember { mutableStateOf("") }
+    TaskEditFields(
+        title = "",
+        description = "",
+        dueAt = null,
+        priority = 0,
+        tags = "",
+        dialogTitle = "Add task",
+        confirmLabel = "Add",
+        onDismiss = onDismiss,
+        onConfirm = onAdd,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditTaskDialog(
+    task: TaskEntity,
+    onDismiss: () -> Unit,
+    onSave: (title: String, description: String, dueAt: Long?, priority: Int, tags: String) -> Unit,
+) {
+    TaskEditFields(
+        title = task.title,
+        description = task.description,
+        dueAt = task.dueAt,
+        priority = task.priority,
+        tags = task.tags,
+        dialogTitle = "Edit task",
+        confirmLabel = "Save",
+        onDismiss = onDismiss,
+        onConfirm = onSave,
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TaskEditFields(
+    title: String,
+    description: String,
+    dueAt: Long?,
+    priority: Int,
+    tags: String,
+    dialogTitle: String,
+    confirmLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (title: String, description: String, dueAt: Long?, priority: Int, tags: String) -> Unit,
+) {
+    var titleState by remember { mutableStateOf(title) }
+    var descriptionState by remember { mutableStateOf(description) }
+    var priorityState by remember { mutableIntStateOf(priority) }
+    var tagsState by remember { mutableStateOf(tags) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
-    var selectedDateMs by remember { mutableStateOf<Long?>(null) }
+    var selectedDateMs by remember { mutableStateOf(dueAt) }
 
     val calendar = remember { Calendar.getInstance() }
     if (selectedDateMs != null) calendar.timeInMillis = selectedDateMs!!
@@ -299,7 +431,7 @@ private fun AddTaskDialog(
         c.set(Calendar.MINUTE, calendar.get(Calendar.MINUTE))
         c.set(Calendar.SECOND, 0)
         c.set(Calendar.MILLISECOND, 0)
-        return c.timeInMillis.takeIf { it > System.currentTimeMillis() }
+        return c.timeInMillis
     }
 
     val dateText = selectedDateMs?.let { ms ->
@@ -308,20 +440,20 @@ private fun AddTaskDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add task") },
+        title = { Text(dialogTitle) },
         text = {
             Column {
                 OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
+                    value = titleState,
+                    onValueChange = { titleState = it },
                     label = { Text("Title") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
+                    value = descriptionState,
+                    onValueChange = { descriptionState = it },
                     label = { Text("Description") },
                     minLines = 2,
                     maxLines = 4,
@@ -337,15 +469,15 @@ private fun AddTaskDialog(
                 Spacer(Modifier.height(8.dp))
                 Text("Priority", style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PriorityOption(label = "None", selected = priority == 0) { priority = 0 }
-                    PriorityOption(label = "Low", selected = priority == 1) { priority = 1 }
-                    PriorityOption(label = "Medium", selected = priority == 2) { priority = 2 }
-                    PriorityOption(label = "High", selected = priority == 3) { priority = 3 }
+                    PriorityOption(label = "None", selected = priorityState == 0) { priorityState = 0 }
+                    PriorityOption(label = "Low", selected = priorityState == 1) { priorityState = 1 }
+                    PriorityOption(label = "Medium", selected = priorityState == 2) { priorityState = 2 }
+                    PriorityOption(label = "High", selected = priorityState == 3) { priorityState = 3 }
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = tags,
-                    onValueChange = { tags = it },
+                    value = tagsState,
+                    onValueChange = { tagsState = it },
                     label = { Text("Tags (comma separated)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -355,10 +487,10 @@ private fun AddTaskDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    onAdd(title, description, dueAtMs(), priority, tags)
+                    onConfirm(titleState, descriptionState, dueAtMs(), priorityState, tagsState)
                 },
-                enabled = title.isNotBlank(),
-            ) { Text("Add") }
+                enabled = titleState.isNotBlank(),
+            ) { Text(confirmLabel) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
