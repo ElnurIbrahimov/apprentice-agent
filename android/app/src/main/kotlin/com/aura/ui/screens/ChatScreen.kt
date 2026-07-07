@@ -75,6 +75,7 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import androidx.compose.ui.draw.clip
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -687,42 +688,87 @@ private fun ChatInputBar(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     Surface(
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
+        tonalElevation = 3.dp,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Bottom,
         ) {
-            IconButton(onClick = { onAttachmentSheetChange(true) }) {
-                Icon(Icons.Filled.AddAPhoto, contentDescription = "Attach")
+            IconButton(
+                onClick = { onAttachmentSheetChange(true) },
+                modifier = Modifier.size(44.dp),
+            ) {
+                Icon(
+                    Icons.Filled.AddAPhoto,
+                    contentDescription = "Attach",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             OutlinedTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                placeholder = { Text("Ask Aura…") },
-                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                placeholder = { Text("Ask Aura…", style = MaterialTheme.typography.bodyLarge) },
+                modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
                 maxLines = 5,
+                shape = RoundedCornerShape(24.dp),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                     imeAction = androidx.compose.ui.text.input.ImeAction.Send
                 ),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { onSend() }),
+                colors = androidx.compose.material3.TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                ),
+                textStyle = MaterialTheme.typography.bodyLarge,
             )
             if (streaming) {
-                IconButton(onClick = onCancel) {
-                    Icon(Icons.Filled.Stop, contentDescription = "Stop", tint = MaterialTheme.colorScheme.error)
+                IconButton(
+                    onClick = onCancel,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(MaterialTheme.colorScheme.error),
+                ) {
+                    Icon(
+                        Icons.Filled.Stop,
+                        contentDescription = "Stop",
+                        tint = MaterialTheme.colorScheme.onError,
+                    )
                 }
             } else {
-                IconButton(onClick = onMicClick) {
-                    Icon(Icons.Filled.Mic, contentDescription = "Voice input", tint = MaterialTheme.colorScheme.primary)
+                IconButton(
+                    onClick = onMicClick,
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Mic,
+                        contentDescription = "Voice input",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 IconButton(
                     onClick = onSend,
                     enabled = draft.isNotBlank(),
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(
+                            if (draft.isNotBlank()) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        ),
                 ) {
-                    Icon(Icons.Filled.Send, contentDescription = "Send", tint = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        Icons.Filled.Send,
+                        contentDescription = "Send",
+                        tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.onPrimary
+                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    )
                 }
             }
         }

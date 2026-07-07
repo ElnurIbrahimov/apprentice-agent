@@ -16,8 +16,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.TaskAlt
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,19 +62,32 @@ fun HomeScreen(
         else -> "Working late"
     }
     val nameSuffix = state.userName?.let { ", $it" } ?: ""
-    val dateStr = SimpleDateFormat("EEE, MMM d", Locale.US).format(Date())
+    val dateStr = SimpleDateFormat("EEEE, MMMM d", Locale.US).format(Date())
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(20.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // Proactive event card (if present) + "see all" link with
-        // unread count. The card renders the latest event; the link
-        // surfaces the total count and navigates to the history
-        // screen.
+        // ── Hero header: greeting + date ──────────────────────────────────
+        Column(modifier = Modifier.padding(top = 8.dp)) {
+            Text(
+                text = "$greeting$nameSuffix",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = dateStr,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+            )
+        }
+
+        // ── Proactive event card ──────────────────────────────────────────
         if (state.proactiveEvent != null || state.proactiveUnreadCount > 0) {
             state.proactiveEvent?.let { event ->
                 val onTap = when (event) {
@@ -86,9 +103,6 @@ fun HomeScreen(
                     onTap = onTap,
                 )
             }
-            // "📬 N today · see all →" affordance — visible whenever
-            // there is at least 1 unread event, even if the latest
-            // event card has auto-dismissed.
             if (state.proactiveUnreadCount > 0) {
                 ProactiveUnreadLink(
                     count = state.proactiveUnreadCount,
@@ -100,42 +114,106 @@ fun HomeScreen(
             }
         }
 
-        // Greeting
-        Text(
-            text = "$greeting$nameSuffix",
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Text(
-            text = dateStr,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-        )
-
-        // Pending tasks
-        if (state.pendingTasks.isNotEmpty()) {
-            BriefCard(title = "📋 Open tasks", lines = state.pendingTasks)
+        // ── Quick action: jump into chat ──────────────────────────────────
+        Surface(
+            color = MaterialTheme.colorScheme.primary,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenChat() },
+        ) {
+            Row(
+                modifier = Modifier.padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Send,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .padding(8.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Talk to Aura",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Text(
+                        text = "Ask anything, set a reminder, or check in",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
+                    )
+                }
+            }
         }
 
-        // Recent memories
-        if (state.recentMemories.isNotEmpty()) {
-            BriefCard(
-                title = "🧠 What I remember",
-                lines = state.recentMemories.map { "· ${it.content}" },
+        // ── Quick action grid: memory / tasks / calendar ──────────────────
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            QuickActionCard(
+                icon = Icons.Filled.Psychology,
+                label = "Memory",
+                count = state.recentMemories.size,
+                onClick = onOpenMemory,
+                modifier = Modifier.weight(1f),
+            )
+            QuickActionCard(
+                icon = Icons.Filled.TaskAlt,
+                label = "Tasks",
+                count = state.pendingTasks.size,
+                onClick = onOpenTasks,
+                modifier = Modifier.weight(1f),
+            )
+            QuickActionCard(
+                icon = Icons.Filled.CalendarMonth,
+                label = "Calendar",
+                count = state.today.size,
+                onClick = onOpenCalendar,
+                modifier = Modifier.weight(1f),
             )
         }
 
-        // Today's calendar
-        if (state.today.isNotEmpty()) {
-            BriefCard(title = "📅 Today", lines = state.today)
+        // ── Detail cards ──────────────────────────────────────────────────
+        if (state.pendingTasks.isNotEmpty()) {
+            BriefCard(
+                title = "Open tasks",
+                lines = state.pendingTasks,
+                onClick = onOpenTasks,
+            )
         }
 
-        // Empty state
+        if (state.recentMemories.isNotEmpty()) {
+            BriefCard(
+                title = "What I remember",
+                lines = state.recentMemories.map { "· ${it.content}" },
+                onClick = onOpenMemory,
+            )
+        }
+
+        if (state.today.isNotEmpty()) {
+            BriefCard(
+                title = "Today",
+                lines = state.today,
+                onClick = onOpenCalendar,
+            )
+        }
+
+        // ── Empty state ───────────────────────────────────────────────────
         if (state.pendingTasks.isEmpty() && state.recentMemories.isEmpty() && state.today.isEmpty() && !state.loading) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
@@ -155,31 +233,56 @@ fun HomeScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-        HorizontalDivider()
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
 
-        // CTA
-        Button(
-            onClick = onOpenChat,
-            modifier = Modifier.fillMaxWidth(),
+@Composable
+private fun QuickActionCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    count: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.clickable { onClick() },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp, horizontal = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Open chat")
-        }
-        if (state.pendingTasks.isNotEmpty()) {
-            OutlinedButton(
-                onClick = onOpenTasks,
-                modifier = Modifier.fillMaxWidth(),
+            Surface(
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(12.dp),
             ) {
-                Text("Open ${state.pendingTasks.size} task${if (state.pendingTasks.size == 1) "" else "s"}")
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .padding(6.dp),
+                )
             }
-        }
-        if (state.recentMemories.isNotEmpty()) {
-            OutlinedButton(
-                onClick = onOpenMemory,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Go to memories")
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (count > 0) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "$count",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
             }
         }
     }
@@ -191,7 +294,6 @@ private fun ProactiveEventCard(
     onDismiss: () -> Unit,
     onTap: () -> Unit = {},
 ) {
-    // Auto-dismiss after 30 seconds
     LaunchedEffect(event) {
         kotlinx.coroutines.delay(30_000L)
         onDismiss()
@@ -201,17 +303,13 @@ private fun ProactiveEventCard(
         is ProactiveEventBus.Event.MorningBriefReady -> {
             Triple("☀️", "Morning brief", event.body)
         }
-        // The structured event fires alongside MorningBriefReady.
-        // Render the deterministic summary from BriefContext so the
-        // Home card shows what actually changed today instead of a
-        // generic placeholder.
         is ProactiveEventBus.Event.MorningBriefStructured -> {
-            Triple("\u2600\uFE0F", "Morning brief", event.context.toSummary())
+            Triple("☀️", "Morning brief", event.context.toSummary())
         }
         is ProactiveEventBus.Event.CalendarEventSoon -> {
             val minutes = event.minutesUntil
             val label = if (minutes < 60) "in $minutes min" else "in ${minutes / 60}h ${minutes % 60}m"
-            Triple("📅", "Upcoming event: ${event.title}", label)
+            Triple("📅", "Upcoming: ${event.title}", label)
         }
         is ProactiveEventBus.Event.LocationArrived -> {
             Triple("📍", "Arrived at ${event.placeName}", "I'm at ${event.placeName}")
@@ -223,19 +321,19 @@ private fun ProactiveEventCard(
 
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onTap() },
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.Top,
         ) {
             Text(
                 text = icon,
                 style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(32.dp),
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -254,7 +352,7 @@ private fun ProactiveEventCard(
             }
             IconButton(
                 onClick = onDismiss,
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(28.dp),
             ) {
                 Icon(
                     imageVector = Icons.Default.Close,
@@ -268,16 +366,18 @@ private fun ProactiveEventCard(
 }
 
 @Composable
-private fun BriefCard(title: String, lines: List<String>) {
+private fun BriefCard(title: String, lines: List<String>, onClick: () -> Unit = {}) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -294,32 +394,33 @@ private fun BriefCard(title: String, lines: List<String>) {
     }
 }
 
-/**
- * "📬 N today · see all →" affordance for the proactive history
- * screen. Rendered on Home whenever the user has at least one
- * unread proactive event — independent of whether the latest-event
- * card is currently displayed (it auto-dismisses after 30s).
- *
- * Tapping the row marks the events as seen, clears the badge, and
- * navigates to the history screen via the provided callback.
- */
 @Composable
 private fun ProactiveUnreadLink(count: Int, onClick: () -> Unit) {
     val label = if (count == 1) "📬 1 today" else "📬 $count today"
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp),
+            .clickable { onClick() }
+            .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Icon(
+            imageVector = Icons.Filled.NotificationsActive,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
         )
         Spacer(modifier = Modifier.weight(1f))
-        TextButton(onClick = onClick) {
-            Text("see all →")
-        }
+        Text(
+            text = "see all →",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
     }
 }
