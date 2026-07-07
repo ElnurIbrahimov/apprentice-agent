@@ -1,7 +1,13 @@
 package com.aura.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,30 +17,33 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Psychology
-import androidx.compose.material.icons.filled.TaskAlt
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.TaskAlt
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -45,10 +54,31 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Example prompts shown on Home when the user has no context yet.
+ * These are the first impressions of Aura — they should feel
+ * inviting, capable, and personal. Tapping a chip starts a chat
+ * with that prompt pre-filled.
+ */
+private val examplePrompts = listOf(
+    ExamplePrompt("Plan my day", "Help me plan my day based on what I have going on", Icons.Filled.WbSunny),
+    ExamplePrompt("Write a message", "Draft a message to a friend I haven't talked to in a while", Icons.Filled.AutoAwesome),
+    ExamplePrompt("Set a reminder", "Remind me to take a break in 30 minutes", Icons.Filled.TaskAlt),
+    ExamplePrompt("Brainstorm", "Help me brainstorm names for my new project", Icons.Filled.Lightbulb),
+    ExamplePrompt("Summarize", "Read my last conversation and give me the key points", Icons.Filled.Psychology),
+    ExamplePrompt("Today's plan", "What's on my calendar today?", Icons.Filled.CalendarMonth),
+)
+
+private data class ExamplePrompt(
+    val label: String,
+    val prompt: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+)
+
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
-    onOpenChat: () -> Unit = {},
+    onOpenChat: (String) -> Unit = {},
     onOpenProactive: () -> Unit = {},
     onOpenMemory: () -> Unit = {},
     onOpenTasks: () -> Unit = {},
@@ -64,6 +94,22 @@ fun HomeScreen(
     val nameSuffix = state.userName?.let { ", $it" } ?: ""
     val dateStr = SimpleDateFormat("EEEE, MMMM d", Locale.US).format(Date())
 
+    // Sub-status line. This is where Aura gets its voice — instead of
+    // a generic "what's up", it tells the user what it knows about right
+    // now. Empty state is the only time it has to introduce itself.
+    val subStatus = when {
+        state.pendingTasks.isNotEmpty() && state.today.isNotEmpty() ->
+            "You have ${state.pendingTasks.size} open task${if (state.pendingTasks.size == 1) "" else "s"} and ${state.today.size} on the calendar today."
+        state.pendingTasks.isNotEmpty() ->
+            "You have ${state.pendingTasks.size} open task${if (state.pendingTasks.size == 1) "" else "s"} to clear."
+        state.today.isNotEmpty() ->
+            "Your day is starting to take shape — ${state.today.size} on the calendar."
+        state.recentMemories.isNotEmpty() ->
+            "I've been paying attention. I remember ${state.recentMemories.size} thing${if (state.recentMemories.size == 1) "" else "s"} about you."
+        else ->
+            "I'm fresh. What do you want to do first?"
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -71,30 +117,48 @@ fun HomeScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // ── Hero header: greeting + date ──────────────────────────────────
-        Column(modifier = Modifier.padding(top = 8.dp)) {
+        // ── Hero: greeting + persona line + date ─────────────────────────
+        Column(
+            modifier = Modifier.padding(top = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Text(
                 text = "$greeting$nameSuffix",
-                style = MaterialTheme.typography.headlineLarge,
+                style = MaterialTheme.typography.displayMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground,
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = subStatus,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+            )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = dateStr,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
             )
         }
 
-        // ── Proactive event card ──────────────────────────────────────────
-        if (state.proactiveEvent != null || state.proactiveUnreadCount > 0) {
+        // ── Proactive event card (if any) ────────────────────────────────
+        AnimatedVisibility(
+            visible = state.proactiveEvent != null,
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = fadeOut(),
+        ) {
             state.proactiveEvent?.let { event ->
                 val onTap = when (event) {
                     is ProactiveEventBus.Event.MorningBriefReady,
-                    is ProactiveEventBus.Event.MorningBriefStructured -> onOpenChat
-                    is ProactiveEventBus.Event.CalendarEventSoon -> onOpenCalendar
-                    is ProactiveEventBus.Event.MemoryDecayWarning -> onOpenMemory
+                    is ProactiveEventBus.Event.MorningBriefStructured -> {
+                        { onOpenChat("") }
+                    }
+                    is ProactiveEventBus.Event.CalendarEventSoon -> {
+                        { onOpenCalendar() }
+                    }
+                    is ProactiveEventBus.Event.MemoryDecayWarning -> {
+                        { onOpenMemory() }
+                    }
                     is ProactiveEventBus.Event.LocationArrived -> { {} }
                 }
                 ProactiveEventCard(
@@ -103,60 +167,65 @@ fun HomeScreen(
                     onTap = onTap,
                 )
             }
-            if (state.proactiveUnreadCount > 0) {
-                ProactiveUnreadLink(
-                    count = state.proactiveUnreadCount,
-                    onClick = {
-                        viewModel.onProactiveHistoryOpened()
-                        onOpenProactive()
-                    },
-                )
-            }
+        }
+        if (state.proactiveUnreadCount > 0) {
+            ProactiveUnreadLink(
+                count = state.proactiveUnreadCount,
+                onClick = {
+                    viewModel.onProactiveHistoryOpened()
+                    onOpenProactive()
+                },
+            )
         }
 
-        // ── Quick action: jump into chat ──────────────────────────────────
-        Surface(
-            color = MaterialTheme.colorScheme.primary,
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onOpenChat() },
-        ) {
-            Row(
-                modifier = Modifier.padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        // ── Quick action: jump into chat (or show examples) ─────────────
+        if (state.recentMemories.isEmpty() && state.today.isEmpty() && state.pendingTasks.isEmpty()) {
+            // Empty state — show example prompts instead of just data
+            ExamplePromptsGrid(onPromptClick = { onOpenChat(it) })
+        } else {
+            Surface(
+                color = MaterialTheme.colorScheme.primary,
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenChat("") },
             ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f),
-                    shape = RoundedCornerShape(14.dp),
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Send,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .padding(8.dp),
-                    )
-                }
-                Spacer(modifier = Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Talk to Aura",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                    Text(
-                        text = "Ask anything, set a reminder, or check in",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
-                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Send,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .padding(8.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Talk to Aura",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        Text(
+                            text = "Ask anything, set a reminder, or just check in",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
+                        )
+                    }
                 }
             }
         }
 
-        // ── Quick action grid: memory / tasks / calendar ──────────────────
+        // ── Quick action grid: memory / tasks / calendar ─────────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -184,7 +253,7 @@ fun HomeScreen(
             )
         }
 
-        // ── Detail cards ──────────────────────────────────────────────────
+        // ── Detail cards ─────────────────────────────────────────────────
         if (state.pendingTasks.isNotEmpty()) {
             BriefCard(
                 title = "Open tasks",
@@ -192,7 +261,6 @@ fun HomeScreen(
                 onClick = onOpenTasks,
             )
         }
-
         if (state.recentMemories.isNotEmpty()) {
             BriefCard(
                 title = "What I remember",
@@ -200,7 +268,6 @@ fun HomeScreen(
                 onClick = onOpenMemory,
             )
         }
-
         if (state.today.isNotEmpty()) {
             BriefCard(
                 title = "Today",
@@ -209,31 +276,79 @@ fun HomeScreen(
             )
         }
 
-        // ── Empty state ───────────────────────────────────────────────────
-        if (state.pendingTasks.isEmpty() && state.recentMemories.isEmpty() && state.today.isEmpty() && !state.loading) {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "Nothing scheduled, nothing remembered yet.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Chat with Aura to start building memory. Tell it things like \"my name is Elnur\" or \"I prefer dark mode\".",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    )
+        Spacer(modifier = Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun ExamplePromptsGrid(onPromptClick: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Try one of these",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+        )
+        // 2-column grid of prompt chips. Each chip is a small action
+        // card — feels like suggestion, not a list of options.
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            examplePrompts.chunked(2).forEach { row ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    row.forEach { prompt ->
+                        ExamplePromptChip(
+                            prompt = prompt,
+                            onClick = { onPromptClick(prompt.prompt) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
                 }
             }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(16.dp))
+@Composable
+private fun ExamplePromptChip(
+    prompt: ExamplePrompt,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(16.dp),
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .clickable { onClick() },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = prompt.icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = prompt.label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = prompt.prompt,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                maxLines = 2,
+            )
+        }
     }
 }
 
@@ -258,7 +373,7 @@ private fun QuickActionCard(
         ) {
             Surface(
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(12.dp),
+                shape = CircleShape,
             ) {
                 Icon(
                     imageVector = icon,
@@ -266,7 +381,7 @@ private fun QuickActionCard(
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .size(36.dp)
-                        .padding(6.dp),
+                        .padding(8.dp),
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -277,7 +392,6 @@ private fun QuickActionCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (count > 0) {
-                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "$count",
                     style = MaterialTheme.typography.labelSmall,

@@ -23,6 +23,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.text.Regex
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.shape.CircleShape
 
 /**
  * Lightweight markdown renderer. Parses the 80% case:
@@ -173,26 +179,47 @@ private fun splitMarkdownBlocks(text: String): List<MarkdownBlock> {
 
 @Composable
 private fun CodeBlock(language: String, code: String) {
-    val codeBg = MaterialTheme.colorScheme.surfaceVariant
+    // Premium code block: dark surface regardless of theme, mono
+    // font, subtle border. Mirrors the look of a real IDE.
+    val codeBg = MaterialTheme.colorScheme.surface
+    val codeFg = MaterialTheme.colorScheme.onSurface
+    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(codeBg, RoundedCornerShape(8.dp))
-            .padding(12.dp),
+            .background(codeBg, RoundedCornerShape(12.dp))
+            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
+            .padding(14.dp),
     ) {
         Column {
             if (language.isNotBlank()) {
-                Text(
-                    text = language,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(bottom = 4.dp),
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                MaterialTheme.colorScheme.primary,
+                                androidx.compose.foundation.shape.CircleShape,
+                            ),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = language,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
             Text(
                 text = code,
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                ),
+                color = codeFg,
                 overflow = TextOverflow.Visible,
             )
         }

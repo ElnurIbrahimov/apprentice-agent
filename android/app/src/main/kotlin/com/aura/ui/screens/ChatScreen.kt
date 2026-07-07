@@ -76,6 +76,10 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -88,6 +92,7 @@ fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel(),
     resumeConversationId: String? = null,
     morningBriefSummary: String? = null,
+    initialDraft: String? = null,
     onNavigateHistory: () -> Unit = {},
 ) {
     LaunchedEffect(resumeConversationId) {
@@ -95,6 +100,9 @@ fun ChatScreen(
     }
     LaunchedEffect(morningBriefSummary) {
         if (!morningBriefSummary.isNullOrBlank()) viewModel.onUserMessage(morningBriefSummary)
+    }
+    LaunchedEffect(initialDraft) {
+        if (!initialDraft.isNullOrBlank()) viewModel.setDraft(initialDraft)
     }
 
     val state by viewModel.state.collectAsState()
@@ -508,19 +516,43 @@ private fun ChatMessageList(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        items(state.conversation.turns) { turn ->
-            turn.user?.let { MessageBubble(text = it, isUser = true) }
-            turn.assistant?.let {
-                MessageBubble(
-                    text = it,
-                    isUser = false,
-                    citations = turn.citations,
-                    onShowSources = onShowSources,
-                )
+        itemsIndexed(state.conversation.turns) { index, turn ->
+            // Subtle entry animation — each new turn fades + slides in.
+            // We track "has this turn been shown" by remembering the
+            // index it first appeared at. The first 4 turns appear
+            // immediately; subsequent turns animate in.
+            val alreadyShown = remember(index, state.conversation.turns.size) {
+                index < state.conversation.turns.size - 1
             }
-            for (toolTurn in turn.toolTurns) {
-                if (toolTurn.result.isNotEmpty()) {
-                    ToolCallBubble(name = toolTurn.name, result = toolTurn.result)
+            val visible = remember { mutableStateOf(alreadyShown) }
+            LaunchedEffect(turn, state.streaming) {
+                if (!visible.value) {
+                    kotlinx.coroutines.delay(20L)
+                    visible.value = true
+                }
+            }
+            AnimatedVisibility(
+                visible = visible.value,
+                enter = fadeIn() + slideInVertically { it / 4 },
+            ) {
+                Column {
+                    turn.user?.let { MessageBubble(text = it, isUser = true) }
+                    turn.assistant?.let {
+                        val isLast = turn === state.conversation.turns.lastOrNull()
+                        val isStreaming = state.streaming && isLast
+                        MessageBubble(
+                            text = it,
+                            isUser = false,
+                            citations = turn.citations,
+                            onShowSources = onShowSources,
+                            isStreaming = isStreaming,
+                        )
+                    }
+                    for (toolTurn in turn.toolTurns) {
+                        if (toolTurn.result.isNotEmpty()) {
+                            ToolCallBubble(name = toolTurn.name, result = toolTurn.result)
+                        }
+                    }
                 }
             }
         }
@@ -573,6 +605,7 @@ private fun MessageBubble(
     isUser: Boolean,
     citations: List<com.aura.tools.Citation> = emptyList(),
     onShowSources: () -> Unit = {},
+    isStreaming: Boolean = false,
 ) {
     val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.surfaceVariant
@@ -601,8 +634,9 @@ private fun MessageBubble(
                         style = MaterialTheme.typography.bodyLarge,
                     )
                 } else {
-                    MarkdownText(
+                    com.aura.ui.components.StreamingText(
                         text = text.ifBlank { "…" },
+                        isStreaming = isStreaming,
                         style = MaterialTheme.typography.bodyLarge.copy(color = textColor),
                     )
                 }

@@ -105,8 +105,15 @@ fun NavGraph(
         ) {
             composable(TopLevelRoute.Home.route) {
                 HomeScreen(
-                    onOpenChat = {
-                        navController.navigate(TopLevelRoute.Chat.route) {
+                    onOpenChat = { prefill ->
+                        // Pre-fill the chat draft via a query param.
+                        // Empty string means "just open chat" — no prefill.
+                        val route = if (prefill.isNotBlank()) {
+                            "chat?draft=${android.net.Uri.encode(prefill)}"
+                        } else {
+                            TopLevelRoute.Chat.route
+                        }
+                        navController.navigate(route) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
@@ -130,14 +137,19 @@ fun NavGraph(
                 )
             }
             composable(
-                route = "chat?convId={convId}",
-                arguments = listOf(navArgument("convId") { type = NavType.StringType; nullable = true; defaultValue = null }),
+                route = "chat?convId={convId}&draft={draft}",
+                arguments = listOf(
+                    navArgument("convId") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("draft") { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
             ) {
                 val convId = it.arguments?.getString("convId")
                 val summary = it.arguments?.getString("morningBriefSummary")
+                val draft = it.arguments?.getString("draft")
                 ChatScreen(
                     resumeConversationId = convId,
                     morningBriefSummary = summary,
+                    initialDraft = draft,
                     onNavigateHistory = { navController.navigate("history") },
                 )
             }
