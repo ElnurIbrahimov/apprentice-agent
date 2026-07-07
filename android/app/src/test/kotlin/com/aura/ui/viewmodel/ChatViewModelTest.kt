@@ -15,6 +15,7 @@ import com.aura.kg.KnowledgeGraphRepository
 import com.aura.memory.MemoryStore
 import com.aura.providers.ProviderRegistry
 import com.aura.voice.TextToSpeech
+import com.aura.core.error.CrashLogger
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -54,6 +55,7 @@ class ChatViewModelTest {
     private lateinit var memoryStore: MemoryStore
     private lateinit var conversationStore: ConversationStore
     private lateinit var knowledgeGraphRepository: KnowledgeGraphRepository
+    private lateinit var crashLogger: CrashLogger
 
     @Before
     fun setUp() {
@@ -69,6 +71,7 @@ class ChatViewModelTest {
         memoryStore = mockk(relaxed = true)
         conversationStore = mockk(relaxed = true)
         knowledgeGraphRepository = mockk(relaxed = true)
+        crashLogger = mockk(relaxed = true)
 
         every { userPreferences.defaultModel } returns MutableStateFlow("ollama:deepseek-v4-pro:cloud")
         every { providerRegistry.all() } returns emptyList()
@@ -95,6 +98,7 @@ class ChatViewModelTest {
         memoryStore = memoryStore,
         conversationStore = conversationStore,
         knowledgeGraphRepository = knowledgeGraphRepository,
+        crashLogger = crashLogger,
     )
 
     @Test

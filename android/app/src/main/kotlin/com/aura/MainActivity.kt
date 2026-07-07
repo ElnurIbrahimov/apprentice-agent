@@ -2,6 +2,7 @@ package com.aura
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -79,6 +80,24 @@ class MainActivity : FragmentActivity() {
 
     private var openChatOnLaunch: Boolean = false
     private var openMemoryOnLaunch: Boolean = false
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Enter PiP when the user leaves the app while chat is active.
+        // The user can keep reading the streaming response while using
+        // another app. minSdk 26 supports PiP natively.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                enterPictureInPictureMode(
+                    android.app.PictureInPictureParams.Builder()
+                        .setAspectRatio(android.util.Rational(16, 9))
+                        .build()
+                )
+            } catch (_: Exception) {
+                // Some devices don't support PiP — silently skip.
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(

@@ -59,6 +59,38 @@ class ConversationStore @Inject constructor(
 
     suspend fun deleteAll() = dao.deleteAll()
 
+    /**
+     * Fork a conversation from a specific turn index. Creates a new
+     * conversation with a new ID, copying turns 0..fromTurnIndex
+     * (inclusive). The original is untouched. The fork's title is
+     * "{original title} (fork)" and it inherits the system prompt +
+     * model. Used by the "Fork from here" action in ChatScreen.
+     */
+    suspend fun fork(id: String, fromTurnIndex: Int): String? {
+        val original = dao.getById(id) ?: return null
+        val metadata = runCatching {
+            convJson.decodeFromString<Map<String, String>>(original.metadataJson)
+        }.getOrElse { emptyMap() }
+        val allTurns = runCatching {
+            convJson.decodeFromString<List<Turn>>(original.turnsJson)
+        }.getOrElse { emptyList() }
+        if (fromTurnIndex !in allTurns.indices) return null
+        val forkedTurns = allTurns.take(fromTurnIndex + 1)
+        val forkId = java.util.UUID.randomUUID().toString()
+        val forkTitle = "${original.title} (fork)"
+        dao.insert(ConversationEntity(
+            id = forkId,
+            title = forkTitle,
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis(),
+            systemPrompt = original.systemPrompt,
+            model = original.model,
+            metadataJson = convJson.encodeToString(metadata),
+            turnsJson = convJson.encodeToString(forkedTurns),
+        ))
+        return forkId
+    }
+
     private fun entityToConversation(e: ConversationEntity): Conversation {
         // runCatching here is a guard against a corrupted row. The
         // entity columns are typed, but metadataJson and turnsJson are

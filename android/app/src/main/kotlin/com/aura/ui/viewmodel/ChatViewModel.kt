@@ -119,6 +119,7 @@ class ChatViewModel @Inject constructor(
     private val memoryStore: com.aura.memory.MemoryStore,
     private val conversationStore: ConversationStore,
     private val knowledgeGraphRepository: KnowledgeGraphRepository,
+    private val crashLogger: com.aura.core.error.CrashLogger,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -305,6 +306,23 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
+     * Fork the current conversation from a specific turn index.
+     * Creates a new conversation with turns up to [fromTurnIndex],
+     * loads it, and saves. The original conversation is untouched.
+     */
+    fun forkConversation(fromTurnIndex: Int) {
+        val convId = _state.value.conversation.id
+        viewModelScope.launch {
+            val forkId = conversationStore.fork(convId, fromTurnIndex)
+            if (forkId != null) {
+                conversationStore.load(forkId)?.let { conv ->
+                    _state.update { it.copy(conversation = conv) }
+                }
+            }
+        }
+    }
+
+    /**
      * Start a fresh conversation. Clears the current conversation,
      * resets the draft, and creates a new empty one with the default
      * system prompt. The old conversation is NOT deleted — it stays
@@ -400,6 +418,11 @@ class ChatViewModel @Inject constructor(
 
     private fun setErrorWithAutoDismiss(error: String, retryable: Boolean = false, typed: AuraError? = null) {
         _state.update { it.copy(error = error, errorRetryable = retryable, errorTyped = typed) }
+        // Persist the error so it survives the 5-second auto-dismiss.
+        crashLogger.log(
+            code = typed?.code ?: "error",
+            message = error,
+        )
         // Auto-dismiss after 5 seconds
         viewModelScope.launch {
             kotlinx.coroutines.delay(5_000L)

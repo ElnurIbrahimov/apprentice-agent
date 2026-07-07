@@ -11,6 +11,7 @@ import com.aura.data.UserPreferences
 import com.aura.kg.KnowledgeGraphRepository
 import com.aura.providers.ProviderRegistry
 import com.aura.voice.TextToSpeech
+import com.aura.core.error.CrashLogger
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,7 @@ class ChatViewModelLastAssistantTest {
     private val textToSpeech = mockk<TextToSpeech>(relaxed = true)
     private val memoryStore = mockk<com.aura.memory.MemoryStore>(relaxed = true)
     private val kgRepo = mockk<KnowledgeGraphRepository>(relaxed = true)
+    private val crashLogger = mockk<CrashLogger>(relaxed = true)
 
     @Before
     fun setUp() { Dispatchers.setMain(UnconfinedTestDispatcher()) }
@@ -58,6 +60,7 @@ class ChatViewModelLastAssistantTest {
             memoryStore = memoryStore,
             conversationStore = store,
             knowledgeGraphRepository = kgRepo,
+        crashLogger = crashLogger,
         )
         // Replace the private _state with a Conversation containing
         // our test data. Done via reflection so we don't have to

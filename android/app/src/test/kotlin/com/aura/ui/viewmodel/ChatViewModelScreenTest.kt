@@ -8,6 +8,7 @@ import com.aura.agent.ToolRegistry
 import com.aura.kg.KnowledgeGraphRepository
 import com.aura.providers.ProviderRegistry
 import com.aura.voice.TextToSpeech
+import com.aura.core.error.CrashLogger
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -51,6 +52,7 @@ class ChatViewModelScreenTest {
         val memoryStore: com.aura.memory.MemoryStore = mockk(relaxed = true)
         val conversationStore: ConversationStore = mockk(relaxed = true)
         val knowledgeGraphRepository: KnowledgeGraphRepository = mockk(relaxed = true)
+    val crashLogger: CrashLogger = mockk(relaxed = true)
 
         every { userPreferences.defaultModel } returns MutableStateFlow("ollama:deepseek-v4-pro:cloud")
         every { providerRegistry.all() } returns emptyList()
@@ -71,6 +73,7 @@ class ChatViewModelScreenTest {
             memoryStore = memoryStore,
             conversationStore = conversationStore,
             knowledgeGraphRepository = knowledgeGraphRepository,
+        crashLogger = crashLogger,
         )
     }
 
