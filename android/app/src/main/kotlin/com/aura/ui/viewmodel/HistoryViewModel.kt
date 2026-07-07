@@ -124,4 +124,39 @@ class HistoryViewModel @Inject constructor(
 
     private fun formatTimestamp(millis: Long): String =
         java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(millis))
+
+    /**
+     * Compute stats for a conversation: turn count, tool call count,
+     * and duration (updated - created). Used by the History screen
+     * to show "12 turns · 3 tools · 2d" per row.
+     */
+    fun getStats(conversation: Conversation): ConversationStats {
+        val turnCount = conversation.turns.count { it.user != null || it.assistant != null }
+        val toolCallCount = conversation.turns.sumOf { it.toolTurns.size }
+        val durationMs = conversation.updatedAt - conversation.createdAt
+        return ConversationStats(
+            turns = turnCount,
+            toolCalls = toolCallCount,
+            durationMs = durationMs,
+        )
+    }
+
+    data class ConversationStats(
+        val turns: Int,
+        val toolCalls: Int,
+        val durationMs: Long,
+    )
+
+    /**
+     * Export all conversations as a single Markdown document.
+     * Conversations are separated by horizontal rules. Used by
+     * the "Export all" button in HistoryScreen.
+     */
+    fun exportAllMarkdown(): String = buildString {
+        val convos = _state.value.conversations
+        for ((i, conv) in convos.withIndex()) {
+            if (i > 0) append("\n\n---\n\n")
+            append(exportMarkdown(conv))
+        }
+    }
 }

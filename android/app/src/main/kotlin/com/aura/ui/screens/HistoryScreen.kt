@@ -31,6 +31,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -65,12 +66,30 @@ fun HistoryScreen(
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).padding(top = 16.dp)) {
         Text("History", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-        Text(
-            text = if (state.query.isBlank()) "${state.conversations.size} saved conversations"
-            else "${state.conversations.size} match${if (state.conversations.size == 1) "" else "es"} for \"${state.query}\"",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (state.query.isBlank()) "${state.conversations.size} saved conversations"
+                else "${state.conversations.size} match${if (state.conversations.size == 1) "" else "es"} for \"${state.query}\"",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+            )
+            if (state.conversations.isNotEmpty() && state.query.isBlank()) {
+                TextButton(onClick = {
+                    coroutineScope.launch {
+                        val md = viewModel.exportAllMarkdown()
+                        shareMarkdown(context, md, "aura-conversations")
+                    }
+                }) {
+                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Export all")
+                }
+            }
+        }
         Spacer(modifier = Modifier.height(12.dp))
 
         // Search bar.

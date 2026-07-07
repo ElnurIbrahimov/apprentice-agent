@@ -47,6 +47,9 @@ object ToolsModule {
         runHand: RunHandTool,
         knowledgeGraph: KnowledgeGraphTool,
         kgQuery: KgQueryTool,
+        emailSend: EmailSendTool,
+        smsSend: SmsSendTool,
+        translate: TranslateTool,
         timer: TimerTool,
         weather: WeatherTool,
     ): ToolRegistry {
@@ -84,6 +87,9 @@ object ToolsModule {
         registry.register(runHand.tool)
         registry.register(knowledgeGraph.tool)
         registry.register(kgQuery.tool)
+        registry.register(emailSend.tool)
+        registry.register(smsSend.tool)
+        registry.register(translate.tool)
         registry.register(timer.tool)
         registry.register(weather.tool)
         return registry

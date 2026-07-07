@@ -42,6 +42,7 @@ data class SettingsUiState(
      */
     val verifyResults: Map<String, String> = emptyMap(),
     val verifying: String? = null,
+    val morningBriefHour: Int = 7,
 )
 
 @HiltViewModel
@@ -68,6 +69,7 @@ class SettingsViewModel @Inject constructor(
             val themeMode = userPreferences.themeMode.first()
             val customIdentity = userPreferences.customIdentity.first()
             val specialistOverrides = userPreferences.specialistOverrides.first()
+            val morningBriefHour = userPreferences.morningBriefHour.first()
             _state.value = SettingsUiState(
                 ollamaKey = providerKeys.keyFor("ollama") ?: "",
                 anthropicKey = providerKeys.keyFor("anthropic") ?: "",
@@ -85,6 +87,7 @@ class SettingsViewModel @Inject constructor(
                 themeMode = themeMode,
                 customIdentity = customIdentity,
                 specialistOverrides = specialistOverrides,
+                morningBriefHour = morningBriefHour,
             )
         }
     }
@@ -138,6 +141,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferences.setMorningBriefEnabled(enabled)
             _state.update { it.copy(morningBriefEnabled = enabled) }
+        }
+    }
+
+    fun setMorningBriefHour(hour: Int) {
+        viewModelScope.launch {
+            userPreferences.setMorningBriefHour(hour)
+            _state.update { it.copy(morningBriefHour = hour) }
         }
     }
 

@@ -2,6 +2,7 @@ package com.aura.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -48,6 +49,7 @@ internal val KEY_INCOGNITO_DEFAULT = booleanPreferencesKey("incognito_default")
 internal val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
 internal val KEY_CUSTOM_IDENTITY = stringPreferencesKey("custom_identity")
 internal val KEY_SPECIALIST_OVERRIDES = stringPreferencesKey("specialist_overrides")
+internal val KEY_MORNING_BRIEF_HOUR = intPreferencesKey("morning_brief_hour")
 
 @Singleton
 class UserPreferences @Inject constructor(
@@ -163,6 +165,14 @@ class UserPreferences @Inject constructor(
         prefs[KEY_SPECIALIST_OVERRIDES] ?: "{}"
     }
 
+    /**
+     * Hour of day (0-23) for the morning brief. Default 7 (7am).
+     * The user can change this in Settings → Morning brief time.
+     */
+    val morningBriefHour: Flow<Int> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_MORNING_BRIEF_HOUR] ?: 7
+    }
+
     suspend fun setDefaultModel(model: String) {
         context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
     }
@@ -205,6 +215,10 @@ class UserPreferences @Inject constructor(
 
     suspend fun setSpecialistOverrides(json: String) {
         context.auraPrefs.edit { it[KEY_SPECIALIST_OVERRIDES] = json }
+    }
+
+    suspend fun setMorningBriefHour(hour: Int) {
+        context.auraPrefs.edit { it[KEY_MORNING_BRIEF_HOUR] = hour.coerceIn(0, 23) }
     }
 
     /**

@@ -24,6 +24,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -44,7 +46,7 @@ import com.aura.ui.settings.ProviderKeyField
 import com.aura.ui.settings.SettingsViewModel
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onNavigateProfile: () -> Unit,
@@ -459,7 +461,7 @@ fun SettingsScreen(
                 Text(text = "Morning brief", style = MaterialTheme.typography.bodyLarge)
                 Text(
                     text = if (state.morningBriefEnabled)
-                        "On — 7am daily summary"
+                        "On — %02d:00 daily summary".format(state.morningBriefHour)
                     else
                         "Off — no morning notification",
                     style = MaterialTheme.typography.bodySmall,
@@ -470,6 +472,40 @@ fun SettingsScreen(
                 checked = state.morningBriefEnabled,
                 onCheckedChange = { viewModel.setMorningBriefEnabled(it) },
             )
+        }
+        if (state.morningBriefEnabled) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Brief at:", style = MaterialTheme.typography.bodySmall)
+                var showBriefTimePicker by remember { mutableStateOf(false) }
+                OutlinedButton(onClick = { showBriefTimePicker = true }) {
+                    Text("%02d:00".format(state.morningBriefHour))
+                }
+                if (showBriefTimePicker) {
+                    val tpState = rememberTimePickerState(
+                        initialHour = state.morningBriefHour,
+                        initialMinute = 0,
+                    )
+                    AlertDialog(
+                        onDismissRequest = { showBriefTimePicker = false },
+                        title = { Text("Morning brief time") },
+                        text = { TimePicker(state = tpState) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                viewModel.setMorningBriefHour(tpState.hour)
+                                showBriefTimePicker = false
+                            }) { Text("Set") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showBriefTimePicker = false }) { Text("Cancel") }
+                        },
+                    )
+                }
+            }
         }
         Spacer(modifier = Modifier.height(8.dp))
         Row(

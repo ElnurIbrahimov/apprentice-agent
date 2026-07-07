@@ -56,6 +56,7 @@ class SettingsViewModelAppLockTest {
         every { userPreferences.ttsEnabled } returns flowOf(true)
         every { userPreferences.incognitoDefault } returns flowOf(false)
         every { userPreferences.lastSeenProactiveAt } returns flowOf(0L)
+        every { userPreferences.morningBriefHour } returns flowOf(7)
         coEvery { userPreferences.setAppLockEnabled(any()) } answers {
             appLockFlow.value = firstArg()
         }

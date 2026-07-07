@@ -63,12 +63,15 @@ class ProactiveBootstrap @Inject constructor(
             val calendarMonitorOn = runCatching {
                 userPreferences.calendarMonitorEnabled.first()
             }.getOrDefault(true)
+            val briefHour = runCatching {
+                userPreferences.morningBriefHour.first()
+            }.getOrDefault(7)
 
             // Apply the gates. The split method is the testable seam:
             // it doesn't touch the Android Context, so a pure-JVM test
             // can verify scheduling/cancellation decisions without
             // needing Robolectric or a Context mock.
-            val decisions = applyGates(morningBriefOn, calendarMonitorOn)
+            val decisions = applyGates(morningBriefOn, calendarMonitorOn, briefHour)
 
             // One-shot memory decay pass on startup. Best-effort —
             // failure is logged, the next DecayWorker tick catches up.
@@ -117,9 +120,9 @@ class ProactiveBootstrap @Inject constructor(
      * decision lets the caller dispatch the FGS side effect without
      * duplicating the boolean math.
      */
-    internal fun applyGates(morningBriefOn: Boolean, calendarMonitorOn: Boolean): GatedDecisions {
+    internal fun applyGates(morningBriefOn: Boolean, calendarMonitorOn: Boolean, briefHour: Int = 7): GatedDecisions {
         if (morningBriefOn) {
-            scheduler.scheduleMorningBrief()
+            scheduler.scheduleMorningBrief(briefHour)
             scheduler.scheduleDecay()
         } else {
             scheduler.cancelMorningBrief()
