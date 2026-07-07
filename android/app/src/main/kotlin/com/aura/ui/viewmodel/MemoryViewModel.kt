@@ -217,4 +217,25 @@ class MemoryViewModel @Inject constructor(
     fun clearRebuildResult() {
         _state.update { it.copy(rebuildResult = null) }
     }
+
+    /**
+     * Manually create a memory — bypasses the write gate and dedup
+     * check. The user explicitly wants this stored, so it goes in
+     * directly via [memoryStore.store]. Tagged with source="manual"
+     * so the UI can distinguish agent-stored from user-stored notes.
+     */
+    fun createNote(content: String, category: String, importance: Float) {
+        if (content.isBlank()) return
+        viewModelScope.launch {
+            runCatching {
+                memoryStore.store(
+                    content = content.trim(),
+                    source = "manual",
+                    category = category,
+                    importance = importance,
+                )
+            }
+            refresh()
+        }
+    }
 }

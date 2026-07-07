@@ -96,4 +96,14 @@ interface MemoryDao {
      */
     @Query("SELECT COUNT(*) FROM memories WHERE content = :content LIMIT 1")
     suspend fun existsByContent(content: String): Int
+
+    /**
+     * All memories that have a non-null embedding. Used by the semantic
+     * dedup check in [MemoryStore.maybeStore] — after computing the new
+     * content's embedding, we scan existing embeddings for cosine
+     * similarity > threshold to catch "I like dark mode" vs "I prefer
+     * dark mode" which exact-match would miss.
+     */
+    @Query("SELECT * FROM memories WHERE embedding IS NOT NULL ORDER BY createdAt DESC")
+    suspend fun allWithEmbeddings(): List<MemoryEntity>
 }

@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -67,6 +68,7 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
     var showRebuildConfirm by remember { mutableStateOf(false) }
     var showClearAllConfirm by remember { mutableStateOf(false) }
     var showClearCategoryConfirm by remember { mutableStateOf(false) }
+    var showAddNote by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -146,6 +148,20 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
                 )
             }
         }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Manual note creation — bypasses the write gate so the user
+        // can explicitly store anything they want without going through
+        // the agent.
+        OutlinedButton(
+            onClick = { showAddNote = true },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Add note")
+        }
+
         Spacer(modifier = Modifier.height(8.dp))
 
         // Rebuild embeddings action. Always visible; disabled while
@@ -324,6 +340,16 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
             },
             dismissButton = {
                 TextButton(onClick = { showClearCategoryConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (showAddNote) {
+        AddNoteDialog(
+            onDismiss = { showAddNote = false },
+            onAdd = { content, category, importance ->
+                viewModel.createNote(content, category, importance)
+                showAddNote = false
             },
         )
     }
@@ -540,5 +566,65 @@ private fun CategoryDot(category: String) {
         modifier = Modifier
             .size(10.dp)
             .background(color, CircleShape),
+    )
+}
+
+
+@Composable
+private fun AddNoteDialog(
+    onDismiss: () -> Unit,
+    onAdd: (content: String, category: String, importance: Float) -> Unit,
+) {
+    var content by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("note") }
+    var importance by remember { mutableStateOf(0.5f) }
+    val categories = listOf("note", "fact", "preference", "person", "episode", "idea", "task")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add note") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    label = { Text("Note content") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    categories.forEach { cat ->
+                        AssistChip(
+                            onClick = { category = cat },
+                            label = { Text(cat.replaceFirstChar { it.uppercase() }) },
+                            colors = if (category == cat)
+                                AssistChipDefaults.assistChipColors()
+                            else
+                                AssistChipDefaults.assistChipColors(
+                                    containerColor = MaterialTheme.colorScheme.surface,
+                                ),
+                        )
+                    }
+                }
+                Text("Importance: ${"%.1f".format(importance)}", style = MaterialTheme.typography.labelMedium)
+                Slider(
+                    value = importance,
+                    onValueChange = { importance = it },
+                    valueRange = 0f..1f,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onAdd(content, category, importance) },
+                enabled = content.isNotBlank(),
+            ) { Text("Add") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
     )
 }

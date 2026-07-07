@@ -21,8 +21,40 @@ class MemoryStore @Inject constructor(
         // across 3 conversations, which would waste recall slots
         // and skew the RRF ranking with duplicate hits.
         if (dao.existsByContent(content) > 0) return null
-        val id = UUID.randomUUID().toString()
         val embedding = embedder.embed(content)
+
+        // Semantic dedup: scan existing memories with embeddings for
+        // cosine similarity > 0.92. This catches paraphrased versions
+        // of the same fact ("I like dark mode" vs "I prefer dark
+        // mode") that exact-match misses. When a match is found, we
+        // merge — keep the richer (longer) version and re-null its
+        // embedding so the next recall re-embeds with the updated text.
+        val existing = runCatching { dao.allWithEmbeddings() }.getOrDefault(emptyList())
+        if (existing.isNotEmpty()) {
+            val match = existing.firstOrNull { mem ->
+                mem.embedding != null &&
+                    cosineSimilarity(embedding, Embedder.fromBytes(mem.embedding!!)) > SEMANTIC_DEDUP_THRESHOLD
+            }
+            if (match != null) {
+                // Merge: keep the longer content (richer version of
+                // the fact). If the new content is longer, replace
+                // the existing memory's content and re-null the
+                // embedding. If the existing is longer or same, skip.
+                if (content.length > match.content.length) {
+                    runCatching {
+                        dao.update(match.copy(
+                            content = content,
+                            embedding = null,
+                            accessedAt = System.currentTimeMillis(),
+                        ))
+                    }
+                }
+                // Either way, we don't store a new memory.
+                return null
+            }
+        }
+
+        val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         dao.insert(
             MemoryEntity(
@@ -294,3 +326,12 @@ internal fun escapeLikeWildcards(s: String): String = s
     .replace("\\", "\\\\")
     .replace("%", "\\%")
     .replace("_", "\\_")
+
+/**
+ * Cosine similarity threshold for semantic memory dedup. 0.92 is
+ * conservative — it catches paraphrased versions of the same fact
+ * ("I like dark mode" vs "I prefer dark mode") while allowing
+ * related-but-distinct facts ("I prefer dark mode" vs "I prefer
+ * light mode") to be stored separately.
+ */
+private const val SEMANTIC_DEDUP_THRESHOLD = 0.92f
