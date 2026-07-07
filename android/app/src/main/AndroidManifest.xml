@@ -82,6 +82,11 @@
             android:excludeFromRecents="true"
             android:noHistory="true" />
 
+        <activity
+            android:name=".widget.WidgetConfigActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

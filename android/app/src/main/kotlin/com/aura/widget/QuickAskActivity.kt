@@ -52,11 +52,17 @@ class QuickAskActivity : ComponentActivity() {
     @Inject lateinit var providerRegistry: ProviderRegistry
     @Inject lateinit var userPreferences: UserPreferences
 
+    private var appWidgetId: Int = AppWidgetManager.INVALID_APPWIDGET_ID
+
     private val responseFlow = MutableStateFlow<String?>(null)
     private val loadingFlow = MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        appWidgetId = intent?.extras?.getInt(
+            AppWidgetManager.EXTRA_APPWIDGET_ID,
+            AppWidgetManager.INVALID_APPWIDGET_ID,
+        ) ?: AppWidgetManager.INVALID_APPWIDGET_ID
         window.setDimAmount(0.5f)
         window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         window.setStatusBarColor(android.graphics.Color.TRANSPARENT)
@@ -77,10 +83,15 @@ class QuickAskActivity : ComponentActivity() {
         loadingFlow.value = true
         responseFlow.value = null
         lifecycleScope.launch {
-            val model = userPreferences.defaultModel.first()
+            val defaultModel = userPreferences.defaultModel.first()
+            // Use widget-specific config if available, else fall back to default.
+            val model = WidgetConfig.modelFor(this@QuickAskActivity, appWidgetId, defaultModel)
+            val prefix = WidgetConfig.prefixFor(this@QuickAskActivity, appWidgetId)
+            val systemPrompt = "You are Aura. Answer concisely in 1-3 sentences. Be direct and helpful." +
+                if (prefix.isNotBlank()) "\n\n$prefix" else ""
             val response = withContext(Dispatchers.IO) {
                 val conversation = Conversation(
-                    systemPrompt = "You are Aura. Answer concisely in 1-3 sentences. Be direct and helpful.",
+                    systemPrompt = systemPrompt,
                 ).addUser(query)
                 val text = StringBuilder()
                 try {

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.ContentCopy
@@ -68,6 +69,8 @@ import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.components.SpecialistChips
 import com.aura.ui.viewmodel.ChatViewModel
 import com.aura.ui.voice.VoiceOverlay
+import com.aura.ui.voice.ContinuousVoiceOverlay
+import com.aura.ui.voice.ContinuousVoiceViewModel
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -100,6 +103,8 @@ fun ChatScreen(
     var showModelPicker by remember { mutableStateOf(false) }
     var showSources by remember { mutableStateOf(false) }
     var showVoiceOverlay by remember { mutableStateOf(false) }
+    var showContinuousVoice by remember { mutableStateOf(false) }
+    val continuousVoiceViewModel: ContinuousVoiceViewModel = hiltViewModel()
     var showStopStreamConfirm by remember { mutableStateOf(false) }
 
     // Intercept back press during streaming — the user gets a chance to
@@ -189,6 +194,10 @@ fun ChatScreen(
             onToggleDeepMode = viewModel::toggleDeepMode,
             onToggleIncognito = viewModel::toggleIncognito,
             onShowModelPicker = { showModelPicker = true },
+            onVoiceMode = {
+                if (hasMicPermission) showContinuousVoice = true
+                else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            },
         )
 
         if (state.deepModeActive) {
@@ -278,6 +287,36 @@ fun ChatScreen(
         LaunchedEffect(Unit) { showVoiceOverlay = false }
     }
 
+    // Continuous voice mode — hands-free conversation loop
+    if (showContinuousVoice && hasMicPermission) {
+        val cvState by continuousVoiceViewModel.state.collectAsState()
+        ContinuousVoiceOverlay(
+            state = cvState,
+            onStop = {
+                continuousVoiceViewModel.stopLoop()
+                showContinuousVoice = false
+            },
+        )
+        LaunchedEffect(Unit) {
+            continuousVoiceViewModel.startLoop(
+                onSend = { text ->
+                    viewModel.setDraft(text)
+                    viewModel.send()
+                },
+                onStreamingDone = { !viewModel.state.value.streaming },
+            )
+        }
+        // Update last response when streaming completes
+        LaunchedEffect(viewModel.state.value.streaming) {
+            if (!viewModel.state.value.streaming && viewModel.state.value.conversation.turns.isNotEmpty()) {
+                continuousVoiceViewModel.setLastResponse(viewModel.lastAssistantText())
+            }
+        }
+    } else if (showContinuousVoice && !hasMicPermission) {
+        LaunchedEffect(Unit) { showContinuousVoice = false }
+        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+    }
+
     PermissionDialog(
         permission = state.pendingPermission,
         rationale = state.permissionRationale,
@@ -323,6 +362,7 @@ private fun ChatHeader(
     onToggleDeepMode: () -> Unit,
     onToggleIncognito: () -> Unit,
     onShowModelPicker: () -> Unit,
+    onVoiceMode: () -> Unit = {},
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -387,6 +427,13 @@ private fun ChatHeader(
                 Icon(
                     imageVector = Icons.Filled.DeleteOutline,
                     contentDescription = "Delete conversation",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+            IconButton(onClick = onVoiceMode) {
+                Icon(
+                    imageVector = Icons.Filled.GraphicEq,
+                    contentDescription = "Continuous voice mode",
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
             }
