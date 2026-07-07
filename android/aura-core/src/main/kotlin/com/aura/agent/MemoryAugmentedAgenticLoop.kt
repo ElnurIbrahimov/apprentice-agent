@@ -1,7 +1,9 @@
 package com.aura.agent
 
 import com.aura.kg.ConversationKgExtractor
+import com.aura.memory.LlmWriteGate
 import com.aura.memory.MemoryStore
+import com.aura.memory.WriteGate
 import com.aura.providers.ChatOptions
 import com.aura.providers.ProviderMessage
 import com.aura.providers.ProviderMessage.Role
@@ -28,6 +30,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
     private val kgExtractor: ConversationKgExtractor,
     private val userProfileStore: com.aura.profile.UserProfileStore,
     private val handRepository: com.aura.hands.HandRepository,
+    private val providerRegistry: com.aura.providers.ProviderRegistry,
 ) {
     /**
      * Run the agentic loop, optionally overriding the base system prompt
@@ -193,10 +196,29 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             }
         }
 
-        // 4) Auto-store the user's last message via WriteGate (best-effort, non-blocking)
+        // 4) Auto-store the user's last message via LLM write gate (best-effort, non-blocking)
         //    Skipped when memoryEnabled is false (incognito mode).
+        //    The LLM gate wraps the heuristic gate: heuristic runs first
+        //    (fast, no network), and if it says "store", the LLM makes the
+        //    final decision with better category + importance. If the LLM
+        //    call fails, the heuristic decision is used as fallback.
         if (memoryEnabled && lastUserMessage.isNotBlank()) {
-            runCatching { memoryStore.maybeStore(lastUserMessage, source = "user") }
+            runCatching {
+                val gate = LlmWriteGate(
+                    heuristic = WriteGate(),
+                    registry = providerRegistry,
+                    modelId = model,
+                )
+                val decision = gate.evaluate(lastUserMessage, "user")
+                if (decision.shouldStore) {
+                    memoryStore.store(
+                        content = lastUserMessage,
+                        source = "user",
+                        category = decision.category,
+                        importance = decision.importance,
+                    )
+                }
+            }
         }
 
         // 5) Extract user profile from last assistant turn (name, traits, facts)

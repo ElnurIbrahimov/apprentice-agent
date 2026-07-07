@@ -36,6 +36,7 @@ class AgentIncognitoTest {
     private val kgExtractor = mockk<ConversationKgExtractor>(relaxed = true)
     private val userProfileStore = mockk<UserProfileStore>(relaxed = true)
     private val handRepository = mockk<com.aura.hands.HandRepository>(relaxed = true)
+    private val providerRegistry = mockk<com.aura.providers.ProviderRegistry>(relaxed = true)
 
     private fun makeLoop(): MemoryAugmentedAgenticLoop =
         MemoryAugmentedAgenticLoop(
@@ -46,6 +47,7 @@ class AgentIncognitoTest {
             kgExtractor = kgExtractor,
             userProfileStore = userProfileStore,
             handRepository = handRepository,
+            providerRegistry = providerRegistry,
         )
 
     @Test
@@ -57,7 +59,6 @@ class AgentIncognitoTest {
         }
         // Recall returns nothing.
         coEvery { memoryStore.query(any(), any()) } returns emptyList()
-        coEvery { memoryStore.maybeStore(any(), any()) } returns "new_id"
         coEvery { userProfileStore.update(any(), any(), any(), any()) } returns Unit
         coEvery { kgExtractor.extract(any()) } returns Unit
         coEvery { handRepository.getEnabled() } returns emptyList()
@@ -66,13 +67,16 @@ class AgentIncognitoTest {
         val events = loop.run(
             conversation = Conversation(
                 id = "c1", title = "t", createdAt = 0L, updatedAt = 0L,
-                turns = listOf(Turn(user = "hi", assistant = null)),
+                turns = listOf(Turn(user = "hi there", assistant = null)),
             ),
             model = "ollama:deepseek-v4-pro:cloud",
         ).toList()
 
         coVerify { brain.stream(any(), any(), any(), any()) }
-        coVerify { memoryStore.maybeStore("hi", source = "user") }
+        // The LLM gate falls back to heuristic (providerRegistry is a
+        // relaxed mock returning empty flow), which says shouldStore=true
+        // for content >= 4 chars. So store() should be called.
+        coVerify { memoryStore.store(any<String>(), any<String>(), any<String>(), any<Float>(), any<List<String>>()) }
         // KG extraction runs by default.
         coVerify { kgExtractor.extract("hello back") }
     }
@@ -98,7 +102,7 @@ class AgentIncognitoTest {
         ).toList()
 
         coVerify { brain.stream(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { memoryStore.maybeStore(any(), any()) }
+        coVerify(exactly = 0) { memoryStore.store(any<String>(), any<String>(), any<String>(), any<Float>(), any<List<String>>()) }
         coVerify(exactly = 0) { userProfileStore.update(name = any(), traits = any(), preferences = any(), facts = any()) }
         // KG extraction is gated by the same flag.
         coVerify(exactly = 0) { kgExtractor.extract(any()) }

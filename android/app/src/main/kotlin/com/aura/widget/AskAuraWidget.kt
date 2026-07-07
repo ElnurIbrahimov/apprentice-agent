@@ -124,13 +124,14 @@ class AskAuraWidget : AppWidgetProvider() {
         )
         views.setOnClickPendingIntent(R.id.widget_root, openPending)
 
-        // The Ask button also opens Aura. In a future iteration we
-        // could pass an extra to ChatScreen to focus the input,
-        // but that requires plumbing through the navigation graph.
-        // For now, "Ask Aura…" and tapping the body both open the
-        // chat at the existing state.
+        // The Ask button opens QuickAskActivity — a lightweight
+        // transparent activity with a text field for asking a
+        // question without opening the full app.
+        val askIntent = Intent(context, QuickAskActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
         val askPending = PendingIntent.getActivity(
-            context, 1, openIntent,
+            context, 1, askIntent,
             pendingFlags(),
         )
         views.setOnClickPendingIntent(R.id.widget_ask_button, askPending)

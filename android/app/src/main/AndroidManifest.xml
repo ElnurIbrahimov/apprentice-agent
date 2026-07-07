@@ -74,6 +74,13 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".widget.QuickAskActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
