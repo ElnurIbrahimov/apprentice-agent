@@ -220,10 +220,23 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         //    call fails, the heuristic decision is used as fallback.
         if (memoryEnabled && lastUserMessage.isNotBlank()) {
             runCatching {
+                // Use the user's default model for the gate. If the default
+                // is MoA (expensive — 3 API calls for a yes/no), fall back to
+                // the first configured non-MoA provider's first model.
+                // The heuristic gate is the pre-filter; the LLM gate only
+                // runs when the heuristic says "store", so this is one
+                // lightweight call per memorable turn — not per message.
+                val gateModel = if (model.startsWith("moa:")) {
+                    providerRegistry.configured().firstOrNull()?.let { p ->
+                        "${p.prefix}:${p.listModels().firstOrNull() ?: "default"}"
+                    } ?: model
+                } else {
+                    model
+                }
                 val gate = LlmWriteGate(
                     heuristic = WriteGate(),
                     registry = providerRegistry,
-                    modelId = "ollama:qwen2:1.5b:cloud",
+                    modelId = gateModel,
                 )
                 val decision = gate.evaluate(lastUserMessage, "user")
                 if (decision.shouldStore) {
