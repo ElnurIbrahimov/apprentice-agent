@@ -105,6 +105,9 @@ class HistoryViewModel @Inject constructor(
         conversation.model?.let { append("_Model: `").append(it).append("`_\n") }
         append("---\n\n")
         for (turn in conversation.turns) {
+            turn.imageUri?.let { uri ->
+                append("![image](").append(uri).append(")\n\n")
+            }
             turn.user?.takeIf { it.isNotBlank() }?.let {
                 append("## User\n\n").append(it).append("\n\n")
             }

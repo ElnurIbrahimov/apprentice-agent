@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.IncomingShareStore
 import com.aura.agent.Specialist
+import com.aura.ui.components.MarkdownText
 import com.aura.ui.components.MoaThinkingIndicator
 import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.components.SpecialistChips
@@ -99,6 +100,34 @@ fun ChatScreen(
     var showModelPicker by remember { mutableStateOf(false) }
     var showSources by remember { mutableStateOf(false) }
     var showVoiceOverlay by remember { mutableStateOf(false) }
+    var showStopStreamConfirm by remember { mutableStateOf(false) }
+
+    // Intercept back press during streaming — the user gets a chance to
+    // stop and save the partial response instead of navigating away
+    // while the stream continues in the background.
+    if (state.streaming) {
+        androidx.activity.compose.BackHandler(enabled = true) {
+            showStopStreamConfirm = true
+        }
+    }
+    if (showStopStreamConfirm) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showStopStreamConfirm = false },
+            title = { androidx.compose.material3.Text("Stop streaming?") },
+            text = { androidx.compose.material3.Text("The response will be saved with what's been generated so far.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    viewModel.cancel()
+                    showStopStreamConfirm = false
+                }) { androidx.compose.material3.Text("Stop and save") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showStopStreamConfirm = false }) {
+                    androidx.compose.material3.Text("Keep listening")
+                }
+            },
+        )
+    }
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -518,11 +547,18 @@ private fun MessageBubble(
             modifier = Modifier.widthIn(max = 320.dp),
         ) {
             Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Text(
-                    text = text.ifBlank { "…" },
-                    color = textColor,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                if (isUser) {
+                    Text(
+                        text = text.ifBlank { "…" },
+                        color = textColor,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                } else {
+                    MarkdownText(
+                        text = text.ifBlank { "…" },
+                        style = MaterialTheme.typography.bodyMedium.copy(color = textColor),
+                    )
+                }
                 if (!isUser && citations.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Surface(

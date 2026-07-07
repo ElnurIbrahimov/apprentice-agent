@@ -26,17 +26,39 @@ data class Conversation(
     val model: String? = null,
     val metadata: Map<String, String> = emptyMap(),
 ) {
-    fun toMessages(): List<ProviderMessage> {
+    /**
+     * Convert the conversation to a list of provider messages.
+     *
+     * @param maxTurns Only the last [maxTurns] turns are sent to the model.
+     *                 Older turns are dropped to stay within the context
+     *                 window. The full conversation is still in [turns]
+     *                 for UI display and persistence — this only affects
+     *                 what the LLM sees.
+     *
+     * @param maxToolResultChars Tool results longer than this are truncated
+     *                           before being sent to the model. The full
+     *                           result is kept in [Turn.toolTurns] for UI
+     *                           display. Default 2000 chars — enough for
+     *                           the model to understand the result without
+     *                           flooding the context window.
+     */
+    fun toMessages(maxTurns: Int = 40, maxToolResultChars: Int = 2000): List<ProviderMessage> {
         val out = mutableListOf<ProviderMessage>()
         val sys = listOfNotNull(systemPrompt).filter { it.isNotBlank() }
         if (sys.isNotEmpty()) {
             out += ProviderMessage(role = ProviderMessage.Role.system, content = sys.joinToString("\n\n"))
         }
-        for (turn in turns) {
+        val visibleTurns = if (turns.size > maxTurns) turns.takeLast(maxTurns) else turns
+        for (turn in visibleTurns) {
             turn.user?.let { out += ProviderMessage(role = ProviderMessage.Role.user, content = it) }
             turn.assistant?.let { out += ProviderMessage(role = ProviderMessage.Role.assistant, content = it) }
             for (toolTurn in turn.toolTurns) {
-                out += ProviderMessage(role = ProviderMessage.Role.tool, content = toolTurn.result, toolCallId = toolTurn.id)
+                val resultForModel = if (toolTurn.result.length > maxToolResultChars) {
+                    toolTurn.result.take(maxToolResultChars) + "\n[... truncated]"
+                } else {
+                    toolTurn.result
+                }
+                out += ProviderMessage(role = ProviderMessage.Role.tool, content = resultForModel, toolCallId = toolTurn.id)
             }
         }
         return out
@@ -95,6 +117,7 @@ data class Turn(
     val assistant: String? = null,
     val toolTurns: List<ToolTurn> = emptyList(),
     val citations: List<Citation> = emptyList(),
+    val imageUri: String? = null,
 )
 
 @Serializable

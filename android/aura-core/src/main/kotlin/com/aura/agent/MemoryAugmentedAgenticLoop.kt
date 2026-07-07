@@ -116,29 +116,66 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             var finishReason: String? = null
             var stepError: String? = null
 
-            brain.stream(model, messages, tools, options).collect { chunk ->
-                when (chunk) {
-                    is BrainChunk.Text -> {
-                        accumulatedText.append(chunk.text)
-                        emit(AgentEvent.TextDelta(chunk.text))
+            // Provider failover: if the primary model returns a retryable
+            // error (5xx, 429, network timeout), try the next configured
+            // provider before giving up. Don't failover on 401 (bad key)
+            // or 400 (bad request) — retrying won't help.
+            var currentModel = model
+            val triedModels = mutableSetOf<String>()
+
+            stream@ while (true) {
+                triedModels.add(currentModel)
+                stepError = null
+                accumulatedText.clear()
+                toolCalls.clear()
+                toolCallStarts.clear()
+                toolCallArgs.clear()
+                finishReason = null
+
+                try {
+                    brain.stream(currentModel, messages, tools, options).collect { chunk ->
+                        when (chunk) {
+                            is BrainChunk.Text -> {
+                                accumulatedText.append(chunk.text)
+                                emit(AgentEvent.TextDelta(chunk.text))
+                            }
+                            is BrainChunk.ToolCallStart -> {
+                                toolCallStarts[chunk.id] = chunk.name
+                                emit(AgentEvent.ToolCallStart(chunk.id, chunk.name))
+                            }
+                            is BrainChunk.ToolCallDelta -> {
+                                val id = chunk.id.ifEmpty { toolCallStarts.keys.lastOrNull() ?: "" }
+                                toolCallArgs.getOrPut(id) { StringBuilder() }.append(chunk.argumentsDelta)
+                            }
+                            is BrainChunk.ToolCallEnd -> {
+                                toolCalls += chunk.id to chunk.arguments
+                                emit(AgentEvent.ToolCallEnd(chunk.id, chunk.name, chunk.arguments))
+                            }
+                            is BrainChunk.Finished -> { finishReason = chunk.reason }
+                            is BrainChunk.Error -> {
+                                stepError = "${chunk.code}: ${chunk.message}"
+                                if (chunk.retryable && triedModels.size < 2) {
+                                    val nextProvider = providerRegistry.configured()
+                                        .firstOrNull { p ->
+                                            triedModels.none { it.startsWith("${p.prefix}:") }
+                                        }
+                                    if (nextProvider != null) {
+                                        val nextModel = "${nextProvider.prefix}:${
+                                            runCatching { nextProvider.listModels().firstOrNull() }.getOrNull() ?: "default"
+                                        }"
+                                        emit(AgentEvent.Warning("Provider ${currentModel} failed (${chunk.code}), falling back to $nextModel"))
+                                        currentModel = nextModel
+                                        throw kotlinx.coroutines.CancellationException("failover")
+                                    }
+                                }
+                                emit(AgentEvent.Error(chunk.code, chunk.message, chunk.retryable, chunk.error?.toAuraError()))
+                            }
+                        }
                     }
-                    is BrainChunk.ToolCallStart -> {
-                        toolCallStarts[chunk.id] = chunk.name
-                        emit(AgentEvent.ToolCallStart(chunk.id, chunk.name))
-                    }
-                    is BrainChunk.ToolCallDelta -> {
-                        val id = chunk.id.ifEmpty { toolCallStarts.keys.lastOrNull() ?: "" }
-                        toolCallArgs.getOrPut(id) { StringBuilder() }.append(chunk.argumentsDelta)
-                    }
-                    is BrainChunk.ToolCallEnd -> {
-                        toolCalls += chunk.id to chunk.arguments
-                        emit(AgentEvent.ToolCallEnd(chunk.id, chunk.name, chunk.arguments))
-                    }
-                    is BrainChunk.Finished -> { finishReason = chunk.reason }
-                    is BrainChunk.Error -> {
-                        stepError = "${chunk.code}: ${chunk.message}"
-                        emit(AgentEvent.Error(chunk.code, chunk.message, chunk.retryable, chunk.error?.toAuraError()))
-                    }
+                    break@stream
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    if (e.message == "failover") continue@stream
+                    throw e
                 }
             }
 
@@ -311,6 +348,7 @@ sealed class AgentEvent {
     /** Emitted by the UI after a permission was granted. The loop re-executes the named tool with the given args. */
     data class PermissionGranted(val toolName: String, val arguments: String) : AgentEvent()
     data class Error(val code: String, val message: String, val retryable: Boolean, val typedError: com.aura.core.error.AuraError? = null) : AgentEvent()
+    data class Warning(val message: String) : AgentEvent()
     data class Result(val conversation: com.aura.agent.Conversation) : AgentEvent()
     data object Done : AgentEvent()
 }

@@ -31,6 +31,7 @@ data class MemoryUiState(
      * it with [clearRebuildResult].
      */
     val rebuildResult: String? = null,
+    val undoMessage: String? = null,
 )
 
 @HiltViewModel
@@ -42,6 +43,7 @@ class MemoryViewModel @Inject constructor(
     val state: StateFlow<MemoryUiState> = _state.asStateFlow()
 
     private var searchJob: kotlinx.coroutines.Job? = null
+    private var lastDeleted: MemoryEntity? = null
 
     init {
         refresh()
@@ -114,9 +116,30 @@ class MemoryViewModel @Inject constructor(
 
     fun forget(id: String) {
         viewModelScope.launch {
+            val mem = memoryStore.recent(200).find { it.id == id }
+            lastDeleted = mem
             memoryStore.forget(id)
+            _state.update { it.copy(undoMessage = "Memory deleted") }
             refresh()
         }
+    }
+
+    fun undoDelete() {
+        val mem = lastDeleted ?: return
+        viewModelScope.launch {
+            memoryStore.store(
+                mem.content, mem.source, mem.category, mem.importance,
+                if (mem.tags.isBlank()) emptyList() else mem.tags.split(",").map { it.trim() },
+            )
+            lastDeleted = null
+            _state.update { it.copy(undoMessage = null) }
+            refresh()
+        }
+    }
+
+    fun clearUndo() {
+        _state.update { it.copy(undoMessage = null) }
+        lastDeleted = null
     }
 
     /**
