@@ -122,7 +122,7 @@ class VisionTool @Inject constructor(
     // Body: { contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: image_base64 } }] }] }
     // ------------------------------------------------------------------
 
-    private fun analyzeWithGemini(imageBase64: String, prompt: String, apiKey: String): String {
+    private fun analyzeWithGemini(imageBase64: String, prompt: String, apiKey: kotlin.String): String {
         val body = buildJsonObject {
             put("contents", JsonArray(listOf(buildJsonObject {
                 put("parts", JsonArray(listOf(
@@ -138,9 +138,13 @@ class VisionTool @Inject constructor(
         }
 
         val requestBody = body.toString().toRequestBody(mediaTypeJson)
+        // API key in header, not URL query — the URL is logged in HTTP
+        // traces, proxy captures, and crash reports. The X-Goog-Api-Key
+        // header is the documented mechanism and keeps the key out of logs.
         val req = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey")
+            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent")
             .header("Content-Type", "application/json")
+            .header("X-Goog-Api-Key", apiKey)
             .post(requestBody)
             .build()
 

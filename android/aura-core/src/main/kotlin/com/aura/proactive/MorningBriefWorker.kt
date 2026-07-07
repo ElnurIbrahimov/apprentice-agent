@@ -151,6 +151,7 @@ class MorningBriefWorker @AssistedInject constructor(
             val modelId = solo.listModels().firstOrNull()
                 ?.let { "${solo.prefix}:$it" }
                 ?: defaultModelIdForProvider(solo.prefix)
+            if (modelId == null) return ""
             try {
                 providerRegistry.parse(modelId)
             } catch (e: IllegalArgumentException) {
@@ -180,15 +181,16 @@ class MorningBriefWorker @AssistedInject constructor(
         return text.toString().trim()
     }
 
-    private fun defaultModelIdForProvider(prefix: String): String =
-        when (prefix) {
-            "ollama" -> "ollama:deepseek-v4-pro:cloud"
-            "anthropic" -> "anthropic:claude-sonnet-4-5"
-            "openai" -> "openai:gpt-4.1"
-            "deepseek" -> "deepseek:deepseek-chat"
-            "gemini" -> "gemini:gemini-1.5-flash"
-            else -> "ollama:deepseek-v4-pro:cloud"
-        }
+    private suspend fun defaultModelIdForProvider(prefix: String): String? {
+        // Derive the model ID from the provider's actual listModels()
+        // rather than hardcoding names that go stale. Gap category #79:
+        // hardcoded model names break when providers rotate their catalog.
+        val provider = providerRegistry.all().firstOrNull { it.prefix == prefix }
+            ?: providerRegistry.configured().firstOrNull()
+            ?: return null
+        val model = runCatching { provider.listModels().firstOrNull() }.getOrNull()
+        return if (model != null) "${provider.prefix}:$model" else null
+    }
 
     private fun postNotification(ctx: Context, title: String, body: String, summary: String) {
         val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

@@ -23,8 +23,17 @@ class DecayWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        runCatching { memoryStore.runDecayPass() }
-        return Result.success()
+        return try {
+            memoryStore.runDecayPass()
+            Result.success()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            try {
+                android.util.Log.w("DecayWorker", "decay pass failed: ${e.message}")
+            } catch (_: RuntimeException) {}
+            Result.retry()
+        }
     }
 
     companion object {
