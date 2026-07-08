@@ -2,8 +2,12 @@ package com.aura.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -22,7 +26,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -59,15 +68,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.IncomingShareStore
 import com.aura.agent.Specialist
 import com.aura.ui.components.MarkdownText
 import com.aura.ui.components.MoaThinkingIndicator
 import com.aura.ui.components.ModelPickerSheet
+import com.aura.ui.theme.AuraTokens
 import com.aura.ui.components.SpecialistChips
 import com.aura.ui.viewmodel.ChatViewModel
 import com.aura.ui.voice.VoiceOverlay
@@ -844,104 +857,160 @@ private fun ChatInputBar(
     onAttachmentSheetChange: (Boolean) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp,
+    // The input bar has no surface of its own — the screen
+    // background bleeds through so the glass text-field looks
+    // like it's floating on the chat, not sitting in a separate
+    // panel. The Web does the same with no border on the bottom
+    // row.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(
+        IconButton(
+            onClick = { onAttachmentSheetChange(true) },
             modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.Bottom,
+                .size(40.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(AuraTokens.Dark.surface2),
         ) {
-            IconButton(
-                onClick = { onAttachmentSheetChange(true) },
-                modifier = Modifier.size(44.dp),
-            ) {
-                Icon(
-                    Icons.Filled.AddAPhoto,
-                    contentDescription = "Attach",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            OutlinedTextField(
+            Icon(
+                Icons.Filled.AddAPhoto,
+                contentDescription = "Attach",
+                tint = AuraTokens.Dark.textSecondary,
+            )
+        }
+        // Glass input — surface-1 + border-subtle + 24dp radius.
+        // The web does the same but with backdrop-blur 24dp; on
+        // Android Compose there's no equivalent for arbitrary
+        // composables (only for whole surfaces), so we use a
+        // slightly-opaque surface-1 instead.
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(AuraTokens.Dark.surface1)
+                .border(1.dp, AuraTokens.Dark.borderSubtle, RoundedCornerShape(24.dp)),
+        ) {
+            BasicTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                placeholder = { Text("Ask Aura…", style = MaterialTheme.typography.bodyLarge) },
-                modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
-                maxLines = 5,
-                shape = RoundedCornerShape(24.dp),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = AuraTokens.Dark.textPrimary,
+                ),
+                cursorBrush = SolidColor(AuraTokens.Dark.accentPurple),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                decorationBox = { inner ->
+                    if (draft.isEmpty()) {
+                        Text(
+                            text = "Message AURA…",
+                            fontFamily = com.aura.ui.theme.InterDisplay,
+                            fontSize = 16.sp,
+                            color = AuraTokens.Dark.textTertiary,
+                        )
+                    }
+                    inner()
+                },
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Send
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Send,
                 ),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { onSend() }),
-                colors = androidx.compose.material3.TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                ),
-                textStyle = MaterialTheme.typography.bodyLarge,
             )
-            if (streaming) {
-                IconButton(
-                    onClick = onCancel,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(MaterialTheme.colorScheme.error),
-                ) {
-                    Icon(
-                        Icons.Filled.Stop,
-                        contentDescription = "Stop",
-                        tint = MaterialTheme.colorScheme.onError,
+        }
+        if (streaming) {
+            // Stop button — square (12dp) red surface.
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(AuraTokens.Dark.glowRed.copy(alpha = 0.15f))
+                    .border(1.dp, AuraTokens.Dark.glowRed.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                    .clickable { onCancel() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Stop,
+                    contentDescription = "Stop",
+                    tint = Color(0xFFF87171),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        } else {
+            // Mic button — 40dp circle, no background. Long-press
+            // opens push-to-talk. Tap opens the tap-to-speak
+            // overlay.
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .clickable { onMicClick() }
+                    .pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { onMicLongPress() })
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Mic,
+                    contentDescription = "Voice input",
+                    tint = AuraTokens.Dark.textSecondary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            // Send button — morphs between square (12dp, empty)
+            // and pill (20dp, ready). The animation is spring-eased
+            // matching the web's
+            // `transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)`.
+            val canSend = draft.isNotBlank()
+            val targetRadius = if (canSend) 20.dp else 12.dp
+            val targetScale = if (canSend) 1f else 0.9f
+            val animatedRadius by animateDpAsState(
+                targetValue = targetRadius,
+                animationSpec = spring(
+                    dampingRatio = 0.65f,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
+                ),
+                label = "send-radius",
+            )
+            val animatedScale by animateFloatAsState(
+                targetValue = targetScale,
+                animationSpec = spring(
+                    dampingRatio = 0.65f,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
+                ),
+                label = "send-scale",
+            )
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .graphicsLayer { scaleX = animatedScale; scaleY = animatedScale }
+                    .clip(RoundedCornerShape(animatedRadius))
+                    .background(
+                        if (canSend) AuraTokens.Dark.sendReady
+                        else AuraTokens.Dark.surface2,
                     )
-                }
-            } else {
-                IconButton(
-                    onClick = onMicClick,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .pointerInput(Unit) {
-                            // Long-press triggers push-to-talk
-                            // mode. Tap keeps the existing
-                            // tap-to-speak behavior.
-                            detectTapGestures(
-                                onLongPress = {
-                                    onMicLongPress()
-                                },
-                            )
-                        },
-                ) {
-                    Icon(
-                        Icons.Filled.Mic,
-                        contentDescription = "Voice input",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    .border(
+                        width = if (canSend) 0.dp else 1.dp,
+                        color = AuraTokens.Dark.borderSubtle,
+                        shape = RoundedCornerShape(animatedRadius),
                     )
-                }
-                IconButton(
-                    onClick = {
+                    .clickable(enabled = canSend) {
                         com.aura.ui.util.Haptics.send(hapticView)
                         onSend()
                     },
-                    enabled = draft.isNotBlank(),
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(
-                            if (draft.isNotBlank()) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                ) {
-                    Icon(
-                        Icons.Filled.Send,
-                        contentDescription = "Send",
-                        tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.onPrimary
-                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                    )
-                }
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                    tint = if (canSend) Color.White
+                           else AuraTokens.Dark.textTertiary,
+                    modifier = Modifier.size(16.dp),
+                )
             }
         }
     }
