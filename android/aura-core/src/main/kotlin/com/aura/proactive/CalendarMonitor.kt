@@ -47,6 +47,13 @@ class CalendarMonitor @Inject constructor(
      */
     private val surfaced: LinkedHashSet<Long> = LinkedHashSet()
 
+    /**
+     * One polling pass. Public so the ProactiveRunner's "fire now"
+     * button can trigger a check without waiting for the 5-minute
+     * interval. Idempotent and safe to call from any coroutine.
+     */
+    suspend fun pollOnce() = poll()
+
     fun start() {
         if (pollJob?.isActive == true) return
         _running.value = true

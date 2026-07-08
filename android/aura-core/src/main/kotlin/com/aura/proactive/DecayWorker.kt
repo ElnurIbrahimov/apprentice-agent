@@ -12,8 +12,9 @@ import dagger.assisted.AssistedInject
  * WorkManager periodic worker that runs a single decay pass over all memories.
  * Scheduled every 6 hours via [ProactiveScheduler.scheduleDecay].
  *
- * The cost is O(n) over the memory table (typically hundreds to a few thousand
- * rows) and completes in milliseconds, so overlapping a chat is not a concern.
+ * The actual work is one call to [MemoryStore.runDecayPass] — no need
+ * to extract a builder class. The ProactiveRunner uses the same
+ * MemoryStore directly when the user taps "fire decay pass now".
  */
 @HiltWorker
 class DecayWorker @AssistedInject constructor(
@@ -22,18 +23,23 @@ class DecayWorker @AssistedInject constructor(
     private val memoryStore: MemoryStore,
 ) : CoroutineWorker(appContext, params) {
 
-    override suspend fun doWork(): Result {
-        return try {
-            memoryStore.runDecayPass()
-            Result.success()
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            try {
-                android.util.Log.w("DecayWorker", "decay pass failed: ${e.message}")
-            } catch (_: RuntimeException) {}
-            Result.retry()
-        }
+    override suspend fun doWork(): Result = runNow()
+
+    /**
+     * Run a single decay pass. Returns a [Result] the same way
+     * [doWork] does so the ProactiveRunner can surface
+     * success / retry / failure to the UI.
+     */
+    suspend fun runNow(): Result = try {
+        memoryStore.runDecayPass()
+        Result.success()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        try {
+            android.util.Log.w("DecayWorker", "decay pass failed: ${e.message}")
+        } catch (_: RuntimeException) {}
+        Result.retry()
     }
 
     companion object {

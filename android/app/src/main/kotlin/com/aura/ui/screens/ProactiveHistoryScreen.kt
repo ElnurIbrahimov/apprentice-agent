@@ -22,6 +22,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -61,6 +65,7 @@ fun ProactiveHistoryScreen(
             TopAppBar(title = { Text("Proactive history") })
         },
     ) { padding ->
+        val status by viewModel.status.collectAsState()
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -74,6 +79,88 @@ fun ProactiveHistoryScreen(
                     model = model,
                     modifier = if (model.onClick != null) Modifier.clickable(onClick = model.onClick) else Modifier,
                 )
+            }
+            item { DebugSection(
+                status = status,
+                onFireBrief = { viewModel.fireMorningBrief() },
+                onFireDecay = { viewModel.fireDecayPass() },
+                onFireCalendar = { viewModel.fireCalendarCheck() },
+                onClearStatus = { viewModel.clearStatus() },
+            ) }
+        }
+    }
+}
+
+@Composable
+private fun DebugSection(
+    status: String?,
+    onFireBrief: () -> Unit,
+    onFireDecay: () -> Unit,
+    onFireCalendar: () -> Unit,
+    onClearStatus: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HorizontalDivider()
+        Text(
+            text = "Debug · fire now",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = "Run each loop on demand without waiting for its scheduled interval. Use to verify the agent is actually doing things.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+        Button(
+            onClick = onFireBrief,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ),
+        ) { Text("☀️ Fire morning brief now") }
+        Button(
+            onClick = onFireDecay,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ),
+        ) { Text("💭 Fire memory decay pass now") }
+        Button(
+            onClick = onFireCalendar,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ),
+        ) { Text("📅 Fire calendar check now") }
+        status?.let { msg ->
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = msg,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "dismiss",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { onClearStatus() },
+                    )
+                }
             }
         }
     }
