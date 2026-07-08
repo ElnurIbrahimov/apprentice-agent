@@ -61,6 +61,60 @@ class ConversationStore @Inject constructor(
     suspend fun deleteAll() = dao.deleteAll()
 
     /**
+     * Rename a conversation. The new title must be non-blank and
+     * not exceed 120 chars (the entity column caps it). Returns
+     * true on success, false if the conversation doesn't exist
+     * or the title is invalid.
+     */
+    suspend fun setTitle(id: String, newTitle: String): Boolean {
+        val trimmed = newTitle.trim().take(120)
+        if (trimmed.isBlank()) return false
+        val entity = dao.getById(id) ?: return false
+        val updated = entity.copy(title = trimmed, updatedAt = System.currentTimeMillis())
+        dao.insert(updated)  // INSERT OR REPLACE — see ConversationDao
+        return true
+    }
+
+    /**
+     * Pin or unpin a conversation. Pinned conversations sort to
+     * the top of the History list so the user can find them
+     * without scrolling. Pin state lives in the metadata JSON
+     * column under the key "pinned" — adding a typed column
+     * would have required a Room migration.
+     */
+    suspend fun setPinned(id: String, pinned: Boolean): Boolean {
+        val entity = dao.getById(id) ?: return false
+        val metadata = runCatching {
+            convJson.decodeFromString<Map<String, String>>(entity.metadataJson)
+        }.getOrElse { emptyMap() }
+        val updated = metadata.toMutableMap().apply {
+            if (pinned) put("pinned", "true") else remove("pinned")
+        }
+        dao.insert(entity.copy(
+            metadataJson = convJson.encodeToString(updated),
+            updatedAt = System.currentTimeMillis(),
+        ))
+        return true
+    }
+
+    /**
+     * Read the pinned flag from a conversation's metadata. Returns
+     * false for conversations without the flag (default = unpinned).
+     */
+    fun isPinned(conv: Conversation): Boolean =
+        conv.metadata["pinned"] == "true"
+
+    /**
+     * Recent conversations with pinned ones sorted to the top.
+     * The list is otherwise ordered by updatedAt desc, same as
+     * [recent]. Pinned items also have a stable insertion order
+     * (most recently pinned first) because their updatedAt is
+     * bumped when pinned.
+     */
+    suspend fun recentPinnedFirst(limit: Int = 50): List<Conversation> =
+        recent(limit).sortedByDescending { isPinned(it) }
+
+    /**
      * Semantic search across conversations. Embeds the query and
      * compares against conversation embeddings (lazy-populated from
      * the last user message). Falls back to SQL LIKE search if no

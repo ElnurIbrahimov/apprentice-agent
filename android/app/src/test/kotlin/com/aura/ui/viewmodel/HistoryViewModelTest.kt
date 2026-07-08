@@ -9,6 +9,7 @@ import io.mockk.coVerifyOrder
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -100,11 +101,11 @@ class HistoryViewModelTest {
     }
 
     @Test
-    fun `load calls store_recent`() = runTest {
-        coEvery { store.recent(50) } returns emptyList()
+    fun `load calls store_recentPinnedFirst`() = runTest {
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
         val vm = HistoryViewModel(mockk(relaxed = true), store)
         vm.load()
-        coVerify { store.recent(50) }
+        coVerify { store.recentPinnedFirst(50) }
         assertEquals(emptyList(), vm.state.value.conversations)
         assertFalse(vm.state.value.loading)
     }
@@ -112,9 +113,49 @@ class HistoryViewModelTest {
     @Test
     fun `delete calls store_delete then reloads`() = runTest {
         coEvery { store.delete("c1") } returns Unit
-        coEvery { store.recent(50) } returns emptyList()
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
         val vm = HistoryViewModel(mockk(relaxed = true), store)
         vm.delete("c1")
-        coVerifyOrder { store.delete("c1"); store.recent(50) }
+        coVerifyOrder { store.delete("c1"); store.recentPinnedFirst(50) }
+    }
+
+    @Test
+    fun `setTitle writes to store and updates local list`() = runTest {
+        coEvery { store.setTitle("c1", "New title") } returns true
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.setTitle("c1", "New title")
+        advanceUntilIdle()
+        coVerify { store.setTitle("c1", "New title") }
+    }
+
+    @Test
+    fun `setTitle with blank input is a no-op`() = runTest {
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.setTitle("c1", "   ")
+        coVerify(exactly = 0) { store.setTitle(any(), any()) }
+    }
+
+    @Test
+    fun `togglePinned flips the pin and writes to store`() = runTest {
+        val conv = com.aura.agent.Conversation(
+            id = "c1",
+            title = "Test",
+            createdAt = 1L,
+            updatedAt = 1L,
+            systemPrompt = null,
+            turns = emptyList(),
+            model = null,
+            metadata = emptyMap(),
+        )
+        coEvery { store.recentPinnedFirst(50) } returns listOf(conv)
+        coEvery { store.isPinned(conv) } returns false
+        coEvery { store.setPinned("c1", true) } returns true
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.load()
+        advanceUntilIdle()
+        vm.togglePinned("c1")
+        advanceUntilIdle()
+        coVerify { store.setPinned("c1", true) }
     }
 }

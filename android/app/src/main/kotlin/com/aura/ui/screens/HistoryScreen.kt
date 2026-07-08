@@ -2,6 +2,7 @@ package com.aura.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,9 +38,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -148,6 +153,7 @@ fun HistoryScreen(
                 items(state.conversations, key = { it.id }) { conv ->
                     HistoryRow(
                         conv = conv,
+                        isPinned = viewModel.isPinned(conv),
                         onClick = { onSelect(conv.id) },
                         onDelete = { viewModel.delete(conv.id) },
                         onShare = {
@@ -155,6 +161,8 @@ fun HistoryScreen(
                                 shareMarkdown(context, viewModel.exportMarkdown(conv), conv.title)
                             }
                         },
+                        onTogglePin = { viewModel.togglePinned(conv.id) },
+                        onRename = { newTitle -> viewModel.setTitle(conv.id, newTitle) },
                     )
                 }
             }
@@ -165,20 +173,69 @@ fun HistoryScreen(
 @Composable
 private fun HistoryRow(
     conv: Conversation,
+    isPinned: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onShare: () -> Unit,
+    onTogglePin: () -> Unit,
+    onRename: (String) -> Unit,
 ) {
     val fmt = SimpleDateFormat("MMM d, HH:mm", Locale.US)
     val lastTurn = conv.turns.lastOrNull()
     val preview = lastTurn?.user ?: lastTurn?.assistant ?: "Empty"
 
+    // Long-press the row → rename dialog. Tap = open conversation.
+    // Pin icon toggles the pinned flag.
+    var showRenameDialog by androidx.compose.runtime.remember { mutableStateOf(false) }
+
+    if (showRenameDialog) {
+        var text by androidx.compose.runtime.remember { mutableStateOf(conv.title) }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { androidx.compose.material3.Text("Rename conversation") },
+            text = {
+                androidx.compose.material3.OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.take(120) },
+                    singleLine = true,
+                    label = { androidx.compose.material3.Text("Title") },
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    onRename(text)
+                    showRenameDialog = false
+                }) {
+                    androidx.compose.material3.Text("Save")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showRenameDialog = false }) {
+                    androidx.compose.material3.Text("Cancel")
+                }
+            },
+        )
+    }
+
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(conv.id) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { showRenameDialog = true },
+                )
+            },
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Chat, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(24.dp))
+            Icon(
+                imageVector = if (isPinned) Icons.Filled.PushPin else Icons.Filled.Chat,
+                contentDescription = if (isPinned) "Pinned" else null,
+                tint = if (isPinned) MaterialTheme.colorScheme.primary
+                       else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.size(24.dp),
+            )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(conv.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -194,6 +251,18 @@ private fun HistoryRow(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(fmt.format(Date(conv.updatedAt)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+            }
+            IconButton(
+                onClick = onTogglePin,
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PushPin,
+                    contentDescription = if (isPinned) "Unpin" else "Pin",
+                    tint = if (isPinned) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.size(18.dp),
+                )
             }
             IconButton(onClick = onShare, modifier = Modifier.size(32.dp)) {
                 Icon(

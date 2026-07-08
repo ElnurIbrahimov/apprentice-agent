@@ -42,11 +42,80 @@ class HistoryViewModel @Inject constructor(
     fun load() {
         viewModelScope.launch {
             _state.update { it.copy(query = "", loading = true, searching = false) }
-            val convos = store.recent(50)
+            // Pin-aware order: pinned items surface at the top of
+            // the list, the rest fall through to the recent
+            // updatedAt desc order.
+            val convos = store.recentPinnedFirst(50)
             _state.update { HistoryUiState(conversations = convos, loading = false) }
             searchJob?.cancel()
         }
     }
+
+    /**
+     * Rename a conversation. No-op when the new title is blank
+     * or the conversation doesn't exist. The new title is
+     * reflected in the local list immediately (no DB round-trip
+     * for the UI) and the DB is updated asynchronously.
+     */
+    fun setTitle(id: String, newTitle: String) {
+        if (newTitle.isBlank()) return
+        // Optimistic update so the row reflects the new title
+        // before the DB write completes.
+        _state.update { s ->
+            s.copy(conversations = s.conversations.map { c ->
+                if (c.id == id) c.copy(title = newTitle.trim().take(120)) else c
+            })
+        }
+        viewModelScope.launch {
+            val ok = store.setTitle(id, newTitle)
+            if (!ok) {
+                // Roll back the optimistic update on failure.
+                _state.update { s ->
+                    s.copy(conversations = s.conversations.map { c ->
+                        if (c.id == id) store.load(id) ?: c else c
+                    })
+                }
+            }
+        }
+    }
+
+    /**
+     * Toggle the pinned flag for a conversation. Pin state lives
+     * in the conversation's metadata JSON. Pinned items sort to
+     * the top of the History list so they're always one tap
+     * away — the equivalent of "starred" in chat apps.
+     */
+    fun togglePinned(id: String) {
+        val current = _state.value.conversations.firstOrNull { it.id == id } ?: return
+        val target = !store.isPinned(current)
+        // Optimistic update.
+        val updatedMeta = if (target) current.metadata + ("pinned" to "true")
+            else current.metadata - "pinned"
+        _state.update { s ->
+            s.copy(
+                conversations = s.conversations.map { c ->
+                    if (c.id == id) c.copy(metadata = updatedMeta) else c
+                }
+            )
+        }
+        viewModelScope.launch {
+            val ok = store.setPinned(id, target)
+            if (!ok) {
+                // Roll back.
+                _state.update { s ->
+                    s.copy(conversations = s.conversations.map { c ->
+                        if (c.id == id) store.load(id) ?: c else c
+                    })
+                }
+            }
+        }
+    }
+
+    /**
+     * Whether a conversation is pinned. The pin flag is stored
+     * in the conversation's metadata JSON under "pinned".
+     */
+    fun isPinned(conv: Conversation): Boolean = store.isPinned(conv)
 
     /**
      * Debounced full-text search. 250ms keeps Room from being hammered
@@ -58,7 +127,7 @@ class HistoryViewModel @Inject constructor(
         val trimmed = query.trim()
         if (trimmed.isEmpty()) {
             viewModelScope.launch {
-                _state.update { it.copy(conversations = store.recent(50), searching = false) }
+                _state.update { it.copy(conversations = store.recentPinnedFirst(50), searching = false) }
             }
             return
         }
@@ -75,7 +144,7 @@ class HistoryViewModel @Inject constructor(
             store.delete(id)
             val q = _state.value.query
             if (q.isBlank()) {
-                _state.update { it.copy(conversations = store.recent(50)) }
+                _state.update { it.copy(conversations = store.recentPinnedFirst(50)) }
             } else {
                 _state.update { it.copy(conversations = store.search(q, 50)) }
             }
