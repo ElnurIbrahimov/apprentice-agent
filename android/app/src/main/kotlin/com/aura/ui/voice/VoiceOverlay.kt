@@ -45,6 +45,7 @@ fun VoiceOverlay(
     viewModel: VoiceViewModel = hiltViewModel(),
     onTranscript: (String) -> Unit,
     onDismiss: () -> Unit,
+    holdToTalk: Boolean = false,
 ) {
     val state by viewModel.sttState.collectAsState()
     val partial = when (val s = state) {
@@ -57,16 +58,25 @@ fun VoiceOverlay(
         viewModel.start()
     }
 
-    LaunchedEffect(state) {
+    LaunchedEffect(state, holdToTalk) {
         when (val s = state) {
             is SpeechToText.State.FinalResult -> {
-                if (s.text.isNotBlank()) onTranscript(s.text)
-                viewModel.reset()
-                onDismiss()
+                // In tap-to-speak (default) we auto-dismiss on
+                // FinalResult. In hold-to-talk, the user dismisses
+                // explicitly via the stop button; the overlay
+                // captures the most recent transcript (final OR
+                // partial) on dismiss.
+                if (!holdToTalk) {
+                    if (s.text.isNotBlank()) onTranscript(s.text)
+                    viewModel.reset()
+                    onDismiss()
+                }
             }
             is SpeechToText.State.Error -> {
-                viewModel.reset()
-                onDismiss()
+                if (!holdToTalk) {
+                    viewModel.reset()
+                    onDismiss()
+                }
             }
             else -> Unit
         }
@@ -97,14 +107,14 @@ fun VoiceOverlay(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Mic,
-                    contentDescription = "Listening",
+                    contentDescription = if (holdToTalk) "Hold to talk" else "Listening",
                     tint = MaterialTheme.colorScheme.onError,
                     modifier = Modifier.size(56.dp),
                 )
             }
             Spacer(modifier = Modifier.height(32.dp))
             Text(
-                text = statusText(state),
+                text = if (holdToTalk) "Hold to talk" else statusText(state),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onBackground,
@@ -119,16 +129,37 @@ fun VoiceOverlay(
             )
             Spacer(modifier = Modifier.height(48.dp))
             IconButton(
-                onClick = { viewModel.stop() },
+                onClick = {
+                    // In hold-to-talk mode, the user is releasing
+                    // the hold by tapping stop. Read the most
+                    // recent transcript (final OR partial) and
+                    // send it.
+                    if (holdToTalk) {
+                        val t = viewModel.consumeTranscript()
+                        if (t.isNotBlank()) onTranscript(t)
+                        viewModel.reset()
+                    } else {
+                        viewModel.stop()
+                    }
+                    onDismiss()
+                },
                 modifier = Modifier
                     .size(72.dp)
                     .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
             ) {
                 Icon(
                     imageVector = Icons.Filled.Stop,
-                    contentDescription = "Stop",
+                    contentDescription = if (holdToTalk) "Send" else "Stop",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(32.dp),
+                )
+            }
+            if (holdToTalk) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Tap to send what you said",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
                 )
             }
         }

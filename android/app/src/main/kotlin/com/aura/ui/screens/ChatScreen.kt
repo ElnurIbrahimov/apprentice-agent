@@ -3,6 +3,7 @@ package com.aura.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -57,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -123,6 +125,7 @@ fun ChatScreen(
     var showModelPicker by remember { mutableStateOf(false) }
     var showSources by remember { mutableStateOf(false) }
     var showVoiceOverlay by remember { mutableStateOf(false) }
+    var showHoldToTalk by remember { mutableStateOf(false) }
     var showContinuousVoice by remember { mutableStateOf(false) }
     val continuousVoiceViewModel: ContinuousVoiceViewModel = hiltViewModel()
     var showStopStreamConfirm by remember { mutableStateOf(false) }
@@ -300,6 +303,14 @@ fun ChatScreen(
                 if (hasMicPermission) showVoiceOverlay = true
                 else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
             },
+            onMicLongPress = {
+                // Long-press the mic button = push-to-talk. The
+                // overlay shows "Hold to talk" and the user controls
+                // when to send via the stop button. Distinct from
+                // tap (auto-send on first final result).
+                if (hasMicPermission) showHoldToTalk = true
+                else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            },
             onCameraClick = {
                 if (hasCameraPermission) cameraLauncher.launch(null)
                 else cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
@@ -329,6 +340,12 @@ fun ChatScreen(
     }
 
     if (showVoiceOverlay && hasMicPermission) {
+        // Two voice modes are reachable from the mic button:
+        // - Tap: tap-to-speak (auto-send on first final result)
+        // - Long-press: hold-to-talk (the user controls when to send)
+        // The mode flag is on the overlay state below; for now we
+        // expose a single entry point. Hold-to-talk is wired in
+        // commit 6 — see the holdToTalk flag in VoiceOverlay.
         VoiceOverlay(
             onTranscript = { transcript ->
                 viewModel.setDraft(transcript)
@@ -338,6 +355,27 @@ fun ChatScreen(
         )
     } else if (showVoiceOverlay) {
         LaunchedEffect(Unit) { showVoiceOverlay = false }
+    }
+
+    // Hold-to-talk overlay: the user is in control. STT runs while
+    // the overlay is shown. The user dismisses explicitly via the
+    // stop button; the most recent transcript (final OR partial) is
+    // sent on dismiss. Distinct from continuous voice mode (which
+    // loops LISTENING → THINKING → SPEAKING until explicitly stopped)
+    // and from tap-to-speak (which auto-sends on the first final
+    // result). The hold-to-talk mode is for users who want to
+    // speak, review what was transcribed, then send — not auto-send.
+    if (showHoldToTalk && hasMicPermission) {
+        VoiceOverlay(
+            holdToTalk = true,
+            onTranscript = { transcript ->
+                viewModel.setDraft(transcript)
+                viewModel.send()
+            },
+            onDismiss = { showHoldToTalk = false },
+        )
+    } else if (showHoldToTalk) {
+        LaunchedEffect(Unit) { showHoldToTalk = false }
     }
 
     // Continuous voice mode — hands-free conversation loop
@@ -996,6 +1034,7 @@ private fun ChatInputBar(
     onSend: () -> Unit,
     onCancel: () -> Unit,
     onMicClick: () -> Unit,
+    onMicLongPress: () -> Unit = {},
     onCameraClick: () -> Unit,
     onGalleryClick: () -> Unit,
     onAudioClick: () -> Unit,
@@ -1061,7 +1100,18 @@ private fun ChatInputBar(
             } else {
                 IconButton(
                     onClick = onMicClick,
-                    modifier = Modifier.size(44.dp),
+                    modifier = Modifier
+                        .size(44.dp)
+                        .pointerInput(Unit) {
+                            // Long-press triggers push-to-talk
+                            // mode. Tap keeps the existing
+                            // tap-to-speak behavior.
+                            detectTapGestures(
+                                onLongPress = {
+                                    onMicLongPress()
+                                },
+                            )
+                        },
                 ) {
                     Icon(
                         Icons.Filled.Mic,
