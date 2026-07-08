@@ -265,6 +265,7 @@ fun ChatScreen(
             state = state,
             listState = listState,
             onShowSources = { showSources = true },
+            onShowSourcesForLastTurn = { showSources = true },
             onSendSuggestion = { pick ->
                 viewModel.setDraft(pick)
                 viewModel.send()
@@ -646,6 +647,7 @@ private fun ChatMessageList(
     listState: androidx.compose.foundation.lazy.LazyListState,
     onShowSources: () -> Unit,
     onSendSuggestion: (String) -> Unit = {},
+    onShowSourcesForLastTurn: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -675,17 +677,24 @@ private fun ChatMessageList(
                 enter = fadeIn() + slideInVertically { it / 4 },
             ) {
                 Column {
-                    turn.user?.let { MessageBubble(text = it, isUser = true, timestamp = turn.timestamp) }
+                    turn.user?.let {
+                        com.aura.ui.components.MessageBubble(
+                            text = it,
+                            isUser = true,
+                            timestamp = turn.timestamp,
+                        )
+                    }
                     turn.assistant?.let {
                         val isLast = turn === state.conversation.turns.lastOrNull()
                         val isStreaming = state.streaming && isLast
-                        MessageBubble(
+                        com.aura.ui.components.MessageBubble(
                             text = it,
                             isUser = false,
                             citations = turn.citations,
-                            onShowSources = onShowSources,
                             isStreaming = isStreaming,
                             timestamp = turn.timestamp,
+                            modelLabel = state.conversation.model,
+                            onShowSources = onShowSourcesForLastTurn,
                         )
                         // Smart follow-up suggestions: shown for
                         // the LAST assistant turn (only) and only
@@ -808,232 +817,13 @@ private fun ErrorBanner(
 }
 
 @Composable
-private fun MessageBubble(
-    text: String,
-    isUser: Boolean,
-    citations: List<com.aura.tools.Citation> = emptyList(),
-    onShowSources: () -> Unit = {},
-    isStreaming: Boolean = false,
-    timestamp: Long = 0L,
-) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.surfaceVariant
-    val textColor = if (isUser) MaterialTheme.colorScheme.onPrimary
-        else MaterialTheme.colorScheme.onSurfaceVariant
-    val alignment = if (isUser) Alignment.End else Alignment.Start
-    var copied by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    var showFullTime by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    val timeText = if (timestamp > 0) {
-        if (showFullTime) com.aura.ui.util.formatClockTime(timestamp)
-        else com.aura.ui.util.formatRelativeTime(timestamp)
-    } else ""
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-        horizontalAlignment = alignment,
-    ) {
-        Surface(
-            color = bubbleColor,
-            shape = RoundedCornerShape(
-                topStart = 20.dp,
-                topEnd = 20.dp,
-                bottomStart = if (isUser) 20.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 20.dp,
-            ),
-            modifier = Modifier.widthIn(max = 340.dp),
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                if (isUser) {
-                    Text(
-                        text = text.ifBlank { "…" },
-                        color = textColor,
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                } else {
-                    com.aura.ui.components.StreamingText(
-                        text = text.ifBlank { "…" },
-                        isStreaming = isStreaming,
-                        style = MaterialTheme.typography.bodyLarge.copy(color = textColor),
-                    )
-                }
-                if (!isUser && citations.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    // Inline citation chips. Each chip is a small
-                    // primary-tinted pill that opens a preview
-                    // dialog with the source title + URL. This
-                    // replaces the old "N sources" pill that hid
-                    // the actual citation list behind a tap.
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        citations.forEach { c ->
-                            val context = androidx.compose.ui.platform.LocalContext.current
-                            var showDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-                            Surface(
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.clickable { showDialog = true },
-                            ) {
-                                Text(
-                                    text = "[${c.index}]",
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                            if (showDialog) {
-                                androidx.compose.material3.AlertDialog(
-                                    onDismissRequest = { showDialog = false },
-                                    title = {
-                                        Text(
-                                            text = c.title.ifBlank { "Source ${c.index}" },
-                                            style = MaterialTheme.typography.titleMedium,
-                                        )
-                                    },
-                                    text = {
-                                        Column {
-                                            if (c.url.isNotBlank()) {
-                                                Text(
-                                                    text = c.url,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                )
-                                            }
-                                        }
-                                    },
-                                    confirmButton = {
-                                        if (c.url.isNotBlank()) {
-                                            androidx.compose.material3.TextButton(onClick = {
-                                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(c.url))
-                                                context.startActivity(intent)
-                                                showDialog = false
-                                            }) { Text("Open") }
-                                        } else {
-                                            androidx.compose.material3.TextButton(onClick = { showDialog = false }) { Text("Close") }
-                                        }
-                                    },
-                                    dismissButton = {
-                                        androidx.compose.material3.TextButton(onClick = { showDialog = false }) { Text("Close") }
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // Action row under the bubble — copy button for assistant
-        // messages. Only shown when not streaming.
-        if (!isUser && !isStreaming && text.isNotBlank()) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.padding(top = 4.dp, start = 4.dp),
-            ) {
-                Surface(
-                    onClick = {
-                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Aura", text))
-                        copied = true
-                    },
-                    color = androidx.compose.ui.graphics.Color.Transparent,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.size(32.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        Icon(
-                            imageVector = androidx.compose.material.icons.Icons.Filled.ContentCopy,
-                            contentDescription = "Copy",
-                            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                }
-                androidx.compose.runtime.LaunchedEffect(copied) {
-                    if (copied) {
-                        kotlinx.coroutines.delay(1500)
-                        copied = false
-                    }
-                }
-                if (copied) {
-                    Text(
-                        text = "Copied",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-                    )
-                }
-                if (timestamp > 0 && !isStreaming) {
-                    // Tap the timestamp to toggle between relative
-                    // ("5m") and full clock time ("3:42 PM").
-                    Surface(
-                        onClick = { showFullTime = !showFullTime },
-                        color = androidx.compose.ui.graphics.Color.Transparent,
-                        shape = RoundedCornerShape(6.dp),
-                    ) {
-                        Text(
-                            text = timeText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun TypingIndicator() {
-    // Three animated dots in a bubble — like iMessage / WhatsApp.
-    // Each dot pulses with a 200ms stagger so the eye sees a wave.
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = Modifier
-            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
-            .background(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
-            )
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-    ) {
-        for (i in 0 until 3) {
-            val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "dot-$i")
-            val offset by transition.animateFloat(
-                initialValue = 0f,
-                targetValue = -6f,
-                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                    animation = androidx.compose.animation.core.tween(500),
-                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
-                    initialStartOffset = androidx.compose.animation.core.StartOffset(i * 150),
-                ),
-                label = "y-$i",
-            )
-            val alpha by transition.animateFloat(
-                initialValue = 0.4f,
-                targetValue = 1f,
-                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                    animation = androidx.compose.animation.core.tween(500),
-                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
-                    initialStartOffset = androidx.compose.animation.core.StartOffset(i * 150),
-                ),
-                label = "alpha-$i",
-            )
-            Box(
-                modifier = Modifier
-                    .graphicsLayer { translationY = offset }
-                    .size(7.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
-                        shape = androidx.compose.foundation.shape.CircleShape,
-                    ),
-            )
-        }
-    }
+    // Three animated dots — same idea as iMessage / WhatsApp, but
+    // now rendered with Aura brand typography. The shimmer
+    // [ThinkingShimmer] in the message list component handles the
+    // in-list shimmer; this stub remains for the case where the
+    // screen wants a standalone indicator above the input bar.
+    com.aura.ui.components.ThinkingShimmer()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
