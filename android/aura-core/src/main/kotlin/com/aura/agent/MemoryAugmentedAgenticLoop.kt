@@ -67,6 +67,14 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         var finished = false
         var lastUserMessage = ""
         var currentConversation = conversation
+        // Tracks the most recent recall across all steps. The
+        // agentic loop can run multiple model steps per turn (e.g.
+        // one with tools, one without); we capture the recall
+        // from the last step that actually performed recall so the
+        // chip shows the most relevant memories for the final
+        // assistant text. Null when no step recalled anything
+        // (or memoryEnabled=false in incognito mode).
+        var lastRecall: com.aura.agent.RecallSummary? = null
 
         while (!finished && step < maxSteps) {
             step += 1
@@ -84,6 +92,25 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                 "\n\n# Triggered automation:\nThe user triggered hand '${hand.name}'. " +
                     "Run it with run_hand(name=\"${hand.name}\")."
             } ?: ""
+
+            // Capture this step's recall. Skip in incognito mode —
+            // we don't want to surface "Aura used N memories" when
+            // the user opted out of memory entirely. The MemoryStore
+            // call itself is read-only so this gate is just about
+            // the chip and the persisted Turn.recall field.
+            val stepMemoryIds: List<String> = if (memoryEnabled && lastUserMessage.isNotBlank()) {
+                memoryStore.query(lastUserMessage, recallLimit).map { it.id }
+            } else emptyList()
+            val stepHandIds: List<String> = handTrigger?.let { listOf(it.id) } ?: emptyList()
+            if (memoryEnabled) {
+                // Only persist a non-null recall when memory is on
+                // for this turn. The chip is hidden otherwise.
+                lastRecall = com.aura.agent.RecallSummary(
+                    memoryIds = stepMemoryIds,
+                    handIds = stepHandIds,
+                    noResults = stepMemoryIds.isEmpty() && stepHandIds.isEmpty(),
+                )
+            }
 
             val memoryContext = if (lastUserMessage.isNotBlank()) {
                 val hits = memoryStore.query(lastUserMessage, recallLimit)
@@ -302,7 +329,14 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         if (!finished) {
             emit(AgentEvent.Error("max_steps_exceeded", "Hit max steps ($maxSteps) without finishing.", retryable = false))
         }
-        emit(AgentEvent.Result(currentConversation))
+        // Persist the recall summary on the conversation's last
+        // turn so the chat UI can render the chip on history
+        // replays and so the loop stays the single source of
+        // truth for what was recalled.
+        val finalConv = if (lastRecall != null) {
+            currentConversation.attachRecallToLastTurn(lastRecall)
+        } else currentConversation
+        emit(AgentEvent.Result(finalConv, lastRecall))
         emit(AgentEvent.Done)
     }
 
@@ -348,6 +382,15 @@ sealed class AgentEvent {
     data class PermissionGranted(val toolName: String, val arguments: String) : AgentEvent()
     data class Error(val code: String, val message: String, val retryable: Boolean, val typedError: com.aura.core.error.AuraError? = null) : AgentEvent()
     data class Warning(val message: String) : AgentEvent()
-    data class Result(val conversation: com.aura.agent.Conversation) : AgentEvent()
+    data class Result(
+        val conversation: com.aura.agent.Conversation,
+        /**
+         * The recall summary for the turn that just completed.
+         * Null when the loop skipped recall (incognito mode).
+         * Stored on the conversation's last turn by the UI layer
+         * so the chip renders on history replays.
+         */
+        val recall: com.aura.agent.RecallSummary? = null,
+    ) : AgentEvent()
     data object Done : AgentEvent()
 }

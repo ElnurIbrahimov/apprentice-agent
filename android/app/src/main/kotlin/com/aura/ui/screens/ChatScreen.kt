@@ -632,6 +632,19 @@ private fun ChatMessageList(
                             isStreaming = isStreaming,
                             timestamp = turn.timestamp,
                         )
+                        // Memory recall chip: shown below the assistant
+                        // bubble when the agentic loop actually performed
+                        // recall. Hidden for incognito turns and for turns
+                        // where the loop errored before the recall step.
+                        // Use a local val because `turn.recall` is in a
+                        // different module (aura-core) and Kotlin won't
+                        // smart-cast cross-module public properties.
+                        val recall = turn.recall
+                        if (recall != null) {
+                            com.aura.ui.components.MemoryRecallChip(
+                                recall = recall,
+                            )
+                        }
                     }
                     for (toolTurn in turn.toolTurns) {
                         if (toolTurn.result.isNotEmpty()) {

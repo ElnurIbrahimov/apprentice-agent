@@ -109,6 +109,18 @@ data class Conversation(
         turns = turns.dropLast(1) + newLast,
         updatedAt = System.currentTimeMillis(),
     )
+
+    /**
+     * Persist the recall summary on the conversation's last turn.
+     * No-op when the conversation has no turns (a fresh
+     * conversation that errored before any user message). Used
+     * by [com.aura.agent.MemoryAugmentedAgenticLoop] right before
+     * emitting the [com.aura.agent.AgentEvent.Result] event.
+     */
+    fun attachRecallToLastTurn(recall: RecallSummary): Conversation {
+        if (turns.isEmpty()) return this
+        return replaceLastTurn(turns.last().copy(recall = recall))
+    }
 }
 
 @Serializable
@@ -119,6 +131,14 @@ data class Turn(
     val citations: List<Citation> = emptyList(),
     val imageUri: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
+    /**
+     * What Aura recalled from its long-term stores for this turn.
+     * Null when the loop didn't perform recall (e.g. incognito
+     * mode where memoryEnabled=false). Stored as part of the
+     * conversation's JSON so the chip renders on history replays
+     * too.
+     */
+    val recall: RecallSummary? = null,
 )
 
 @Serializable
@@ -127,4 +147,24 @@ data class ToolTurn(
     val name: String,
     val args: String,
     val result: String,
+)
+
+/**
+ * A snapshot of which memories / facts / hands the agentic loop
+ * pulled into the system prompt for a given turn. Stored on the
+ * [Turn] so the chat UI can show the user what Aura remembered
+ * ("Used 3 memories · 1 hand") and so the History view can
+ * display the same.
+ *
+ * IDs are stored, not full content, so the chip stays small and
+ * the bottom sheet can lazy-load the content from the store.
+ * Nullable fields mean "we didn't recall this category" — the
+ * loop picks them up at most once per turn.
+ */
+@Serializable
+data class RecallSummary(
+    val memoryIds: List<String> = emptyList(),
+    val handIds: List<String> = emptyList(),
+    /** True when the recall found 0 results — distinguishes "we looked" from "we didn't look". */
+    val noResults: Boolean = false,
 )
