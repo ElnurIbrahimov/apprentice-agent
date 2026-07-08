@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aura.FirstRunGate
+import com.aura.providers.MoaPresetRepository
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -68,6 +69,14 @@ data class OnboardingUiState(
     val configuredCount: Int = 0,
     val verifying: Boolean = false,
     val verifyResult: String? = null,
+    /**
+     * True when the default MoA preset's reference models + aggregator
+     * are all from providers the user has configured. Drives whether
+     * the PageDone "MoA — Mixture of Agents" card is shown. The card
+     * used to render unconditionally, which lied to anyone with
+     * fewer than the required providers configured.
+     */
+    val moaAvailable: Boolean = false,
 )
 
 @HiltViewModel
@@ -75,6 +84,7 @@ class OnboardingViewModel @Inject constructor(
     private val firstRunGate: FirstRunGate,
     private val providerKeys: ProviderKeys,
     private val providerRegistry: ProviderRegistry,
+    private val moaPresetRepository: MoaPresetRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(OnboardingUiState())
@@ -92,10 +102,27 @@ class OnboardingViewModel @Inject constructor(
 
     fun refreshConfigured() {
         viewModelScope.launch {
+            val configured = providerRegistry.configured()
             _state.value = _state.value.copy(
-                configuredCount = providerRegistry.configured().size
+                configuredCount = configured.size,
+                moaAvailable = computeMoaAvailable(configured.map { it.prefix }),
             )
         }
+    }
+
+    /**
+     * MoA is available when the default preset's reference models and
+     * aggregator are all from providers the user has configured.
+     * Default preset (per MoaPresetRepository): 2× ollama references +
+     * 1× deepseek aggregator. So users need at least ollama + deepseek
+     * configured for the default MoA to work.
+     */
+    private fun computeMoaAvailable(configuredPrefixes: List<String>): Boolean {
+        val preset = moaPresetRepository.loadPresets().values.firstOrNull { it.enabled }
+            ?: return false
+        val requiredPrefixes = preset.referenceModels.map { it.providerPrefix }.toSet() +
+            preset.aggregator.providerPrefix
+        return configuredPrefixes.toSet().containsAll(requiredPrefixes)
     }
 
     /**
@@ -180,6 +207,7 @@ fun OnboardingScreen(
                 )
                 2 -> PageDone(
                     configuredCount = state.configuredCount,
+                    moaAvailable = state.moaAvailable,
                     onFinish = {
                         viewModel.finish()
                         onComplete()
@@ -389,6 +417,7 @@ private fun PageKeys(
 @Composable
 private fun PageDone(
     configuredCount: Int,
+    moaAvailable: Boolean,
     onFinish: () -> Unit,
 ) {
     Column(
@@ -426,30 +455,45 @@ private fun PageDone(
             textAlign = TextAlign.Center,
         )
         Spacer(modifier = Modifier.height(16.dp))
-        // MoA introduction
-        Surface(
-            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+        // MoA card. Only shown when the user has configured providers
+        // for the default MoA preset (ollama + deepseek per
+        // MoaPresetRepository). Showing it when MoA isn't actually
+        // usable was a lie — the user would tap "🚀 Deep" and get a
+        // 401 from the unconfigured aggregator.
+        if (moaAvailable) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(
-                    text = "🧠 MoA — Mixture of Agents",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Aura can use 3 AI models together for harder problems. Tap \"🚀 Deep\" in chat to enable it — the models collaborate to give you better answers.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
-                    textAlign = TextAlign.Center,
-                )
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = "🧠 MoA — Mixture of Agents",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Aura can use 3 AI models together for harder problems. Tap \"🚀 Deep\" in chat to enable it — the models collaborate to give you better answers.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
+        } else {
+            // Honest substitute: tell the user what MoA needs so they
+            // can add the missing providers in Settings later.
+            Text(
+                text = "Tip: add more providers in Settings to unlock Mixture of Agents — it runs 3 models together for harder questions.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                textAlign = TextAlign.Center,
+            )
         }
         Spacer(modifier = Modifier.height(48.dp))
         Button(
