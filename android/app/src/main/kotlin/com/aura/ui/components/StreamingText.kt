@@ -4,6 +4,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
@@ -51,13 +52,28 @@ fun StreamingText(
     cursorColor: Color = MaterialTheme.colorScheme.primary,
 ) {
     // The infinite transition must live in a Composable context.
+    //
+    // Binary on/off blink at 530ms per cycle (53% on, 47% off — a
+    // 50/50 split feels too nervous). Using keyframes with two
+    // steps produces a hard cut between on and off, like a real
+    // terminal cursor and the ChatGPT / Claude streaming
+    // indicator. The previous tween + RepeatMode.Reverse
+    // produced a smooth 0.3 → 1.0 alpha fade, which looks like
+    // throbbing rather than typing.
     val infiniteTransition = rememberInfiniteTransition(label = "cursor")
     val cursorAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
+        initialValue = 1f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
+            animation = keyframes<Float> {
+                durationMillis = 530
+                1f at 0
+                1f at 280  // on for ~53% of cycle
+                0f at 281  // hard cut to off
+                0f at 529
+                1f at 530  // hard cut back to on
+            },
+            repeatMode = RepeatMode.Restart,
         ),
         label = "alpha",
     )
