@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -21,15 +22,19 @@ import androidx.compose.ui.text.withStyle
 
 /**
  * Compose the annotated string for a streaming response — appends
- * a colored cursor block (▍) at the end. Used by [StreamingText].
+ * a colored cursor block (▍) at the end. Uses [StreamingMarkdownState]
+ * to suppress trailing unclosed markdown markers (e.g. `**` at
+ * the end of a partial bold span) so the rendered text doesn't
+ * flicker as the closing marker arrives in the next chunk.
  */
 fun buildStreamingAnnotatedString(
     text: String,
     cursorColor: Color,
     isStreaming: Boolean,
     colors: MarkdownColors,
+    state: StreamingMarkdownState = StreamingMarkdownState(),
 ): AnnotatedString = buildAnnotatedString {
-    append(parseMarkdown(text, colors))
+    append(state.render(text, colors))
     if (isStreaming) {
         withStyle(SpanStyle(color = cursorColor)) {
             append(" ▍")
@@ -79,11 +84,18 @@ fun StreamingText(
     )
     val effectiveCursor = cursorColor.copy(alpha = cursorAlpha)
     val colors = rememberMarkdownColors()
+    // Hold the parser state across recompositions. Otherwise each
+    // recomposition would create a fresh state and lose any
+    // partial work (which is fine here because the state is
+    // fully derived from the input text, but `remember` makes
+    // the intent explicit and avoids an allocation per frame).
+    val state = remember { StreamingMarkdownState() }
     val annotated = buildStreamingAnnotatedString(
         text = text,
         cursorColor = effectiveCursor,
         isStreaming = isStreaming,
         colors = colors,
+        state = state,
     )
     Text(
         text = annotated,
