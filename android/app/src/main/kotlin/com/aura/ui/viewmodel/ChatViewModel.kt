@@ -125,17 +125,30 @@ class ChatViewModel @Inject constructor(
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
 
-    private var runJob: Job? = null
-
-    /** Track consecutive tool failures for adaptive MoA escalation. */
-    private var consecutiveFailures: Int = 0
-    private var lastUserMessage: String = ""
-
-    /** Known user correction patterns that suggest the model is struggling. */
-    private val correctionPatterns = listOf(
-        Regex("""\b(?:no|wrong|incorrect|not right|nope|that's wrong|bad answer)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:try again|redo|retry|do it again|another way)\b""", RegexOption.IGNORE_CASE),
-    )
+    /**
+     * Send pipeline controller. Owns the streaming runJob, the
+     * consecutive-failures counter (for adaptive MoA escalation),
+     * and the assistant-text buffer used for TTS on completion.
+     * Extracted from this VM so the send logic lives in one place
+     * and the VM is just a state holder + lifecycle owner.
+     */
+    private val sendController: ChatSendController by lazy {
+        ChatSendController(
+            application = application,
+            state = _state,
+            loop = loop,
+            userPreferences = userPreferences,
+            textToSpeech = textToSpeech,
+            knowledgeGraphRepository = knowledgeGraphRepository,
+            onSaveConversation = { saveConversation() },
+            onKgNodeCountChanged = { refreshKgNodeCount() },
+            onFirstConversationComplete = { onFirstConversationComplete() },
+            extractCitations = ::extractCitations,
+            setErrorWithAutoDismiss = ::setErrorWithAutoDismiss,
+            generateTitle = ::generateTitle,
+            onError = { msg -> _state.update { it.copy(error = msg) } },
+        )
+    }
 
     private fun saveConversation() {
         if (_state.value.incognitoMode) return
@@ -487,7 +500,13 @@ class ChatViewModel @Inject constructor(
             _state.update { it.copy(streaming = false, error = "Lost tool call context") }
             return
         }
-        runJob = viewModelScope.launch {
+        // Cancel any in-flight agent stream so this retry isn't
+        // racing with the loop. The original code stored both
+        // the send loop and the retry in the same runJob field;
+        // now they're separate but cancel() still does the right
+        // thing via the controller.
+        sendController.cancel()
+        viewModelScope.launch {
             try {
                 val ctx = ToolContext(conversationId = _state.value.conversation.id)
                 val result = toolExecutor.execute(toolName, args, ctx)
@@ -507,16 +526,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun cancel() {
-        runJob?.cancel()
-        runJob = null
-        // Save the partial response rather than discarding it. The
-        // streaming text was already appended to the conversation's
-        // last turn via replaceLastTurn, so the partial assistant text
-        // is in _state.value.conversation. We just need to persist it.
-        if (!_state.value.incognitoMode && _state.value.conversation.turns.isNotEmpty()) {
-            saveConversation()
-        }
-        _state.update { it.copy(streaming = false) }
+        sendController.cancel()
     }
 
     fun onUserMessage(text: String) {
@@ -525,163 +535,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun send() {
-        val current = _state.value
-        val text = current.draft.trim()
-        if (text.isEmpty() || current.streaming) return
-
-        // Adaptive MoA escalation: if the user corrected the last response
-        // or the model has been struggling, auto-enable Deep Mode.
-        val userIsCorrecting = correctionPatterns.any { it.containsMatchIn(text) }
-        val shouldEscalate = !current.deepModeEnabled && (
-            userIsCorrecting || consecutiveFailures >= 3
-        )
-        if (shouldEscalate) {
-            _state.update { it.copy(deepModeEnabled = true) }
-        }
-        lastUserMessage = text
-
-        // If Deep Mode is enabled, use the MoA provider for this turn.
-        val useMoa = _state.value.deepModeEnabled
-        val model = if (useMoa) "moa:default" else current.activeModel
-
-        _state.update { it.copy(
-            conversation = it.conversation.addUser(text),
-            draft = "",
-            streaming = true,
-            error = null,
-            deepModeActive = useMoa,
-        ) }
-
-        // Auto-title: if this is the first user message and the title
-        // is still a default placeholder, generate a short title from
-        // the first 6 words. No LLM call — fast, deterministic, good
-        // enough for History browsing. The title is part of the
-        // conversation object so it persists on the next
-        // saveConversation() call.
-        val isDefaultTitle = _state.value.conversation.title == "New conversation" ||
-            _state.value.conversation.title == "Welcome"
-        if (isDefaultTitle &&
-            _state.value.conversation.turns.count { it.user != null } == 1
-        ) {
-            val title = generateTitle(text)
-            _state.update { it.copy(conversation = it.conversation.copy(title = title)) }
-        }
-
-        val specialist = current.selectedSpecialist
-        var responseBuffer = StringBuilder()
-
-        saveConversation()  // Save user message immediately
-
-        runJob = viewModelScope.launch {
-            try {
-                val conversation = _state.value.conversation
-                // Apply user-defined specialist prompt overrides
-                val resolvedSpecialist = specialist?.let { s ->
-                    val overridesJson = userPreferences.specialistOverrides.first()
-                    val toolOverridesJson = userPreferences.specialistToolOverrides.first()
-                    try {
-                        val promptOverrides = kotlinx.serialization.json.Json.decodeFromString<Map<String, String>>(overridesJson)
-                        val toolOverrides = if (toolOverridesJson.isNotBlank() && toolOverridesJson != "{}") {
-                            kotlinx.serialization.json.Json.decodeFromString<Map<String, List<String>>>(toolOverridesJson)
-                                .mapValues { it.value.toSet() }
-                        } else emptyMap()
-                        val customPrompt = promptOverrides[s.name]
-                        val customTools = toolOverrides[s.name]
-                        val withPrompt = if (customPrompt.isNullOrBlank()) s else s.copy(systemPrompt = customPrompt)
-                        if (customTools != null && customTools.isNotEmpty()) withPrompt.copy(toolsAllowed = customTools) else withPrompt
-                    } catch (e: Exception) { s }
-                }
-                loop.run(
-                    conversation = conversation,
-                    model = model,
-                    specialist = resolvedSpecialist,
-                    memoryEnabled = !_state.value.incognitoMode,
-                ).collect { event ->
-                    when (event) {
-                        is AgentEvent.TextDelta -> {
-                            responseBuffer.append(event.text)
-                            _state.update { old ->
-                                val turns = old.conversation.turns
-                                val last = turns.lastOrNull()
-                                val updatedConversation = if (last != null) {
-                                    old.conversation.replaceLastTurn(
-                                        last.copy(assistant = (last.assistant ?: "") + event.text)
-                                    )
-                                } else old.conversation
-                                old.copy(conversation = updatedConversation)
-                            }
-                        }
-                        is AgentEvent.ToolResult -> {
-                            val citations = extractCitations(event.name, event.result)
-                            if (citations.isNotEmpty()) {
-                                _state.update { old ->
-                                    old.copy(conversation = old.conversation.setCitations(citations))
-                                }
-                            }
-                            if (event.needsPermission != null) {
-                                _state.update { old ->
-                                    old.copy(
-                                        pendingPermission = event.needsPermission,
-                                        permissionRationale = event.permissionRationale,
-                                        pendingToolRetry = event.name to event.arguments,
-                                    )
-                                }
-                            } else if (event.result.startsWith("Still needs permission")) {
-                                // Fallback: parse permission back out of formatted tool result
-                                val perm = event.result.substringAfter("Still needs permission: ").trim()
-                                _state.update { old ->
-                                    old.copy(
-                                        pendingPermission = perm,
-                                        permissionRationale = "Permission is still required for ${event.name}.",
-                                        pendingToolRetry = event.name to event.arguments,
-                                    )
-                                }
-                            }
-                        }
-                        is AgentEvent.ToolExecuting -> {
-                            // not used in this collector
-                        }
-                        is AgentEvent.Error -> {
-                            consecutiveFailures++
-                            val typed = event.typedError
-                            val display = typed?.formatUserMessage() ?: "${event.code}: ${event.message}"
-                            setErrorWithAutoDismiss(display, retryable = event.retryable, typed = typed)
-                        }
-                        is AgentEvent.Result -> {
-                            // Replace the conversation snapshot with the loop's final state
-                            // which includes all tool calls, tool results, and assistant text.
-                            _state.update { old ->
-                                old.copy(conversation = event.conversation)
-                            }
-                        }
-                        is AgentEvent.Done -> {
-                            // Reset failure counter on successful completion.
-                            consecutiveFailures = 0
-                            if (_state.value.ttsEnabled && responseBuffer.isNotBlank()) {
-                                textToSpeech.speak(
-                                    text = responseBuffer.toString(),
-                                    utteranceId = "turn-${System.currentTimeMillis()}",
-                                    flush = true,
-                                )
-                            }
-                            saveConversation()
-                            // Check if KG learned new nodes
-                            refreshKgNodeCount()
-                            onFirstConversationComplete()
-                            // Reset Deep Mode after a successful MoA turn.
-                            _state.update { it.copy(deepModeEnabled = false, deepModeActive = false) }
-                        }
-                        else -> Unit
-                    }
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                // user cancelled; no-op
-            } catch (e: Exception) {
-                _state.update { it.copy(error = e.message ?: "unknown error") }
-            } finally {
-                _state.update { it.copy(streaming = false, deepModeActive = false) }
-            }
-        }
+        sendController.runSend(viewModelScope)
     }
 
     /**
