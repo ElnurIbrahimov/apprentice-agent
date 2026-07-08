@@ -119,6 +119,18 @@ fun NavGraph(
                             restoreState = true
                         }
                     },
+                    onOpenChatWithBrief = { brief ->
+                        // Morning-brief proactive card. Pass the brief text
+                        // as `brief` query param so ChatScreen auto-sends
+                        // it as a user message.
+                        navController.navigate(
+                            "chat?brief=${android.net.Uri.encode(brief)}"
+                        ) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                     onOpenMemory = {
                         navController.navigate(TopLevelRoute.Memory.route) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -137,14 +149,15 @@ fun NavGraph(
                 )
             }
             composable(
-                route = "chat?convId={convId}&draft={draft}",
+                route = "chat?convId={convId}&draft={draft}&brief={brief}",
                 arguments = listOf(
                     navArgument("convId") { type = NavType.StringType; nullable = true; defaultValue = null },
                     navArgument("draft") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("brief") { type = NavType.StringType; nullable = true; defaultValue = null },
                 ),
             ) {
                 val convId = it.arguments?.getString("convId")
-                val summary = it.arguments?.getString("morningBriefSummary")
+                val summary = it.arguments?.getString("brief")
                 val draft = it.arguments?.getString("draft")
                 ChatScreen(
                     resumeConversationId = convId,

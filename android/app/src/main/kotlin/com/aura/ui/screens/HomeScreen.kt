@@ -78,7 +78,14 @@ private data class ExamplePrompt(
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
-    onOpenChat: (String) -> Unit = {},
+    onOpenChat: (prefillDraft: String) -> Unit = {},
+    /**
+     * Like [onOpenChat] but the chat screen receives the brief as
+     * `morningBriefSummary` — the chat auto-sends the brief text
+     * as a user message so the user lands mid-conversation, not on
+     * a blank draft. Used by the morning-brief proactive event card.
+     */
+    onOpenChatWithBrief: (briefText: String) -> Unit = {},
     onOpenProactive: () -> Unit = {},
     onOpenMemory: () -> Unit = {},
     onOpenTasks: () -> Unit = {},
@@ -155,9 +162,17 @@ fun HomeScreen(
         ) {
             state.proactiveEvent?.let { event ->
                 val onTap = when (event) {
-                    is ProactiveEventBus.Event.MorningBriefReady,
+                    is ProactiveEventBus.Event.MorningBriefReady -> {
+                        // Send the brief body as a user message so the user
+                        // lands on a chat that's already mid-discussion of
+                        // the brief, not on a blank draft.
+                        { onOpenChatWithBrief(event.body) }
+                    }
                     is ProactiveEventBus.Event.MorningBriefStructured -> {
-                        { onOpenChat("") }
+                        // The structured event doesn't carry a freeform
+                        // body — render the summary lines as the user
+                        // message so the user can discuss the brief.
+                        { onOpenChatWithBrief(event.context.toSummary()) }
                     }
                     is ProactiveEventBus.Event.CalendarEventSoon -> {
                         { onOpenCalendar() }
@@ -165,7 +180,11 @@ fun HomeScreen(
                     is ProactiveEventBus.Event.MemoryDecayWarning -> {
                         { onOpenMemory() }
                     }
-                    is ProactiveEventBus.Event.LocationArrived -> { {} }
+                    is ProactiveEventBus.Event.LocationArrived -> {
+                        // Open a chat asking "Where am I?" so the agent
+                        // can describe the place + recalled memories.
+                        { onOpenChat("Where am I? What do you remember about this place?") }
+                    }
                 }
                 ProactiveEventCard(
                     event = event,
