@@ -11,108 +11,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
-// ── Dark theme (primary — dark-first design) ──────────────────────────────────
-// Deep charcoal background, teal accent, warm secondary. Feels premium
-// and modern, not generic Material purple.
-
-private val DarkPrimary = Color(0xFF2DD4BF)        // teal-400
-private val DarkOnPrimary = Color(0xFF003731)
-private val DarkPrimaryContainer = Color(0xFF00504A)
-private val DarkOnPrimaryContainer = Color(0xFF6FF7E6)
-private val DarkSecondary = Color(0xFFB0BEC5)       // blue-grey-200
-private val DarkOnSecondary = Color(0xFF253238)
-private val DarkSecondaryContainer = Color(0xFF37474F)
-private val DarkOnSecondaryContainer = Color(0xFFCFD8DC)
-private val DarkTertiary = Color(0xFFF9A825)        // amber-700
-private val DarkOnTertiary = Color(0xFF3E2A00)
-private val DarkTertiaryContainer = Color(0xFF573E00)
-private val DarkOnTertiaryContainer = Color(0xFFFFD9A0)
-private val DarkBackground = Color(0xFF0F0F10)       // near-black, not pure black
-private val DarkSurface = Color(0xFF1A1A1C)         // slight elevation
-private val DarkSurfaceVariant = Color(0xFF252528)
-private val DarkOnSurfaceVariant = Color(0xFFCACACA)
-private val DarkOnSurface = Color(0xFFEAEAEA)
-private val DarkOutline = Color(0xFF3A3A3D)
-private val DarkOutlineVariant = Color(0xFF2A2A2D)
-private val DarkError = Color(0xFFEF5350)
-private val DarkOnError = Color(0xFFFFFFFF)
-
-// ── Light theme ───────────────────────────────────────────────────────────────
-
-private val LightPrimary = Color(0xFF00897B)       // teal-600
-private val LightOnPrimary = Color(0xFFFFFFFF)
-private val LightPrimaryContainer = Color(0xFFB2DFDB)
-private val LightOnPrimaryContainer = Color(0xFF004D45)
-private val LightSecondary = Color(0xFF546E7A)       // blue-grey-600
-private val LightOnSecondary = Color(0xFFFFFFFF)
-private val LightSecondaryContainer = Color(0xFFCFD8DC)
-private val LightOnSecondaryContainer = Color(0xFF1A2327)
-private val LightTertiary = Color(0xFFE65100)        // orange-900
-private val LightOnTertiary = Color(0xFFFFFFFF)
-private val LightTertiaryContainer = Color(0xFFFFD180)
-private val LightOnTertiaryContainer = Color(0xFF2E1A00)
-private val LightBackground = Color(0xFFFAFAFA)
-private val LightSurface = Color(0xFFFFFFFF)
-private val LightSurfaceVariant = Color(0xFFECECEC)
-private val LightOnSurfaceVariant = Color(0xFF444444)
-private val LightOnSurface = Color(0xFF1A1A1A)
-private val LightOutline = Color(0xFFCCCCCC)
-private val LightOutlineVariant = Color(0xFFE0E0E0)
-private val LightError = Color(0xFFD32F2F)
-private val LightOnError = Color(0xFFFFFFFF)
-
-private val DarkColors = darkColorScheme(
-    primary = DarkPrimary,
-    onPrimary = DarkOnPrimary,
-    primaryContainer = DarkPrimaryContainer,
-    onPrimaryContainer = DarkOnPrimaryContainer,
-    secondary = DarkSecondary,
-    onSecondary = DarkOnSecondary,
-    secondaryContainer = DarkSecondaryContainer,
-    onSecondaryContainer = DarkOnSecondaryContainer,
-    tertiary = DarkTertiary,
-    onTertiary = DarkOnTertiary,
-    tertiaryContainer = DarkTertiaryContainer,
-    onTertiaryContainer = DarkOnTertiaryContainer,
-    background = DarkBackground,
-    surface = DarkSurface,
-    surfaceVariant = DarkSurfaceVariant,
-    onSurfaceVariant = DarkOnSurfaceVariant,
-    onSurface = DarkOnSurface,
-    outline = DarkOutline,
-    outlineVariant = DarkOutlineVariant,
-    error = DarkError,
-    onError = DarkOnError,
-)
-
-private val LightColors = lightColorScheme(
-    primary = LightPrimary,
-    onPrimary = LightOnPrimary,
-    primaryContainer = LightPrimaryContainer,
-    onPrimaryContainer = LightOnPrimaryContainer,
-    secondary = LightSecondary,
-    onSecondary = LightOnSecondary,
-    secondaryContainer = LightSecondaryContainer,
-    onSecondaryContainer = LightOnSecondaryContainer,
-    tertiary = LightTertiary,
-    onTertiary = LightOnTertiary,
-    tertiaryContainer = LightTertiaryContainer,
-    onTertiaryContainer = LightOnTertiaryContainer,
-    background = LightBackground,
-    surface = LightSurface,
-    surfaceVariant = LightSurfaceVariant,
-    onSurfaceVariant = LightOnSurfaceVariant,
-    onSurface = LightOnSurface,
-    outline = LightOutline,
-    outlineVariant = LightOutlineVariant,
-    error = LightError,
-    onError = LightOnError,
-)
-
+/**
+ * AuraTheme — wraps the Material 3 color scheme with the Aura design
+ * tokens defined in [AuraTokens]. Dark theme is the default because
+ * Aura runs dark-first, matching the Aura Web UI.
+ *
+ * Dynamic color is OFF by default. The Aura brand uses a fixed
+ * violet/blue palette (matching the web `--accent-purple` #8B5CF6
+ * and `--accent-blue` #3B82F6) and dynamic color pulls in
+ * wallpaper-derived hues that clash with the brand identity. The
+ * user can opt-in via Settings.
+ */
 @Composable
 fun AuraTheme(
     themeMode: String = "system",
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -122,9 +35,6 @@ fun AuraTheme(
         "dark" -> true
         else -> systemDark
     }
-    // Dynamic color uses the device wallpaper — nice on Android 12+
-    // but it can clash with our teal palette. Default off so the
-    // Aura brand identity is consistent.
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && themeMode == "system" -> {
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -139,3 +49,61 @@ fun AuraTheme(
         content = content,
     )
 }
+
+// ── Dark scheme — Aura brand (vivid violet on near-black) ─────────────────
+private val DarkColors = darkColorScheme(
+    primary = AuraTokens.Dark.accentPurple,
+    onPrimary = Color.White,
+    primaryContainer = AuraTokens.Dark.surface3,
+    onPrimaryContainer = AuraTokens.Dark.accentPurple,
+    secondary = AuraTokens.Dark.accentBlue,
+    onSecondary = Color.White,
+    secondaryContainer = AuraTokens.Dark.surface2,
+    onSecondaryContainer = AuraTokens.Dark.accentBlue,
+    tertiary = AuraTokens.Dark.accentGreen,
+    onTertiary = Color.White,
+    tertiaryContainer = AuraTokens.Dark.surface2,
+    onTertiaryContainer = AuraTokens.Dark.accentGreen,
+    background = AuraTokens.Dark.bgBase,
+    onBackground = AuraTokens.Dark.textPrimary,
+    surface = AuraTokens.Dark.surface1,
+    onSurface = AuraTokens.Dark.textPrimary,
+    surfaceVariant = AuraTokens.Dark.surface2,
+    onSurfaceVariant = AuraTokens.Dark.textSecondary,
+    surfaceTint = AuraTokens.Dark.accentPurple,
+    inverseSurface = Color.White,
+    inverseOnSurface = AuraTokens.Dark.surface0,
+    inversePrimary = AuraTokens.Dark.accentPurple,
+    outline = AuraTokens.Dark.borderDefault,
+    outlineVariant = AuraTokens.Dark.borderSubtle,
+    error = Color(0xFFEF4444),
+    onError = Color.White,
+    errorContainer = AuraTokens.Dark.aiError,
+    onErrorContainer = Color(0xFFFCA5A5),
+    scrim = Color(0x99000000),
+)
+
+// ── Light scheme (low priority — Aura runs dark-first) ───────────────────
+private val LightColors = lightColorScheme(
+    primary = AuraTokens.Light.accentPurple,
+    onPrimary = Color.White,
+    primaryContainer = AuraTokens.Light.surface1,
+    onPrimaryContainer = AuraTokens.Light.accentPurple,
+    secondary = AuraTokens.Light.accentBlue,
+    onSecondary = Color.White,
+    secondaryContainer = AuraTokens.Light.surface1,
+    onSecondaryContainer = AuraTokens.Light.accentBlue,
+    tertiary = AuraTokens.Light.accentGreen,
+    onTertiary = Color.White,
+    background = AuraTokens.Light.bgBase,
+    onBackground = AuraTokens.Light.textPrimary,
+    surface = AuraTokens.Light.surface0,
+    onSurface = AuraTokens.Light.textPrimary,
+    surfaceVariant = AuraTokens.Light.surface1,
+    onSurfaceVariant = AuraTokens.Light.textSecondary,
+    outline = AuraTokens.Light.borderDefault,
+    outlineVariant = AuraTokens.Light.borderSubtle,
+    error = Color(0xFFDC2626),
+    onError = Color.White,
+    scrim = Color(0x66000000),
+)
