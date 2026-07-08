@@ -262,6 +262,10 @@ fun ChatScreen(
             state = state,
             listState = listState,
             onShowSources = { showSources = true },
+            onSendSuggestion = { pick ->
+                viewModel.setDraft(pick)
+                viewModel.send()
+            },
             modifier = Modifier.weight(1f),
         )
 
@@ -591,6 +595,7 @@ private fun ChatMessageList(
     state: com.aura.ui.viewmodel.ChatUiState,
     listState: androidx.compose.foundation.lazy.LazyListState,
     onShowSources: () -> Unit,
+    onSendSuggestion: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -632,6 +637,31 @@ private fun ChatMessageList(
                             isStreaming = isStreaming,
                             timestamp = turn.timestamp,
                         )
+                        // Smart follow-up suggestions: shown for
+                        // the LAST assistant turn (only) and only
+                        // when not streaming. The user can tap a
+                        // chip to send it as the next user
+                        // message, or long-press to fill the
+                        // draft. Heuristic-only — no LLM call.
+                        if (isLast && !isStreaming) {
+                            val isCodey = it.contains("```") || it.contains("`")
+                            val suggestions = com.aura.ui.components.FollowUpSuggestions.suggest(
+                                assistantText = it,
+                                isCodey = isCodey,
+                            )
+                            com.aura.ui.components.FollowUpSuggestionChips(
+                                suggestions = suggestions,
+                                onPick = { pick ->
+                                    // Send the picked suggestion
+                                    // directly as the next user
+                                    // message — the assistant's
+                                    // turn just completed, so the
+                                    // conversation is ready for
+                                    // the next turn.
+                                    onSendSuggestion(pick)
+                                },
+                            )
+                        }
                         // Memory recall chip: shown below the assistant
                         // bubble when the agentic loop actually performed
                         // recall. Hidden for incognito turns and for turns
