@@ -26,8 +26,9 @@ fun buildStreamingAnnotatedString(
     text: String,
     cursorColor: Color,
     isStreaming: Boolean,
+    colors: MarkdownColors,
 ): AnnotatedString = buildAnnotatedString {
-    append(parseMarkdown(text))
+    append(parseMarkdown(text, colors))
     if (isStreaming) {
         withStyle(SpanStyle(color = cursorColor)) {
             append(" ▍")
@@ -61,10 +62,12 @@ fun StreamingText(
         label = "alpha",
     )
     val effectiveCursor = cursorColor.copy(alpha = cursorAlpha)
+    val colors = rememberMarkdownColors()
     val annotated = buildStreamingAnnotatedString(
         text = text,
         cursorColor = effectiveCursor,
         isStreaming = isStreaming,
+        colors = colors,
     )
     Text(
         text = annotated,
