@@ -2,6 +2,7 @@ package com.aura.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aura.agent.IdentityStore
 import com.aura.data.UserPreferences
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
@@ -35,6 +36,14 @@ data class SettingsUiState(
     val embeddingModel: String = ProviderKeys.DEFAULT_EMBEDDING_MODEL,
     val themeMode: String = "system",
     val customIdentity: String = "",
+    /**
+     * Full identity text (the SOUL.md file the user can edit).
+     * Defaults to the bundled asset until the user opens
+     * Settings → Persona → Identity for the first time.
+     */
+    val identityText: String = "",
+    /** True when the user has a non-empty override file saved. */
+    val identityCustomized: Boolean = false,
     val specialistOverrides: String = "{}",
     /**
      * Per-provider verify result: prefix → "✓ Verified — N models"
@@ -50,6 +59,7 @@ class SettingsViewModel @Inject constructor(
     private val providerRegistry: ProviderRegistry,
     private val providerKeys: ProviderKeys,
     private val userPreferences: UserPreferences,
+    private val identityStore: IdentityStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsUiState())
@@ -72,6 +82,8 @@ class SettingsViewModel @Inject constructor(
             val embeddingModel = providerKeys.embeddingModel
             val themeMode = userPreferences.themeMode.first()
             val customIdentity = userPreferences.customIdentity.first()
+            val identityText = identityStore.readCurrent()
+            val identityCustomized = identityStore.hasOverride()
             val specialistOverrides = userPreferences.specialistOverrides.first()
             val morningBriefHour = userPreferences.morningBriefHour.first()
             _state.value = SettingsUiState(
@@ -90,6 +102,8 @@ class SettingsViewModel @Inject constructor(
                 embeddingModel = embeddingModel,
                 themeMode = themeMode,
                 customIdentity = customIdentity,
+                identityText = identityText,
+                identityCustomized = identityCustomized,
                 specialistOverrides = specialistOverrides,
                 morningBriefHour = morningBriefHour,
             )
@@ -185,6 +199,46 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferences.setCustomIdentity(identity)
             _state.update { it.copy(customIdentity = identity) }
+        }
+    }
+
+    /**
+     * Persist the user's edited identity (SOUL.md) to
+     * `filesDir/identity.md`. On next chat send, [com.aura.agent.Brain]
+     * reads this file instead of the bundled asset.
+     *
+     * Pass an empty string to fall back to the asset (same as
+     * [resetIdentity]).
+     */
+    fun saveIdentity(text: String) {
+        viewModelScope.launch {
+            if (text.isBlank()) {
+                identityStore.resetToDefault()
+            } else {
+                identityStore.save(text)
+            }
+            _state.update {
+                it.copy(
+                    identityText = identityStore.readCurrent(),
+                    identityCustomized = identityStore.hasOverride(),
+                )
+            }
+        }
+    }
+
+    /**
+     * Delete the user override file, falling back to the bundled
+     * asset. Idempotent.
+     */
+    fun resetIdentity() {
+        viewModelScope.launch {
+            identityStore.resetToDefault()
+            _state.update {
+                it.copy(
+                    identityText = identityStore.readCurrent(),
+                    identityCustomized = identityStore.hasOverride(),
+                )
+            }
         }
     }
 

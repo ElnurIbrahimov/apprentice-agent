@@ -1,5 +1,6 @@
 package com.aura.ui.settings
 
+import com.aura.agent.IdentityStore
 import com.aura.data.UserPreferences
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
@@ -34,6 +35,7 @@ class SettingsViewModelAppLockTest {
     private val providerRegistry = mockk<ProviderRegistry>(relaxed = true)
     private val providerKeys = mockk<ProviderKeys>(relaxed = true)
     private val userPreferences = mockk<UserPreferences>(relaxed = true)
+    private val identityStore = mockk<IdentityStore>(relaxed = true)
 
     private val appLockFlow = MutableStateFlow(false)
     private val morningBriefFlow = MutableStateFlow(true)
@@ -81,21 +83,21 @@ class SettingsViewModelAppLockTest {
 
     @Test
     fun `appLockEnabled starts false in the default state`() = runTest {
-        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         assertFalse(vm.state.value.appLockEnabled)
     }
 
     @Test
     fun `appLockEnabled reflects the persisted value after reload`() = runTest {
         appLockFlow.value = true
-        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         vm.reload()
         assertTrue(vm.state.value.appLockEnabled)
     }
 
     @Test
     fun `setAppLockEnabled true persists and updates the state`() = runTest {
-        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         vm.setAppLockEnabled(true)
         coVerify(exactly = 1) { userPreferences.setAppLockEnabled(true) }
         assertTrue(vm.state.value.appLockEnabled)
@@ -104,7 +106,7 @@ class SettingsViewModelAppLockTest {
     @Test
     fun `setAppLockEnabled false persists and updates the state`() = runTest {
         appLockFlow.value = true
-        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         // Sanity: we did read the initial value as true.
         assertTrue(vm.state.value.appLockEnabled)
 
@@ -116,7 +118,7 @@ class SettingsViewModelAppLockTest {
 
     @Test
     fun `toggling twice lands on the last value`() = runTest {
-        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         vm.setAppLockEnabled(true)
         vm.setAppLockEnabled(false)
         assertFalse(vm.state.value.appLockEnabled)
@@ -126,13 +128,13 @@ class SettingsViewModelAppLockTest {
 
     @Test
     fun `morning brief defaults to enabled`() = runTest {
-        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         assertTrue(vm.state.value.morningBriefEnabled, "fresh install should default to morning brief on")
     }
 
     @Test
     fun `setMorningBriefEnabled false persists and updates state`() = runTest {
-        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         vm.setMorningBriefEnabled(false)
         coVerify(exactly = 1) { userPreferences.setMorningBriefEnabled(false) }
         assertFalse(vm.state.value.morningBriefEnabled)
@@ -142,7 +144,7 @@ class SettingsViewModelAppLockTest {
     @Test
     fun `setMorningBriefEnabled re-enabling flips state back`() = runTest {
         morningBriefFlow.value = false
-        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         assertFalse(vm.state.value.morningBriefEnabled, "should read the persisted false on init")
 
         vm.setMorningBriefEnabled(true)
@@ -152,13 +154,13 @@ class SettingsViewModelAppLockTest {
 
     @Test
     fun `calendar monitor defaults to enabled`() = runTest {
-        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         assertTrue(vm.state.value.calendarMonitorEnabled, "fresh install should default to calendar monitor on")
     }
 
     @Test
     fun `setCalendarMonitorEnabled false persists and updates state`() = runTest {
-        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences)
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         vm.setCalendarMonitorEnabled(false)
         coVerify(exactly = 1) { userPreferences.setCalendarMonitorEnabled(false) }
         assertFalse(vm.state.value.calendarMonitorEnabled)

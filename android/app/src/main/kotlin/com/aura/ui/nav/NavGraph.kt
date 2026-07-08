@@ -187,7 +187,15 @@ fun NavGraph(
             }
             composable(TopLevelRoute.Memory.route) { MemoryScreen() }
             composable(TopLevelRoute.Settings.route) {
-                SettingsScreen(onNavigateProfile = { navController.navigate("profile") })
+                SettingsScreen(
+                    onNavigateProfile = { navController.navigate("profile") },
+                    onOpenIdentityEditor = { navController.navigate("identity_editor") },
+                )
+            }
+            composable("identity_editor") {
+                com.aura.ui.screens.IdentityEditorScreen(
+                    onBack = { navController.popBackStack() },
+                )
             }
             composable(TopLevelRoute.Graph.route) { GraphScreen() }
             composable("history") {
