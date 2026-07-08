@@ -274,17 +274,27 @@ fun ChatScreen(
             IncognitoBanner()
         }
 
-        ChatMessageList(
-            state = state,
-            listState = listState,
-            onShowSources = { showSources = true },
-            onShowSourcesForLastTurn = { showSources = true },
-            onSendSuggestion = { pick ->
-                viewModel.setDraft(pick)
-                viewModel.send()
-            },
-            modifier = Modifier.weight(1f),
-        )
+        if (state.conversation.turns.isEmpty() && !state.streaming) {
+            com.aura.ui.components.EmptyChatState(
+                onPickQuickAction = { prompt ->
+                    viewModel.setDraft(prompt)
+                    viewModel.send()
+                },
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            ChatMessageList(
+                state = state,
+                listState = listState,
+                onShowSources = { showSources = true },
+                onShowSourcesForLastTurn = { showSources = true },
+                onSendSuggestion = { pick ->
+                    viewModel.setDraft(pick)
+                    viewModel.send()
+                },
+                modifier = Modifier.weight(1f),
+            )
+        }
 
         state.error?.let { err ->
             ErrorBanner(
