@@ -1,11 +1,22 @@
 package com.aura.ui.nav
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Chat
@@ -20,12 +31,19 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -46,6 +64,7 @@ import com.aura.ui.screens.ProactiveHistoryScreen
 import com.aura.ui.screens.ProfileScreen
 import com.aura.ui.screens.SettingsScreen
 import com.aura.ui.screens.TasksScreen
+import com.aura.ui.theme.AuraTokens
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.unit.dp
 
@@ -192,39 +211,74 @@ fun NavGraph(
 
 @Composable
 private fun AuraBottomBar(navController: NavHostController, currentRoute: String?) {
-    NavigationBar(
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp,
+    // Web-style floating pill bottom bar. The Material 3
+    // NavigationBar is a flat full-width strip with tonal
+    // elevation; the web uses a 16dp-radius floating pill
+    // with border-subtle and surface-1 background, padded
+    // 12dp above the navigation bar. We mimic that here
+    // with a custom Row inside a Surface that floats with
+    // bottom padding.
+    Surface(
+        color = AuraTokens.Dark.surface1,
+        shape = RoundedCornerShape(16.dp),
+        shadowElevation = 8.dp,
+        modifier = Modifier
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .fillMaxWidth(),
     ) {
-        topLevelRoutes.forEach { route ->
-            val selected = currentRoute == route.route
-            NavigationBarItem(
-                selected = selected,
-                onClick = {
-                    if (!selected) {
-                        navController.navigate(route.route) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            topLevelRoutes.forEach { route ->
+                val selected = currentRoute == route.route
+                val containerColor by animateColorAsState(
+                    targetValue = if (selected) AuraTokens.Dark.surface3
+                                  else Color.Transparent,
+                    animationSpec = tween(durationMillis = 180),
+                    label = "bar-item-bg",
+                )
+                val contentColor = if (selected) AuraTokens.Dark.textPrimary
+                                   else AuraTokens.Dark.textTertiary
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(containerColor)
+                        .clickable {
+                            if (!selected) {
+                                navController.navigate(route.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
                         }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (selected) route.selectedIcon else route.unselectedIcon,
+                            contentDescription = route.label,
+                            tint = contentColor,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Text(
+                            text = route.label,
+                            fontSize = 10.sp,
+                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                            color = contentColor,
+                        )
                     }
-                },
-                icon = {
-                    Icon(
-                        imageVector = if (selected) route.selectedIcon else route.unselectedIcon,
-                        contentDescription = route.label,
-                        tint = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    )
-                },
-                label = {
-                    Text(
-                        route.label,
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    )
-                },
-            )
+                }
+            }
         }
     }
 }
