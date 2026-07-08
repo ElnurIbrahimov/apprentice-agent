@@ -1210,11 +1210,25 @@ private fun PermissionDialog(
     onDismiss: () -> Unit,
 ) {
     if (permission == null) return
+    val context = androidx.compose.ui.platform.LocalContext.current
     val permLauncher = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) onGrant(permission) else onDismiss()
     }
+    // Some permissions can become "permanently denied" if the user
+    // selected "Don't ask again" or pressed deny twice in a row.
+    // The system prompt then silently no-ops and grants=false. The
+    // only path forward is the system app-info page where the user
+    // can re-enable the permission manually. Detect this and offer
+    // the open-settings button.
+    val activity = context as? android.app.Activity
+    val packageName = context.packageName
+    val shouldShowRationale = activity?.shouldShowRequestPermissionRationale(permission) ?: false
+    val isPermanentlyDenied = !shouldShowRationale &&
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context, permission,
+        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Permission needed") },
@@ -1223,12 +1237,37 @@ private fun PermissionDialog(
                 buildString {
                     append(rationale ?: "Aura needs access to continue.")
                     append("\n\nPermission: $permission")
+                    if (isPermanentlyDenied) {
+                        append(
+                            "\n\nThe system won't show the prompt again. " +
+                                "Open Settings to enable it manually.",
+                        )
+                    }
                 }
             )
         },
         confirmButton = {
-            TextButton(onClick = { permLauncher.launch(permission) }) {
-                Text("Grant")
+            if (isPermanentlyDenied) {
+                // "Don't ask again" was selected (or Android considers
+                // the request denied enough times). The runtime
+                // permission API is locked out — the user has to go
+                // through the system Settings app.
+                TextButton(onClick = {
+                    val intent = android.content.Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    ).apply {
+                        data = android.net.Uri.fromParts("package", packageName, null)
+                        flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(intent)
+                    onDismiss()
+                }) {
+                    Text("Open Settings")
+                }
+            } else {
+                TextButton(onClick = { permLauncher.launch(permission) }) {
+                    Text("Grant")
+                }
             }
         },
         dismissButton = {
