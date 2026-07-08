@@ -5,49 +5,33 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Lock the [DefaultQuickActions] list. We don't want the empty
- * state to silently drop a quick action or to swap their order
- * without test coverage — these are the first thing a new user
- * sees when they open the app cold.
+ * Lock the [DefaultQuickChips] list. We don't want the empty
+ * state to silently grow a 6th chip or rename "Code" without
+ * the change being intentional.
  */
-class DefaultQuickActionsTest {
-
+class DefaultQuickChipsTest {
     @Test
-    fun `five quick actions, all unique titles`() {
-        val titles = DefaultQuickActions.map { it.title }
-        assertEquals(5, titles.size)
-        assertEquals(titles.size, titles.toSet().size, "duplicate title: $titles")
+    fun `default chips cover the five core use cases`() {
+        val labels = DefaultQuickChips.map { it.label }
+        assertEquals(5, labels.size, "expected 5 starter chips")
+        assertTrue("Research" in labels)
+        assertTrue("Code" in labels)
+        assertTrue("Brainstorm" in labels)
+        assertTrue("Rewrite" in labels)
+        assertTrue("Memory" in labels)
     }
 
     @Test
-    fun `each quick action has a non-empty prompt`() {
-        for (action in DefaultQuickActions) {
-            assertTrue(action.prompt.isNotBlank(), "empty prompt for ${action.title}")
-            // A real prompt should have at least 4 words so the
-            // user understands what they'll get.
-            assertTrue(
-                action.prompt.split(" ").size >= 4,
-                "prompt too short for ${action.title}: ${action.prompt}",
-            )
+    fun `every chip has non-empty prompt and label`() {
+        DefaultQuickChips.forEach { chip ->
+            assertTrue(chip.prompt.isNotBlank(), "prompt blank for ${chip.label}")
+            assertTrue(chip.label.isNotBlank(), "label blank")
         }
     }
 
     @Test
-    fun `each quick action has non-empty title and subtitle`() {
-        for (action in DefaultQuickActions) {
-            assertTrue(action.title.isNotBlank(), "empty title")
-            assertTrue(action.subtitle.isNotBlank(), "empty subtitle for ${action.title}")
-        }
-    }
-
-    @Test
-    fun `research action mentions research so users connect icon to capability`() {
-        val research = DefaultQuickActions.firstOrNull { it.title == "Research a topic" }
-        assertTrue(research != null)
-        assertTrue(
-            research!!.prompt.contains("research", ignoreCase = true) ||
-                research.prompt.contains("summary", ignoreCase = true),
-            "Research quick action should mention research or summary in prompt",
-        )
+    fun `labels are unique`() {
+        val labels = DefaultQuickChips.map { it.label }
+        assertEquals(labels.size, labels.toSet().size, "duplicate chip labels")
     }
 }

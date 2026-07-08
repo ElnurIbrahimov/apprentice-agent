@@ -376,10 +376,12 @@ private fun AssistantMessage(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // Avatar: web uses w-7 h-7 (28dp). 36dp looked like a
+        // giant blob next to 14sp body text.
         AuraAiAvatar(
             isThinking = isStreaming,
             isProactive = isProactive,
-            size = 36.dp,
+            size = 28.dp,
         )
         Column(modifier = Modifier.weight(1f)) {
             // Role label

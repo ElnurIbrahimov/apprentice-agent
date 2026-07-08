@@ -252,17 +252,12 @@ fun ChatScreen(
             deepModeActive = state.deepModeActive,
             incognitoMode = state.incognitoMode,
             onToggleTts = viewModel::toggleTts,
-            onCopyLast = { copyToClipboard(context, viewModel.lastAssistantText()) },
             onHistory = onNavigateHistory,
             onNewConversation = viewModel::newConversation,
             onDeleteConversation = { showDeleteConfirm = true },
             onToggleDeepMode = viewModel::toggleDeepMode,
             onToggleIncognito = viewModel::toggleIncognito,
             onShowModelPicker = { showModelPicker = true },
-            onVoiceMode = {
-                if (hasMicPermission) showContinuousVoice = true
-                else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-            },
         )
 
         if (state.deepModeActive) {
@@ -275,12 +270,12 @@ fun ChatScreen(
             IncognitoBanner()
         }
 
+        // Empty state: logomark + welcome text in the upper
+        // portion of the chat area, with quick chips rendered
+        // BELOW the input bar (web puts them there too, not
+        // floating in the middle of the screen).
         if (state.conversation.turns.isEmpty() && !state.streaming) {
             com.aura.ui.components.EmptyChatState(
-                onPickQuickAction = { prompt ->
-                    viewModel.setDraft(prompt)
-                    viewModel.send()
-                },
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -326,6 +321,15 @@ fun ChatScreen(
             com.aura.ui.components.VisionPromptChips(
                 onPick = { prompt -> viewModel.runVisionPrompt(bitmap, prompt) },
                 onDismiss = { viewModel.dismissPendingVision() },
+            )
+        }
+
+        if (state.conversation.turns.isEmpty() && !state.streaming) {
+            com.aura.ui.components.QuickChipRow(
+                onPick = { prompt ->
+                    viewModel.setDraft(prompt)
+                    viewModel.send()
+                },
             )
         }
 
@@ -527,14 +531,12 @@ private fun ChatHeader(
     deepModeActive: Boolean,
     incognitoMode: Boolean,
     onToggleTts: () -> Unit,
-    onCopyLast: () -> Unit,
     onHistory: () -> Unit,
     onNewConversation: () -> Unit,
     onDeleteConversation: () -> Unit,
     onToggleDeepMode: () -> Unit,
     onToggleIncognito: () -> Unit,
     onShowModelPicker: () -> Unit,
-    onVoiceMode: () -> Unit = {},
 ) {
     val displayModel = conversationModel ?: activeModel
     val modelMismatch = conversationModel != null && conversationModel != activeModel
@@ -618,16 +620,11 @@ private fun ChatHeader(
                    else AuraTokens.Dark.textSecondary,
             onClick = onToggleTts,
         )
-        HeaderIconButton(
-            icon = Icons.Filled.ContentCopy,
-            contentDescription = "Copy last response",
-            onClick = onCopyLast,
-        )
-        HeaderIconButton(
-            icon = Icons.Filled.GraphicEq,
-            contentDescription = "Continuous voice mode",
-            onClick = onVoiceMode,
-        )
+        // The web has 4 small icons in the top-right
+        // (TTS, share, save, more). The Copy + Voice
+        // actions live in the message-bubble footer, not
+        // the header — that's where users look for them
+        // after reading a response, not before sending.
         HeaderIconButton(
             icon = Icons.Filled.Add,
             contentDescription = "New conversation",
@@ -987,7 +984,7 @@ private fun ChatInputBar(
                 cursorBrush = SolidColor(AuraTokens.Dark.accentPurple),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 decorationBox = { inner ->
                     if (draft.isEmpty()) {
                         Text(
@@ -1092,7 +1089,7 @@ private fun ChatInputBar(
                     contentDescription = "Send",
                     tint = if (canSend) Color.White
                            else AuraTokens.Dark.textTertiary,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(18.dp),
                 )
             }
         }

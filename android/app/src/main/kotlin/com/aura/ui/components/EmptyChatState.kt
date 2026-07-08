@@ -1,16 +1,12 @@
 package com.aura.ui.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,7 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,20 +24,12 @@ import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -51,184 +39,141 @@ import com.aura.ui.theme.Fraunces
 import com.aura.ui.theme.InterDisplay
 
 /**
- * Quick-action prompts shown in the empty chat state. Tapping
- * one sets the draft and focuses the input — same as the Aura
- * Web `QUICK_ACTIONS` cards in `ChatContainer.tsx`.
+ * Quick-action chips shown BELOW the input bar in the empty
+ * chat state. Web's "starter chips" — small 28dp round icon +
+ * 11sp label, all on a 1-row horizontal scroller. Tap a chip
+ * to send its prompt.
  *
- * The list is intentionally short (5 items) and biased toward
- * the cases the user reaches for first: research, code, idea,
- * rewrite, search. Each action has a single icon and a two-line
- * label: the prompt and a sub-label describing what Aura will do.
+ * Sized for the input bar's horizontal padding (10dp) so the
+ * chips align visually with the input above.
  */
-data class QuickAction(
+data class QuickChip(
     val prompt: String,
-    val title: String,
-    val subtitle: String,
-    val icon: ImageVector,
-    val accent: Color,
+    val label: String,
+    val emoji: String,
+    val icon: ImageVector? = null,
 )
 
-val DefaultQuickActions: List<QuickAction> = listOf(
-    QuickAction(
-        prompt = "Research the latest on quantum computing and write a 1-page summary",
-        title = "Research a topic",
-        subtitle = "Deep dive with citations",
-        icon = Icons.Filled.Search,
-        accent = AuraTokens.Dark.modeResearch,
+val DefaultQuickChips: List<QuickChip> = listOf(
+    QuickChip(
+        prompt = "Research the latest on quantum computing",
+        label = "Research",
+        emoji = "🔍",
     ),
-    QuickAction(
-        prompt = "Help me write a Python script that watches a folder for new files",
-        title = "Write code",
-        subtitle = "Real working snippets",
-        icon = Icons.Filled.Code,
-        accent = AuraTokens.Dark.modeAgent,
+    QuickChip(
+        prompt = "Help me write a Python script",
+        label = "Code",
+        emoji = "💻",
     ),
-    QuickAction(
-        prompt = "Brainstorm 5 product names for a meditation app for teens",
-        title = "Brainstorm an idea",
-        subtitle = "Multiple options + rationale",
-        icon = Icons.Filled.Lightbulb,
-        accent = AuraTokens.Dark.modeDelegate,
+    QuickChip(
+        prompt = "Brainstorm 5 product names for a meditation app",
+        label = "Brainstorm",
+        emoji = "💡",
     ),
-    QuickAction(
-        prompt = "Rewrite this paragraph to sound more confident: 'I think maybe we could try the new design'",
-        title = "Rewrite text",
-        subtitle = "Tone, length, clarity",
-        icon = Icons.Filled.SwapHoriz,
-        accent = AuraTokens.Dark.modeCompare,
+    QuickChip(
+        prompt = "Rewrite this to be more confident: 'I think maybe we could'",
+        label = "Rewrite",
+        emoji = "✍️",
     ),
-    QuickAction(
-        prompt = "Search my memories for anything I saved about travel in Japan",
-        title = "Search memories",
-        subtitle = "Recall what you saved",
-        icon = Icons.Filled.Search,
-        accent = AuraTokens.Dark.modeDeepResearch,
+    QuickChip(
+        prompt = "Search my memories for anything I saved",
+        label = "Memory",
+        emoji = "🧠",
     ),
 )
 
 /**
  * Empty-state hero for the chat screen. Shown when there are
- * zero conversation turns. Matches Aura Web's
- * `<h1>What should we explore?</h1>` empty state in
- * `ChatContainer.tsx`.
+ * zero conversation turns. Matches Aura Web's empty state:
+ * a small logomark (28dp) above a Fraunces H1 welcome line,
+ * with a row of small quick-action chips below the input.
  *
- * The hero has a breathing radial-purple glow behind the title,
- * a Fraunces-serif H1, an Inter subtitle, and a horizontal
- * scroller of quick-action cards. Each card has its own accent
- * color matching the Web's mode palette.
- *
- * Cards use a spring-up entry animation staggered by index.
- * The hero glow has a slow `infiniteRepeatable` scale + alpha
- * animation to feel "alive" without being distracting.
+ * The chips sit OUTSIDE the hero (they live in the input bar
+ * area in the web). The hero itself is just the logomark +
+ * welcome text — no breathing glow, no card grid. The chat
+ * is the hero; the input is always reachable.
  */
 @Composable
 fun EmptyChatState(
-    onPickQuickAction: (String) -> Unit,
-    actions: List<QuickAction> = DefaultQuickActions,
     modifier: Modifier = Modifier,
 ) {
-    Box(
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier.fillMaxSize(),
+    ) {
+        // Spacer pushes the welcome down from the top bar by
+        // ~25% of the available height. Web has roughly the
+        // same offset (the welcome sits between the top bar
+        // and the input, biased toward the top).
+        Spacer(Modifier.weight(0.6f))
+        AuraLogomark(size = 28.dp)
+        Spacer(Modifier.height(14.dp))
+        Text(
+            text = "Welcome",
+            fontFamily = Fraunces,
+            fontWeight = FontWeight.Normal,
+            fontSize = 28.sp,
+            color = AuraTokens.Dark.textSecondary,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "What should we explore?",
+            fontFamily = InterDisplay,
+            fontWeight = FontWeight.Medium,
+            fontSize = 14.sp,
+            color = AuraTokens.Dark.textTertiary,
+        )
+        // Push the rest of the screen to the bottom so the
+        // input bar (rendered separately by ChatScreen) lines
+        // up with where the user expects to see it.
+        Spacer(Modifier.weight(1f))
+        // (chips are rendered by ChatScreen below the input bar — not here)
+    }
+}
+
+/**
+ * Small Aura logomark for the empty state. The web uses a
+ * 28px square gradient with the "A" character; on Android
+ * we render a 28dp circle with the Aura "✦" glyph in the
+ * brand violet, surrounded by a faint 1px border.
+ */
+@Composable
+fun AuraLogomark(size: androidx.compose.ui.unit.Dp = 28.dp) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(AuraTokens.Dark.glowPurple.copy(alpha = 0.18f))
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                    colors = listOf(
+                        AuraTokens.Dark.glowPurple.copy(alpha = 0.35f),
+                        Color.Transparent,
+                    ),
+                ),
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 32.dp),
-        ) {
-            BreathingGlow()
-            Spacer(Modifier.height(40.dp))
-            Text(
-                text = "What should we explore?",
-                fontFamily = Fraunces,
-                fontWeight = FontWeight.Normal,
-                fontSize = 36.sp,
-                lineHeight = 44.sp,
-                letterSpacing = (-0.8).sp,
-                color = AuraTokens.Dark.textPrimary,
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "Research, create, code, and compare — all in one place.",
-                fontFamily = InterDisplay,
-                fontSize = 14.sp,
-                color = AuraTokens.Dark.textSecondary,
-            )
-            Spacer(Modifier.height(32.dp))
-            QuickActionRow(actions = actions, onPick = onPickQuickAction)
-        }
+        Text(
+            text = "✦",
+            fontFamily = Fraunces,
+            fontSize = (size.value * 0.6f).sp,
+            color = AuraTokens.Dark.accentPurple,
+        )
     }
 }
 
 @Composable
-private fun BreathingGlow() {
-    val transition = rememberInfiniteTransition(label = "hero-glow")
-    val scale by transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.18f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3600, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "scale",
-    )
-    val alpha by transition.animateFloat(
-        initialValue = 0.18f,
-        targetValue = 0.32f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3600, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "alpha",
-    )
-    Box(
-        modifier = Modifier
-            .size(220.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            }
-            .background(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        AuraTokens.Dark.glowPurple,
-                        Color.Transparent,
-                    ),
-                ),
-                shape = CircleShape,
-            ),
-    )
-}
-
-@Composable
-private fun QuickActionRow(
-    actions: List<QuickAction>,
+fun QuickChipRow(
+    chips: List<QuickChip> = DefaultQuickChips,
     onPick: (String) -> Unit,
 ) {
     LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp),
     ) {
-        items(actions.size) { i ->
-            val action = actions[i]
-            val entry = remember { androidx.compose.animation.core.Animatable(0f) }
-            androidx.compose.runtime.LaunchedEffect(Unit) {
-                kotlinx.coroutines.delay(i * 60L)
-                entry.animateTo(
-                    targetValue = 1f,
-                    animationSpec = androidx.compose.animation.core.spring(
-                        dampingRatio = 0.7f,
-                        stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
-                    ),
-                )
-            }
-            QuickActionCard(
-                action = action,
-                onClick = { onPick(action.prompt) },
-                progress = entry.value,
-            )
+        items(chips.size) { i ->
+            QuickChipView(chip = chips[i], onClick = { onPick(chips[i].prompt) })
         }
     }
 }
@@ -241,53 +186,27 @@ private fun androidx.compose.foundation.lazy.LazyListScope.items(
 }
 
 @Composable
-private fun QuickActionCard(
-    action: QuickAction,
-    onClick: () -> Unit,
-    progress: Float,
-) {
-    Box(
+private fun QuickChipView(chip: QuickChip, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
         modifier = Modifier
-            .widthIn(min = 180.dp, max = 220.dp)
-            .graphicsLayer {
-                translationY = (1f - progress) * 16f
-                alpha = progress
-            }
-            .clip(RoundedCornerShape(12.dp))
-            .background(AuraTokens.Dark.surface1)
+            .clip(RoundedCornerShape(999.dp))
+            .background(AuraTokens.Dark.surface2)
+            .border(1.dp, AuraTokens.Dark.borderSubtle, RoundedCornerShape(999.dp))
             .clickable(onClick = onClick)
-            .padding(14.dp),
+            .padding(horizontal = 10.dp, vertical = 5.dp),
     ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(action.accent),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = action.icon,
-                    contentDescription = null,
-                    tint = AuraTokens.Dark.textPrimary,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = action.title,
-                fontFamily = InterDisplay,
-                fontWeight = FontWeight.Medium,
-                fontSize = 14.sp,
-                color = AuraTokens.Dark.textPrimary,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = action.subtitle,
-                fontFamily = InterDisplay,
-                fontSize = 12.sp,
-                color = AuraTokens.Dark.textTertiary,
-            )
-        }
+        Text(
+            text = chip.emoji,
+            fontSize = 12.sp,
+        )
+        Text(
+            text = chip.label,
+            fontFamily = InterDisplay,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            color = AuraTokens.Dark.textSecondary,
+        )
     }
 }

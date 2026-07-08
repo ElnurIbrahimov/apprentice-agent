@@ -76,7 +76,7 @@ sealed class TopLevelRoute(val route: String, val label: String, val selectedIco
     data object Graph : TopLevelRoute("graph", "Graph", Icons.Filled.AccountTree, Icons.Outlined.AccountTree)
 }
 
-private val topLevelRoutes = listOf(TopLevelRoute.Home, TopLevelRoute.Chat, TopLevelRoute.Memory, TopLevelRoute.Settings, TopLevelRoute.Graph)
+private val topLevelRoutes = listOf(TopLevelRoute.Home, TopLevelRoute.Chat, TopLevelRoute.Memory, TopLevelRoute.Settings)
 
 @Composable
 fun NavGraph(
