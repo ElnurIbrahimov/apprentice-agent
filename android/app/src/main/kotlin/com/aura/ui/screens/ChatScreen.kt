@@ -778,17 +778,65 @@ private fun MessageBubble(
                 }
                 if (!isUser && citations.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.clickable { onShowSources() },
-                    ) {
-                        Text(
-                            text = "${citations.size} sources",
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
+                    // Inline citation chips. Each chip is a small
+                    // primary-tinted pill that opens a preview
+                    // dialog with the source title + URL. This
+                    // replaces the old "N sources" pill that hid
+                    // the actual citation list behind a tap.
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        citations.forEach { c ->
+                            val context = androidx.compose.ui.platform.LocalContext.current
+                            var showDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable { showDialog = true },
+                            ) {
+                                Text(
+                                    text = "[${c.index}]",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                            if (showDialog) {
+                                androidx.compose.material3.AlertDialog(
+                                    onDismissRequest = { showDialog = false },
+                                    title = {
+                                        Text(
+                                            text = c.title.ifBlank { "Source ${c.index}" },
+                                            style = MaterialTheme.typography.titleMedium,
+                                        )
+                                    },
+                                    text = {
+                                        Column {
+                                            if (c.url.isNotBlank()) {
+                                                Text(
+                                                    text = c.url,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                )
+                                            }
+                                        }
+                                    },
+                                    confirmButton = {
+                                        if (c.url.isNotBlank()) {
+                                            androidx.compose.material3.TextButton(onClick = {
+                                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(c.url))
+                                                context.startActivity(intent)
+                                                showDialog = false
+                                            }) { Text("Open") }
+                                        } else {
+                                            androidx.compose.material3.TextButton(onClick = { showDialog = false }) { Text("Close") }
+                                        }
+                                    },
+                                    dismissButton = {
+                                        androidx.compose.material3.TextButton(onClick = { showDialog = false }) { Text("Close") }
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
