@@ -9,6 +9,7 @@ import com.aura.memory.MemoryStore
 import com.aura.proactive.BriefContext
 import com.aura.proactive.ProactiveEventBus
 import com.aura.proactive.ProactiveEvents
+import com.aura.tasks.ReminderDao
 import com.aura.tasks.TaskDao
 import com.aura.tools.CalendarReadTool
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -51,6 +52,12 @@ data class HomeUiState(
      * screen falls back to its count-based string.
      */
     val briefContext: BriefContext = BriefContext(),
+    /**
+     * Up to 3 upcoming reminders, soonest first. Rendered on Home
+     * as a BriefCard so the user can see what's pending without
+     * opening the Reminders screen.
+     */
+    val upcomingReminders: List<String> = emptyList(),
 )
 
 @HiltViewModel
@@ -61,6 +68,7 @@ class HomeViewModel @Inject constructor(
     private val proactiveEvents: ProactiveEvents,
     private val calendarReadTool: CalendarReadTool,
     private val knowledgeGraphRepository: KnowledgeGraphRepository,
+    private val reminderDao: ReminderDao,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(HomeUiState())
@@ -71,6 +79,19 @@ class HomeViewModel @Inject constructor(
         observeProactiveEvents()
         observeTasks()
         observeMemories()
+        observeReminders()
+    }
+
+    private fun observeReminders() {
+        viewModelScope.launch {
+            reminderDao.observeUpcoming(System.currentTimeMillis()).collect { rs ->
+                val fmt = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
+                val lines = rs.take(3).map { r ->
+                    "⏰ ${fmt.format(java.util.Date(r.triggerAt))} — ${r.message}"
+                }
+                _state.update { it.copy(upcomingReminders = lines) }
+            }
+        }
     }
 
     private fun observeProactiveEvents() {

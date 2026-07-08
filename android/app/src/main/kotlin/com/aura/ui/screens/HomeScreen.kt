@@ -90,6 +90,7 @@ fun HomeScreen(
     onOpenMemory: () -> Unit = {},
     onOpenTasks: () -> Unit = {},
     onOpenCalendar: () -> Unit = {},
+    onOpenReminders: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val greeting = when (state.hour) {
@@ -284,6 +285,13 @@ fun HomeScreen(
                 title = "Open tasks",
                 lines = state.pendingTasks,
                 onClick = onOpenTasks,
+            )
+        }
+        if (state.upcomingReminders.isNotEmpty()) {
+            BriefCard(
+                title = "Upcoming reminders",
+                lines = state.upcomingReminders,
+                onClick = onOpenReminders,
             )
         }
         if (state.recentMemories.isNotEmpty()) {
