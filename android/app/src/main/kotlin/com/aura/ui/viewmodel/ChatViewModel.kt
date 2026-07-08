@@ -114,6 +114,13 @@ data class ChatUiState(
      * returns a result, so this list is just the "in-flight" view.
      */
     val inFlightToolCalls: List<InFlightToolCall> = emptyList(),
+    /**
+     * A bitmap that was just captured or picked but not yet sent
+     * to vision. Cleared when the user picks a vision prompt chip
+     * (Describe / Read text / Translate) or dismisses the row.
+     * Lives in UI state — not persisted.
+     */
+    val pendingVisionBitmap: Bitmap? = null,
 )
 
 /**
@@ -563,10 +570,37 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Capture/pick an image and ask the cloud vision model directly. The result is
-     * inserted as an assistant turn so the user can continue the conversation.
+     * Capture/pick an image and stage it for vision. The user is
+     * shown a small row of 3 chips (Describe / Read text / Translate)
+     * above the input bar and picks the prompt they want. The
+     * bitmap is held in [ChatUiState.pendingVisionBitmap] until a
+     * chip is tapped, at which point [runVisionPrompt] is called
+     * with the picked prompt and the bitmap is cleared.
+     *
+     * If no chips are visible (the user can still see the photo
+     * in their gallery / camera roll), the default behavior — a
+     * direct vision call — is preserved.
      */
     fun onImageCaptured(bitmap: Bitmap, question: String = "Describe this image in detail") {
+        // Stage the bitmap. The UI will show the quick-question
+        // chips if they haven't been answered yet. If the user
+        // dismisses the row (or if a chip fires immediately), the
+        // bitmap is cleared by runVisionPrompt / dismissPendingVision.
+        _state.update { it.copy(pendingVisionBitmap = bitmap) }
+        // If the caller passed a non-default question, fire
+        // immediately. This keeps the gallery / camera flow
+        // backward-compatible — gallery "describe" still works.
+        if (question != "Describe this image in detail") {
+            runVisionPrompt(bitmap, question)
+        }
+    }
+
+    /**
+     * Send the staged bitmap to vision with the chosen prompt.
+     * Clears the staged bitmap from state once the call starts.
+     */
+    fun runVisionPrompt(bitmap: Bitmap, question: String) {
+        _state.update { it.copy(pendingVisionBitmap = null) }
         viewModelScope.launch(Dispatchers.IO) {
             val base64 = bitmap.toBase64Jpeg()
             val tool = toolRegistry.get("vision") ?: run {
@@ -600,6 +634,15 @@ class ChatViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    /**
+     * Clear a staged vision bitmap without sending it. The user
+     * can hit a small X on the chip row to dismiss the staged
+     * image (e.g. they captured the wrong thing).
+     */
+    fun dismissPendingVision() {
+        _state.update { it.copy(pendingVisionBitmap = null) }
     }
 
     /**

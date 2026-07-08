@@ -292,6 +292,18 @@ fun ChatScreen(
             )
         }
 
+        // Vision quick-prompt chips: shown above the input bar
+        // right after the user captures or picks an image. The
+        // bitmap is held in state.pendingVisionBitmap until the
+        // user picks a prompt (which fires runVisionPrompt) or
+        // dismisses the row.
+        state.pendingVisionBitmap?.let { bitmap ->
+            com.aura.ui.components.VisionPromptChips(
+                onPick = { prompt -> viewModel.runVisionPrompt(bitmap, prompt) },
+                onDismiss = { viewModel.dismissPendingVision() },
+            )
+        }
+
         ChatInputBar(
             hapticView = hapticView,
             draft = state.draft,
