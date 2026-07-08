@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -537,93 +538,165 @@ private fun ChatHeader(
 ) {
     val displayModel = conversationModel ?: activeModel
     val modelMismatch = conversationModel != null && conversationModel != activeModel
-
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth(),
+    // Web-style compact top bar: model picker pill on the
+    // left, a row of 32dp icon buttons on the right, with
+    // status pills (Deep / Incognito) floating above when
+    // active. No surface background — the screen background
+    // bleeds through. The previous version had a flat
+    // Material 3 Surface with 8 action buttons and 2 filter
+    // chips visible at once.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Model picker pill — 32dp tall, surface-2 background,
+        // 16dp radius. Shows the active model in 13sp Inter
+        // Medium + a small chevron. Matches the web's mode
+        // pill exactly.
         Row(
             modifier = Modifier
+                .clip(RoundedCornerShape(16.dp))
+                .background(AuraTokens.Dark.surface2)
                 .clickable { onShowModelPicker() }
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Aura",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = com.aura.ui.util.modelDisplayName(displayModel),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (modelMismatch) MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                )
-                if (modelMismatch && conversationModel != null) {
-                    Text(
-                        text = "was ${com.aura.ui.util.modelDisplayName(conversationModel)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                    )
-                }
-            }
-            IconButton(onClick = onToggleTts) {
-                Icon(
-                    imageVector = if (ttsEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
-                    contentDescription = if (ttsEnabled) "TTS on, tap to mute" else "TTS off, tap to enable",
-                    tint = if (ttsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                )
-            }
-            IconButton(onClick = onCopyLast) {
-                Icon(
-                    imageVector = Icons.Filled.ContentCopy,
-                    contentDescription = "Copy last response",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
-            }
-            IconButton(onClick = onNewConversation) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = "New conversation",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
-            }
-            IconButton(onClick = onDeleteConversation) {
-                Icon(
-                    imageVector = Icons.Filled.DeleteOutline,
-                    contentDescription = "Delete conversation",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
-            }
-            IconButton(onClick = onVoiceMode) {
-                Icon(
-                    imageVector = Icons.Filled.GraphicEq,
-                    contentDescription = "Continuous voice mode",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
-            }
-            IconButton(onClick = onHistory) {
-                Icon(Icons.Filled.History, contentDescription = "History", tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-            }
-            FilterChip(
-                selected = deepModeEnabled,
-                label = if (deepModeActive) "🪩 Thinking..." else "🚀 Deep",
-                onClick = onToggleDeepMode,
+            // Tiny breathing accent dot for the active model
+            // — a brand touch, not a status indicator.
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(AuraTokens.Dark.accentPurple),
             )
-            FilterChip(
-                selected = incognitoMode,
-                label = if (incognitoMode) "🕵️ Incognito" else "👤",
-                onClick = onToggleIncognito,
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = com.aura.ui.util.modelDisplayName(displayModel),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                fontFamily = com.aura.ui.theme.InterDisplay,
+                color = if (modelMismatch) AuraTokens.Dark.glowOrange
+                       else AuraTokens.Dark.textPrimary,
             )
+            Spacer(modifier = Modifier.width(4.dp))
             Icon(
                 imageVector = Icons.Filled.ArrowDropDown,
                 contentDescription = "Change model",
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                tint = AuraTokens.Dark.textTertiary,
+                modifier = Modifier.size(18.dp),
             )
         }
+        // Active mode pills — show only when enabled. These
+        // float as a thin row between the model picker and
+        // the action icons.
+        if (deepModeEnabled) {
+            Spacer(modifier = Modifier.width(8.dp))
+            ModeChip(
+                label = if (deepModeActive) "Thinking…" else "Deep",
+                accent = AuraTokens.Dark.glowBlue,
+                onClick = onToggleDeepMode,
+            )
+        }
+        if (incognitoMode) {
+            Spacer(modifier = Modifier.width(8.dp))
+            ModeChip(
+                label = "Incognito",
+                accent = AuraTokens.Dark.glowOrange,
+                onClick = onToggleIncognito,
+            )
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        // Action icons — 32dp round buttons, no background
+        // by default. TTS uses accent color when on.
+        HeaderIconButton(
+            icon = if (ttsEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+            contentDescription = if (ttsEnabled) "Mute TTS" else "Enable TTS",
+            tint = if (ttsEnabled) AuraTokens.Dark.accentPurple
+                   else AuraTokens.Dark.textSecondary,
+            onClick = onToggleTts,
+        )
+        HeaderIconButton(
+            icon = Icons.Filled.ContentCopy,
+            contentDescription = "Copy last response",
+            onClick = onCopyLast,
+        )
+        HeaderIconButton(
+            icon = Icons.Filled.GraphicEq,
+            contentDescription = "Continuous voice mode",
+            onClick = onVoiceMode,
+        )
+        HeaderIconButton(
+            icon = Icons.Filled.Add,
+            contentDescription = "New conversation",
+            onClick = onNewConversation,
+        )
+        HeaderIconButton(
+            icon = Icons.Filled.History,
+            contentDescription = "History",
+            onClick = onHistory,
+        )
+        HeaderIconButton(
+            icon = Icons.Filled.DeleteOutline,
+            contentDescription = "Delete conversation",
+            onClick = onDeleteConversation,
+        )
+    }
+}
+
+@Composable
+private fun HeaderIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    tint: androidx.compose.ui.graphics.Color = AuraTokens.Dark.textSecondary,
+) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun ModeChip(
+    label: String,
+    accent: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(accent.copy(alpha = 0.15f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(accent),
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            fontFamily = com.aura.ui.theme.InterDisplay,
+            color = accent,
+        )
     }
 }
 
