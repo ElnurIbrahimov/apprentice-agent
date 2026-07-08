@@ -125,6 +125,11 @@ class ChatSendController(
 
         onSaveConversation()  // Save user message immediately
 
+        // Clear any stale in-flight tool calls from a previous turn.
+        // The new turn starts fresh; we'll repopulate as the loop
+        // emits ToolCallStart events.
+        state.update { it.copy(inFlightToolCalls = emptyList()) }
+
         runJob = scope.launch {
             try {
                 val conversation = state.value.conversation
@@ -166,7 +171,44 @@ class ChatSendController(
                                 old.copy(conversation = updatedConversation)
                             }
                         }
+                        is AgentEvent.ToolCallStart -> {
+                            // The loop announced a tool call. Push it
+                            // onto the in-flight list so the chat UI
+                            // can show a running badge. The matching
+                            // ToolResult will remove it.
+                            state.update { old ->
+                                val inFlight = InFlightToolCall(
+                                    id = event.id,
+                                    name = event.name,
+                                    args = "",  // args come via ToolCallDelta + ToolCallEnd
+                                )
+                                old.copy(
+                                    inFlightToolCalls = old.inFlightToolCalls + inFlight,
+                                )
+                            }
+                        }
+                        is AgentEvent.ToolCallEnd -> {
+                            // The args for the tool call are now
+                            // complete. Update the in-flight entry
+                            // with the full args so the UI can show
+                            // them. ToolResult will close it out.
+                            state.update { old ->
+                                val updated = old.inFlightToolCalls.map { inFlight ->
+                                    if (inFlight.id == event.id) inFlight.copy(args = event.arguments)
+                                    else inFlight
+                                }
+                                old.copy(inFlightToolCalls = updated)
+                            }
+                        }
                         is AgentEvent.ToolResult -> {
+                            // The tool finished. Remove the in-flight
+                            // entry — the completed form is now on
+                            // conversation.turns.last().toolTurns.
+                            state.update { old ->
+                                old.copy(
+                                    inFlightToolCalls = old.inFlightToolCalls.filterNot { it.id == event.id },
+                                )
+                            }
                             val citations = extractCitations(event.name, event.result)
                             if (citations.isNotEmpty()) {
                                 state.update { old ->
@@ -224,7 +266,16 @@ class ChatSendController(
                             onKgNodeCountChanged()
                             onFirstConversationComplete()
                             // Reset Deep Mode after a successful MoA turn.
-                            state.update { it.copy(deepModeEnabled = false, deepModeActive = false) }
+                            // Clear in-flight tool calls — anything still
+                            // running at Done is orphaned (the loop finished
+                            // without emitting a matching ToolResult). The
+                            // visible conversation turns already have the
+                            // complete tool history.
+                            state.update { it.copy(
+                                deepModeEnabled = false,
+                                deepModeActive = false,
+                                inFlightToolCalls = emptyList(),
+                            ) }
                         }
                         else -> Unit
                     }
@@ -252,7 +303,8 @@ class ChatSendController(
         if (!state.value.incognitoMode && state.value.conversation.turns.isNotEmpty()) {
             onSaveConversation()
         }
-        state.update { it.copy(streaming = false) }
+        // Clear in-flight badges — the stream is being torn down.
+        state.update { it.copy(streaming = false, inFlightToolCalls = emptyList()) }
     }
 }
 

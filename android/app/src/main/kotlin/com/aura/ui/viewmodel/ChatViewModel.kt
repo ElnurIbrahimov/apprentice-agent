@@ -105,6 +105,28 @@ data class ChatUiState(
      * response. Session-scoped — not persisted across app restarts.
      */
     val incognitoMode: Boolean = false,
+    /**
+     * Tool calls that have started (ToolCallStart) but whose
+     * ToolResult has not yet been emitted by the agentic loop.
+     * In-memory only; cleared when the next user message sends or
+     * when the matching ToolResult lands. The completed entry moves
+     * into `conversation.turns.last().toolTurns` once the loop
+     * returns a result, so this list is just the "in-flight" view.
+     */
+    val inFlightToolCalls: List<InFlightToolCall> = emptyList(),
+)
+
+/**
+ * A tool call that the agentic loop has started but not yet
+ * finished. The companion [com.aura.agent.ToolTurn] (persisted on
+ * the turn) carries the completed form once the loop emits a
+ * `ToolResult` event.
+ */
+data class InFlightToolCall(
+    val id: String,
+    val name: String,
+    val args: String,
+    val startedAtMs: Long = System.currentTimeMillis(),
 )
 
 @HiltViewModel
@@ -357,6 +379,7 @@ class ChatViewModel @Inject constructor(
                 deepModeActive = false,
                 selectedSpecialist = null,
                 suggestedSpecialist = null,
+                inFlightToolCalls = emptyList(),
             )
         }
     }
@@ -388,6 +411,7 @@ class ChatViewModel @Inject constructor(
                     deepModeActive = false,
                     selectedSpecialist = null,
                     suggestedSpecialist = null,
+                    inFlightToolCalls = emptyList(),
                 )
             }
         }

@@ -635,7 +635,37 @@ private fun ChatMessageList(
                     }
                     for (toolTurn in turn.toolTurns) {
                         if (toolTurn.result.isNotEmpty()) {
-                            ToolCallBubble(name = toolTurn.name, result = toolTurn.result)
+                            // A tool call with a result is in the "done"
+                            // state. The result may be a plain string OR
+                            // a "Tool errored: ..." payload — surface the
+                            // distinction so the user sees failures.
+                            val state = if (toolTurn.result.startsWith("Tool errored:")) {
+                                com.aura.ui.components.ToolCallState.Failed(
+                                    name = toolTurn.name,
+                                    args = toolTurn.args,
+                                    error = toolTurn.result.removePrefix("Tool errored:").trim(),
+                                )
+                            } else {
+                                com.aura.ui.components.ToolCallState.Done(
+                                    name = toolTurn.name,
+                                    args = toolTurn.args,
+                                    result = toolTurn.result,
+                                )
+                            }
+                            com.aura.ui.components.ToolCallBadge(state = state)
+                        }
+                    }
+                    // In-flight tool calls: tools the agent announced but
+                    // whose result hasn't returned yet. Only render these
+                    // for the LAST turn (the one currently being built
+                    // by the streaming loop) and only while the loop is
+                    // actively running.
+                    val isCurrentTurn = turn === state.conversation.turns.lastOrNull()
+                    if (isCurrentTurn && state.streaming) {
+                        for (inFlight in state.inFlightToolCalls) {
+                            com.aura.ui.components.ToolCallBadge(
+                                state = com.aura.ui.components.ToolCallState.Running(inFlight),
+                            )
                         }
                     }
                 }
@@ -811,30 +841,6 @@ private fun MessageBubble(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun ToolCallBubble(name: String, result: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth(0.85f).padding(start = 32.dp),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text(
-                text = name,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = result.take(280),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
-            )
         }
     }
 }

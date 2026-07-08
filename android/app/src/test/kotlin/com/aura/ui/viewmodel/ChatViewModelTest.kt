@@ -353,6 +353,109 @@ class ChatViewModelTest {
         assertTrue(title.endsWith("…"))
         assertTrue(title != "New conversation")
     }
+
+    // ---- Commit 1: in-flight tool call tracking ----
+    //
+    // The agentic loop emits ToolCallStart → ToolResult (or
+    // ToolCallEnd → ToolResult) pairs. The VM should track the
+    // in-flight state in ChatUiState.inFlightToolCalls so the chat
+    // UI can show a "running" badge while the tool is being
+    // executed.
+
+    @Test
+    fun `ToolCallStart pushes an in-flight entry to state`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        coEvery { conversationStore.recent(2) } returns emptyList()
+        coEvery { loop.run(any(), any(), any(), any(), any(), any(), any()) } returns flowOf(
+            AgentEvent.ToolCallStart(id = "call-1", name = "web_search"),
+            AgentEvent.TextDelta("Found it."),
+            AgentEvent.ToolResult(
+                id = "call-1", name = "web_search", arguments = "{}",
+                result = "3 results", needsPermission = null, permissionRationale = null,
+            ),
+            AgentEvent.Done,
+        )
+
+        vm.setDraft("search for x")
+        vm.send()
+        advanceUntilIdle()
+
+        // The in-flight entry was added then removed on ToolResult.
+        // After Done, the list must be empty (cleaned up).
+        val state = vm.state.value
+        assertEquals(0, state.inFlightToolCalls.size)
+    }
+
+    @Test
+    fun `multiple concurrent tool calls are tracked in order`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        coEvery { conversationStore.recent(2) } returns emptyList()
+        coEvery { loop.run(any(), any(), any(), any(), any(), any(), any()) } returns flowOf(
+            AgentEvent.ToolCallStart(id = "a", name = "web_search"),
+            AgentEvent.ToolCallStart(id = "b", name = "calendar_read"),
+            AgentEvent.ToolResult(
+                id = "a", name = "web_search", arguments = "{}",
+                result = "ok", needsPermission = null, permissionRationale = null,
+            ),
+            AgentEvent.ToolResult(
+                id = "b", name = "calendar_read", arguments = "{}",
+                result = "ok", needsPermission = null, permissionRationale = null,
+            ),
+            AgentEvent.Done,
+        )
+
+        vm.setDraft("parallel tool calls")
+        vm.send()
+        advanceUntilIdle()
+
+        // Both in-flight entries should be cleared after both
+        // ToolResults land.
+        assertEquals(0, vm.state.value.inFlightToolCalls.size)
+    }
+
+    @Test
+    fun `newConversation clears in-flight tool calls`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        // Simulate a stale in-flight entry from a previous turn
+        // that was interrupted (e.g. process death + restart).
+        _stateDirectly(vm, vm.state.value.copy(
+            inFlightToolCalls = listOf(
+                InFlightToolCall(id = "stale", name = "web_search", args = "{}"),
+            ),
+        ))
+        assertEquals(1, vm.state.value.inFlightToolCalls.size)
+
+        vm.newConversation()
+        advanceUntilIdle()
+        assertEquals(0, vm.state.value.inFlightToolCalls.size)
+    }
+
+    @Test
+    fun `cancel clears in-flight tool calls`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        // The loop emits ToolCallStart but never ToolResult — simulate
+        // a slow tool that the user cancels mid-flight.
+        coEvery { loop.run(any(), any(), any(), any(), any(), any(), any()) } returns flowOf(
+            AgentEvent.ToolCallStart(id = "slow", name = "web_search"),
+        )
+
+        vm.setDraft("trigger a long tool")
+        vm.send()
+        advanceUntilIdle()
+
+        // The in-flight list has the slow tool.
+        assertEquals(1, vm.state.value.inFlightToolCalls.size)
+
+        vm.cancel()
+        advanceUntilIdle()
+
+        // After cancel, the in-flight list is cleared.
+        assertEquals(0, vm.state.value.inFlightToolCalls.size)
+    }
 }
 
 private fun _stateDirectly(vm: ChatViewModel, newState: ChatUiState) {
