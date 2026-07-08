@@ -59,6 +59,10 @@ class SettingsViewModel @Inject constructor(
 
     fun reload() {
         viewModelScope.launch {
+            // Wait for the initial DataStore load to finish so the
+            // configured providers list doesn't show "0 configured"
+            // on first launch while the keys are still being read.
+            providerKeys.loaded.first { it }
             val configured = providerRegistry.configured().map { "${it.prefix} (${it.displayName})" }
             val defaultModel = userPreferences.defaultModel.first()
             val firstRunComplete = userPreferences.firstRunComplete.first()

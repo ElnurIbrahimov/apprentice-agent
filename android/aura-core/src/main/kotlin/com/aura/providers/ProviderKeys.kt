@@ -7,6 +7,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -43,6 +44,16 @@ class ProviderKeys @Inject constructor(
     private val _state = MutableStateFlow<Map<String, String>>(emptyMap())
     val state: StateFlow<Map<String, String>> = _state.asStateFlow()
 
+    /**
+     * True once the initial DataStore load completes. The Settings
+     * and Onboarding screens wait on this before showing the
+     * "configured providers" list so the user never sees a
+     * momentary "0 configured" flicker. Set in [init] after
+     * [loadAllKeys] finishes.
+     */
+    private val _loaded = MutableStateFlow(false)
+    val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
+
     /** Embedding model name (default: "nomic-embed-text"). */
     private val _embeddingModel = MutableStateFlow(DEFAULT_EMBEDDING_MODEL)
     val embeddingModel: String get() = _embeddingModel.value
@@ -78,6 +89,10 @@ class ProviderKeys @Inject constructor(
                 _state.value = loaded
                 _embeddingModel.value = model
             }
+            // Flip the loaded signal last, after the state is
+            // populated, so a consumer waiting on loaded.value
+            // sees the populated state in the same read.
+            _loaded.value = true
         }
     }
 
@@ -90,6 +105,19 @@ class ProviderKeys @Inject constructor(
 
     /** True if the user has set a non-blank key for the given prefix. */
     fun isConfigured(prefix: String): Boolean = !keyFor(prefix).isNullOrBlank()
+
+    /**
+     * Block until the initial DataStore load completes. Use only on
+     * app start (Application.onCreate) where blocking the main thread
+     * is acceptable — DataStore reads on a warm start complete in
+     * 5-20ms and on a cold start in ~50-100ms. Calling this from
+     * a UI or background thread is wrong; the caller is on a hot
+     * path.
+     */
+    suspend fun awaitLoaded() {
+        if (_loaded.value) return
+        _loaded.first { it }
+    }
 
     /**
      * Write a new key and refresh the cached state. Persisted via DataStore

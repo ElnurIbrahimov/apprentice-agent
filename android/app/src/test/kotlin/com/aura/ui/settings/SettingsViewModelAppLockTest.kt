@@ -45,6 +45,12 @@ class SettingsViewModelAppLockTest {
         every { providerRegistry.configured() } returns emptyList()
         every { providerRegistry.all() } returns emptyList()
         every { providerKeys.keyFor(any()) } returns null
+        // The SettingsViewModel now waits for the ProviderKeys initial
+        // load to finish before reading configured providers. In
+        // production this flips to true in ProviderKeys.init once
+        // DataStore resolves; in tests we just pretend it's already
+        // done so reload() doesn't block.
+        every { providerKeys.loaded } returns MutableStateFlow(true)
         every { userPreferences.defaultModel } returns flowOf("ollama:deepseek-v4-pro:cloud")
         every { userPreferences.firstRunComplete } returns flowOf(true)
         every { userPreferences.appLockEnabled } returns appLockFlow
