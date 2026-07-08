@@ -97,7 +97,13 @@ fun HomeScreen(
     // Sub-status line. This is where Aura gets its voice — instead of
     // a generic "what's up", it tells the user what it knows about right
     // now. Empty state is the only time it has to introduce itself.
+    //
+    // If the BriefContext has anything to say (decayed memories, new
+    // facts, tasks due today, calendar events), use the structured
+    // summary. Otherwise fall back to the count-based greeting.
+    val briefSummary = state.briefContext.toSummary()
     val subStatus = when {
+        briefSummary.isNotBlank() -> briefSummary
         state.pendingTasks.isNotEmpty() && state.today.isNotEmpty() ->
             "You have ${state.pendingTasks.size} open task${if (state.pendingTasks.size == 1) "" else "s"} and ${state.today.size} on the calendar today."
         state.pendingTasks.isNotEmpty() ->
@@ -264,7 +270,10 @@ fun HomeScreen(
         if (state.recentMemories.isNotEmpty()) {
             BriefCard(
                 title = "What I remember",
-                lines = state.recentMemories.map { "· ${it.content}" },
+                // First sentence per memory, truncated to 60 chars + ellipsis.
+                // Raw content can be hundreds of chars; the brief card is a
+                // 2-line peek, not the full text.
+                lines = state.recentMemories.map { "· ${summarizeMemory(it.content)}" },
                 onClick = onOpenMemory,
             )
         }
@@ -536,5 +545,19 @@ private fun ProactiveUnreadLink(count: Int, onClick: () -> Unit) {
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
         )
+    }
+}
+
+/**
+ * One-line summary of a memory: the first sentence, hard-capped at
+ * 60 chars with an ellipsis. Used by the "What I remember" card
+ * so a 200-character memory doesn't take up 4 lines in the brief.
+ */
+private fun summarizeMemory(content: String): String {
+    val firstSentence = content.substringBefore('.').ifBlank { content }.trim()
+    return if (firstSentence.length > 60) {
+        firstSentence.take(60).trimEnd() + "…"
+    } else {
+        firstSentence
     }
 }
