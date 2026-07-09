@@ -26,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -151,23 +152,42 @@ fun AuraRoot() {
     val lifecycleOwner = LocalLifecycleOwner.current
     val mainActivity = ctx as? MainActivity
     var firstRunComplete by remember { mutableStateOf<Boolean?>(null) }
-    var appLockEnabled by remember { mutableStateOf(false) }
     var unlocked by remember { mutableStateOf(false) }
-    var themeMode by remember { mutableStateOf("system") }
+
+    val mainEntry = remember {
+        EntryPointAccessors.fromApplication(
+            ctx.applicationContext,
+            MainActivityEntryPoint::class.java,
+        )
+    }
+
+    // Collect appLockEnabled as a reactive Flow so enabling it in
+    // Settings takes effect immediately in the active session —
+    // the user doesn't need to restart the app for the gate to engage.
+    val appLockEnabled by mainEntry.userPreferences().appLockEnabled
+        .collectAsState(initial = false)
+
+    // Collect themeMode the same way so Settings theme changes
+    // apply live without a restart.
+    val themeMode by mainEntry.userPreferences().themeMode
+        .collectAsState(initial = "system")
 
     LaunchedEffect(Unit) {
         val entry = EntryPointAccessors.fromApplication(
             ctx.applicationContext,
             FirstRunGateEntryPoint::class.java,
         )
-        val mainEntry = EntryPointAccessors.fromApplication(
-            ctx.applicationContext,
-            MainActivityEntryPoint::class.java,
-        )
         firstRunComplete = entry.firstRunGate().isFirstRunComplete()
-        appLockEnabled = mainEntry.userPreferences().appLockEnabled.first()
-        themeMode = mainEntry.userPreferences().themeMode.first()
         if (!appLockEnabled) unlocked = true
+    }
+
+    // When appLockEnabled transitions to true, lock immediately.
+    LaunchedEffect(appLockEnabled) {
+        if (appLockEnabled) {
+            unlocked = false
+        } else {
+            unlocked = true
+        }
     }
 
     DisposableEffect(lifecycleOwner) {
