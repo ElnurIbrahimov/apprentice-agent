@@ -64,9 +64,22 @@ class MoaProvider(
     // ── Provider contract ──
 
     override fun isConfigured(): Boolean {
-        // MoA is configured when the aggregator provider is configured.
-        val aggId = "${defaultPreset.aggregator.providerPrefix}:${defaultPreset.aggregator.modelName}"
-        return runCatching { registry.get().parse(aggId) }.isSuccess
+        // MoA is configured only when the aggregator provider AND every
+        // enabled reference provider have valid API keys. Previously this
+        // checked only that the aggregator prefix was parseable — a
+        // provider with no key would still parse, making MoA appear
+        // available in the model picker and then fail on first send.
+        val aggProvider = runCatching {
+            registry.get().get(defaultPreset.aggregator.providerPrefix)
+        }.getOrNull() ?: return false
+        if (!aggProvider.isConfigured()) return false
+        for (ref in defaultPreset.referenceModels) {
+            val provider = runCatching {
+                registry.get().get(ref.providerPrefix)
+            }.getOrNull() ?: return false
+            if (!provider.isConfigured()) return false
+        }
+        return true
     }
 
     override suspend fun listModels(): List<String> = loadedPresets.keys.toList()

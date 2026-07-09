@@ -142,8 +142,9 @@ class GeminiProvider(
         )
         return try {
             val req = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}")
+                .url("https://generativelanguage.googleapis.com/v1beta/models")
                 .addHeader("Content-Type", "application/json")
+                .addHeader("X-Goog-Api-Key", apiKey)
                 .get()
                 .build()
             httpClient.newCall(req).execute().use { resp ->
