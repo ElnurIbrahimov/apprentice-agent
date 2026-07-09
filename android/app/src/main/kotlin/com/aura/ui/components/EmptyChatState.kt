@@ -106,22 +106,28 @@ fun EmptyChatState(
         // same offset (the welcome sits between the top bar
         // and the input, biased toward the top).
         Spacer(Modifier.weight(0.6f))
-        AuraLogomark(size = 28.dp)
-        Spacer(Modifier.height(14.dp))
+        // Logomark — slightly bigger than the tiny 28dp we had
+        // before, so the empty state has a visible anchor.
+        AuraLogomark(size = 40.dp)
+        Spacer(Modifier.height(16.dp))
         Text(
-            text = "Welcome",
+            text = "Welcome to Aura",
             fontFamily = Fraunces,
-            fontWeight = FontWeight.Normal,
+            fontWeight = FontWeight.SemiBold,
             fontSize = 28.sp,
-            color = AuraTokens.Dark.textSecondary,
+            // Brighter than textSecondary (0xFFA1A1AA) so the
+            // welcome actually reads on the dark background.
+            color = AuraTokens.Dark.textPrimary,
         )
         Spacer(Modifier.height(6.dp))
         Text(
             text = "What should we explore?",
             fontFamily = InterDisplay,
             fontWeight = FontWeight.Medium,
-            fontSize = 14.sp,
-            color = AuraTokens.Dark.textTertiary,
+            fontSize = 15.sp,
+            // Brighter than textTertiary (0xFF6B6B6B) which was
+            // near-invisible. textSecondary reads well.
+            color = AuraTokens.Dark.textSecondary,
         )
         // Push the rest of the screen to the bottom so the
         // input bar (rendered separately by ChatScreen) lines
