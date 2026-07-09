@@ -1,5 +1,6 @@
 package com.aura.kg
 
+import com.aura.memory.escapeLikeWildcards
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.ArrayDeque
@@ -42,11 +43,6 @@ class KnowledgeGraphRepository @Inject constructor(
 
     suspend fun search(query: String): List<KgNode> =
         dao.searchNodes(escapeLikeWildcards(query.trim())).map { KgNode.fromEntity(it) }
-
-    private fun escapeLikeWildcards(s: String): String = s
-        .replace("\\", "\\\\")
-        .replace("%", "\\%")
-        .replace("_", "\\_")
 
     suspend fun recent(limit: Int = 50): List<KgNode> =
         dao.recentNodes(limit).map { KgNode.fromEntity(it) }

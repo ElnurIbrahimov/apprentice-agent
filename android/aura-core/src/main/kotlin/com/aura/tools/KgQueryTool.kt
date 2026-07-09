@@ -24,6 +24,16 @@ import javax.inject.Singleton
 class KgQueryTool @Inject constructor(
     private val repository: KnowledgeGraphRepository,
 ) {
+    // "path between X and Y" — X and Y are arbitrary labels, which can
+    // themselves contain the word "and" (e.g. "research and development").
+    // The non-greedy `(.+?)\s+and\s+` capture for the source leaves the
+    // destination to match greedily to the end. This means a query like
+    // "path between research and development and shipping" routes as
+    // fromLabel="research and development", toLabel="shipping" — which is
+    // the most useful interpretation. A query like "path between A and B
+    // and C" routes as fromLabel="A", toLabel="B and C" — also a sane
+    // choice, and one we can't disambiguate without knowing the user's
+    // intent.
     private val pathPattern = Regex(
         """path\s+between\s+(.+?)\s+and\s+(.+)""",
         RegexOption.IGNORE_CASE,

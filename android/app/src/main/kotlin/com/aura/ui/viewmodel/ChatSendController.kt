@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -306,10 +307,4 @@ class ChatSendController(
         // Clear in-flight badges — the stream is being torn down.
         state.update { it.copy(streaming = false, inFlightToolCalls = emptyList()) }
     }
-}
-
-private fun MutableStateFlow<ChatUiState>.update(
-    transform: (ChatUiState) -> ChatUiState,
-) {
-    value = transform(value)
 }

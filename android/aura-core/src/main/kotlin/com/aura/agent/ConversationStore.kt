@@ -1,5 +1,6 @@
 package com.aura.agent
 
+import com.aura.memory.escapeLikeWildcards
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -43,17 +44,14 @@ class ConversationStore @Inject constructor(
     /**
      * Search across conversation title + serialized turn content. Returns
      * the most-recently-updated matches first. Like [com.aura.memory.MemoryStore.query],
-     * the input is escaped so SQL LIKE wildcards in the user query are
-     * treated as literal characters.
+     * the input is escaped (via the shared `escapeLikeWildcards` helper)
+     * so SQL LIKE wildcards in the user query are treated as literal
+     * characters.
      */
     suspend fun search(query: String, limit: Int = 50): List<Conversation> {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return emptyList()
-        val escaped = trimmed
-            .replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
-        return dao.search(escaped, limit).map { entityToConversation(it) }
+        return dao.search(escapeLikeWildcards(trimmed), limit).map { entityToConversation(it) }
     }
 
     suspend fun delete(id: String) = dao.delete(id)
