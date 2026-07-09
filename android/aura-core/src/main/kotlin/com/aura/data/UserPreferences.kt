@@ -38,43 +38,35 @@ internal val KEY_DEFAULT_MODEL = stringPreferencesKey("default_model")
 
 /**
  * The default chat model used when the user hasn't picked one yet.
- * Pinned in DefaultModelTest to prevent a regression of the 2026-07-09
- * bug where this string included a `:cloud` suffix that does not exist
- * on Ollama Cloud (real model ids are bare — e.g. `deepseek-v4-pro`).
- * The picker refreshes from the live `/v1/models` endpoint on open, so
- * this is only the model used for the very first chat before the
- * user has touched the picker.
+ * Pinned in DefaultModelTest to prevent a regression. Verified against
+ * https://ollama.com/v1/models on 2026-07-09: every Ollama Cloud model
+ * id has the `:cloud` suffix on the wire. A bare `ollama:deepseek-v4-pro`
+ * (no suffix) 404s — confirmed by direct API call. The picker
+ * refreshes from the live `/v1/models` endpoint on open, so this is
+ * only the model used for the very first chat before the user has
+ * touched the picker.
  *
  * Public (not `internal`) because the UI module's [ChatUiState] default
  * also reads it, and `internal` is module-scoped in Kotlin.
  */
-const val DEFAULT_MODEL = "ollama:deepseek-v4-pro"
+const val DEFAULT_MODEL = "ollama:deepseek-v4-pro:cloud"
 
 /**
- * Normalize a model id by stripping the legacy `:cloud` suffix that
- * was used in the Settings chips and the DataStore default through
- * 2026-07-08. The suffix does not exist on Ollama Cloud (real model
- * ids are bare, e.g. `deepseek-v4-pro`), so any persisted value
- * with `:cloud` would 404 on first send.
+ * Normalize a model id. Currently a no-op for ollama-cloud-shaped ids
+ * (we want the `:cloud` suffix kept — that's the live id). Kept as a
+ * function so we have a single chokepoint for any future id
+ * canonicalization (e.g. lowercasing provider prefixes, collapsing
+ * `models/<name>` shapes). Runs on every read of
+ * [UserPreferences.defaultModel] so any future migration has one
+ * place to plug in.
  *
- * The transformation is idempotent: a model id that already lacks
- * the suffix is returned unchanged. Runs on every read of
- * [UserPreferences.defaultModel] so existing installs (whose
- * DataStore already has the old value) self-heal on next launch
- * without needing a separate one-shot migration.
+ * Why not strip the suffix: verified directly against
+ * https://ollama.com/v1/models on 2026-07-09 that every Ollama Cloud
+ * model id has the `:cloud` suffix on the wire. A bare id 404s. The
+ * picker refreshes from the live endpoint on open, so the canonical
+ * answer is the live API, not a regex.
  */
-internal fun normalizeModelId(model: String): String {
-    // Match any "<provider>:<name>:cloud" pattern. The provider prefix
-    // is the first colon-delimited segment; the suffix is the trailing
-    // ":cloud". Strip the suffix only — leave the rest of the id alone
-    // (preserve case, internal colons like gemma4:31b, etc).
-    val colonCloud = ":cloud"
-    return if (model.endsWith(colonCloud) && model.count { it == ':' } >= 2) {
-        model.removeSuffix(colonCloud)
-    } else {
-        model
-    }
-}
+internal fun normalizeModelId(model: String): String = model
 internal val KEY_APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
 internal val KEY_FIRST_RUN_COMPLETE = booleanPreferencesKey("first_run_complete")
 internal val KEY_LAST_SEEN_PROACTIVE_AT = longPreferencesKey("last_seen_proactive_at")

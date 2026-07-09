@@ -49,10 +49,19 @@ class GeminiProviderTest {
     }
 
     @Test
-    fun `listModels returns hardcoded Gemini models`() = kotlinx.coroutines.runBlocking {
+    fun `listModels returns fallback list when API is unreachable`() = kotlinx.coroutines.runBlocking {
+        // No HTTP server reachable on the wire in this unit test, so the
+        // provider should fall back to the small hardcoded list. We don't
+        // pin the exact contents (the Gemini model catalog is a Google
+        // concern) — we pin the shape: a non-empty list, no "models/"
+        // prefix on any entry, and no "models/" prefix on a Gemini name
+        // is the bare id the chat endpoint accepts.
         val provider = createProvider(configured = true)
         val models = provider.listModels()
-        assertEquals(listOf("gemini-1.5-flash", "gemini-1.5-pro"), models)
+        assertTrue(models.isNotEmpty(), "listModels should return at least the fallback list")
+        for (m in models) {
+            assertFalse(m.startsWith("models/"), "model id should not include the API 'models/' prefix: $m")
+        }
     }
 
     @Test

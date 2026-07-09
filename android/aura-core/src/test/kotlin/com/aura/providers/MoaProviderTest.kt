@@ -30,8 +30,8 @@ class MoaProviderTest {
         val providers = mapOf(
             "ollama" to mockk<Provider>(relaxed = true) {
                 every { this@mockk.prefix } returns "ollama"
-                every { chat("glm-5.2", any(), any(), any()) } returns hangFlow
-                every { chat("kimi-k2.7-code", any(), any(), any()) } returns hangFlow
+                every { chat("glm-5.1:cloud", any(), any(), any()) } returns hangFlow
+                every { chat("kimi-k2.6:cloud", any(), any(), any()) } returns hangFlow
             },
             "deepseek" to mockk<Provider>(relaxed = true) {
                 every { prefix } returns "deepseek"
@@ -68,8 +68,8 @@ class MoaProviderTest {
         val providers = mapOf(
             "ollama" to mockk<Provider>(relaxed = true) {
                 every { this@mockk.prefix } returns "ollama"
-                every { chat("glm-5.2", any(), any(), any()) } returns hangFlow
-                every { chat("kimi-k2.7-code", any(), any(), any()) } returns hangFlow
+                every { chat("glm-5.1:cloud", any(), any(), any()) } returns hangFlow
+                every { chat("kimi-k2.6:cloud", any(), any(), any()) } returns hangFlow
             },
             "deepseek" to aggregator,
         )
@@ -94,11 +94,11 @@ class MoaProviderTest {
         val providers = mapOf(
             "ollama" to mockk<Provider>(relaxed = true) {
                 every { this@mockk.prefix } returns "ollama"
-                every { chat("glm-5.2", any(), any(), any()) } returns flowOf(
+                every { chat("glm-5.1:cloud", any(), any(), any()) } returns flowOf(
                     ProviderChunk(text = "Reference A output"),
                     ProviderChunk(finishReason = FinishReason.stop),
                 )
-                every { chat("kimi-k2.7-code", any(), any(), any()) } returns flowOf(
+                every { chat("kimi-k2.6:cloud", any(), any(), any()) } returns flowOf(
                     ProviderChunk(text = "Reference B output"),
                     ProviderChunk(finishReason = FinishReason.stop),
                 )
