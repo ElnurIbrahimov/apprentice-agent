@@ -25,7 +25,7 @@ import javax.inject.Singleton
  * (Gemini, GPT-4o, or Ollama Cloud gemma3) and returns the generated text.
  *
  * Provider selection order:
- * 1. Gemini (gemini-1.5-flash) — if a Gemini API key is configured
+ * 1. Gemini (gemini-2.5-flash) — if a Gemini API key is configured
  * 2. OpenAI (gpt-4o) — if an OpenAI API key is configured
  * 3. Ollama Cloud (gemma3:12b:cloud) — if an Ollama Cloud API key is configured
  *
@@ -115,9 +115,9 @@ class VisionTool @Inject constructor(
     }
 
     // ------------------------------------------------------------------
-    // Gemini API (gemini-1.5-flash)
+    // Gemini API (gemini-2.5-flash)
     // ------------------------------------------------------------------
-    // POST https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=...
+    // POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
     // Body: { contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: image_base64 } }] }] }
     // ------------------------------------------------------------------
 
@@ -141,7 +141,7 @@ class VisionTool @Inject constructor(
         // traces, proxy captures, and crash reports. The X-Goog-Api-Key
         // header is the documented mechanism and keeps the key out of logs.
         val req = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent")
+            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
             .header("Content-Type", "application/json")
             .header("X-Goog-Api-Key", apiKey)
             .post(requestBody)

@@ -10,7 +10,7 @@ import javax.inject.Singleton
  * Risk level a tool carries. Drives permission gating and confirmation UX.
  * - READ_ONLY: never destructive. Examples: web_search, calendar_read.
  * - WRITE_LOCAL: changes local state. Examples: calendar_write, app_launcher.
- * - WRITE_REMOTE: makes a network call that mutates. Examples: email send.
+ * - WRITE_REMOTE: makes a network call that mutates remote state. Currently unused by any tool.
  * - PRIVACY: touches personal data. Examples: contacts_get, location_now.
  * - DESTRUCTIVE: irreversible. Examples: file_pick + delete, factory_reset (don't add this).
  */

@@ -17,7 +17,8 @@ import javax.inject.Singleton
  * Opens the SMS app with a pre-filled compose intent (smsto:).
  * The user must tap Send in the SMS app — this tool does NOT send directly.
  *
- * Risk: WRITE_REMOTE (triggers network egress when the user sends).
+ * Risk: WRITE_LOCAL (opens an Activity on the device; no network
+ * egress from Aura itself).
  */
 @Singleton
 class SmsSendTool @Inject constructor(
@@ -44,7 +45,7 @@ class SmsSendTool @Inject constructor(
     val tool = Tool(
         name = "sms_send",
         description = definition().description,
-        risk = ToolRisk.WRITE_REMOTE,
+        risk = ToolRisk.WRITE_LOCAL,
         parameters = definition().parameters,
         execute = { call, _ ->
             val to = call.arguments["to"] as? String

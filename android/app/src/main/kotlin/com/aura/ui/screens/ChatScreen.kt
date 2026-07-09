@@ -200,7 +200,7 @@ fun ChatScreen(
         contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         uri?.let {
-            val bmp = decodeBitmap(context, it)
+            val bmp = decodeSharedImage(context, it)
             bmp?.let(viewModel::onImageCaptured)
         }
     }
@@ -1350,21 +1350,6 @@ private fun decodeSharedImage(context: android.content.Context, uri: android.net
                     opts,
                 )
             }
-        }.getOrNull()
-    }
-}
-
-private fun decodeBitmap(context: android.content.Context, uri: android.net.Uri): android.graphics.Bitmap? {
-    return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-        runCatching {
-            android.graphics.ImageDecoder.decodeBitmap(
-                android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
-            )
-        }.getOrNull()
-    } else {
-        runCatching {
-            @Suppress("DEPRECATION")
-            android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
         }.getOrNull()
     }
 }

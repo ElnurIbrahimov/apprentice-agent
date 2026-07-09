@@ -11,7 +11,7 @@ import okhttp3.OkHttpClient
  * for identification.
  *
  * Base URL: https://openrouter.ai/api/v1
- * Default models: gpt-4o, claude-3.5-sonnet, deepseek-v3
+ * Default models: derived from live /v1/models endpoint
  *
  * Required headers:
  * - HTTP-Referer: "https://aura-android"
