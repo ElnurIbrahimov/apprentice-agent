@@ -22,6 +22,13 @@ data class SettingsUiState(
     val deepseekKey: String = "",
     val groqKey: String = "",
     val openrouterKey: String = "",
+    // Default state value — overwritten by [reload] from the persisted
+    // UserPreferences value, so this only matters for the first render
+    // before the DataStore read completes. Must match a real model id
+    // so the chip-highlight check (`state.defaultModel == id`) is
+    // correct even on the very first frame. The 4d692a7 self-heal
+    // normalizes any legacy stored value (no `:cloud` suffix from the
+    // 2026-07-07 bug) back to the live id on next read.
     val defaultModel: String = "ollama:deepseek-v4-pro:cloud",
     val firstRunComplete: Boolean = false,
     val configuredProviders: List<String> = emptyList(),
