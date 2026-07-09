@@ -5,6 +5,7 @@ import io.mockk.mockk
 import okhttp3.OkHttpClient
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -49,12 +50,13 @@ class GroqProviderTest {
     }
 
     @Test
-    fun `listModels returns empty when API call fails`() = kotlinx.coroutines.runBlocking {
-        // No defaultModels anymore — listModels() calls the live API.
-        // Without a real server, it returns empty.
-        val provider = createProvider(configured = true)
-        val models = provider.listModels()
-        assertEquals(emptyList(), models)
+    fun `listModels surfaces API failure instead of pretending there are no models`() {
+        kotlinx.coroutines.runBlocking {
+            val provider = createProvider(configured = true)
+            assertFailsWith<IllegalStateException> {
+                provider.listModels()
+            }
+        }
     }
 
     @Test

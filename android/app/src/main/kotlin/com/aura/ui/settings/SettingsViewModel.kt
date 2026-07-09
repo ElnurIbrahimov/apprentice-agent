@@ -309,7 +309,8 @@ class SettingsViewModel @Inject constructor(
             }
             val moaModels = moaResult?.getOrDefault(emptyList())?.map { "moa:$it" } ?: emptyList()
             val moaError = moaResult?.exceptionOrNull()?.let { "MoA: ${it.message ?: it.javaClass.simpleName}" }
-            val merged = (all + moaModels).distinct().sorted()
+            val currentModel = _state.value.defaultModel.trim().takeIf { it.isNotBlank() }
+            val merged = (all + moaModels + listOfNotNull(currentModel)).distinct().sorted()
             val allErrors = errors + listOfNotNull(moaError)
             val resolvedError = allErrors.firstOrNull()
                 ?: if (merged.isEmpty()) {

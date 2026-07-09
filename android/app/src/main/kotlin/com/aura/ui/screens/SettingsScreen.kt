@@ -216,11 +216,17 @@ fun SettingsScreen(
             ) {
                 Text("Choose model")
             }
-            if (state.availableModels.isNotEmpty()) {
+            if (state.modelsError == null && state.availableModels.isNotEmpty()) {
                 Text(
                     text = "${state.availableModels.size} live models loaded",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                )
+            } else if (state.modelsError != null) {
+                Text(
+                    text = "Model refresh failed — open the picker for details",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
         }

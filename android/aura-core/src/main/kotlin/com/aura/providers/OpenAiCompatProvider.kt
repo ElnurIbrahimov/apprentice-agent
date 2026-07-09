@@ -1,7 +1,9 @@
 package com.aura.providers
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -108,17 +110,23 @@ open class OpenAiCompatProvider(
         }
     }
 
-    override suspend fun listModels(): List<String> {
-        if (defaultModels.isNotEmpty()) return defaultModels
+    override suspend fun listModels(): List<String> = withContext(Dispatchers.IO) {
+        if (defaultModels.isNotEmpty()) return@withContext defaultModels
         val req = Request.Builder().url("$baseUrl/models")
             .addHeader("Authorization", "Bearer $apiKey")
             .build()
         httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) return emptyList()
-            val body = resp.body?.string() ?: return emptyList()
+            if (!resp.isSuccessful) {
+                val detail = resp.body?.string()?.take(200)?.trim().orEmpty()
+                val suffix = if (detail.isNotBlank()) " — $detail" else ""
+                throw IllegalStateException("HTTP ${resp.code} ${resp.message}$suffix".trim())
+            }
+            val body = resp.body?.string() ?: throw IllegalStateException("Empty /models response")
             val obj = Json.parseToJsonElement(body).jsonObject
-            val data = (obj["data"] as? JsonArray) ?: return emptyList()
-            return data.mapNotNull { (it as? JsonObject)?.get("id")?.let { id -> (id as? JsonPrimitive)?.content } }
+            val data = (obj["data"] as? JsonArray)
+                ?: throw IllegalStateException("Missing data[] in /models response")
+            data.mapNotNull { (it as? JsonObject)?.get("id")?.let { id -> (id as? JsonPrimitive)?.content } }
+                .ifEmpty { throw IllegalStateException("Provider returned zero models") }
         }
     }
 

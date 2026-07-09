@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +30,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -61,6 +64,7 @@ import java.util.Locale
 
 private val MEMORY_CATEGORIES = listOf("fact", "preference", "episode", "person", "project", "idea", "task")
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
@@ -85,8 +89,14 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
             )
             Spacer(modifier = Modifier.height(4.dp))
             val filterText = state.categoryFilter?.let { " · $it" } ?: ""
+            val subtitle = when {
+                state.memories.isEmpty() && state.query.isBlank() -> "No memories yet$filterText"
+                state.memories.isEmpty() -> "No memories match your filters$filterText"
+                state.memories.size == 1 -> "1 memory$filterText"
+                else -> "${state.memories.size} memories$filterText"
+            }
             Text(
-                text = "${state.memories.size} things I remember$filterText",
+                text = subtitle,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
             )
@@ -140,7 +150,11 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
         Spacer(modifier = Modifier.height(8.dp))
 
         // Category filter chips
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             AssistChip(
                 onClick = { viewModel.setCategory(null) },
                 label = { Text("All") },
@@ -158,57 +172,71 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
                 )
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
+
 
         // Manual note creation — bypasses the write gate so the user
         // can explicitly store anything they want without going through
         // the agent.
-        OutlinedButton(
+        Button(
             onClick = { showAddNote = true },
             modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
         ) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text("Add note")
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        if (state.memories.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
 
-        // Rebuild embeddings action. Always visible; disabled while
-        // the rebuild is in flight or when there are no memories at
-        // all. Tapping shows a confirm dialog so an accidental press
-        // doesn't kick off a long-running operation.
-        OutlinedButton(
-            onClick = { showRebuildConfirm = true },
-            enabled = !state.rebuildInFlight && state.memories.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (state.rebuildInFlight) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(modifier = Modifier.size(8.dp))
-                Text("Rebuilding…")
-            } else {
-                Icon(
-                    imageVector = Icons.Filled.Build,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(modifier = Modifier.size(8.dp))
-                Text("Rebuild embeddings")
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Bulk delete actions. "Clear category" only shows when a
-        // category filter is active. Both show a confirm dialog.
-        if (state.categoryFilter != null) {
+            // Rebuild embeddings action. Visible only once there is something
+            // to rebuild.
             OutlinedButton(
-                onClick = { showClearCategoryConfirm = true },
-                enabled = state.memories.isNotEmpty(),
+                onClick = { showRebuildConfirm = true },
+                enabled = !state.rebuildInFlight,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (state.rebuildInFlight) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("Rebuilding…")
+                } else {
+                    Icon(
+                        imageVector = Icons.Filled.Build,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("Rebuild embeddings")
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Bulk delete actions. "Clear category" only shows when a
+            // category filter is active. Both show a confirm dialog.
+            if (state.categoryFilter != null) {
+                OutlinedButton(
+                    onClick = { showClearCategoryConfirm = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Delete,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("Clear ${state.categoryFilter} memories", color = MaterialTheme.colorScheme.error)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+            OutlinedButton(
+                onClick = { showClearAllConfirm = true },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(
@@ -218,38 +246,42 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
                     tint = MaterialTheme.colorScheme.error,
                 )
                 Spacer(modifier = Modifier.size(8.dp))
-                Text("Clear ${state.categoryFilter} memories", color = MaterialTheme.colorScheme.error)
+                Text("Clear all memories", color = MaterialTheme.colorScheme.error)
             }
             Spacer(modifier = Modifier.height(8.dp))
         }
-        OutlinedButton(
-            onClick = { showClearAllConfirm = true },
-            enabled = state.memories.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Delete,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.error,
-            )
-            Spacer(modifier = Modifier.size(8.dp))
-            Text("Clear all memories", color = MaterialTheme.colorScheme.error)
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        HorizontalDivider()
+
         Spacer(modifier = Modifier.height(8.dp))
 
         if (state.loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         } else if (state.memories.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    if (state.query.isBlank()) "No memories yet"
-                    else "No memories match \"${state.query}\"",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-                )
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = if (state.query.isBlank()) "No memories yet" else "Nothing matches that search",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = if (state.query.isBlank()) {
+                            "Add a note, or keep chatting and Aura will save facts, preferences, and episodes here."
+                        } else {
+                            "Try a different keyword or clear the category filter."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         } else {
             LazyColumn(

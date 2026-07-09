@@ -120,6 +120,8 @@ fun ModelPickerSheet(
             .toSortedMap()
     }
     val totalCount = grouped.values.sumOf { it.size }
+    val trimmedQuery = query.trim()
+    val showCustomModelRow = trimmedQuery.contains(":") && models.none { it.equals(trimmedQuery, ignoreCase = true) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -207,7 +209,7 @@ fun ModelPickerSheet(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )
                 }
-            } else if (errorMessage != null) {
+            } else if (models.isEmpty() && !showCustomModelRow && errorMessage != null) {
                 // Surface the error so the user knows it's a network/key problem,
                 // not "the app doesn't have any models"
                 Column(
@@ -232,14 +234,14 @@ fun ModelPickerSheet(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )
                 }
-            } else if (models.isEmpty()) {
+            } else if (models.isEmpty() && !showCustomModelRow) {
                 Text(
-                    text = "No models available. Add a provider API key in Settings.",
+                    text = "No models available. Add a provider API key in Settings, or paste a full model ID.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     modifier = Modifier.padding(vertical = 24.dp),
                 )
-            } else if (grouped.isEmpty()) {
+            } else if (grouped.isEmpty() && !showCustomModelRow) {
                 Text(
                     text = "No models match \"$query\"",
                     style = MaterialTheme.typography.bodyMedium,
@@ -250,6 +252,48 @@ fun ModelPickerSheet(
                 LazyColumn(
                     contentPadding = PaddingValues(bottom = 8.dp),
                 ) {
+                    if (errorMessage != null) {
+                        item(key = "models-warning") {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 12.dp),
+                            ) {
+                                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                                    Text(
+                                        text = "Last refresh failed",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = errorMessage,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (showCustomModelRow) {
+                        item(key = "custom-model-header") {
+                            ProviderHeader(name = "Custom", count = 1)
+                        }
+                        item(key = "custom-model-row") {
+                            ModelRow(
+                                id = trimmedQuery,
+                                displayName = "Use custom model ID",
+                                isCurrent = trimmedQuery == currentModel,
+                                onClick = {
+                                    onPick(trimmedQuery)
+                                    onDismiss()
+                                },
+                            )
+                        }
+                    }
                     grouped.forEach { (provider, items) ->
                         item(key = "header-$provider") {
                             ProviderHeader(
