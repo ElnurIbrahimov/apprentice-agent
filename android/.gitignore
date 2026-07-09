@@ -32,6 +32,12 @@ captures/
 *.aab
 *.aar
 
+# Runtime data (NOT the com.aura.data source package)
+# The previous "data/" rule was a generic catch-all that wrongly ignored
+# any directory named "data" at any depth — including the
+# aura-core/src/main/kotlin/com/aura/data source package. New test
+# files added under that package were silently dropped from commits.
+# Use a more specific rule:
 # Kotlin
 .kotlin/
 .kotlin_metadata/
