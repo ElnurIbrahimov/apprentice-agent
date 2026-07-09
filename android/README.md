@@ -8,7 +8,7 @@ This is my personal copy. The plan lives at `.hermes/plans/`.
 
 ## Status
 
-**v0.10.0** (versionCode 1).
+**v0.10.2** (versionCode 3).
 
 - 38 tools (web search x3, vision, image gen, deep research, firecrawl fetch, knowledge graph, weather, translate, timer, SMS, email, biometric prompt, and 25 phone-native tools)
 - Memory stack (Room + 384-dim cloud embeddings + 6-signal RRF retrieval + 14-day FadeMem with access-frequency decay + heuristic WriteGate)
@@ -25,7 +25,7 @@ This is my personal copy. The plan lives at `.hermes/plans/`.
 - User profile (learned from conversations via regex, injected into system prompt)
 - Onboarding wizard (paste API key + verify connectivity)
 - Biometric gate for sensitive tools
-- 454 unit tests passing across `:aura-core` (324) + `:app` (130)
+- 458 unit tests passing across `:aura-core` (324) + `:app` (134)
 
 Note: the app uses **cloud providers only** — there is no on-device model.
 
@@ -184,7 +184,7 @@ Scheduled via WorkManager. Re-scheduled on app start (idempotent, UPDATE policy)
 ./gradlew :app:assembleDebug connectedAndroidTest  # androidTests (needs device)
 ```
 
-Stats: 454 unit tests passing across `:aura-core` (324) + `:app` (130).
+Stats: 458 unit tests passing across `:aura-core` (324) + `:app` (134).
 
 CI (`.github/workflows/ci.yml`) runs `assembleDebug` + unit tests on every push and PR.
 
