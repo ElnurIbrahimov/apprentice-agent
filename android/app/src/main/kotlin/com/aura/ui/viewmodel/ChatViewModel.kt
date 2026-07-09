@@ -774,6 +774,7 @@ class ChatViewModel @Inject constructor(
                     streaming = false,
                 )
             }
+            saveConversation()
         }
     }
 

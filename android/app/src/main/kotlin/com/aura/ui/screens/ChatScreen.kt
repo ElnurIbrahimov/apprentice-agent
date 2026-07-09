@@ -30,7 +30,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddAPhoto
@@ -44,7 +43,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -760,23 +758,6 @@ private fun ModeChip(
 }
 
 @Composable
-private fun FilterChip(selected: Boolean, label: String, onClick: () -> Unit) {
-    androidx.compose.material3.FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(text = label, style = MaterialTheme.typography.labelSmall) },
-        colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(
-            selectedContainerColor = if (label.contains("Deep")) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
-            } else {
-                MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f)
-            },
-        ),
-        modifier = Modifier.padding(end = 4.dp),
-    )
-}
-
-@Composable
 private fun IncognitoBanner() {
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
@@ -1352,12 +1333,6 @@ private fun decodeSharedImage(context: android.content.Context, uri: android.net
             }
         }.getOrNull()
     }
-}
-
-private fun copyToClipboard(context: android.content.Context, text: String) {
-    if (text.isBlank()) return
-    val clip = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-    clip.setPrimaryClip(android.content.ClipData.newPlainText("Aura response", text))
 }
 
 @Composable

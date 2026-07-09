@@ -147,7 +147,14 @@ class BackupManager @Inject constructor(
         if (edgeRows.isNotEmpty()) kgDao.insertAllEdges(edgeRows)
         if (handRows.isNotEmpty()) handDao.insertAll(handRows)
         if (taskRows.isNotEmpty()) taskDao.insertAll(taskRows)
-        profileRow?.let { userProfileDao.upsert(it) }
+        // If the backup has a profile, replace the current one.
+        // If it doesn't, clear the existing profile so stale identity
+        // data doesn't survive a restore.
+        if (profileRow != null) {
+            userProfileDao.upsert(profileRow)
+        } else {
+            userProfileDao.deleteAll()
+        }
         backup.preferences.defaultModel?.let { userPreferences.setDefaultModel(it) }
         if (backup.preferences.appLockEnabled) userPreferences.setAppLockEnabled(true)
         if (backup.preferences.firstRunComplete) userPreferences.setFirstRunComplete(true)
@@ -180,6 +187,7 @@ class BackupManager @Inject constructor(
         kgDao.deleteAllNodes()
         handDao.deleteAll()
         taskDao.deleteAll()
+        userProfileDao.deleteAll()
     }
 
     /**

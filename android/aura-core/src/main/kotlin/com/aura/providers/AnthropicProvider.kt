@@ -149,7 +149,6 @@ class AnthropicProvider(
                 val obj = Json.parseToJsonElement(body).jsonObject
                 val data = (obj["data"] as? kotlinx.serialization.json.JsonArray) ?: return fallbackModels
                 data.mapNotNull { (it as? JsonObject)?.get("id")?.let { id -> (id as? JsonPrimitive)?.content }
-                    ?.let { mid -> mid.removePrefix("claude-") }
                 }
             }
         } catch (e: Exception) {
