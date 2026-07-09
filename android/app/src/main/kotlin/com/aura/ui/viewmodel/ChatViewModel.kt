@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.aura.data.DEFAULT_MODEL
 import com.aura.data.UserPreferences
 import com.aura.agent.AgentEvent
 import com.aura.agent.ConversationStore
@@ -82,7 +83,7 @@ data class ChatUiState(
     val draft: String = "",
     val error: String? = null,
     val errorTyped: AuraError? = null,
-    val activeModel: String = "ollama:deepseek-v4-pro:cloud",
+    val activeModel: String = DEFAULT_MODEL,
     val availableModels: List<String> = emptyList(),
     /**
      * True while [refreshModels] is in flight. Drives a small

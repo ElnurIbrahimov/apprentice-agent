@@ -34,6 +34,20 @@ import javax.inject.Singleton
  */
 private val Context.auraPrefs by preferencesDataStore(name = "aura_settings")
 internal val KEY_DEFAULT_MODEL = stringPreferencesKey("default_model")
+
+/**
+ * The default chat model used when the user hasn't picked one yet.
+ * Pinned in DefaultModelTest to prevent a regression of the 2026-07-09
+ * bug where this string included a `:cloud` suffix that does not exist
+ * on Ollama Cloud (real model ids are bare — e.g. `deepseek-v4-pro`).
+ * The picker refreshes from the live `/v1/models` endpoint on open, so
+ * this is only the model used for the very first chat before the
+ * user has touched the picker.
+ *
+ * Public (not `internal`) because the UI module's [ChatUiState] default
+ * also reads it, and `internal` is module-scoped in Kotlin.
+ */
+const val DEFAULT_MODEL = "ollama:deepseek-v4-pro"
 internal val KEY_APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
 internal val KEY_FIRST_RUN_COMPLETE = booleanPreferencesKey("first_run_complete")
 internal val KEY_LAST_SEEN_PROACTIVE_AT = longPreferencesKey("last_seen_proactive_at")
@@ -57,7 +71,7 @@ class UserPreferences @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     val defaultModel: Flow<String> = context.auraPrefs.data.map { prefs ->
-        prefs[KEY_DEFAULT_MODEL] ?: "ollama:deepseek-v4-pro:cloud"
+        prefs[KEY_DEFAULT_MODEL] ?: DEFAULT_MODEL
     }
 
     /**

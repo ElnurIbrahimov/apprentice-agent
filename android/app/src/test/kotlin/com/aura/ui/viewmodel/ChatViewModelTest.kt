@@ -193,14 +193,21 @@ class ChatViewModelTest {
     fun `setSpecialist updates model`() = runTest(testDispatcher) {
         val vm = createViewModel()
         advanceUntilIdle()
+        // Specialist override wires the specialist's suggestedModel
+        // straight into activeModel. The exact id is irrelevant here —
+        // this test pins the wiring contract, not the model's existence
+        // on Ollama Cloud. Use a verified id from the 2026-07-09
+        // /v1/models snapshot so a future model-list refresh doesn't
+        // accidentally turn a passing test into a "404 on send".
+        val suggested = "ollama:qwen3.5:397b"
         val specialist = Specialist(
             name = "coder",
             icon = "\uD83D\uDCBB",
             systemPrompt = "coding specialist",
-            suggestedModel = "ollama:qwen3.5:cloud",
+            suggestedModel = suggested,
         )
         vm.setSpecialist(specialist)
-        assertEquals("ollama:qwen3.5:cloud", vm.state.value.activeModel)
+        assertEquals(suggested, vm.state.value.activeModel)
         assertEquals(specialist, vm.state.value.selectedSpecialist)
     }
 

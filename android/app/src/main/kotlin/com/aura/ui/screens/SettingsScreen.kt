@@ -198,12 +198,17 @@ fun SettingsScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             listOf(
-                "ollama:deepseek-v4-pro:cloud" to "DeepSeek V4 Pro (fast, cheap)",
-                "ollama:kimi-k2.7-code:cloud" to "Kimi K2.7 Code (tool use)",
+                // Verified against https://ollama.com/v1/models on 2026-07-09.
+                // The `:cloud` suffix is NOT a real Ollama Cloud model tag —
+                // it was a 2026-07-07 bug that turned the first chat into a
+                // 404. The picker refreshes from /v1/models on open, so these
+                // are just the most-likely defaults the user wants to tap.
+                "ollama:deepseek-v4-pro" to "DeepSeek V4 Pro (fast, cheap)",
+                "ollama:kimi-k2.7-code" to "Kimi K2.7 Code (tool use)",
                 "anthropic:claude-sonnet-4-5" to "Claude Sonnet 4.5",
-                "ollama:minimax-m2.7:cloud" to "MiniMax M2.7 (code)",
-                "ollama:gemma4:31b:cloud" to "Gemma 4 31B",
-                "ollama:qwen3.5:cloud" to "Qwen 3.5",
+                "ollama:minimax-m2.7" to "MiniMax M2.7 (code)",
+                "ollama:gemma4:31b" to "Gemma 4 31B",
+                "ollama:qwen3.5:397b" to "Qwen 3.5 397B",
             ).forEach { (id, label) ->
                 AssistChip(
                     onClick = { viewModel.setDefaultModel(id) },
