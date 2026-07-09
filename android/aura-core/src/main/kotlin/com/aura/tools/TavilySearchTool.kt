@@ -91,8 +91,7 @@ class TavilySearchTool @Inject constructor(
                 ToolResult.Error("search failed: ${e.message}", "http_error")
             }
         },
-    )
-
+    category = "web")
     private fun search(
         query: String,
         maxResults: Int,

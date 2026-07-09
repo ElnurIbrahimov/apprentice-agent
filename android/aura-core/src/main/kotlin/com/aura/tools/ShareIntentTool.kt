@@ -58,5 +58,5 @@ class ShareIntentTool @Inject constructor(
                 ToolResult.Error("share failed: ${e.message}", "exception")
             }
         },
-    )
+    category = "system")
 }

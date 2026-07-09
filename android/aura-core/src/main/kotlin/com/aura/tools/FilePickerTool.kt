@@ -55,5 +55,5 @@ class FilePickerTool @Inject constructor(
                 ToolResult.Error("file_pick failed: ${e.message}", "exception")
             }
         },
-    )
+    category = "device")
 }

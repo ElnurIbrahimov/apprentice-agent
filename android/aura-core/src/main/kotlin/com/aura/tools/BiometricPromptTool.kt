@@ -113,5 +113,5 @@ class BiometricPromptTool @Inject constructor(
                 )
             }
         },
-    )
+    category = "device")
 }

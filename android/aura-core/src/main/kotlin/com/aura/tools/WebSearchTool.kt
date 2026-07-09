@@ -49,8 +49,7 @@ class WebSearchTool @Inject constructor(
                 ToolResult.Error("search failed: ${e.message}", "http_error")
             }
         },
-    )
-
+    category = "web")
     private data class Result(val title: String, val url: String, val snippet: String)
 
     private fun search(query: String, maxResults: Int): List<Result> {

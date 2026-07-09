@@ -134,5 +134,5 @@ class TaskManagerTool @Inject constructor(
                 else -> ToolResult.Error("unknown action: $action", "bad_args")
             }
         },
-    )
+    category = "productivity")
 }

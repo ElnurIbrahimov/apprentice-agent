@@ -70,6 +70,7 @@ class WeatherTool @Inject constructor(
                 ToolResult.Error("Weather fetch failed: ${e.message}", "weather_error")
             }
         },
+        category = "media",
     )
 
     private fun fetchWeather(lat: Double, lon: Double): String {

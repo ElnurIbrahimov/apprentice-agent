@@ -61,8 +61,7 @@ class BraveSearchTool @Inject constructor(
                 ToolResult.Error("search failed: ${e.message}", "http_error")
             }
         },
-    )
-
+    category = "web")
     private data class Result(val title: String, val url: String, val snippet: String)
 
     /**

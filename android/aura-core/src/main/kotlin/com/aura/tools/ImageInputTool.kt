@@ -88,5 +88,5 @@ class ImageInputTool @Inject constructor(
                 ToolResult.Error("image_input failed: ${e.message}", "exception")
             }
         },
-    )
+    category = "vision")
 }

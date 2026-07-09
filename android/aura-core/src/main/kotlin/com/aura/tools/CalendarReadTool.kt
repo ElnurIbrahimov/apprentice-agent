@@ -68,8 +68,7 @@ class CalendarReadTool @Inject constructor(
                 ToolResult.Error("calendar read failed: ${e.message}", "exception")
             }
         },
-    )
-
+    category = "productivity")
     private data class Event(val title: String, val begin: Long, val end: Long, val location: String, val allDay: Boolean)
 
     private fun readEvents(days: Int, max: Int): List<Event> {

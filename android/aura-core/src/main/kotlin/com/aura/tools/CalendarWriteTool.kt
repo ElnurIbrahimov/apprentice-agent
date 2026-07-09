@@ -75,8 +75,7 @@ class CalendarWriteTool @Inject constructor(
                 ToolResult.Error("calendar_write failed: ${e.message}", "exception")
             }
         },
-    )
-
+    category = "productivity")
     private fun parseTime(s: String): Long? {
         return try {
             val iso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(s)

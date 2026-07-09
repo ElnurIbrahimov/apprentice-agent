@@ -57,8 +57,7 @@ class KgQueryTool @Inject constructor(
                 ToolResult.Error("Query failed: ${e.message}", "query_error")
             }
         },
-    )
-
+    category = "knowledge")
     private suspend fun runQuery(query: String): String {
         // 1. Check for "path between X and Y"
         val pathMatch = pathPattern.find(query.trim())

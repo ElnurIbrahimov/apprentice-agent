@@ -73,8 +73,7 @@ class PhotoLibraryTool @Inject constructor(
                 ToolResult.Error("photo_library failed: ${e.message}", "exception")
             }
         },
-    )
-
+    category = "media")
     private data class Photo(val uri: Uri, val date: String, val width: Int, val height: Int)
 
     private fun listRecent(limit: Int): List<Photo> {

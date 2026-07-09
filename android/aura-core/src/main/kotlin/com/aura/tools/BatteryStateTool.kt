@@ -51,5 +51,5 @@ class BatteryStateTool @Inject constructor(
             }
             ToolResult.Ok("Battery: $pct%, ${if (charging) "charging" else "discharging"}, plug=$plugName")
         },
-    )
+    category = "system")
 }

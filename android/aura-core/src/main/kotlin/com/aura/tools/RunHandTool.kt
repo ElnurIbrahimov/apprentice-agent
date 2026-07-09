@@ -51,5 +51,5 @@ class RunHandTool @Inject constructor(
                 ?: return@Tool ToolResult.Error("Hand not found: $name", "not_found")
             repository.run(hand, executor.get(), ctx)
         },
-    )
+    category = "automation")
 }

@@ -35,5 +35,5 @@ class GetCurrentTimeTool @Inject constructor() {
             val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).format(Date(now))
             ToolResult.Ok("Now: $human (ISO $iso, epoch $now)")
         },
-    )
+    category = "productivity")
 }

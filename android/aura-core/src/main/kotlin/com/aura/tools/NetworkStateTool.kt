@@ -49,5 +49,5 @@ class NetworkStateTool @Inject constructor(
             val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
             ToolResult.Ok("Online: $type, ${if (metered) "metered" else "unmetered"}, ${if (validated) "validated" else "not yet validated"}")
         },
-    )
+    category = "system")
 }

@@ -11,10 +11,25 @@ data class ToolCall(
 )
 
 @Serializable
+/**
+ * Lightweight, public-safe description of a tool — name, what it
+ * does, the arguments it accepts, and the UI category it belongs
+ * to. Returned by [com.aura.agent.ToolRegistry.definitions] for
+ * the LLM prompt and for the Tools browser screen. Never includes
+ * the `execute` lambda or risk metadata — those are private to the
+ * executor.
+ */
 data class ToolDefinition(
     val name: String,
     val description: String,
     val parameters: ToolParameters,
+    /**
+     * UI category used by the Tools browser screen. See
+     * [com.aura.tools.ToolCategories] for the list of valid values.
+     * Empty string = "other" (default if a tool hasn't been
+     * categorized yet).
+     */
+    val category: String = "",
 )
 
 @Serializable

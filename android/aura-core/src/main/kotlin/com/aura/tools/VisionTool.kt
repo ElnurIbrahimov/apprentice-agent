@@ -85,8 +85,7 @@ class VisionTool @Inject constructor(
                 ToolResult.Error("vision analysis failed: ${e.message}", "http_error")
             }
         },
-    )
-
+    category = "vision")
     /**
      * Routes to the first configured vision-capable provider.
      *

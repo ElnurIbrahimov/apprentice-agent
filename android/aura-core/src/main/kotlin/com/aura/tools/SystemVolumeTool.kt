@@ -62,5 +62,5 @@ class SystemVolumeTool @Inject constructor(
                 ToolResult.Ok("$streamName volume set to $level% (index $target / $max)")
             }
         },
-    )
+    category = "system")
 }

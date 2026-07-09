@@ -23,6 +23,12 @@ data class Tool(
     val requiredPermissions: List<String> = emptyList(),
     val parameters: ToolParameters = ToolParameters(),
     val execute: suspend (ToolCall, ToolContext) -> ToolResult,
+    /**
+     * Top-level group the tool belongs to, used by the Tools
+     * browser screen. Categories are stable strings — see
+     * [com.aura.tools.ToolCategories]. Empty string = "other".
+     */
+    val category: String = "",
 )
 
 data class ToolCall(val id: String, val name: String, val arguments: Map<String, Any?>)
@@ -69,6 +75,11 @@ class ToolRegistry @Inject constructor() {
     fun byRisk(min: ToolRisk): List<Tool> = tools.values.filter { it.risk.ordinal >= min.ordinal }
 
     fun definitions(): List<ToolDefinition> = tools.values.map { t ->
-        ToolDefinition(name = t.name, description = t.description, parameters = t.parameters)
+        ToolDefinition(
+            name = t.name,
+            description = t.description,
+            parameters = t.parameters,
+            category = t.category,
+        )
     }
 }

@@ -57,8 +57,7 @@ class ContactsSearchTool @Inject constructor(
                 ToolResult.Error("contacts search failed: ${e.message}", "exception")
             }
         },
-    )
-
+    category = "communication")
     private data class Contact(val name: String, val phone: String?, val email: String?)
 
     private fun search(query: String): List<Contact> {

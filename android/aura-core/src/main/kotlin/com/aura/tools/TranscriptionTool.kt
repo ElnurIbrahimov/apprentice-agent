@@ -84,8 +84,7 @@ class TranscriptionTool @Inject constructor(
                 ToolResult.Error("transcription failed: ${e.message}", "http_error")
             }
         },
-    )
-
+    category = "media")
     /**
      * Decodes a base64 string to a byte array.
      */

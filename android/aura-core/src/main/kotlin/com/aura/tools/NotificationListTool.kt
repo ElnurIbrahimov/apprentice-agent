@@ -63,5 +63,5 @@ class NotificationListTool @Inject constructor(
             if (count == 0) ToolResult.Ok("No active notifications (or notification listener not granted).")
             else ToolResult.Ok(sb.toString())
         },
-    )
+    category = "communication")
 }

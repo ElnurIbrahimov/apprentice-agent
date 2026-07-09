@@ -53,5 +53,5 @@ class AppLauncherTool @Inject constructor(
                 ToolResult.Error("launch failed: ${e.message}", "exception")
             }
         },
-    )
+    category = "system")
 }

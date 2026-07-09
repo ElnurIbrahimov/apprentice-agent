@@ -77,5 +77,5 @@ class EmailSendTool @Inject constructor(
                 ToolResult.Error("Failed to open email app: ${e.message}", "email_error")
             }
         },
-    )
+    category = "communication")
 }

@@ -59,6 +59,7 @@ import com.aura.ui.screens.GraphScreen
 import com.aura.ui.screens.HandsScreen
 import com.aura.ui.screens.HistoryScreen
 import com.aura.ui.screens.HomeScreen
+import com.aura.ui.screens.ToolsScreen
 import com.aura.ui.screens.MemoryScreen
 import com.aura.ui.screens.ProactiveHistoryScreen
 import com.aura.ui.screens.RemindersScreen
@@ -166,6 +167,9 @@ fun NavGraph(
                     },
                     onOpenTasks = { navController.navigate("tasks") },
                     onOpenReminders = { navController.navigate("reminders") },
+                    onOpenHands = { navController.navigate("hands") },
+                    onOpenTools = { navController.navigate("tools") },
+                    onOpenProactive = { navController.navigate("proactive") },
                     onOpenCalendar = {
                         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                             data = android.net.Uri.parse("content://com.android.calendar/time/${System.currentTimeMillis()}")
@@ -217,6 +221,7 @@ fun NavGraph(
             }
             composable("hands") { HandsScreen() }
             composable("tasks") { TasksScreen() }
+            composable("tools") { ToolsScreen() }
             composable("proactive") { ProactiveHistoryScreen() }
             composable("reminders") {
                 RemindersScreen(onBack = { navController.popBackStack() })

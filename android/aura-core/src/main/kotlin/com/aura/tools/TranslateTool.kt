@@ -62,8 +62,7 @@ class TranslateTool @Inject constructor(
                 ToolResult.Error("Translation failed: ${e.message}", "translation_error")
             }
         },
-    )
-
+    category = "media")
     private suspend fun performTranslation(text: String, targetLanguage: String): String {
         // Resolve the first configured provider's first model
         val providers = providerRegistry.configured()

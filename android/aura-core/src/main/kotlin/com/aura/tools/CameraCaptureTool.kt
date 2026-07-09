@@ -48,5 +48,5 @@ class CameraCaptureTool @Inject constructor(
                 ToolResult.Error("camera failed: ${e.message}", "exception")
             }
         },
-    )
+    category = "vision")
 }

@@ -98,8 +98,7 @@ class SetReminderTool @Inject constructor(
             }
             ToolResult.Ok("Reminder set for ${TimeParser.format(triggerAt)}: $message")
         },
-    )
-
+    category = "productivity")
     companion object {
         /** Reserved notification ID space: 1000..9999 for reminders. */
         private const val NOTIFICATION_ID_START = 1000

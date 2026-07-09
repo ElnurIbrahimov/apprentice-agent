@@ -91,8 +91,7 @@ class DeepResearchTool @Inject constructor(
                 ToolResult.Error("Research failed: ${e.message}", "research_error")
             }
         },
-    )
-
+    category = "web")
     // ------------------------------------------------------------------
     // Pipeline
     // ------------------------------------------------------------------

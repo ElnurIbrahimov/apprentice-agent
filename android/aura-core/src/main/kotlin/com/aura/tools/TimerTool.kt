@@ -76,5 +76,5 @@ class TimerTool @Inject constructor() {
                 else -> ToolResult.Error("Unknown action '$action'. Use: start, check, stop", "bad_args")
             }
         },
-    )
+    category = "productivity")
 }

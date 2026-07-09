@@ -73,8 +73,7 @@ class FirecrawlFetchTool @Inject constructor(
                 ToolResult.Error("fetch failed: ${e.message}", "http_error")
             }
         },
-    )
-
+    category = "web")
     // ------------------------------------------------------------------
     // Firecrawl API call
     // ------------------------------------------------------------------

@@ -71,5 +71,5 @@ class SmsSendTool @Inject constructor(
                 ToolResult.Error("Failed to open SMS app: ${e.message}", "sms_error")
             }
         },
-    )
+    category = "communication")
 }

@@ -70,5 +70,5 @@ class DndModeTool @Inject constructor(
                 ToolResult.Error("dnd_mode failed: ${e.message}", "exception")
             }
         },
-    )
+    category = "system")
 }

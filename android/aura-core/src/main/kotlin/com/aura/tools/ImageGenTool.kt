@@ -75,8 +75,7 @@ class ImageGenTool @Inject constructor(
                 ToolResult.Error("image generation failed: ${e.message}", "http_error")
             }
         },
-    )
-
+    category = "media")
     /**
      * Routes to the first available image generation provider.
      *

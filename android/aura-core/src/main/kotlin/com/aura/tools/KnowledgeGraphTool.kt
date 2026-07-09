@@ -70,8 +70,7 @@ class KnowledgeGraphTool @Inject constructor(
                 ToolResult.Error("Knowledge graph extraction failed: ${e.message}", "extraction_error")
             }
         },
-    )
-
+    category = "knowledge")
     suspend fun extract(text: String): Pair<List<KgNode>, List<KgEdge>> {
         val response = callLlm(text)
         return parseResponse(response) ?: Pair(emptyList(), emptyList())
