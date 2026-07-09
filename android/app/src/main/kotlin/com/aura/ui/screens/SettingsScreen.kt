@@ -52,7 +52,6 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     onNavigateProfile: () -> Unit,
-    onOpenIdentityEditor: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
     backupViewModel: BackupViewModel = hiltViewModel(),
 ) {

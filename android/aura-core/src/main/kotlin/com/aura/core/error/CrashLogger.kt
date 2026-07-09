@@ -83,7 +83,11 @@ class CrashLogger @Inject constructor(
         if (!logFile.exists() || logFile.length() <= MAX_LOG_BYTES) return
         try {
             val content = logFile.readText()
-            val keepFrom = content.length / 2
+            var keepFrom = content.length / 2
+            // Advance to the next newline after the midpoint so we
+            // don't split a log entry or a surrogate pair.
+            val nextNewline = content.indexOf('\n', keepFrom)
+            if (nextNewline != -1) keepFrom = nextNewline + 1
             val truncated = content.substring(keepFrom)
             logFile.writeText(truncated)
         } catch (_: Exception) {}

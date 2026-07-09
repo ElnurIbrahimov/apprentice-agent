@@ -200,7 +200,6 @@ fun NavGraph(
             composable(TopLevelRoute.Settings.route) {
                 SettingsScreen(
                     onNavigateProfile = { navController.navigate("profile") },
-                    onOpenIdentityEditor = { navController.navigate("identity_editor") },
                 )
             }
             composable("identity_editor") {
