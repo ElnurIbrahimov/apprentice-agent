@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.aura.voice.SpeechToText
 import com.aura.voice.TextToSpeech
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,7 +47,15 @@ class ContinuousVoiceViewModel @Inject constructor(
     private val _state = MutableStateFlow(ContinuousVoiceState())
     val state: StateFlow<ContinuousVoiceState> = _state.asStateFlow()
 
-    private var silenceTimer: kotlinx.coroutines.Job? = null
+    private var silenceTimer: Job? = null
+
+    // ── Single-owner collector jobs ──────────────────────────
+    // Only one STT collector and one TTS collector may be active at
+    // a time. Each cycle cancels the previous job before starting a
+    // new one so stale collectors cannot fire duplicate callbacks.
+    private var sttCollectorJob: Job? = null
+    private var ttsCollectorJob: Job? = null
+    private var responseWaitJob: Job? = null
 
     /**
      * Start the voice loop. The caller (ChatScreen) provides callbacks
@@ -64,6 +73,9 @@ class ContinuousVoiceViewModel @Inject constructor(
 
     fun stopLoop() {
         silenceTimer?.cancel()
+        sttCollectorJob?.cancel()
+        ttsCollectorJob?.cancel()
+        responseWaitJob?.cancel()
         speechToText.cancel()
         textToSpeech.stop()
         _state.update { it.copy(active = false, phase = VoiceModeState.IDLE) }
@@ -73,6 +85,10 @@ class ContinuousVoiceViewModel @Inject constructor(
         onSend: (String) -> Unit,
         onStreamingDone: () -> Boolean,
     ) {
+        // Cancel any previous STT collector so only one exists at a time.
+        sttCollectorJob?.cancel()
+        responseWaitJob?.cancel()
+
         _state.update { it.copy(phase = VoiceModeState.LISTENING, partialTranscript = "") }
         speechToText.start()
 
@@ -85,8 +101,8 @@ class ContinuousVoiceViewModel @Inject constructor(
             }
         }
 
-        // Watch STT state for final results
-        viewModelScope.launch {
+        // Watch STT state for final results — single collector.
+        sttCollectorJob = viewModelScope.launch {
             speechToText.state.collect { sttState ->
                 when (sttState) {
                     is SpeechToText.State.PartialResult -> {
@@ -110,7 +126,7 @@ class ContinuousVoiceViewModel @Inject constructor(
                         _state.update { it.copy(phase = VoiceModeState.THINKING, partialTranscript = text) }
                         onSend(text)
                         // Wait for streaming to complete, then speak
-                        viewModelScope.launch {
+                        responseWaitJob = viewModelScope.launch {
                             // Poll until streaming is done
                             while (_state.value.active && !onStreamingDone()) {
                                 delay(200)
@@ -140,6 +156,9 @@ class ContinuousVoiceViewModel @Inject constructor(
         onSend: (String) -> Unit,
         onStreamingDone: () -> Boolean,
     ) {
+        // Cancel any previous TTS collector so only one exists at a time.
+        ttsCollectorJob?.cancel()
+
         _state.update { it.copy(phase = VoiceModeState.SPEAKING) }
         val response = _state.value.lastResponse
         if (response.isBlank()) {
@@ -152,8 +171,8 @@ class ContinuousVoiceViewModel @Inject constructor(
             flush = true,
         )
         // Watch TTS state — when it goes back to Ready, the utterance
-        // is done and we can resume listening.
-        viewModelScope.launch {
+        // is done and we can resume listening. Single collector.
+        ttsCollectorJob = viewModelScope.launch {
             textToSpeech.state.collect { ttsState ->
                 if (ttsState is TextToSpeech.State.Ready && _state.value.phase == VoiceModeState.SPEAKING) {
                     if (_state.value.active) {
@@ -171,6 +190,11 @@ class ContinuousVoiceViewModel @Inject constructor(
      */
     fun setLastResponse(text: String) {
         _state.update { it.copy(lastResponse = text) }
+    }
+
+    override fun onCleared() {
+        stopLoop()
+        super.onCleared()
     }
 
     companion object {
