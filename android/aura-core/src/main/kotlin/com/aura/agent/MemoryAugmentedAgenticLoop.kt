@@ -93,33 +93,40 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                     "Run it with run_hand(name=\"${hand.name}\")."
             } ?: ""
 
-            // Capture this step's recall. Skip in incognito mode —
-            // we don't want to surface "Aura used N memories" when
-            // the user opted out of memory entirely. The MemoryStore
-            // call itself is read-only so this gate is just about
-            // the chip and the persisted Turn.recall field.
-            val stepMemoryIds: List<String> = if (memoryEnabled && lastUserMessage.isNotBlank()) {
-                memoryStore.query(lastUserMessage, recallLimit).map { it.id }
-            } else emptyList()
+            // Single recall pass per step. Earlier revisions of this loop
+            // called memoryStore.query() twice — once to capture the IDs
+            // for the recall chip, and again to build the memoryContext
+            // injected into the system prompt. Each call is an embedder
+            // hit (cloud round-trip) plus an RRF rank. We now compute the
+            // hits once and reuse the list for both the chip and the
+            // context block. The semantic dedup check in MemoryStore is
+            // still applied at write time; here we only read.
+            //
+            // Skip in incognito mode — we don't want to surface "Aura
+            // used N memories" when the user opted out of memory
+            // entirely. The MemoryStore call itself is read-only so this
+            // gate is just about the chip and the persisted Turn.recall
+            // field.
+            val recallHits: List<com.aura.memory.MemoryEntity> =
+                if (memoryEnabled && lastUserMessage.isNotBlank()) {
+                    memoryStore.query(lastUserMessage, recallLimit)
+                } else emptyList()
             val stepHandIds: List<String> = handTrigger?.let { listOf(it.id) } ?: emptyList()
             if (memoryEnabled) {
                 // Only persist a non-null recall when memory is on
                 // for this turn. The chip is hidden otherwise.
                 lastRecall = com.aura.agent.RecallSummary(
-                    memoryIds = stepMemoryIds,
+                    memoryIds = recallHits.map { it.id },
                     handIds = stepHandIds,
-                    noResults = stepMemoryIds.isEmpty() && stepHandIds.isEmpty(),
+                    noResults = recallHits.isEmpty() && stepHandIds.isEmpty(),
                 )
             }
 
-            val memoryContext = if (lastUserMessage.isNotBlank()) {
-                val hits = memoryStore.query(lastUserMessage, recallLimit)
-                if (hits.isNotEmpty()) {
-                    val lines = hits.mapIndexed { i, m ->
-                        "- [${m.category}] ${m.content}"
-                    }.joinToString("\n")
-                    "\n\n# Relevant memories:\n$lines"
-                } else ""
+            val memoryContext = if (recallHits.isNotEmpty()) {
+                val lines = recallHits.mapIndexed { i, m ->
+                    "- [${m.category}] ${m.content}"
+                }.joinToString("\n")
+                "\n\n# Relevant memories:\n$lines"
             } else ""
 
             // 2) Build messages

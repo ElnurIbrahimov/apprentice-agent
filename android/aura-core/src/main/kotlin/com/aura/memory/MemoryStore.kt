@@ -111,7 +111,15 @@ class MemoryStore @Inject constructor(
             // a memory (e.g. query "programming languages I enjoy" vs stored
             // "I love Kotlin" — zero shared words, but vectors are close).
             // Scan all memories with embeddings and rank by cosine similarity.
-            val all = dao.allForExport().filter { it.embedding != null }
+            //
+            // Uses `allWithEmbeddings()` rather than `allForExport()` —
+            // the dedicated DAO query skips rows whose embedding column is
+            // null at the SQL level, so we don't load every legacy row
+            // (which has no embedding) just to filter in Kotlin. For a
+            // personal-use install with thousands of memories, this is the
+            // difference between "fast" and "a noticeable pause on first
+            // miss" when a query has no shared words.
+            val all = dao.allWithEmbeddings()
             if (all.isEmpty()) return emptyList()
             val scored = all.map { mem ->
                 val embedding = Embedder.fromBytes(mem.embedding!!)

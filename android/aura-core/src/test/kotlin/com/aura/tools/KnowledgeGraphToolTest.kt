@@ -6,6 +6,7 @@ import com.aura.providers.FinishReason
 import com.aura.providers.ProviderChunk
 import com.aura.providers.ProviderMessage
 import com.aura.providers.ProviderRegistry
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
@@ -144,15 +145,27 @@ class KnowledgeGraphToolTest {
     }
 
     @Test
-    fun `falls back to ollama deepseek when default fails`() = runTest {
+    fun `falls back to first configured provider when default parse fails`() = runTest {
+        // Old test pinned the fallback to "ollama:deepseek-v4-pro" — that was
+        // a 2026-07-07 bug (hardcoded model that crashed users without an
+        // Ollama key). The new contract: when ProviderRegistry.parse("default")
+        // throws (no configured providers, or "default" is not a valid
+        // model id for any provider), fall back to the first configured
+        // provider's first model. The test now mocks that path.
         val llmResponse = """{"nodes":[{"label":"Fallback","type":"concept"}],"edges":[]}"""
 
+        val mockProvider = mockk<com.aura.providers.Provider> {
+            every { prefix } returns "anthropic"
+            coEvery { listModels() } returns listOf("claude-sonnet-4.6")
+        }
         val mockRegistry = mockk<ProviderRegistry> {
-            // First call with "default" throws
+            // First call with "default" throws — parse() can't resolve it
             every { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } throws
                 IllegalStateException("No configured providers")
-            // Fallback to ollama:deepseek-v4-pro
-            every { chat("ollama:deepseek-v4-pro", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
+            // Fallback path: configured() returns our mock provider
+            every { configured() } returns listOf(mockProvider)
+            // The fallback call uses the dynamically-built model id
+            every { chat("anthropic:claude-sonnet-4.6", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
                 ProviderChunk(text = llmResponse),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
@@ -167,6 +180,29 @@ class KnowledgeGraphToolTest {
         assertTrue("expected Ok, got $result") { result is ToolResult.Ok }
         val json = (result as ToolResult.Ok).output
         assertTrue(json.contains("Fallback"), "should use fallback model and return nodes: $json")
+    }
+
+    @Test
+    fun `no configured providers returns error instead of crashing`() = runTest {
+        // When even the fallback path finds no configured providers,
+        // the tool should fail with a clear error rather than crash
+        // with a NullPointerException or generic IllegalStateException.
+        // This pins the error-message contract callers see.
+        val mockRegistry = mockk<ProviderRegistry> {
+            every { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } throws
+                IllegalStateException("No configured providers")
+            every { configured() } returns emptyList()
+        }
+        val tool = KnowledgeGraphTool(mockRegistry).tool
+        val result = tool.execute(
+            call("knowledge_graph_extract", "text" to "Hello."),
+            ctx(),
+        )
+        assertTrue("expected Error, got $result") { result is ToolResult.Error }
+        assertEquals("extraction_error", (result as ToolResult.Error).code)
+        assertTrue(
+            "error message should mention the missing-provider condition",
+        ) { result.message.contains("No configured providers", ignoreCase = true) }
     }
 
     @Test

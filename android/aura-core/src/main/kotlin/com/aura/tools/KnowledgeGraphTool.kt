@@ -120,12 +120,26 @@ class KnowledgeGraphTool @Inject constructor(
             responseFormat = ResponseFormat.JSON,
         )
 
-        // Try "default" first, fall back to explicit provider
-        val modelId = "default"
-        val flow = try {
-            providerRegistry.chat(modelId, messages, options)
-        } catch (_: Exception) {
-            providerRegistry.chat("ollama:deepseek-v4-pro", messages, options)
+        // Pick a model to drive the extraction. We try the user's default
+        // model first (resolved by ProviderRegistry's parse("default")
+        // which routes to the first configured provider's first model).
+        // If that throws (no configured providers at all), we fall back
+        // to any configured provider so the tool still works once the
+        // user has set up at least one key. We do NOT hardcode a
+        // specific provider:model — that was the 2026-07-07 bug where
+        // ollama:deepseek-v4-pro was baked in and crashed on users with
+        // no Ollama key.
+        val flow = runCatching {
+            providerRegistry.chat("default", messages, options)
+        }.getOrElse {
+            val fallback = providerRegistry.configured()
+                .firstOrNull()
+                ?.let { p ->
+                    val first = p.listModels().firstOrNull() ?: return@let null
+                    "${p.prefix}:$first"
+                }
+                ?: throw IllegalStateException("No configured providers for knowledge graph extraction")
+            providerRegistry.chat(fallback, messages, options)
         }
 
         val chunks = flow.toList()

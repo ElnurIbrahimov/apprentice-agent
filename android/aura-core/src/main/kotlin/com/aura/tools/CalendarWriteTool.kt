@@ -16,7 +16,6 @@ import com.aura.providers.ToolDefinition
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.util.Calendar
 import java.util.TimeZone
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -76,23 +75,15 @@ class CalendarWriteTool @Inject constructor(
             }
         },
     category = "productivity")
-    private fun parseTime(s: String): Long? {
-        return try {
-            val iso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(s)
-            iso?.time
-        } catch (_: Exception) {
-            try {
-                val parts = s.split(":")
-                if (parts.size != 2) return null
-                val cal = Calendar.getInstance()
-                cal.set(Calendar.HOUR_OF_DAY, parts[0].toInt())
-                cal.set(Calendar.MINUTE, parts[1].toInt())
-                cal.set(Calendar.SECOND, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-                cal.timeInMillis
-            } catch (_: Exception) { null }
-        }
-    }
+    /**
+     * Parse the time string. Delegates to [TimeParser] so reminder
+     * events and ad-hoc calendar events agree on input formats and
+     * validation (HH:mm must have an hour in 0..23 and a minute in
+     * 0..59 — the local copy of this routine silently accepted
+     * "99:99" as 99:99 and the calendar event landed at midnight + 1
+     * day. TimeParser is the canonical parser now).
+     */
+    private fun parseTime(s: String): Long? = TimeParser.parse(s)
 
     private fun insertEvent(title: String, start: Long, end: Long, location: String?, description: String?): Long {
         val calId = primaryCalendarId() ?: throw IllegalStateException("No calendar account on device.")
