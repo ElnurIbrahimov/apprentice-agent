@@ -680,6 +680,11 @@ class ChatViewModel @Inject constructor(
                 _state.update { it.copy(error = "vision tool not available") }
                 return@launch
             }
+            // Add the user's question as a real user turn so the
+            // agentic loop's memory recall, profile extraction, and
+            // KG extraction all see it. Previously this bypassed the
+            // loop entirely — the vision query was invisible to future
+            // memory recall.
             _state.update { old ->
                 old.copy(
                     conversation = old.conversation.addUser(question),
@@ -692,7 +697,10 @@ class ChatViewModel @Inject constructor(
                     name = "vision",
                     arguments = mapOf("image_base64" to base64, "prompt" to question),
                 ),
-                ToolContext(conversationId = _state.value.conversation.id),
+                ToolContext(
+                    conversationId = _state.value.conversation.id,
+                    memoryEnabled = !_state.value.incognitoMode,
+                ),
             )
             val text = when (result) {
                 is ToolResult.Ok -> result.output
@@ -700,12 +708,21 @@ class ChatViewModel @Inject constructor(
                 is ToolResult.NeedsPermission -> "Permission needed: ${result.permission}"
                 is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
             }
+            // Add the tool result as a tool turn and an assistant turn
+            // so the conversation history is coherent. The agentic loop
+            // post-processing (KG extraction, profile extraction, memory
+            // write gate) runs via saveConversation + the next send().
             _state.update { old ->
+                val conv = old.conversation
+                    .addToolCall(UUID.randomUUID().toString(), "vision", "{}")
+                    .setToolResult(UUID.randomUUID().toString(), text)
+                    .addAssistant(text)
                 old.copy(
-                    conversation = old.conversation.addAssistant(text),
+                    conversation = conv,
                     streaming = false,
                 )
             }
+            saveConversation()
         }
     }
 
