@@ -129,10 +129,40 @@ class GeminiProvider(
         }
     }
 
-    override suspend fun listModels(): List<String> = listOf(
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-    )
+    override suspend fun listModels(): List<String> {
+        // Fetch the live model list from the Gemini API. Fall back to
+        // a small hardcoded list only if the API call fails — same
+        // shape as AnthropicProvider.listModels. The hardcoded list is
+        // intentionally minimal: only models the user can fall back to
+        // when the API is unreachable. Live verification beats stale
+        // defaults every time.
+        val fallback = listOf(
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+        )
+        return try {
+            val req = Request.Builder()
+                .url("https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}")
+                .addHeader("Content-Type", "application/json")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return fallback
+                val body = resp.body?.string() ?: return fallback
+                val obj = Json.parseToJsonElement(body).jsonObject
+                val models = (obj["models"] as? JsonArray) ?: return fallback
+                models.mapNotNull { (it as? JsonObject)?.get("name")?.let { n -> (n as? JsonPrimitive)?.content } }
+                    .mapNotNull { fullName ->
+                        // The "name" field is "models/gemini-2.5-pro" — strip the
+                        // "models/" prefix to get the bare model id used in
+                        // chat requests.
+                        fullName.removePrefix("models/").takeIf { it.isNotBlank() }
+                    }
+            }
+        } catch (e: Exception) {
+            fallback
+        }
+    }
 
     override suspend fun cancel() {
         activeCall?.cancel()
