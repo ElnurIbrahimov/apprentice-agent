@@ -76,7 +76,7 @@ class BackupViewModelTest {
         val state = vm.state.value
         assertFalse(state.exportInFlight)
         assertTrue(state.lastResult!!.contains("Exported"))
-        assertEquals("{\"memories\":[{}]}", file.readText())
+        assertEquals("{\"memories\":[{}]}", file!!.readText())
     }
 
     @Test

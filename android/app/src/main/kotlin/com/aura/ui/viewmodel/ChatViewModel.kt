@@ -133,6 +133,12 @@ data class ChatUiState(
      * Lives in UI state — not persisted.
      */
     val pendingVisionBitmap: Bitmap? = null,
+    /**
+     * Non-blocking warning shown when a conversation save fails.
+     * De-duplicated: only the first failure per session is shown so
+     * repeated autosave failures don't spam the UI.
+     */
+    val saveWarning: String? = null,
 )
 
 /**
@@ -197,6 +203,15 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching {
                 conversationStore.save(_state.value.conversation)
+            }.onFailure { e ->
+                // Surface the first save failure per session as a
+                // non-blocking warning. Subsequent failures don't
+                // re-set the warning so the UI doesn't spam.
+                if (_state.value.saveWarning == null) {
+                    _state.update {
+                        it.copy(saveWarning = "Conversation could not be saved: ${e.message ?: e.javaClass.simpleName}")
+                    }
+                }
             }
         }
     }
@@ -550,16 +565,19 @@ class ChatViewModel @Inject constructor(
 
     private fun setErrorWithAutoDismiss(error: String, retryable: Boolean = false, typed: AuraError? = null) {
         _state.update { it.copy(error = error, errorRetryable = retryable, errorTyped = typed) }
-        // Persist the error so it survives the 5-second auto-dismiss.
         crashLogger.log(
             code = typed?.code ?: "error",
             message = error,
         )
-        // Auto-dismiss after 5 seconds
-        viewModelScope.launch {
-            kotlinx.coroutines.delay(5_000L)
-            if (_state.value.error == error) {
-                _state.update { it.copy(error = null, errorRetryable = false, errorTyped = null) }
+        // Only auto-dismiss non-retryable errors. Retryable errors
+        // must stay visible until the user retries or sends a new
+        // message — auto-dismissing them takes the retry button away.
+        if (!retryable) {
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(5_000L)
+                if (_state.value.error == error) {
+                    _state.update { it.copy(error = null, errorRetryable = false, errorTyped = null) }
+                }
             }
         }
     }

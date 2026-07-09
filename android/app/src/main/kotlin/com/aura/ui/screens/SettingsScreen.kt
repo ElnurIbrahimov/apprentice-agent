@@ -591,20 +591,22 @@ fun SettingsScreen(
             onClick = {
                 coroutineScope.launch {
                     val file = backupViewModel.prepareExportFile()
-                    val uri = androidx.core.content.FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.fileprovider",
-                        file,
-                    )
-                    val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                        type = "application/json"
-                        putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    if (file != null) {
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            file,
+                        )
+                        val share = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "application/json"
+                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(
+                            android.content.Intent.createChooser(share, "Share Aura backup")
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
                     }
-                    context.startActivity(
-                        android.content.Intent.createChooser(share, "Share Aura backup")
-                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
                 }
             },
             enabled = !backupState.exportInFlight,

@@ -54,7 +54,7 @@ class BackupViewModel @Inject constructor(
      * [com.aura.tools.ShareIntentTool] or a manual FileProvider
      * reference.
      */
-    suspend fun prepareExportFile(): java.io.File = withContext(Dispatchers.IO) {
+    suspend fun prepareExportFile(): java.io.File? = withContext(Dispatchers.IO) {
         _state.update { it.copy(exportInFlight = true, lastResult = null) }
         try {
             val backup = backupManager.snapshot(appVersionName = BuildConfig.VERSION_NAME)
@@ -70,7 +70,10 @@ class BackupViewModel @Inject constructor(
             file
         } catch (e: Exception) {
             _state.update { it.copy(exportInFlight = false, lastResult = "Export failed: ${e.message ?: e.javaClass.simpleName}") }
-            throw e
+            // Return null instead of rethrowing — the caller is a
+            // Composable coroutineScope, and an unhandled exception
+            // would crash the app.
+            null
         }
     }
 
