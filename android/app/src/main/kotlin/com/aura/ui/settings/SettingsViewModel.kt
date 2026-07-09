@@ -59,6 +59,9 @@ data class SettingsUiState(
     val verifyResults: Map<String, String> = emptyMap(),
     val verifying: String? = null,
     val morningBriefHour: Int = 7,
+    val availableModels: List<String> = emptyList(),
+    val modelsLoading: Boolean = false,
+    val modelsError: String? = null,
 )
 
 @HiltViewModel
@@ -68,6 +71,11 @@ class SettingsViewModel @Inject constructor(
     private val userPreferences: UserPreferences,
     private val identityStore: IdentityStore,
 ) : ViewModel() {
+
+    private fun configuredProviderLabels(): List<String> =
+        providerRegistry.configured()
+            .sortedBy { it.prefix }
+            .map { "${it.prefix} (${it.displayName})" }
 
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -80,7 +88,7 @@ class SettingsViewModel @Inject constructor(
             // configured providers list doesn't show "0 configured"
             // on first launch while the keys are still being read.
             providerKeys.loaded.first { it }
-            val configured = providerRegistry.configured().map { "${it.prefix} (${it.displayName})" }
+            val configured = configuredProviderLabels()
             val defaultModel = userPreferences.defaultModel.first()
             val firstRunComplete = userPreferences.firstRunComplete.first()
             val appLockEnabled = userPreferences.appLockEnabled.first()
@@ -260,6 +268,61 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             providerKeys.set(prefix, value)
             refresh()
+            _state.update {
+                it.copy(
+                    configuredProviders = configuredProviderLabels(),
+                    verifyResults = it.verifyResults - prefix,
+                )
+            }
+        }
+    }
+
+    fun refreshModels() {
+        if (_state.value.modelsLoading) return
+        _state.update { it.copy(modelsLoading = true, modelsError = null) }
+        viewModelScope.launch {
+            providerKeys.loaded.first { it }
+            val configuredProviders = providerRegistry.configured().sortedBy { it.prefix }
+            if (configuredProviders.isEmpty()) {
+                _state.update {
+                    it.copy(
+                        availableModels = emptyList(),
+                        modelsLoading = false,
+                        modelsError = "No provider API key saved yet. Add one above first.",
+                        configuredProviders = emptyList(),
+                    )
+                }
+                return@launch
+            }
+            val perProviderResults = configuredProviders.associateWith { p ->
+                runCatching { p.listModels() }
+            }
+            val all = perProviderResults.flatMap { (p, result) ->
+                result.getOrDefault(emptyList()).map { "${p.prefix}:$it" }
+            }
+            val errors = perProviderResults
+                .filterValues { it.isFailure }
+                .map { (p, r) -> "${p.displayName}: ${r.exceptionOrNull()?.message ?: r.exceptionOrNull()?.javaClass?.simpleName ?: "unknown"}" }
+            val moaResult = providerRegistry.get("moa")?.let { moa ->
+                if (moa.isConfigured()) runCatching { moa.listModels() }
+                else Result.success(emptyList<String>())
+            }
+            val moaModels = moaResult?.getOrDefault(emptyList())?.map { "moa:$it" } ?: emptyList()
+            val moaError = moaResult?.exceptionOrNull()?.let { "MoA: ${it.message ?: it.javaClass.simpleName}" }
+            val merged = (all + moaModels).distinct().sorted()
+            val allErrors = errors + listOfNotNull(moaError)
+            val resolvedError = allErrors.firstOrNull()
+                ?: if (merged.isEmpty()) {
+                    "Configured providers returned zero models. Test the API key above."
+                } else null
+            _state.update {
+                it.copy(
+                    configuredProviders = configuredProviderLabels(),
+                    availableModels = merged,
+                    modelsLoading = false,
+                    modelsError = resolvedError,
+                )
+            }
         }
     }
 

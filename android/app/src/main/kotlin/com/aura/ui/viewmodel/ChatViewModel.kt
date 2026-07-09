@@ -21,6 +21,7 @@ import com.aura.agent.ToolResult
 import com.aura.agent.toAuraError
 import com.aura.core.error.AuraError
 import com.aura.kg.KnowledgeGraphRepository
+import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
 import com.aura.tools.Citation
 import com.aura.voice.TextToSpeech
@@ -151,6 +152,7 @@ data class InFlightToolCall(
 class ChatViewModel @Inject constructor(
     application: Application,
     private val loop: MemoryAugmentedAgenticLoop,
+    private val providerKeys: ProviderKeys,
     private val providerRegistry: ProviderRegistry,
     private val toolRegistry: ToolRegistry,
     private val toolExecutor: ToolExecutor,
@@ -280,10 +282,21 @@ class ChatViewModel @Inject constructor(
         if (_state.value.modelsLoading) return
         _state.update { it.copy(modelsLoading = true, modelsError = null) }
         viewModelScope.launch {
+            providerKeys.loaded.first { it }
             // Only show models from configured providers (where an API
             // key is present). Showing models for unconfigured providers
             // leads to a 401 on first send — confusing UX.
             val configuredProviders = providerRegistry.configured()
+            if (configuredProviders.isEmpty()) {
+                _state.update {
+                    it.copy(
+                        availableModels = emptyList(),
+                        modelsLoading = false,
+                        modelsError = "No provider API key saved yet. Add one in Settings first.",
+                    )
+                }
+                return@launch
+            }
             val perProviderResults = configuredProviders.associateWith { p ->
                 runCatching { p.listModels() }
             }
@@ -299,13 +312,17 @@ class ChatViewModel @Inject constructor(
             }
             val moaModels = moaResult?.getOrDefault(emptyList())?.map { "moa:$it" } ?: emptyList()
             val moaError = moaResult?.exceptionOrNull()?.let { "MoA: ${it.message ?: it.javaClass.simpleName}" }
-            val merged = (all + moaModels).distinct()
+            val merged = (all + moaModels).distinct().sorted()
             val allErrors = (errors + listOfNotNull(moaError))
+            val resolvedError = allErrors.firstOrNull()
+                ?: if (merged.isEmpty()) {
+                    "Configured providers returned zero models. Test the API key in Settings."
+                } else null
             _state.update {
                 it.copy(
                     availableModels = merged,
                     modelsLoading = false,
-                    modelsError = allErrors.firstOrNull(),  // surface the first one
+                    modelsError = resolvedError,
                 )
             }
         }

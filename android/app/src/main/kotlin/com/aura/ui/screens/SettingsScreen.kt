@@ -41,9 +41,11 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.settings.BackupViewModel
 import com.aura.ui.settings.ProviderKeyField
 import com.aura.ui.settings.SettingsViewModel
+import com.aura.ui.util.modelDisplayName
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -55,6 +57,7 @@ fun SettingsScreen(
     backupViewModel: BackupViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    var showDefaultModelPicker by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -194,33 +197,43 @@ fun SettingsScreen(
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
         )
         Spacer(modifier = Modifier.height(4.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        Text(
+            text = modelDisplayName(state.defaultModel),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            listOf(
-                // Verified against https://ollama.com/v1/models on 2026-07-09.
-                // Every Ollama Cloud model has the `:cloud` suffix in its
-                // real ID — tapping a chip with a missing or wrong suffix
-                // makes the next chat 404. Picker refreshes from /v1/models
-                // on open; these are just the most-likely defaults the user
-                // wants to tap. Keep this list in lockstep with the live
-                // model list.
-                "ollama:deepseek-v4-pro:cloud" to "DeepSeek V4 Pro (fast, cheap)",
-                "ollama:kimi-k2.6:cloud" to "Kimi K2.6 (tool use)",
-                "anthropic:claude-sonnet-4-5" to "Claude Sonnet 4.5",
-                "ollama:minimax-m2.7:cloud" to "MiniMax M2.7 (code)",
-                "ollama:gemma4:31b-cloud" to "Gemma 4 31B",
-                "ollama:qwen3.5:cloud" to "Qwen 3.5",
-            ).forEach { (id, label) ->
-                AssistChip(
-                    onClick = { viewModel.setDefaultModel(id) },
-                    label = { Text(label) },
-                    colors = AssistChipDefaults.assistChipColors(
-                        containerColor = if (state.defaultModel == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                        labelColor = if (state.defaultModel == id) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
+            Button(
+                onClick = {
+                    showDefaultModelPicker = true
+                    viewModel.refreshModels()
+                },
+            ) {
+                Text("Choose model")
+            }
+            if (state.availableModels.isNotEmpty()) {
+                Text(
+                    text = "${state.availableModels.size} live models loaded",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                 )
             }
+        }
+        if (showDefaultModelPicker) {
+            ModelPickerSheet(
+                currentModel = state.defaultModel,
+                models = state.availableModels,
+                isLoading = state.modelsLoading,
+                errorMessage = state.modelsError,
+                onPick = viewModel::setDefaultModel,
+                onRefresh = { viewModel.refreshModels() },
+                onDismiss = { showDefaultModelPicker = false },
+            )
         }
 
         Text(

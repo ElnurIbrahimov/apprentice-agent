@@ -82,6 +82,25 @@ class SettingsViewModelAppLockTest {
     }
 
     @Test
+    fun `refreshModels loads live provider models for the default-model picker`() = runTest {
+        val provider = mockk<com.aura.providers.Provider>(relaxed = true)
+        every { provider.prefix } returns "ollama"
+        every { provider.displayName } returns "Ollama Cloud"
+        coEvery { provider.listModels() } returns listOf("qwen3.5:cloud", "deepseek-v4-pro:cloud")
+        every { providerRegistry.configured() } returns listOf(provider)
+        every { providerRegistry.get("moa") } returns null
+
+        val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
+        vm.refreshModels()
+
+        assertEquals(
+            listOf("ollama:deepseek-v4-pro:cloud", "ollama:qwen3.5:cloud"),
+            vm.state.value.availableModels,
+        )
+        assertEquals(null, vm.state.value.modelsError)
+    }
+
+    @Test
     fun `appLockEnabled starts false in the default state`() = runTest {
         val vm = SettingsViewModel(providerRegistry, providerKeys, userPreferences, identityStore)
         assertFalse(vm.state.value.appLockEnabled)

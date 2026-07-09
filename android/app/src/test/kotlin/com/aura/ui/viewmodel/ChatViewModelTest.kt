@@ -13,6 +13,7 @@ import com.aura.agent.ToolRegistry
 import com.aura.agent.ToolResult
 import com.aura.kg.KnowledgeGraphRepository
 import com.aura.memory.MemoryStore
+import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
 import com.aura.voice.TextToSpeech
 import com.aura.core.error.CrashLogger
@@ -47,6 +48,7 @@ class ChatViewModelTest {
     private lateinit var application: Application
 
     private lateinit var loop: MemoryAugmentedAgenticLoop
+    private lateinit var providerKeys: ProviderKeys
     private lateinit var providerRegistry: ProviderRegistry
     private lateinit var toolRegistry: ToolRegistry
     private lateinit var toolExecutor: ToolExecutor
@@ -63,6 +65,7 @@ class ChatViewModelTest {
         application = ApplicationProvider.getApplicationContext()
 
         loop = mockk(relaxed = true)
+        providerKeys = mockk(relaxed = true)
         providerRegistry = mockk(relaxed = true)
         toolRegistry = mockk(relaxed = true)
         toolExecutor = mockk(relaxed = true)
@@ -74,6 +77,7 @@ class ChatViewModelTest {
         crashLogger = mockk(relaxed = true)
 
         every { userPreferences.defaultModel } returns MutableStateFlow("ollama:deepseek-v4-pro:cloud")
+        every { providerKeys.loaded } returns MutableStateFlow(true)
         every { providerRegistry.all() } returns emptyList()
         every { providerRegistry.configured() } returns emptyList()
         every { providerRegistry.get("moa") } returns null
@@ -90,6 +94,7 @@ class ChatViewModelTest {
     private fun createViewModel(): ChatViewModel = ChatViewModel(
         application = application,
         loop = loop,
+        providerKeys = providerKeys,
         providerRegistry = providerRegistry,
         toolRegistry = toolRegistry,
         toolExecutor = toolExecutor,
@@ -100,6 +105,25 @@ class ChatViewModelTest {
         knowledgeGraphRepository = knowledgeGraphRepository,
         crashLogger = crashLogger,
     )
+
+    @Test
+    fun `refreshModels loads prefixed models from configured providers`() = runTest(testDispatcher) {
+        val provider = mockk<com.aura.providers.Provider>(relaxed = true)
+        every { provider.prefix } returns "ollama"
+        every { provider.displayName } returns "Ollama Cloud"
+        coEvery { provider.listModels() } returns listOf("qwen3.5:cloud", "deepseek-v4-pro:cloud")
+        every { providerRegistry.configured() } returns listOf(provider)
+        every { providerRegistry.get("moa") } returns null
+
+        val vm = createViewModel()
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf("ollama:deepseek-v4-pro:cloud", "ollama:qwen3.5:cloud"),
+            vm.state.value.availableModels,
+        )
+        assertEquals(null, vm.state.value.modelsError)
+    }
 
     @Test
     fun `default state has TTS enabled and empty conversation`() = runTest(testDispatcher) {

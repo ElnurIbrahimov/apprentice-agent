@@ -6,6 +6,7 @@ import com.aura.agent.MemoryAugmentedAgenticLoop
 import com.aura.agent.ToolExecutor
 import com.aura.agent.ToolRegistry
 import com.aura.kg.KnowledgeGraphRepository
+import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
 import com.aura.voice.TextToSpeech
 import com.aura.core.error.CrashLogger
@@ -44,6 +45,7 @@ class ChatViewModelScreenTest {
     private fun buildViewModel(): ChatViewModel {
         val application = org.robolectric.RuntimeEnvironment.getApplication()
         val loop: MemoryAugmentedAgenticLoop = mockk(relaxed = true)
+        val providerKeys: ProviderKeys = mockk(relaxed = true)
         val providerRegistry: ProviderRegistry = mockk(relaxed = true)
         val toolRegistry: ToolRegistry = mockk(relaxed = true)
         val toolExecutor: ToolExecutor = mockk(relaxed = true)
@@ -55,6 +57,7 @@ class ChatViewModelScreenTest {
     val crashLogger: CrashLogger = mockk(relaxed = true)
 
         every { userPreferences.defaultModel } returns MutableStateFlow("ollama:deepseek-v4-pro:cloud")
+        every { providerKeys.loaded } returns MutableStateFlow(true)
         every { providerRegistry.all() } returns emptyList()
         every { providerRegistry.configured() } returns emptyList()
         every { providerRegistry.get("moa") } returns null
@@ -65,6 +68,7 @@ class ChatViewModelScreenTest {
         return ChatViewModel(
             application = application,
             loop = loop,
+            providerKeys = providerKeys,
             providerRegistry = providerRegistry,
             toolRegistry = toolRegistry,
             toolExecutor = toolExecutor,

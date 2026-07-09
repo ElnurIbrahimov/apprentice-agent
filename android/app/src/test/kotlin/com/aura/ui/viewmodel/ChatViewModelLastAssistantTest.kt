@@ -9,6 +9,7 @@ import com.aura.agent.ToolRegistry
 import com.aura.agent.Turn
 import com.aura.data.UserPreferences
 import com.aura.kg.KnowledgeGraphRepository
+import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
 import com.aura.voice.TextToSpeech
 import com.aura.core.error.CrashLogger
@@ -34,6 +35,7 @@ class ChatViewModelLastAssistantTest {
     private val userPreferences = mockk<UserPreferences>(relaxed = true)
     private val app = mockk<Application>(relaxed = true)
     private val loop = mockk<MemoryAugmentedAgenticLoop>(relaxed = true)
+    private val providerKeys = mockk<ProviderKeys>(relaxed = true)
     private val providerRegistry = mockk<ProviderRegistry>(relaxed = true)
     private val toolRegistry = mockk<ToolRegistry>(relaxed = true)
     private val toolExecutor = mockk<ToolExecutor>(relaxed = true)
@@ -49,9 +51,11 @@ class ChatViewModelLastAssistantTest {
 
     private fun makeVm(initialConv: Conversation): ChatViewModel {
         coEvery { userPreferences.defaultModel } returns kotlinx.coroutines.flow.flowOf("ollama:deepseek-v4-pro:cloud")
+        io.mockk.every { providerKeys.loaded } returns kotlinx.coroutines.flow.MutableStateFlow(true)
         val vm = ChatViewModel(
             application = app,
             loop = loop,
+            providerKeys = providerKeys,
             providerRegistry = providerRegistry,
             toolRegistry = toolRegistry,
             toolExecutor = toolExecutor,
