@@ -1,5 +1,6 @@
 package com.aura.ui.components
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,9 +18,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -94,7 +98,10 @@ private fun providerLabel(prefix: String): String = when (prefix) {
 fun ModelPickerSheet(
     currentModel: String,
     models: List<String>,
+    isLoading: Boolean = false,
+    errorMessage: String? = null,
     onPick: (String) -> Unit,
+    onRefresh: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -140,6 +147,20 @@ fun ModelPickerSheet(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                     )
                 }
+                IconButton(
+                    onClick = onRefresh,
+                    enabled = !isLoading,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Refresh,
+                        contentDescription = "Refresh models",
+                        // Subtle spin while loading
+                        modifier = if (isLoading) Modifier
+                            .size(20.dp)
+                            .rotate(0f)  // static; full spin would need a LaunchedEffect
+                        else Modifier.size(20.dp),
+                    )
+                }
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Filled.Close, contentDescription = "Close")
                 }
@@ -169,7 +190,49 @@ fun ModelPickerSheet(
                 textStyle = MaterialTheme.typography.bodyMedium,
             )
 
-            if (models.isEmpty()) {
+            if (isLoading && models.isEmpty()) {
+                // First-load loading state
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "Loading models from your providers…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+            } else if (errorMessage != null) {
+                // Surface the error so the user knows it's a network/key problem,
+                // not "the app doesn't have any models"
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = "Couldn't load models",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Tap refresh, or check the API key in Settings.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+            } else if (models.isEmpty()) {
                 Text(
                     text = "No models available. Add a provider API key in Settings.",
                     style = MaterialTheme.typography.bodyMedium,

@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.ContentCopy
@@ -133,6 +134,17 @@ fun ChatScreen(
 
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
+    // Show the "jump to bottom" pill when the user has scrolled up
+    // by more than 5 messages. The web has this as a small floating
+    // button bottom-right; on Android a small pill above the input
+    // bar is more discoverable.
+    val showJumpToBottom by remember(listState) {
+        derivedStateOf {
+            val total = listState.layoutInfo.totalItemsCount
+            val visible = listState.firstVisibleItemIndex
+            total > 0 && visible > 5
+        }
+    }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -331,6 +343,45 @@ fun ChatScreen(
                     viewModel.send()
                 },
             )
+        } else if (showJumpToBottom) {
+            // Pill that shows above the input bar when the user has
+            // scrolled up. Tap to jump back to the latest message.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Surface(
+                    onClick = {
+                        coroutineScope.launch {
+                            listState.animateScrollToItem(state.conversation.turns.size - 1)
+                        }
+                    },
+                    color = AuraTokens.Dark.surface2,
+                    shape = RoundedCornerShape(16.dp),
+                    shadowElevation = 4.dp,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowDownward,
+                            contentDescription = "Jump to latest",
+                            modifier = Modifier.size(14.dp),
+                            tint = AuraTokens.Dark.textSecondary,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "Jump to latest",
+                            fontFamily = com.aura.ui.theme.InterDisplay,
+                            fontSize = 12.sp,
+                            color = AuraTokens.Dark.textSecondary,
+                        )
+                    }
+                }
+            }
         }
 
         ChatInputBar(
@@ -363,11 +414,20 @@ fun ChatScreen(
         )
     }
 
+    // Re-fetch the model list every time the picker opens, so a key
+    // added in Settings shows up without a manual app restart. The
+    // refresh is a no-op if a fetch is already in flight.
+    LaunchedEffect(showModelPicker) {
+        if (showModelPicker) viewModel.refreshModels()
+    }
     if (showModelPicker) {
         ModelPickerSheet(
             currentModel = state.activeModel,
             models = state.availableModels,
+            isLoading = state.modelsLoading,
+            errorMessage = state.modelsError,
             onPick = viewModel::setModel,
+            onRefresh = { viewModel.refreshModels() },
             onDismiss = { showModelPicker = false },
         )
     }
@@ -991,7 +1051,10 @@ private fun ChatInputBar(
                             text = "Message AURA…",
                             fontFamily = com.aura.ui.theme.InterDisplay,
                             fontSize = 16.sp,
-                            color = AuraTokens.Dark.textTertiary,
+                            // Brighter than textTertiary (0xFF6B6B6B) which
+                            // was barely visible against surface-1
+                            // (0xFF202022) — placeholder now reads.
+                            color = AuraTokens.Dark.textSecondary,
                         )
                     }
                     inner()

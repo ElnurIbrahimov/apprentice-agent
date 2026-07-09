@@ -84,6 +84,16 @@ data class ChatUiState(
     val errorTyped: AuraError? = null,
     val activeModel: String = "ollama:deepseek-v4-pro:cloud",
     val availableModels: List<String> = emptyList(),
+    /**
+     * True while [refreshModels] is in flight. Drives a small
+     * "Loading models…" indicator in the picker.
+     */
+    val modelsLoading: Boolean = false,
+    /**
+     * Last error from [refreshModels], if any. Picker shows
+     * "Couldn't load models — tap to retry". Null on success.
+     */
+    val modelsError: String? = null,
     val ttsEnabled: Boolean = true,
     val selectedSpecialist: Specialist? = null,
     val suggestedSpecialist: Specialist? = null,
@@ -252,25 +262,51 @@ class ChatViewModel @Inject constructor(
         super.onCleared()
     }
 
+    /**
+     * Re-fetch the model list from every configured provider. Safe
+     * to call repeatedly — concurrent calls are no-ops (we check
+     * [ChatUiState.modelsLoading] first). Sets [ChatUiState.modelsLoading]
+     * while in flight, surfaces the last error on failure so the
+     * picker can show "tap to retry" instead of a silent empty list.
+     *
+     * This is the fix for the "I added an Ollama Cloud key and the
+     * picker still shows nothing" bug. Triggered on:
+     *   - init (when the chat first opens)
+     *   - the picker opening (so a key added in Settings is picked up)
+     *   - a manual retry tap from the picker
+     */
     fun refreshModels() {
+        if (_state.value.modelsLoading) return
+        _state.update { it.copy(modelsLoading = true, modelsError = null) }
         viewModelScope.launch {
             // Only show models from configured providers (where an API
             // key is present). Showing models for unconfigured providers
             // leads to a 401 on first send — confusing UX.
             val configuredProviders = providerRegistry.configured()
-            val all = configuredProviders.flatMap { p ->
-                runCatching {
-                    p.listModels()
-                }.getOrDefault(emptyList()).map { "${p.prefix}:$it" }
+            val perProviderResults = configuredProviders.associateWith { p ->
+                runCatching { p.listModels() }
             }
-            // Keep MoA in the list if its aggregator is configured.
-            val moaModels = providerRegistry.get("moa")?.let { moa ->
-                if (moa.isConfigured()) {
-                    runCatching { moa.listModels() }.getOrDefault(emptyList()).map { "moa:$it" }
-                } else emptyList()
-            } ?: emptyList()
+            val all = perProviderResults.flatMap { (p, result) ->
+                result.getOrDefault(emptyList()).map { "${p.prefix}:$it" }
+            }
+            val errors = perProviderResults
+                .filterValues { it.isFailure }
+                .map { (p, r) -> "${p.displayName}: ${r.exceptionOrNull()?.message ?: r.exceptionOrNull()?.javaClass?.simpleName ?: "unknown"}" }
+            val moaResult = providerRegistry.get("moa")?.let { moa ->
+                if (moa.isConfigured()) runCatching { moa.listModels() }
+                else Result.success(emptyList<String>())
+            }
+            val moaModels = moaResult?.getOrDefault(emptyList())?.map { "moa:$it" } ?: emptyList()
+            val moaError = moaResult?.exceptionOrNull()?.let { "MoA: ${it.message ?: it.javaClass.simpleName}" }
             val merged = (all + moaModels).distinct()
-            _state.update { it.copy(availableModels = merged) }
+            val allErrors = (errors + listOfNotNull(moaError))
+            _state.update {
+                it.copy(
+                    availableModels = merged,
+                    modelsLoading = false,
+                    modelsError = allErrors.firstOrNull(),  // surface the first one
+                )
+            }
         }
     }
 
