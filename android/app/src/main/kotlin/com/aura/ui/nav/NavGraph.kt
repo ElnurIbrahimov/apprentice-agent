@@ -86,7 +86,13 @@ fun NavGraph(
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
+    // The destination's full route includes query params (e.g. "chat?convId=..."),
+    // but the bottom bar's topLevelRoutes are bare ("chat"). Match by prefix so
+    // the bar shows on chat — and any other route that starts with a top-level
+    // name. Without this, the bar disappears on chat and the user can't get back
+    // without force-closing the app.
     val currentRoute = backStackEntry?.destination?.route
+    val baseRoute = currentRoute?.substringBefore('?')
 
     LaunchedEffect(openChatOnLaunch) {
         if (openChatOnLaunch) {
@@ -110,7 +116,7 @@ fun NavGraph(
     Scaffold(
         bottomBar = {
             AnimatedVisibility(
-                visible = topLevelRoutes.any { it.route == currentRoute },
+                visible = topLevelRoutes.any { it.route == baseRoute },
                 enter = slideInVertically { it } + fadeIn(),
                 exit = slideOutVertically { it } + fadeOut(),
             ) {
@@ -247,7 +253,9 @@ private fun AuraBottomBar(navController: NavHostController, currentRoute: String
             verticalAlignment = Alignment.CenterVertically,
         ) {
             topLevelRoutes.forEach { route ->
-                val selected = currentRoute == route.route
+                // currentRoute may be "chat?convId=..." — strip the query for comparison
+        val baseRoute = currentRoute?.substringBefore('?')
+        val selected = baseRoute == route.route
                 val containerColor by animateColorAsState(
                     targetValue = if (selected) AuraTokens.Dark.surface3
                                   else Color.Transparent,
