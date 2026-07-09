@@ -8,9 +8,9 @@ This is my personal copy. The plan lives at `.hermes/plans/`.
 
 ## Status
 
-**v0.1.0** (versionCode 1).
+**v0.10.0** (versionCode 1).
 
-- 31 tools (web search x3, vision, image gen, deep research, firecrawl fetch, knowledge graph, plus 22 phone-native tools)
+- 38 tools (web search x3, vision, image gen, deep research, firecrawl fetch, knowledge graph, weather, translate, timer, SMS, email, biometric prompt, and 25 phone-native tools)
 - Memory stack (Room + 384-dim cloud embeddings + 6-signal RRF retrieval + 14-day FadeMem with access-frequency decay + heuristic WriteGate)
 - Knowledge graph (Room-backed, 11 node types, 18 edge types, LLM-extracted per turn)
 - Hands (user-defined automation macros, persisted, triggerable by phrase)
@@ -25,7 +25,7 @@ This is my personal copy. The plan lives at `.hermes/plans/`.
 - User profile (learned from conversations via regex, injected into system prompt)
 - Onboarding wizard (paste API key + verify connectivity)
 - Biometric gate for sensitive tools
-- 362 unit tests passing across `:aura-core` (293) + `:app` (69)
+- 454 unit tests passing across `:aura-core` (324) + `:app` (130)
 
 Note: the app uses **cloud providers only** — there is no on-device model.
 
@@ -79,7 +79,7 @@ Or transfer the APK to the phone and tap it (enable "Install from unknown source
 ┌──────────▼──────────────────────────────────────────┐
 │ :aura-core  (logic library, Android-lifecycle-light) │
 │   MemoryAugmentedAgenticLoop → Brain → ProviderReg │
-│   ToolRegistry (31) · ToolExecutor · Specialist     │
+│   ToolRegistry (38) · ToolExecutor · Specialist     │
 │   Memory (Room + RRF + FadeMem) · KnowledgeGraph   │
 │   Hands (Room) · Tasks (Room) · Voice (STT/TTS)     │
 │   Proactive (MorningBrief + Decay + Calendar)      │
@@ -90,7 +90,7 @@ Or transfer the APK to the phone and tap it (enable "Install from unknown source
 
 The `:aura-core` module has no Compose dependencies. If you ever port to iOS via KMP, this is the layer you'd reuse.
 
-## Tool catalog (31)
+## Tool catalog (38)
 
 ### Web & research
 | Tool | What it does | Risk |
@@ -179,12 +179,12 @@ Scheduled via WorkManager. Re-scheduled on app start (idempotent, UPDATE policy)
 ```bash
 ./gradlew :app:assembleDebug            # debug APK
 ./gradlew :app:assembleRelease          # release APK (currently signed with debug key — sideload only)
-./gradlew :aura-core:testDebugUnitTest  # unit tests (293)
-./gradlew :app:testDebugUnitTest        # unit tests (69)
+./gradlew :aura-core:testDebugUnitTest  # unit tests (324)
+./gradlew :app:testDebugUnitTest        # unit tests (130)
 ./gradlew :app:assembleDebug connectedAndroidTest  # androidTests (needs device)
 ```
 
-Stats: 362 unit tests passing across `:aura-core` (293) + `:app` (69).
+Stats: 454 unit tests passing across `:aura-core` (324) + `:app` (130).
 
 CI (`.github/workflows/ci.yml`) runs `assembleDebug` + unit tests on every push and PR.
 
@@ -205,7 +205,7 @@ android/
 │       ├── kg/           # Knowledge graph (Room + extractor + repository)
 │       ├── hands/        # Automation macros (Room + repository + worker)
 │       ├── tasks/        # Task manager (Room)
-│       ├── tools/        # 31 tool implementations + ToolsModule
+│       ├── tools/        # 38 tool implementations + ToolsModule
 │       ├── voice/        # SpeechToText + TextToSpeech
 │       ├── proactive/    # MorningBrief + Decay + CalendarMonitor + ProactiveEventBus
 │       ├── profile/      # UserProfile (learned from conversations)
