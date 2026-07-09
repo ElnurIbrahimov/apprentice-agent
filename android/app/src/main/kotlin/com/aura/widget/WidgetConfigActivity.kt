@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -28,11 +29,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.aura.data.UserPreferences
 import com.aura.providers.ProviderRegistry
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
@@ -65,32 +69,69 @@ class WidgetConfigActivity : ComponentActivity() {
             return
         }
 
-        val configuredModels = runBlocking {
-            providerRegistry.configured().flatMap { p ->
-                p.listModels().map { "${p.prefix}:$it" }
+        val currentConfig = WidgetConfig.load(this, appWidgetId)
+
+        // Load provider catalogs + default model asynchronously to
+        // avoid blocking the main thread. The previous implementation
+        // used runBlocking on the activity's main thread, which could
+        // ANR if provider listModels() made network calls.
+        var availableModels by mutableStateOf<List<String>>(emptyList())
+        var defaultModel by mutableStateOf("")
+        var loading by mutableStateOf(true)
+
+        lifecycleScope.launch {
+            try {
+                val models = withContext(Dispatchers.IO) {
+                    providerRegistry.configured().flatMap { p ->
+                        p.listModels().map { "${p.prefix}:$it" }
+                    }
+                }
+                val dm = withContext(Dispatchers.IO) {
+                    userPreferences.defaultModel.first()
+                }
+                availableModels = models
+                defaultModel = dm
+            } catch (_: Exception) {
+                // If catalogs fail to load, fall back to the stored
+                // default model so the user can still save.
+            } finally {
+                loading = false
             }
         }
-        val defaultModel = runBlocking { userPreferences.defaultModel.first() }
-        val currentConfig = WidgetConfig.load(this, appWidgetId)
+
         val currentModel = currentConfig?.model ?: defaultModel
         val currentPrefix = currentConfig?.promptPrefix ?: ""
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                WidgetConfigContent(
-                    availableModels = configuredModels,
-                    initialModel = currentModel,
-                    initialPrefix = currentPrefix,
-                    onSave = { model, prefix ->
-                        WidgetConfig.save(this, appWidgetId, model, prefix)
-                        val resultValue = android.content.Intent().apply {
-                            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                if (loading) {
+                    Surface(modifier = Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            CircularProgressIndicator()
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Loading models…", style = MaterialTheme.typography.bodyMedium)
                         }
-                        setResult(RESULT_OK, resultValue)
-                        finish()
-                    },
-                    onCancel = { finish() },
-                )
+                    }
+                } else {
+                    WidgetConfigContent(
+                        availableModels = availableModels,
+                        initialModel = currentModel,
+                        initialPrefix = currentPrefix,
+                        onSave = { model, prefix ->
+                            WidgetConfig.save(this, appWidgetId, model, prefix)
+                            val resultValue = android.content.Intent().apply {
+                                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                            }
+                            setResult(RESULT_OK, resultValue)
+                            finish()
+                        },
+                        onCancel = { finish() },
+                    )
+                }
             }
         }
     }

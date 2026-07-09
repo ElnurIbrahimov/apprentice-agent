@@ -6,7 +6,6 @@ import androidx.work.Configuration
 import com.aura.proactive.ProactiveBootstrap
 import com.aura.providers.ProviderKeys
 import dagger.hilt.android.HiltAndroidApp
-import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -18,14 +17,15 @@ class AuraApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
-        // Block on the initial DataStore load so the first chat
-        // request sees a populated key cache. Without this the
-        // Settings screen flickers "0 providers configured" on
-        // first show, and the user's first chat request can hit
-        // a 401 because the key hasn't loaded yet. DataStore is
-        // fast on warm start (5-20ms) and bounded on cold start
-        // (~50-100ms) — acceptable on app launch.
-        runBlocking { providerKeys.awaitLoaded() }
+        // Do NOT block the main thread on the DataStore load. The
+        // initial key load runs asynchronously in ProviderKeys.init
+        // on Dispatchers.IO. UI consumers that need the keys gate on
+        // providerKeys.loaded (e.g. ChatViewModel.refreshModels()
+        // calls providerKeys.loaded.first { it }). ProactiveBootstrap
+        // also reads gates asynchronously in its own IO scope.
+        //
+        // The previous runBlocking { providerKeys.awaitLoaded() } could
+        // ANR on slow storage, corrupt DataStore, or large key files.
         proactiveBootstrap.start()
     }
 
