@@ -2,8 +2,8 @@
   {
     "name": "default",
     "referenceModels": [
-      { "providerPrefix": "ollama", "modelName": "glm-5.2" },
-      { "providerPrefix": "ollama", "modelName": "kimi-k2.7-code" }
+      { "providerPrefix": "ollama", "modelName": "glm-5.1:cloud" },
+      { "providerPrefix": "ollama", "modelName": "kimi-k2.6:cloud" }
     ],
     "aggregator": { "providerPrefix": "deepseek", "modelName": "deepseek-v4-pro" },
     "referenceTemperature": 0.6,

@@ -41,11 +41,16 @@ class MoaProvider(
         val enabled: Boolean = true,
     )
 
+    // Default preset — used when no asset is bundled or the asset
+    // fails to parse. The model ids here MUST match real entries on
+    // https://ollama.com/v1/models — a typo or stale id makes every
+    // MoA turn error with "model not found" before the user even
+    // sees a response. Verified 2026-07-09.
     private val defaultPreset = presets.values.firstOrNull { it.enabled } ?: Preset(
         name = "default",
         referenceModels = listOf(
-            ModelRef("ollama", "glm-5.2"),
-            ModelRef("ollama", "kimi-k2.7-code"),
+            ModelRef("ollama", "glm-5.1:cloud"),
+            ModelRef("ollama", "kimi-k2.6:cloud"),
         ),
         aggregator = ModelRef("deepseek", "deepseek-v4-pro"),
     )

@@ -29,11 +29,15 @@ class MoaPresetRepository @Inject constructor(
     }
 
     private fun defaultMap(): Map<String, MoaProvider.Preset> = mapOf(
+        // Verified against https://ollama.com/v1/models on 2026-07-09.
+        // Every Ollama Cloud model has the `:cloud` suffix in its real
+        // id — a missing or stale suffix makes the next MoA turn
+        // return "model not found" before any tokens are streamed.
         "default" to MoaProvider.Preset(
             name = "default",
             referenceModels = listOf(
-                MoaProvider.ModelRef("ollama", "glm-5.2"),
-                MoaProvider.ModelRef("ollama", "kimi-k2.7-code"),
+                MoaProvider.ModelRef("ollama", "glm-5.1:cloud"),
+                MoaProvider.ModelRef("ollama", "kimi-k2.6:cloud"),
             ),
             aggregator = MoaProvider.ModelRef("deepseek", "deepseek-v4-pro"),
         ),
