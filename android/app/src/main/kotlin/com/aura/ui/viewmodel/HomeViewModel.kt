@@ -58,6 +58,14 @@ data class HomeUiState(
      * opening the Reminders screen.
      */
     val upcomingReminders: List<String> = emptyList(),
+    /**
+     * Quick counts for the second row of quick-action cards on
+     * Home — Hands, Tools, Proactive. None of these drive any
+     * logic, just badges.
+     */
+    val handsCount: Int = 0,
+    val toolsCount: Int = 0,
+    val proactiveCount: Int = 0,
 )
 
 @HiltViewModel
@@ -69,6 +77,8 @@ class HomeViewModel @Inject constructor(
     private val calendarReadTool: CalendarReadTool,
     private val knowledgeGraphRepository: KnowledgeGraphRepository,
     private val reminderDao: ReminderDao,
+    private val handDao: com.aura.hands.HandDao,
+    private val toolRegistry: com.aura.agent.ToolRegistry,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(HomeUiState())
@@ -80,6 +90,8 @@ class HomeViewModel @Inject constructor(
         observeTasks()
         observeMemories()
         observeReminders()
+        observeHands()
+        loadToolsCount()
     }
 
     private fun observeReminders() {
@@ -105,6 +117,11 @@ class HomeViewModel @Inject constructor(
                 _state.update { it.copy(proactiveUnreadCount = count) }
             }
         }
+        viewModelScope.launch {
+            proactiveEvents.history.collect { events ->
+                _state.update { it.copy(proactiveCount = events.size) }
+            }
+        }
     }
 
     fun dismissProactiveEvent() {
@@ -128,6 +145,20 @@ class HomeViewModel @Inject constructor(
                 _state.update { it.copy(pendingTasks = titles) }
                 rebuildBriefContext()
             }
+        }
+    }
+
+    private fun observeHands() {
+        viewModelScope.launch {
+            handDao.observeAll().collect { hands ->
+                _state.update { it.copy(handsCount = hands.size) }
+            }
+        }
+    }
+
+    private fun loadToolsCount() {
+        viewModelScope.launch {
+            _state.update { it.copy(toolsCount = toolRegistry.definitions().size) }
         }
     }
 

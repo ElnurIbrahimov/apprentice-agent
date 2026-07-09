@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lightbulb
@@ -91,6 +92,8 @@ fun HomeScreen(
     onOpenTasks: () -> Unit = {},
     onOpenCalendar: () -> Unit = {},
     onOpenReminders: () -> Unit = {},
+    onOpenTools: () -> Unit = {},
+    onOpenHands: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val greeting = when (state.hour) {
@@ -275,6 +278,33 @@ fun HomeScreen(
                 label = "Calendar",
                 count = state.today.size,
                 onClick = onOpenCalendar,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            QuickActionCard(
+                icon = Icons.Filled.Build,
+                label = "Hands",
+                count = state.handsCount,
+                onClick = onOpenHands,
+                modifier = Modifier.weight(1f),
+            )
+            QuickActionCard(
+                icon = Icons.Filled.Lightbulb,
+                label = "Tools",
+                count = state.toolsCount,
+                onClick = onOpenTools,
+                modifier = Modifier.weight(1f),
+            )
+            QuickActionCard(
+                icon = Icons.Filled.NotificationsActive,
+                label = "Proactive",
+                count = state.proactiveCount,
+                onClick = onOpenProactive,
                 modifier = Modifier.weight(1f),
             )
         }
