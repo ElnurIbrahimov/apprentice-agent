@@ -102,7 +102,9 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1267,18 +1269,28 @@ private fun SourcesSheet(citations: List<com.aura.tools.Citation>, onDismiss: ()
 
 @Composable
 private fun ConsumeIncomingShare(context: android.content.Context, viewModel: ChatViewModel) {
-    LaunchedEffect(Unit) {
-        val store = EntryPointAccessors.fromApplication<HiltEntryPoint>(context.applicationContext as android.app.Application)
+    val store = remember {
+        EntryPointAccessors.fromApplication<HiltEntryPoint>(context.applicationContext as android.app.Application)
             .incomingShareStore()
+    }
+    // Collect the pending share as state so repeated shares — including
+    // identical text shared twice while Chat is already visible — are
+    // delivered. The previous LaunchedEffect(Unit) ran exactly once and
+    // silently ignored any subsequent share intents.
+    val pendingShare by store.pending.collectAsState()
+    LaunchedEffect(pendingShare?.seq) {
+        val payload = pendingShare ?: return@LaunchedEffect
         // Text share → set as draft
-        store.consume()?.let(viewModel::setDraft)
+        payload.text?.let(viewModel::setDraft)
         // Image share → decode Bitmap and route through onImageCaptured
         // so the vision tool analyzes it instead of dumping base64
         // text into the chat input.
-        store.consumeImageUri()?.let { uri ->
-            val bitmap = decodeSharedImage(context, uri)
+        payload.imageUri?.let { uri ->
+            val bitmap = withContext(Dispatchers.IO) { decodeSharedImage(context, uri) }
             bitmap?.let { viewModel.onImageCaptured(it) }
         }
+        // Clear the store so the same seq doesn't re-fire on recomposition.
+        store.consume()
     }
 }
 

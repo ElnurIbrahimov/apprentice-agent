@@ -10,10 +10,12 @@ import javax.inject.Singleton
 /**
  * Tiny singleton that holds the most recent text or image shared into
  * the app via the share-sheet. MainActivity writes here, the ChatScreen
- * reads on first composition and clears the slot.
+ * reads via collection and clears the slot.
  *
- * Single-slot ring buffer (no history) — sharing is a one-shot "do
- * something with this" gesture, not a transcript.
+ * Uses a monotonically increasing sequence number so the collector can
+ * detect new shares even when the same text/URI is shared twice in a
+ * row — a nullable StateFlow alone can't distinguish "no new share"
+ * from "same value shared again".
  *
  * Images are passed as a [Uri] rather than pre-decoded base64 so the
  * chat screen can decode the Bitmap at display resolution and route
@@ -22,31 +24,33 @@ import javax.inject.Singleton
  */
 @Singleton
 class IncomingShareStore @Inject constructor() {
-    private val _pending = MutableStateFlow<String?>(null)
-    val pending: StateFlow<String?> = _pending.asStateFlow()
 
-    private val _pendingImageUri = MutableStateFlow<Uri?>(null)
-    val pendingImageUri: StateFlow<Uri?> = _pendingImageUri.asStateFlow()
+    data class SharePayload(
+        val text: String?,
+        val imageUri: Uri?,
+        val seq: Long,
+    )
+
+    private val _pending = MutableStateFlow<SharePayload?>(null)
+    val pending: StateFlow<SharePayload?> = _pending.asStateFlow()
+
+    private var seqCounter = 0L
 
     fun set(text: String) {
-        _pending.value = text
+        _pending.value = SharePayload(text = text, imageUri = null, seq = ++seqCounter)
     }
 
     fun setImageUri(uri: Uri) {
-        _pendingImageUri.value = uri
+        _pending.value = SharePayload(text = null, imageUri = uri, seq = ++seqCounter)
     }
 
-    /** Atomically read + clear, so a stale share doesn't get re-applied. */
-    fun consume(): String? {
+    /**
+     * Atomically read + clear, so a stale share doesn't get re-applied.
+     * Returns null if no share is pending.
+     */
+    fun consume(): SharePayload? {
         val v = _pending.value
         _pending.value = null
-        return v
-    }
-
-    /** Atomically read + clear the image URI. */
-    fun consumeImageUri(): Uri? {
-        val v = _pendingImageUri.value
-        _pendingImageUri.value = null
         return v
     }
 }
