@@ -162,7 +162,6 @@ class DeepResearchTool @Inject constructor(
 
     private fun searchTavily(query: String, maxResults: Int, apiKey: String): List<SearchResult> {
         val requestBody = buildJsonObject {
-            put("api_key", apiKey)
             put("query", query)
             put("max_results", maxResults.coerceIn(5, 20))
             put("search_depth", "basic")
@@ -170,6 +169,7 @@ class DeepResearchTool @Inject constructor(
 
         val req = Request.Builder()
             .url("https://api.tavily.com/search")
+            .header("Authorization", "Bearer $apiKey")
             .header("Content-Type", "application/json")
             .header("User-Agent", "Mozilla/5.0 Aura/1.0")
             .post(requestBody.toRequestBody(mediaType))
