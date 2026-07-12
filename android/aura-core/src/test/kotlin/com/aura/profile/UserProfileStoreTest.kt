@@ -73,7 +73,7 @@ class UserProfileStoreTest {
     }
 
     @Test
-    fun `update replaces facts list entirely`() = runTest(dispatcher) {
+    fun `explicit update replaces facts list for profile editing`() = runTest(dispatcher) {
         val dao = mockk<UserProfileDao>(relaxed = true)
         coEvery { dao.get() } returns null
         val store = UserProfileStore(dao)
@@ -83,10 +83,38 @@ class UserProfileStoreTest {
         advanceUntilIdle()
         assertEquals(listOf("likes tea", "has a cat"), store.profile.value.facts)
 
-        // Facts are replaced, not appended (the agent loop sends the full list)
+        // Explicit profile editing retains replacement semantics.
         store.update(facts = listOf("likes coffee"))
         advanceUntilIdle()
         assertEquals(listOf("likes coffee"), store.profile.value.facts)
+    }
+
+    @Test
+    fun `mergeFacts preserves prior facts and deduplicates case-insensitively`() = runTest(dispatcher) {
+        val dao = mockk<UserProfileDao>(relaxed = true)
+        coEvery { dao.get() } returns null
+        val store = UserProfileStore(dao)
+
+        store.mergeFacts(listOf("Lives in Baku"))
+        store.mergeFacts(listOf("Prefers tea", "lives in baku", "  "))
+
+        assertEquals(listOf("Lives in Baku", "Prefers tea"), store.profile.value.facts)
+    }
+
+    @Test
+    fun `update waits for initial load and preserves persisted fields`() = runTest(dispatcher) {
+        val dao = mockk<UserProfileDao>(relaxed = true)
+        coEvery { dao.get() } coAnswers {
+            kotlinx.coroutines.delay(50)
+            UserProfileEntity(name = "Persisted", traitsJson = "[\"curious\"]")
+        }
+        val store = UserProfileStore(dao)
+
+        store.update(preferences = mapOf("theme" to "dark"))
+
+        assertEquals("Persisted", store.profile.value.name)
+        assertEquals(listOf("curious"), store.profile.value.traits)
+        assertEquals("dark", store.profile.value.preferences["theme"])
     }
 
     @Test
@@ -115,10 +143,7 @@ class UserProfileStoreTest {
         val dao = mockk<UserProfileDao>(relaxed = true)
         coEvery { dao.get() } returns entity
         val store = UserProfileStore(dao)
-        // The init block launches on Dispatchers.Default, not the test
-        // dispatcher. Give it time to complete before asserting.
-        kotlinx.coroutines.delay(500)
-        advanceUntilIdle()
+        store.awaitLoaded()
 
         assertEquals("Loaded", store.profile.value.name)
         assertEquals(listOf("smart"), store.profile.value.traits)

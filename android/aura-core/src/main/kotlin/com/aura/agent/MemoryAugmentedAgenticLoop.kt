@@ -391,7 +391,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             .find(text)?.groupValues?.getOrNull(1)?.let { job -> facts.add("Works as ${job.trim()}") }
         Regex("""(?:i (?:prefer|like|love))\s+(.+?)(?:\.|,|\s+(?:and|but|so|because)|\s*$)""", RegexOption.IGNORE_CASE)
             .find(text)?.groupValues?.getOrNull(1)?.let { pref -> facts.add("Prefers ${pref.trim()}") }
-        if (facts.isNotEmpty()) userProfileStore.update(facts = facts)
+        if (facts.isNotEmpty()) userProfileStore.mergeFacts(facts)
     }
 
     /**
