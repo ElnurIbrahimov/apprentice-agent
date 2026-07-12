@@ -218,14 +218,11 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                             is BrainChunk.Error -> {
                                 stepError = "${chunk.code}: ${chunk.message}"
                                 if (chunk.retryable && triedModels.size < 2) {
-                                    val nextProvider = providerRegistry.configured()
-                                        .firstOrNull { p ->
-                                            triedModels.none { it.startsWith("${p.prefix}:") }
-                                        }
-                                    if (nextProvider != null) {
-                                        val nextModel = "${nextProvider.prefix}:${
-                                            runCatching { nextProvider.listModels().firstOrNull() }.getOrNull() ?: "default"
-                                        }"
+                                    val triedPrefixes = triedModels.mapTo(mutableSetOf()) {
+                                        it.substringBefore(":")
+                                    }
+                                    val nextModel = providerRegistry.firstConfiguredModelId(triedPrefixes)
+                                    if (nextModel != null) {
                                         emit(AgentEvent.Warning("Provider ${currentModel} failed (${chunk.code}), falling back to $nextModel"))
                                         currentModel = nextModel
                                         throw kotlinx.coroutines.CancellationException("failover")
@@ -329,9 +326,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                 // runs when the heuristic says "store", so this is one
                 // lightweight call per memorable turn — not per message.
                 val gateModel = if (model.startsWith("moa:")) {
-                    providerRegistry.configured().firstOrNull()?.let { p ->
-                        "${p.prefix}:${p.listModels().firstOrNull() ?: "default"}"
-                    } ?: model
+                    providerRegistry.firstConfiguredModelId(setOf("moa")) ?: model
                 } else {
                     model
                 }

@@ -55,6 +55,7 @@ class DeepResearchToolTest {
                 ProviderChunk(text = "It runs on the JVM and is fully interoperable with Java [2]."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
+            coEvery { firstConfiguredModelId(any()) } returns "test:model"
             coEvery { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
         }
 
@@ -168,6 +169,7 @@ class DeepResearchToolTest {
                 ProviderChunk(text = "Brave search found Kotlin [1]."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
+            coEvery { firstConfiguredModelId(any()) } returns "test:model"
             coEvery { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
         }
 
@@ -203,6 +205,7 @@ class DeepResearchToolTest {
                 ProviderChunk(text = "Result."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
+            coEvery { firstConfiguredModelId(any()) } returns "test:model"
             coEvery { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
         }
 
@@ -226,6 +229,7 @@ class DeepResearchToolTest {
             body = """{"results":[{"title":"internal","url":"http://127.0.0.1/private","content":"nope"}]}""",
         )
         val registry = mockk<ProviderRegistry> {
+            coEvery { firstConfiguredModelId(any()) } returns "test:model"
             coEvery { chat(any(), any(), any(), any()) } returns flowOf(
                 ProviderChunk(text = "Safe answer."),
                 ProviderChunk(finishReason = FinishReason.stop),

@@ -33,16 +33,39 @@ class ProviderRegistryTest {
     }
 
     @Test
-    fun `parse default falls back to raw model when listModels fails`() = runTest {
+    fun `parse default rejects providers whose model catalog fails`() = runTest {
         val p = mockk<Provider>(relaxed = true) {
             every { isConfigured() } returns true
             every { prefix } returns "foo"
             coEvery { listModels() } throws RuntimeException("network")
         }
         val registry = ProviderRegistry(mapOf("foo" to p))
-        val (prov, model) = registry.parse("default")
-        assertEquals(p, prov)
-        assertEquals("default", model)
+        assertFailsWith<IllegalStateException> { registry.parse("default") }
+    }
+
+    @Test
+    fun `firstConfiguredModelId skips failed and empty provider catalogs`() = runTest {
+        val failed = mockk<Provider>(relaxed = true) {
+            every { isConfigured() } returns true
+            every { prefix } returns "failed"
+            coEvery { listModels() } throws RuntimeException("network")
+        }
+        val empty = mockk<Provider>(relaxed = true) {
+            every { isConfigured() } returns true
+            every { prefix } returns "empty"
+            coEvery { listModels() } returns emptyList()
+        }
+        val valid = mockk<Provider>(relaxed = true) {
+            every { isConfigured() } returns true
+            every { prefix } returns "valid"
+            coEvery { listModels() } returns listOf("real-model")
+        }
+        val registry = ProviderRegistry(
+            linkedMapOf("failed" to failed, "empty" to empty, "valid" to valid),
+        )
+
+        assertEquals("valid:real-model", registry.firstConfiguredModelId())
+        assertEquals(null, registry.firstConfiguredModelId(setOf("valid")))
     }
 
     @Test

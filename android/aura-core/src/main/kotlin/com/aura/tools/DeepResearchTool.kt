@@ -127,18 +127,10 @@ class DeepResearchTool @Inject constructor(
         // Step 4 — Build context block (truncated to ~6000 chars total)
         val contextBlock = buildContextBlock(citations, contents)
 
-        // Step 5 — Call LLM to synthesize.
-        // If the caller specified a model, use it. Otherwise pick the
-        // first configured provider's first model — passing a literal
-        // "default" here would hit ProviderRegistry.parse("default")
-        // which resolves to "first configured provider" with model name
-        // "default", which no provider recognizes (404 / model_not_found).
-        val modelId = modelArg ?: runCatching {
-            val p = providerRegistry.configured().firstOrNull()
-                ?: return@runCatching "default"
-            val m = p.listModels().firstOrNull()
-            if (m != null) "${p.prefix}:$m" else "${p.prefix}:default"
-        }.getOrDefault("default")
+        // Step 5 — Call LLM to synthesize. Never manufacture a
+        // `provider:default` model when catalog discovery fails.
+        val modelId = modelArg ?: providerRegistry.firstConfiguredModelId()
+            ?: throw IllegalStateException("No configured provider with an available model for research synthesis")
         val answer = synthesizeAnswer(query, contextBlock, modelId)
 
         // Step 6 — Build & return JSON output
