@@ -41,21 +41,12 @@ class MoaProvider(
         val enabled: Boolean = true,
     )
 
-    // Default preset — used when no asset is bundled or the asset
-    // fails to parse. The model ids here MUST match real entries on
-    // https://ollama.com/v1/models — a typo or stale id makes every
-    // MoA turn error with "model not found" before the user even
-    // sees a response. Verified 2026-07-09.
-    private val defaultPreset = presets.values.firstOrNull { it.enabled } ?: Preset(
-        name = "default",
-        referenceModels = listOf(
-            ModelRef("ollama", "glm-5.1:cloud"),
-            ModelRef("ollama", "kimi-k2.6:cloud"),
-        ),
-        aggregator = ModelRef("deepseek", "deepseek-v4-pro:cloud"),
-    )
-
-    private val loadedPresets: Map<String, Preset> = presets.ifEmpty { mapOf("default" to defaultPreset) }
+    // Model IDs live in moa_presets.json, not Kotlin source. If the asset is
+    // missing or invalid the provider stays unavailable rather than silently
+    // falling back to model names that may have gone stale.
+    private val loadedPresets: Map<String, Preset> = presets
+    private val defaultPreset: Preset?
+        get() = loadedPresets["default"] ?: loadedPresets.values.firstOrNull { it.enabled }
 
     // Parent job for all in-flight MoA work. Cancelling it tears down the
     // aggregator stream and every reference-model coroutine launched in it.
@@ -69,11 +60,12 @@ class MoaProvider(
         // checked only that the aggregator prefix was parseable — a
         // provider with no key would still parse, making MoA appear
         // available in the model picker and then fail on first send.
+        val preset = defaultPreset ?: return false
         val aggProvider = runCatching {
-            registry.get().get(defaultPreset.aggregator.providerPrefix)
+            registry.get().get(preset.aggregator.providerPrefix)
         }.getOrNull() ?: return false
         if (!aggProvider.isConfigured()) return false
-        for (ref in defaultPreset.referenceModels) {
+        for (ref in preset.referenceModels) {
             val provider = runCatching {
                 registry.get().get(ref.providerPrefix)
             }.getOrNull() ?: return false
@@ -107,6 +99,18 @@ class MoaProvider(
         tools: List<ToolDefinition>,
     ): Flow<ProviderChunk> = channelFlow {
         val preset = loadedPresets[model] ?: defaultPreset
+        if (preset == null) {
+            send(
+                ProviderChunk(
+                    error = ProviderError(
+                        code = "moa_no_presets",
+                        message = "No valid MoA presets are configured.",
+                        retryable = false,
+                    ),
+                ),
+            )
+            return@channelFlow
+        }
         val scope = this
         activeJob = scope.coroutineContext[Job]
         ensureActive()
@@ -126,7 +130,7 @@ class MoaProvider(
 
         // 2) Build the aggregator message list: inject reference outputs
         //    into the last user message as private context.
-        val aggregatorMessages = buildAggregatorMessages(messages, preset, referenceOutputs)
+        val aggregatorMessages = buildAggregatorMessages(messages, referenceOutputs)
 
         // 3) Call the aggregator with full tools.
         val aggId = "${preset.aggregator.providerPrefix}:${preset.aggregator.modelName}"
@@ -197,7 +201,6 @@ class MoaProvider(
 
     private fun buildAggregatorMessages(
         messages: List<ProviderMessage>,
-        preset: Preset,
         referenceOutputs: List<ReferenceOutput>,
     ): List<ProviderMessage> {
         if (messages.isEmpty()) return messages

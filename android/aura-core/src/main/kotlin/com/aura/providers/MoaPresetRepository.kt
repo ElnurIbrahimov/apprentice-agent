@@ -8,8 +8,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Loads MoA presets from an application asset, falling back to a compiled-in
- * default so the provider always has at least one usable preset.
+ * Loads MoA presets from an application asset. Invalid configuration disables
+ * MoA instead of falling back to stale model IDs compiled into the app.
  */
 @Singleton
 class MoaPresetRepository @Inject constructor(
@@ -22,26 +22,11 @@ class MoaPresetRepository @Inject constructor(
             json.decodeFromString<List<MoaPresetDto>>(reader.readText())
         }
             .map { it.toPreset() }
+            .filter { it.enabled }
             .associateBy { it.name }
-            .ifEmpty { defaultMap() }
-    } catch (e: Exception) {
-        defaultMap()
+    } catch (_: Exception) {
+        emptyMap()
     }
-
-    private fun defaultMap(): Map<String, MoaProvider.Preset> = mapOf(
-        // Verified against https://ollama.com/v1/models on 2026-07-09.
-        // Every Ollama Cloud model has the `:cloud` suffix in its real
-        // id — a missing or stale suffix makes the next MoA turn
-        // return "model not found" before any tokens are streamed.
-        "default" to MoaProvider.Preset(
-            name = "default",
-            referenceModels = listOf(
-                MoaProvider.ModelRef("ollama", "glm-5.1:cloud"),
-                MoaProvider.ModelRef("ollama", "kimi-k2.6:cloud"),
-            ),
-            aggregator = MoaProvider.ModelRef("deepseek", "deepseek-v4-pro"),
-        ),
-    )
 
     @Serializable
     private data class MoaPresetDto(

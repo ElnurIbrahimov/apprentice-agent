@@ -21,6 +21,17 @@ import kotlin.test.assertFailsWith
  */
 class MoaProviderTest {
 
+    private val testPresets = mapOf(
+        "default" to MoaProvider.Preset(
+            name = "default",
+            referenceModels = listOf(
+                MoaProvider.ModelRef("ollama", "glm-5.1:cloud"),
+                MoaProvider.ModelRef("ollama", "kimi-k2.6:cloud"),
+            ),
+            aggregator = MoaProvider.ModelRef("deepseek", "deepseek-v4-pro:cloud"),
+        ),
+    )
+
     @Test
     fun `cancel terminates in-flight MoA reference work`() = runTest {
         val hangFlow: Flow<ProviderChunk> = flow {
@@ -40,7 +51,7 @@ class MoaProviderTest {
             },
         )
         val registry = ProviderRegistry(providers)
-        val moa = MoaProvider(registry = mockk { every { get() } returns registry })
+        val moa = MoaProvider(registry = mockk { every { get() } returns registry }, presets = testPresets)
 
         val job = launch {
             assertFailsWith<CancellationException> {
@@ -74,7 +85,7 @@ class MoaProviderTest {
             "deepseek" to aggregator,
         )
         val registry = ProviderRegistry(providers)
-        val moa = MoaProvider(registry = mockk { every { get() } returns registry })
+        val moa = MoaProvider(registry = mockk { every { get() } returns registry }, presets = testPresets)
 
         val job = launch {
             assertFailsWith<CancellationException> {
@@ -113,7 +124,7 @@ class MoaProviderTest {
             },
         )
         val registry = ProviderRegistry(providers)
-        val moa = MoaProvider(registry = mockk { every { get() } returns registry })
+        val moa = MoaProvider(registry = mockk { every { get() } returns registry }, presets = testPresets)
 
         moa.chat(
             "default",
@@ -124,6 +135,22 @@ class MoaProviderTest {
             assertEquals("Aggregated", awaitItem().text)
             // The aggregator emits a finishReason=stop chunk after the text.
             awaitItem()
+            awaitComplete()
+        }
+    }
+
+    @Test
+    fun `missing presets disable MoA and return a typed error`() = runTest {
+        val registry = ProviderRegistry(emptyMap())
+        val moa = MoaProvider(
+            registry = mockk { every { get() } returns registry },
+            presets = emptyMap(),
+        )
+
+        assertEquals(false, moa.isConfigured())
+        assertEquals(emptyList(), moa.listModels())
+        moa.chat("default", emptyList(), ChatOptions(), emptyList()).test {
+            assertEquals("moa_no_presets", awaitItem().error?.code)
             awaitComplete()
         }
     }
