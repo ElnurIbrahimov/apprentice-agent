@@ -18,7 +18,11 @@ import javax.inject.Singleton
  * time has elapsed, and stop it. Timers are in-memory only (not persisted)
  * — they reset on app restart.
  *
- * Risk: READ_ONLY (no phone permissions, just in-memory state).
+ * Risk: WRITE_LOCAL. The `start` and `stop` actions mutate the in-process
+ * `timers` map, which constitutes local state. The privacy boundary in
+ * [com.aura.agent.ToolExecutor] refuses tools at this risk level when
+ * the user is in incognito mode — the `check` action (read-only) would
+ * still pass through, but `start`/`stop` are blocked.
  */
 @Singleton
 class TimerTool @Inject constructor() {
@@ -46,7 +50,7 @@ class TimerTool @Inject constructor() {
     val tool = Tool(
         name = "timer",
         description = definition().description,
-        risk = ToolRisk.READ_ONLY,
+        risk = ToolRisk.WRITE_LOCAL,
         parameters = definition().parameters,
         execute = { call, _ ->
             val action = call.arguments["action"] as? String
