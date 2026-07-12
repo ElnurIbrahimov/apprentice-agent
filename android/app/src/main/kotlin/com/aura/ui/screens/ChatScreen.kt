@@ -1383,6 +1383,8 @@ private fun PermissionDialog(
 ) {
     if (permission == null) return
     val context = androidx.compose.ui.platform.LocalContext.current
+    val isNotificationAccess = permission ==
+        "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
     val permLauncher = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -1397,7 +1399,7 @@ private fun PermissionDialog(
     val activity = context as? android.app.Activity
     val packageName = context.packageName
     val shouldShowRationale = activity?.shouldShowRequestPermissionRationale(permission) ?: false
-    val isPermanentlyDenied = !shouldShowRationale &&
+    val isPermanentlyDenied = !isNotificationAccess && !shouldShowRationale &&
         androidx.core.content.ContextCompat.checkSelfPermission(
             context, permission,
         ) != android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -1419,7 +1421,18 @@ private fun PermissionDialog(
             )
         },
         confirmButton = {
-            if (isPermanentlyDenied) {
+            if (isNotificationAccess) {
+                TextButton(onClick = {
+                    context.startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS,
+                        ),
+                    )
+                    onDismiss()
+                }) {
+                    Text("Open Notification access")
+                }
+            } else if (isPermanentlyDenied) {
                 // "Don't ask again" was selected (or Android considers
                 // the request denied enough times). The runtime
                 // permission API is locked out — the user has to go

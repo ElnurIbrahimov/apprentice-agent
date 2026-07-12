@@ -562,6 +562,50 @@ fun SettingsScreen(
             )
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Notification-listener access is a special system setting, not a
+            // runtime permission. Re-check when the settings Activity returns.
+            val notificationContext = androidx.compose.ui.platform.LocalContext.current
+            var notificationAccessEnabled by remember {
+                mutableStateOf(
+                    androidx.core.app.NotificationManagerCompat
+                        .getEnabledListenerPackages(notificationContext)
+                        .contains(notificationContext.packageName),
+                )
+            }
+            val notificationAccessLauncher =
+                androidx.activity.compose.rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+                ) {
+                    notificationAccessEnabled = androidx.core.app.NotificationManagerCompat
+                        .getEnabledListenerPackages(notificationContext)
+                        .contains(notificationContext.packageName)
+                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Notification access", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = if (notificationAccessEnabled)
+                            "Enabled — Aura can read active device notifications"
+                        else
+                            "Off — notification summaries only see Aura itself",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        notificationAccessLauncher.launch(
+                            android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
+                        )
+                    },
+                ) { Text(if (notificationAccessEnabled) "Manage" else "Enable") }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             // App lock row.
             Row(
                 modifier = Modifier.fillMaxWidth(),

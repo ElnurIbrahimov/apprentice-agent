@@ -1,31 +1,26 @@
 package com.aura.tools
 
-import android.content.Context
-import android.service.notification.NotificationListenerService
 import com.aura.agent.Tool
-import com.aura.agent.ToolContext
 import com.aura.agent.ToolResult
 import com.aura.agent.ToolRisk
+import com.aura.notifications.NotificationCaptureStore
 import com.aura.providers.ToolDefinition
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
-import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * List currently-visible notifications on the device. v1: reads from the
- * device's notification listener service which the user must opt into.
- * v1.5: integrates with the AccessibilityService for richer state.
- * Risk: PRIVACY (BIND_NOTIFICATION_LISTENER_SERVICE).
+ * Reads the process-local snapshot populated by AuraNotificationListenerService.
+ * Notification contents remain in memory and are never persisted by this tool.
  */
 @Singleton
 class NotificationListTool @Inject constructor(
-    @ApplicationContext private val context: Context,
+    private val store: NotificationCaptureStore,
 ) {
     fun definition() = ToolDefinition(
         name = "notification_list",
-        description = "List currently-visible notifications. Returns 'pkg: title' for each. Limited by Android — only notifications the listener service has captured since boot.",
+        description = "List active device notifications captured through Aura's opt-in notification listener. Returns package, title, and preview text, newest first.",
         parameters = ToolParameters(
             properties = mapOf(
                 "limit" to ToolProperty(type = "integer", description = "Max notifications to return (default 20, max 50)"),
@@ -38,30 +33,35 @@ class NotificationListTool @Inject constructor(
         name = "notification_list",
         description = definition().description,
         risk = ToolRisk.PRIVACY,
-        requiredPermissions = emptyList(),  // Uses NotificationManager.activeNotifications which only returns Aura's own notifications unless the device-level Notification Listener is enabled
         parameters = definition().parameters,
-        execute = { call, ctx ->
-            val limit = (call.arguments["limit"] as? Int ?: 20).coerceIn(1, 50)
-            val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
-                ?: return@Tool ToolResult.Error("no NotificationManager", "system_error")
-            val sb = StringBuilder()
-            var count = 0
-            try {
-                val active = mgr.activeNotifications
-                for (sbn in active) {
-                    if (count >= limit) break
-                    val pkg = sbn.packageName
-                    val extras = sbn.notification.extras
-                    val title = extras.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString() ?: "(no title)"
-                    val text = extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString() ?: ""
-                    sb.appendLine("${count + 1}. $pkg: $title${if (text.isNotEmpty()) " — $text" else ""}")
-                    count++
-                }
-            } catch (e: Exception) {
-                return@Tool ToolResult.Error("notification_list failed: ${e.message}", "exception")
+        execute = { call, _ ->
+            if (!store.connected.value) {
+                return@Tool ToolResult.NeedsPermission(
+                    permission = NOTIFICATION_LISTENER_PERMISSION,
+                    rationale = "Enable Notification access for Aura in Android Settings, then retry.",
+                )
             }
-            if (count == 0) ToolResult.Ok("No active notifications (or notification listener not granted).")
-            else ToolResult.Ok(sb.toString())
+            val limit = (call.arguments["limit"] as? Int ?: 20).coerceIn(1, 50)
+            val rows = store.snapshot(limit)
+            if (rows.isEmpty()) {
+                ToolResult.Ok("No active device notifications.")
+            } else {
+                ToolResult.Ok(
+                    rows.mapIndexed { index, row ->
+                        val title = row.title.cleanNotificationText().ifBlank { "(no title)" }
+                        val text = row.text.cleanNotificationText()
+                        "${index + 1}. ${row.packageName}: $title${if (text.isNotEmpty()) " — $text" else ""}"
+                    }.joinToString("\n"),
+                )
+            }
         },
-    category = "communication")
+        category = "communication",
+    )
+
+    private fun String.cleanNotificationText(): String =
+        replace(Regex("[\\r\\n\\t]+"), " ").trim().take(500)
+
+    companion object {
+        const val NOTIFICATION_LISTENER_PERMISSION = "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+    }
 }
