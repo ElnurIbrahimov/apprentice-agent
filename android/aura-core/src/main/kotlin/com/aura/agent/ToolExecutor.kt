@@ -10,6 +10,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -56,7 +58,14 @@ class ToolExecutor @Inject constructor(
 
         val call = ToolCall(id = "", name = name, arguments = args)
         return try {
-            tool.execute(call, ctx)
+            withTimeout(ctx.timeout) {
+                tool.execute(call, ctx)
+            }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            ToolResult.Error(
+                message = "Tool '$name' timed out after ${ctx.timeout / 1000}s",
+                code = "tool_timeout",
+            )
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
