@@ -223,7 +223,6 @@ class MorningBriefBuilder @Inject constructor(
 
         val snoozeIntent = Intent(ctx, MorningBriefReceiver::class.java).apply {
             action = MorningBriefWorker.ACTION_SNOOZE
-            putExtra("title", title)
             putExtra("body", body)
             putExtra("summary", summary)
         }

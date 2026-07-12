@@ -25,7 +25,6 @@ class MorningBriefSnoozeWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val title = inputData.getString("snooze_title") ?: return Result.failure()
         val body = inputData.getString("snooze_body") ?: return Result.failure()
         val summary = inputData.getString("snooze_summary") ?: return Result.failure()
 

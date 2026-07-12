@@ -19,6 +19,7 @@ import kotlin.test.assertFailsWith
 /**
  * Unit tests for [MoaProvider] focused on cancellation and structure.
  */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MoaProviderTest {
 
     private val testPresets = mapOf(

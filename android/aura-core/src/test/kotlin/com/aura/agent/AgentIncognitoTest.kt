@@ -64,7 +64,7 @@ class AgentIncognitoTest {
         coEvery { handRepository.getEnabled() } returns emptyList()
 
         val loop = makeLoop()
-        val events = loop.run(
+        loop.run(
             conversation = Conversation(
                 id = "c1", title = "t", createdAt = 0L, updatedAt = 0L,
                 turns = listOf(Turn(user = "hi there", assistant = null)),
@@ -92,7 +92,7 @@ class AgentIncognitoTest {
         coEvery { handRepository.getEnabled() } returns emptyList()
 
         val loop = makeLoop()
-        val events = loop.run(
+        loop.run(
             conversation = Conversation(
                 id = "c1", title = "t", createdAt = 0L, updatedAt = 0L,
                 turns = listOf(Turn(user = "hi", assistant = null)),
@@ -104,6 +104,7 @@ class AgentIncognitoTest {
         coVerify { brain.stream(any(), any(), any(), any()) }
         coVerify(exactly = 0) { memoryStore.store(any<String>(), any<String>(), any<String>(), any<Float>(), any<List<String>>()) }
         coVerify(exactly = 0) { userProfileStore.update(name = any(), traits = any(), preferences = any(), facts = any()) }
+        coVerify(exactly = 0) { userProfileStore.mergeFacts(any()) }
         // KG extraction is gated by the same flag.
         coVerify(exactly = 0) { kgExtractor.extract(any()) }
     }

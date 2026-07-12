@@ -22,12 +22,10 @@ class MorningBriefReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action != MorningBriefWorker.ACTION_SNOOZE) return
 
-        val title = intent.getStringExtra("title") ?: return
         val body = intent.getStringExtra("body") ?: return
         val summary = intent.getStringExtra("summary") ?: return
 
         val inputData = androidx.work.workDataOf(
-            "snooze_title" to title,
             "snooze_body" to body,
             "snooze_summary" to summary,
         )

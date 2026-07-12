@@ -20,6 +20,7 @@ import kotlin.test.assertTrue
  * single source of truth for user facts extracted by the agent loop;
  * a regression here means the model forgets who it's talking to.
  */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class UserProfileStoreTest {
 
     private val dispatcher = StandardTestDispatcher()

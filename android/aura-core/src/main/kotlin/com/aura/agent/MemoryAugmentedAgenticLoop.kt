@@ -153,7 +153,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             }
 
             val memoryContext = if (recallHits.isNotEmpty()) {
-                val lines = recallHits.mapIndexed { i, m ->
+                val lines = recallHits.map { m ->
                     "- [${m.category}] ${m.content}"
                 }.joinToString("\n")
                 "\n\n# Relevant memories:\n$lines"

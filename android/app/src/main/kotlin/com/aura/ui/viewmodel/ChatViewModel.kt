@@ -351,9 +351,8 @@ class ChatViewModel @Inject constructor(
 
     fun setDraft(text: String) {
         _state.update { old ->
-            val toolNames = toolRegistry.definitions().map { it.name }
             val suggested = if (text.isBlank()) null
-                else SpecialistRouter.pickSpecialist(text, toolNames)
+                else SpecialistRouter.pickSpecialist(text)
             old.copy(draft = text, suggestedSpecialist = suggested)
         }
     }
@@ -609,7 +608,7 @@ class ChatViewModel @Inject constructor(
         send()
     }
 
-    fun retryAfterPermission(permission: String) {
+    fun retryAfterPermission(@Suppress("UNUSED_PARAMETER") permission: String) {
         // Re-execute the failed tool directly with the original args, no model round-trip.
         val (toolName, args) = _state.value.pendingToolRetry ?: ("" to "")
         _state.update { it.copy(

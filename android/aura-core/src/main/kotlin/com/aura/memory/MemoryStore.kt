@@ -33,8 +33,9 @@ class MemoryStore @Inject constructor(
         val existing = runCatching { dao.allWithEmbeddings() }.getOrDefault(emptyList())
         if (existing.isNotEmpty()) {
             val match = existing.firstOrNull { mem ->
-                mem.embedding != null &&
-                    cosineSimilarity(embedding, Embedder.fromBytes(mem.embedding!!)) > SEMANTIC_DEDUP_THRESHOLD
+                mem.embedding?.let {
+                    cosineSimilarity(embedding, Embedder.fromBytes(it)) > SEMANTIC_DEDUP_THRESHOLD
+                } == true
             }
             if (match != null) {
                 // Merge: keep the longer content (richer version of

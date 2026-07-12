@@ -126,12 +126,12 @@ class ContinuousVoiceViewModel @Inject constructor(
                         _state.update { it.copy(phase = VoiceModeState.THINKING, partialTranscript = text) }
                         onSend(text)
                         // Wait for streaming to complete, then speak
-                        responseWaitJob = viewModelScope.launch {
+                        responseWaitJob = viewModelScope.launch responseWait@{
                             // Poll until streaming is done
                             while (_state.value.active && !onStreamingDone()) {
                                 delay(200)
                             }
-                            if (!_state.value.active) return@launch
+                            if (!_state.value.active) return@responseWait
                             speakResponse(onSend, onStreamingDone)
                         }
                     }

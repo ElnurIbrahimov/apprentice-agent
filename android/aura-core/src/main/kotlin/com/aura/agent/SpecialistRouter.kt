@@ -12,14 +12,10 @@ object SpecialistRouter {
      * Pick the most appropriate specialist for a user query.
      *
      * @param query The user's raw input text.
-     * @param configuredTools The set of tool names currently registered.
-     * @return The matched [Specialist], or `null` for the General fallback.
+     * @return the best specialist or null if General should handle it.
      */
-    fun pickSpecialist(
-        query: String,
-        configuredTools: List<String> = emptyList(),
-    ): Specialist? {
-        val lower = query.lowercase()
+    fun pickSpecialist(userMessage: String): Specialist? {
+        val lower = userMessage.lowercase()
 
         // Order matters: check the most specific categories first so they
         // take priority over more generic ones.
