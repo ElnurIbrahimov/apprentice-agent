@@ -1,10 +1,17 @@
 package com.aura.tasks
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 
-@Entity(tableName = "tasks")
+@Entity(
+    tableName = "tasks",
+    indices = [
+        Index(value = ["status"]),
+        Index(value = ["status", "dueAt"]),
+    ],
+)
 @Serializable
 data class TaskEntity(
     @PrimaryKey val id: String,

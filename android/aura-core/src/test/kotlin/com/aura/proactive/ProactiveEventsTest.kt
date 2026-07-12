@@ -165,6 +165,37 @@ class ProactiveEventsTest {
         assertEquals(0, events.unreadCount.value)
         assertTrue(events.unreadCount.value == 0)
     }
+
+    @Test
+    fun `init prunes events older than 30 days`() = runTest(testDispatcher) {
+        // Pre-seed the DAO with one old event and one fresh event.
+        // After init the old one should be deleted, the fresh one kept.
+        val now = System.currentTimeMillis()
+        val thirtyOneDaysAgo = now - 31L * 24 * 60 * 60 * 1000
+        val oneDayAgo = now - 1L * 24 * 60 * 60 * 1000
+        dao.insert(ProactiveEventEntity(
+            id = 0,
+            eventType = "morning_brief",
+            title = "old brief",
+            body = "stale",
+            timestamp = thirtyOneDaysAgo,
+        ))
+        dao.insert(ProactiveEventEntity(
+            id = 0,
+            eventType = "calendar",
+            title = "fresh",
+            body = "recent",
+            timestamp = oneDayAgo,
+        ))
+        assertEquals(2, dao.recent(100).size)
+
+        newProactiveEvents()
+        advanceUntilIdle()
+
+        val remaining = dao.recent(100)
+        assertEquals(1, remaining.size)
+        assertEquals("fresh", remaining[0].title)
+    }
 }
 
 /**
@@ -186,5 +217,11 @@ private class FakeProactiveEventDao : ProactiveEventDao {
 
     override suspend fun countSince(since: Long): Int =
         rows.count { it.timestamp > since }
+
+    override suspend fun deleteOlderThan(cutoff: Long): Int {
+        val before = rows.size
+        rows.removeAll { it.timestamp < cutoff }
+        return before - rows.size
+    }
 }
 

@@ -24,6 +24,18 @@ object ConversationModule {
         }
     }
 
+    /**
+     * Migration 2→3: adds an index on `updatedAt` so the History screen's
+     * `ORDER BY updatedAt DESC` query is O(log n) instead of a full table
+     * scan. As the conversation list grows past a few hundred rows this
+     * turns from "noticeable" to "obviously slow" without the index.
+     */
+    val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_conversations_updatedAt ON conversations(updatedAt)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): ConversationDatabase =
@@ -31,7 +43,7 @@ object ConversationModule {
             context,
             ConversationDatabase::class.java,
             "aura-conversations.db",
-            migrations = arrayOf(MIGRATION_1_2),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3),
         ).build()
 
     @Provides

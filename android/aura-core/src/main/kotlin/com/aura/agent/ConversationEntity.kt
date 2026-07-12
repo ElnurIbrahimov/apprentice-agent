@@ -1,9 +1,13 @@
 package com.aura.agent
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "conversations")
+@Entity(
+    tableName = "conversations",
+    indices = [Index(value = ["updatedAt"])],
+)
 data class ConversationEntity(
     @PrimaryKey val id: String,
     val title: String,

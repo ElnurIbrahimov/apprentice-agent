@@ -1,6 +1,7 @@
 package com.aura.tasks
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
@@ -8,7 +9,10 @@ import androidx.room.PrimaryKey
  * reminders before they fire. The [id] matches the WorkManager request
  * id so cancellation can hit both Room and WorkManager by the same key.
  */
-@Entity(tableName = "reminders")
+@Entity(
+    tableName = "reminders",
+    indices = [Index(value = ["triggerAt"])],
+)
 data class ReminderEntity(
     @PrimaryKey val id: String,
     val message: String,

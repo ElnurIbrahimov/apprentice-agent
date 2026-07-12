@@ -20,4 +20,13 @@ interface ProactiveEventDao {
      */
     @Query("SELECT COUNT(*) FROM proactive_events WHERE timestamp > :since")
     suspend fun countSince(since: Long): Int
+
+    /**
+     * Delete all events older than [cutoff]. Called from
+     * [com.aura.proactive.ProactiveEvents.init] with `now - 30 days`
+     * so the table stays bounded — without this it grows forever and
+     * the `recent()` query slows down as rows accumulate.
+     */
+    @Query("DELETE FROM proactive_events WHERE timestamp < :cutoff")
+    suspend fun deleteOlderThan(cutoff: Long): Int
 }
