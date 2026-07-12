@@ -88,9 +88,9 @@ Settings. Calendar monitoring has its own independent toggle.
 ## 9. Verify the build
 
 ```bash
-./gradlew :aura-core:testDebugUnitTest   # 380 unit tests pass
+./gradlew :aura-core:testDebugUnitTest   # 383 unit tests pass
 ./gradlew :app:testDebugUnitTest         # 132 unit tests pass
-./gradlew :aura-core:connectedDebugAndroidTest :app:connectedDebugAndroidTest  # 9 device tests pass
+./gradlew :aura-core:connectedDebugAndroidTest :app:connectedDebugAndroidTest  # 12 device tests pass
 ./gradlew :app:assembleDebug             # APK builds
 ```
 

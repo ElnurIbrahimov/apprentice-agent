@@ -46,4 +46,26 @@ class ConversationDatabaseMigrationTest {
 
         migrated.close()
     }
+
+    @Test
+    fun migrate2To3_preservesConversations_andAddsUpdatedAtIndex() {
+        val db = helper.createDatabase("test-conversations-2-3.db", 2)
+        db.execSQL(
+            "INSERT INTO conversations (id, title, createdAt, updatedAt, systemPrompt, model, metadataJson, turnsJson, embedding) " +
+                "VALUES ('conv-2', 'Indexed chat', 1, 2, '', 'test:model', '{}', '[]', NULL)",
+        )
+        db.close()
+        val migrated = helper.runMigrationsAndValidate(
+            "test-conversations-2-3.db", 3, true, ConversationModule.MIGRATION_2_3,
+        )
+        migrated.query("SELECT title FROM conversations WHERE id = 'conv-2'").use {
+            assert(it.moveToFirst() && it.getString(0) == "Indexed chat")
+        }
+        migrated.query("PRAGMA index_list('conversations')").use {
+            var found = false
+            while (it.moveToNext()) found = found || it.getString(it.getColumnIndexOrThrow("name")) == "index_conversations_updatedAt"
+            assert(found)
+        }
+        migrated.close()
+    }
 }

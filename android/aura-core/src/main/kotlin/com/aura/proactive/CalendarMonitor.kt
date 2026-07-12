@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import com.aura.proactive.ProactiveEventBus.Event.CalendarEventSoon
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -16,8 +17,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
-import java.util.Calendar
+
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -59,6 +61,7 @@ class CalendarMonitor @Inject constructor(
         _running.value = true
         pollJob = scope.launch {
             while (true) {
+                ensureActive()
                 poll()
                 delay(POLL_INTERVAL_MS)
             }
@@ -105,6 +108,8 @@ class CalendarMonitor @Inject constructor(
                     eventBus.emit(CalendarEventSoon(title, minutesUntil))
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: SecurityException) {
             // permission revoked
         } catch (e: Exception) {

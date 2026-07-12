@@ -5,16 +5,20 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 /**
  * Unit tests for [MoaProvider] focused on cancellation and structure.
@@ -99,6 +103,37 @@ class MoaProviderTest {
         job.join()
 
         verify(exactly = 0) { aggregator.chat("deepseek-v4-pro:cloud", any(), any(), any()) }
+    }
+
+    @Test
+    fun `starting a new MoA run cancels the previous run`() = runTest {
+        val started = Channel<Unit>(Channel.UNLIMITED)
+        val hangFlow: Flow<ProviderChunk> = flow {
+            started.send(Unit)
+            awaitCancellation()
+        }
+        val providers = mapOf(
+            "ollama" to mockk<Provider>(relaxed = true) {
+                every { this@mockk.prefix } returns "ollama"
+                every { chat(any(), any(), any(), any()) } returns hangFlow
+            },
+            "deepseek" to mockk<Provider>(relaxed = true) {
+                every { prefix } returns "deepseek"
+                every { chat(any(), any(), any(), any()) } returns flowOf()
+            },
+        )
+        val registry = ProviderRegistry(providers)
+        val moa = MoaProvider(registry = mockk { every { get() } returns registry }, presets = testPresets)
+
+        val first = launch { moa.chat("default", emptyList(), ChatOptions(), emptyList()).collect {} }
+        started.receive()
+        started.receive()
+        val second = launch { moa.chat("default", emptyList(), ChatOptions(), emptyList()).collect {} }
+        started.receive()
+        runCurrent()
+
+        assertTrue(first.isCancelled)
+        second.cancel()
     }
 
     @Test

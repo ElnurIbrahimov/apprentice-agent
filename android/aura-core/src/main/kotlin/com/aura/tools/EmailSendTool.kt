@@ -13,6 +13,15 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
+private val EMAIL_RECIPIENT = Regex(
+    "^[A-Za-z0-9.!#$%*+/=_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$",
+)
+
+internal fun isValidEmailRecipient(value: String): Boolean =
+    value.length <= 254 &&
+        '?' !in value && '#' !in value && '&' !in value &&
+        EMAIL_RECIPIENT.matches(value)
+
 /**
  * Opens the email app with a pre-filled compose intent (mailto:).
  * The user must tap Send in the email app — this tool does NOT send directly.
@@ -54,6 +63,9 @@ class EmailSendTool @Inject constructor(
         execute = { call, _ ->
             val to = call.arguments["to"] as? String
                 ?: return@Tool ToolResult.Error("missing 'to' argument", "bad_args")
+            if (!isValidEmailRecipient(to)) {
+                return@Tool ToolResult.Error("invalid recipient email address", "bad_args")
+            }
             val subject = call.arguments["subject"] as? String ?: ""
             val body = call.arguments["body"] as? String ?: ""
 

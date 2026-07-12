@@ -112,7 +112,11 @@ class MoaProvider(
             return@channelFlow
         }
         val scope = this
-        activeJob = scope.coroutineContext[Job]
+        val job = scope.coroutineContext[Job]
+        synchronized(this@MoaProvider) {
+            activeJob?.cancel()
+            activeJob = job
+        }
         ensureActive()
 
         if (!preset.enabled) {
