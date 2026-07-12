@@ -30,7 +30,7 @@ class ToolRegistryTest {
         "system_volume" to ToolRisk.WRITE_LOCAL,
         "photo_library" to ToolRisk.PRIVACY,
         "biometric_prompt" to ToolRisk.WRITE_LOCAL,
-        "camera_capture" to ToolRisk.WRITE_LOCAL,
+
         "battery_state" to ToolRisk.READ_ONLY,
         "network_state" to ToolRisk.READ_ONLY,
         "dnd_mode" to ToolRisk.WRITE_LOCAL,

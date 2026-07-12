@@ -92,7 +92,6 @@ class SpecialistRouterTest {
 
     @Test
     fun `phone_native has expected tools`() {
-        assertTrue(Specialist.PhoneNative.toolsAllowed.contains("camera_capture"))
         assertTrue(Specialist.PhoneNative.toolsAllowed.contains("photo_library"))
         assertTrue(Specialist.PhoneNative.toolsAllowed.contains("location_now"))
         assertTrue(Specialist.PhoneNative.toolsAllowed.contains("set_reminder"))

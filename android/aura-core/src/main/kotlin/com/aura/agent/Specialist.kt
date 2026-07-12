@@ -85,7 +85,7 @@ data class Specialist(
                 device state (battery, network, volume, DND). Be quick and practical.
             """.trimIndent(),
             toolsAllowed = setOf(
-                "camera_capture", "photo_library", "location_now", "set_reminder",
+                "photo_library", "location_now", "set_reminder",
                 "launch_app", "notification_list", "post_notification",
                 "battery_state", "network_state", "system_volume", "dnd_mode",
             ),

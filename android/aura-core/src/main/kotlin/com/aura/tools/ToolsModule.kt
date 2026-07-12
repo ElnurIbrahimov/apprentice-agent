@@ -31,7 +31,7 @@ object ToolsModule {
         systemVolume: SystemVolumeTool,
         photoLibrary: PhotoLibraryTool,
         biometricPrompt: BiometricPromptTool,
-        cameraCapture: CameraCaptureTool,
+
         batteryState: BatteryStateTool,
         networkState: NetworkStateTool,
         dndMode: DndModeTool,
@@ -69,7 +69,7 @@ object ToolsModule {
         registry.register(systemVolume.tool)
         registry.register(photoLibrary.tool)
         registry.register(biometricPrompt.tool)
-        registry.register(cameraCapture.tool)
+
         registry.register(batteryState.tool)
         registry.register(networkState.tool)
         registry.register(dndMode.tool)

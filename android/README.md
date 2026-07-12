@@ -61,7 +61,7 @@ Or transfer the APK to the phone and tap it (enable "Install from unknown source
 - **Internet** — for cloud LLMs and web search
 - **Microphone** — for voice input (first time only)
 - **Location** — for the `location_now` tool
-- **Camera** — for `camera_capture` and image input to vision tools
+- **Camera** — for image input to vision tools
 - **Calendar** — for `calendar_read` / `calendar_write`
 - **Contacts** — for `contacts_search`
 - **Notifications** — for posting reminders + the morning brief
@@ -73,14 +73,14 @@ Or transfer the APK to the phone and tap it (enable "Install from unknown source
 
 ```
 ┌──────────────────────────────────────────┐
-│ :app  (Compose UI, 5 tabs + 4 routes)    │  Home · Chat · Memory · Graph · Settings · History · Hands · Tasks · Proactive
+│ :app  (Compose UI, 4 tabs + 5 routes)    │  Home · Chat · Memory · Settings · History · Hands · Tasks · Reminders · Proactive
 │   ViewModels (Hilt @HiltViewModel)        │
 └──────────┬───────────────────────────────┘
            │ depends on
 ┌──────────▼──────────────────────────────────────────┐
 │ :aura-core  (logic library, Android-lifecycle-light) │
 │   MemoryAugmentedAgenticLoop → Brain → ProviderReg │
-│   ToolRegistry (38) · ToolExecutor · Specialist     │
+│   ToolRegistry (37) · ToolExecutor · Specialist     │
 │   Memory (Room + RRF + FadeMem) · KnowledgeGraph   │
 │   Hands (Room) · Tasks (Room) · Voice (STT/TTS)     │
 │   Proactive (MorningBrief + Decay + Calendar)      │
@@ -91,7 +91,7 @@ Or transfer the APK to the phone and tap it (enable "Install from unknown source
 
 The `:aura-core` module has no Compose dependencies. If you ever port to iOS via KMP, this is the layer you'd reuse.
 
-## Tool catalog (38)
+## Tool catalog (37)
 
 ### Web & research
 | Tool | What it does | Risk |
@@ -133,7 +133,7 @@ The `:aura-core` module has no Compose dependencies. If you ever port to iOS via
 | `calendar_write` | Create event | PRIVACY |
 | `contacts_search` | Find contact by name | PRIVACY |
 | `photo_library` | List recent photos | PRIVACY |
-| `camera_capture` | Open camera | WRITE_LOCAL |
+
 | `share` | Android share sheet | WRITE_LOCAL |
 | `biometric_prompt` | Face/fingerprint gate | WRITE_LOCAL |
 
@@ -205,7 +205,7 @@ android/
 │       ├── kg/           # Knowledge graph (Room + extractor + repository)
 │       ├── hands/        # Automation macros (Room + repository + worker)
 │       ├── tasks/        # Task manager (Room)
-│       ├── tools/        # 38 tool implementations + ToolsModule
+│       ├── tools/        # 37 tool implementations + ToolsModule
 │       ├── voice/        # SpeechToText + TextToSpeech
 │       ├── proactive/    # MorningBrief + Decay + CalendarMonitor + ProactiveEventBus
 │       ├── profile/      # UserProfile (learned from conversations)
