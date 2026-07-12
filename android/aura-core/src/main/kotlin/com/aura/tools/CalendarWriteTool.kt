@@ -30,7 +30,7 @@ class CalendarWriteTool @Inject constructor(
 ) {
     fun definition() = ToolDefinition(
         name = "calendar_write",
-        description = "Create a new calendar event with a title, start time, and optional end time and location. Times are ISO 8601 (e.g. '2026-06-26T15:00:00') or HH:mm (today/tomorrow).",
+        description = "Create a new calendar event with a title, start time, and optional end time and location. Times are ISO 8601 (e.g. '2026-06-26T15:00:00') or HH:mm (today/tomorrow). On the first call, a preview is returned for the user to confirm. Set confirmed=true on the second call to actually insert the event.",
         parameters = ToolParameters(
             properties = mapOf(
                 "title" to ToolProperty(type = "string", description = "Event title"),
@@ -38,6 +38,7 @@ class CalendarWriteTool @Inject constructor(
                 "end" to ToolProperty(type = "string", description = "End time (ISO 8601 or HH:mm). Defaults to 1 hour after start."),
                 "location" to ToolProperty(type = "string", description = "Optional location"),
                 "description" to ToolProperty(type = "string", description = "Optional description"),
+                "confirmed" to ToolProperty(type = "boolean", description = "Set to true to confirm and insert the event after reviewing the preview."),
             ),
             required = listOf("title", "start"),
         ),
@@ -55,6 +56,7 @@ class CalendarWriteTool @Inject constructor(
             val endStr = call.arguments["end"] as? String
             val location = call.arguments["location"] as? String
             val description = call.arguments["description"] as? String
+            val confirmed = call.arguments["confirmed"] as? Boolean ?: false
 
             val granted = listOf(Manifest.permission.WRITE_CALENDAR, Manifest.permission.READ_CALENDAR)
                 .all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
@@ -65,6 +67,26 @@ class CalendarWriteTool @Inject constructor(
             val end = if (endStr != null) {
                 parseTime(endStr) ?: return@Tool ToolResult.Error("bad 'end' time: $endStr", "bad_args")
             } else start + 60L * 60L * 1000L
+
+            // Confirmation gate: on the first call (confirmed=false), return a
+            // preview of the event for the user to review. The model presents
+            // this to the user and re-calls with confirmed=true if they agree.
+            // This prevents the agent from silently inserting calendar events
+            // without the user seeing the details first.
+            if (!confirmed) {
+                val preview = buildString {
+                    appendLine("Please confirm the following calendar event:")
+                    appendLine("  Title: $title")
+                    appendLine("  Start: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm z", java.util.Locale.getDefault()).format(java.util.Date(start))}")
+                    appendLine("  End:   ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm z", java.util.Locale.getDefault()).format(java.util.Date(end))}")
+                    if (location != null) appendLine("  Location: $location")
+                    if (description != null) appendLine("  Description: $description")
+                    appendLine()
+                    appendLine("Reply with yes to confirm, or tell me what to change.")
+                }
+                return@Tool ToolResult.Ok(preview)
+            }
+
             try {
                 val eventId = insertEvent(title, start, end, location, description)
                 ToolResult.Ok("Event created (id $eventId): $title")

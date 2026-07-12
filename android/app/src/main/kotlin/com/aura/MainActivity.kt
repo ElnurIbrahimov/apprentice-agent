@@ -280,7 +280,7 @@ private fun promptForUnlock(
 
     val mgr = BiometricManager.from(ctx)
     val canAuth = mgr.canAuthenticate(
-        BiometricManager.Authenticators.BIOMETRIC_WEAK or
+        BiometricManager.Authenticators.BIOMETRIC_STRONG or
             BiometricManager.Authenticators.DEVICE_CREDENTIAL
     )
     if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
@@ -306,7 +306,7 @@ private fun promptForUnlock(
             .setTitle("Unlock Aura")
             .setSubtitle("Authenticate to open your conversations")
             .setAllowedAuthenticators(
-                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or
                     BiometricManager.Authenticators.DEVICE_CREDENTIAL
             )
             .build()

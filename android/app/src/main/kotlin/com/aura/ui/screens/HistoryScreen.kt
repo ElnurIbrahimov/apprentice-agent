@@ -265,7 +265,7 @@ private fun HistoryRow(
                     modifier = Modifier.size(18.dp),
                 )
             }
-            IconButton(onClick = onShare, modifier = Modifier.size(32.dp)) {
+            IconButton(onClick = onShare, modifier = Modifier.size(48.dp)) {
                 Icon(
                     imageVector = Icons.Filled.Share,
                     contentDescription = "Share as Markdown",
@@ -273,7 +273,7 @@ private fun HistoryRow(
                     modifier = Modifier.size(18.dp),
                 )
             }
-            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+            IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
             }
         }

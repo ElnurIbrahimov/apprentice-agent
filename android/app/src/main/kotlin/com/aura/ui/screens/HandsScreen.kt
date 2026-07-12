@@ -150,8 +150,8 @@ private fun HandRow(hand: Hand, isRunning: Boolean, onRun: () -> Unit, onToggle:
             Switch(checked = hand.enabled, onCheckedChange = { onToggle() })
             Spacer(Modifier.width(4.dp))
             FilledIconButton(onClick = onRun, enabled = hand.enabled && !isRunning) { Icon(Icons.Filled.PlayArrow, "Run", tint = MaterialTheme.colorScheme.onPrimary) }
-            IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Edit, "Edit", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), modifier = Modifier.size(18.dp)) }
-            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f), modifier = Modifier.size(18.dp)) }
+            IconButton(onClick = onEdit, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Edit, "Edit", tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), modifier = Modifier.size(18.dp)) }
+            IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f), modifier = Modifier.size(18.dp)) }
         }
     }
 }

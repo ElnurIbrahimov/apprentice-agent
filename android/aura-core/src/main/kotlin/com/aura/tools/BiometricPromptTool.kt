@@ -88,7 +88,7 @@ class BiometricPromptTool @Inject constructor(
                     .setTitle(title)
                     .apply { if (subtitle != null) setSubtitle(subtitle) }
                     .apply { if (reason != null) setDescription(reason) }
-                    .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
+                    .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                     .build()
                 prompt.authenticate(promptInfo)
             }
