@@ -75,8 +75,8 @@ The morning brief is scheduled for 7am. To test immediately:
    applicationIdSuffix — see `app/build.gradle.kts`.)
 2. Within seconds, a notification appears with the brief.
 
-Note: there is no Settings toggle for the morning brief yet; it is
-always on and fires daily at 7am. A toggle is a v1.5 task.
+The morning brief can be enabled or disabled and its delivery hour changed in
+Settings. Calendar monitoring has its own independent toggle.
 
 ## 8. Test the home screen
 
@@ -88,8 +88,8 @@ always on and fires daily at 7am. A toggle is a v1.5 task.
 ## 9. Verify the build
 
 ```bash
-./gradlew :aura-core:testDebugUnitTest   # 35+ unit tests pass
-./gradlew :app:testDebugUnitTest         # 3 unit tests pass
+./gradlew :aura-core:testDebugUnitTest   # 380 unit tests pass
+./gradlew :app:testDebugUnitTest         # 132 unit tests pass
 ./gradlew :app:assembleDebug             # APK builds
 ```
 

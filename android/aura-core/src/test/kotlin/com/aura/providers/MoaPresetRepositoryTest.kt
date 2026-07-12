@@ -22,7 +22,7 @@ class MoaPresetRepositoryTest {
         val preset = presets.getValue("default")
         assertEquals(2, preset.referenceModels.size)
         assertEquals("deepseek", preset.aggregator.providerPrefix)
-        assertEquals("deepseek-v4-pro", preset.aggregator.modelName)
+        assertEquals("deepseek-v4-pro:cloud", preset.aggregator.modelName)
         assertTrue(preset.enabled)
     }
 }

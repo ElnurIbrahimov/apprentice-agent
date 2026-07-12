@@ -25,7 +25,7 @@ This is my personal copy. The plan lives at `.hermes/plans/`.
 - User profile (learned from conversations via regex, injected into system prompt)
 - Onboarding wizard (paste API key + verify connectivity)
 - Biometric gate for sensitive tools
-- 458 unit tests passing across `:aura-core` (324) + `:app` (134)
+- 512 unit tests passing across `:aura-core` (380) + `:app` (132)
 
 Note: the app uses **cloud providers only** — there is no on-device model.
 
@@ -155,13 +155,13 @@ The model picker routes by `prefix:model` string. Keys are stored locally via Da
 
 ## Specialists (6)
 
-Keyword-routed (see `SpecialistRouter`). Each has a system prompt, allowed tool set, and optional suggested model override. Tool allowlists are enforced in the loop — a specialist cannot call a tool not in its allowlist.
+Keyword-routed (see `SpecialistRouter`). Each has a system prompt and allowed tool set. Tool allowlists are enforced in the loop — a specialist cannot call a tool not in its allowlist.
 
 - **general** — fallback, all tools
-- **coder** — brave/tavily search + fetch_url, suggested Claude Sonnet
-- **researcher** — deep_research + brave/tavily, suggested MoA default
+- **coder** — brave/tavily search + fetch_url
+- **researcher** — deep_research + brave/tavily
 - **creative** — image generation and visual ideation
-- **executive** — calendar + contacts + remember/recall, suggested MoA default
+- **executive** — calendar + contacts + remember/recall
 - **phone_native** — all device-state + camera + location tools
 
 ## Proactive workers
@@ -178,12 +178,12 @@ Scheduled via WorkManager. Re-scheduled on app start (idempotent, UPDATE policy)
 ```bash
 ./gradlew :app:assembleDebug            # debug APK
 ./gradlew :app:assembleRelease          # release APK (currently signed with debug key — sideload only)
-./gradlew :aura-core:testDebugUnitTest  # unit tests (324)
-./gradlew :app:testDebugUnitTest        # unit tests (130)
+./gradlew :aura-core:testDebugUnitTest  # unit tests (380)
+./gradlew :app:testDebugUnitTest        # unit tests (132)
 ./gradlew :app:assembleDebug connectedAndroidTest  # androidTests (needs device)
 ```
 
-Stats: 458 unit tests passing across `:aura-core` (324) + `:app` (134).
+Stats: 512 unit tests passing across `:aura-core` (380) + `:app` (132).
 
 CI (`.github/workflows/ci.yml`) runs `assembleDebug` + unit tests on every push and PR.
 

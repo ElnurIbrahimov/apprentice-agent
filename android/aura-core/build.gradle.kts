@@ -44,6 +44,11 @@ android {
         // Adds exported Room schemas to the test assets for migration tests.
         getByName("androidTest").assets.srcDir("schemas")
     }
+    testOptions {
+        // Robolectric tests verify packaged configuration assets (for example,
+        // moa_presets.json) rather than silently exercising fallback code.
+        unitTests.isIncludeAndroidResources = true
+    }
     ksp {
         arg("room.schemaLocation", "$projectDir/schemas")
     }
