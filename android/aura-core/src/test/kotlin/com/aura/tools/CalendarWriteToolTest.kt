@@ -46,18 +46,6 @@ class CalendarWriteToolTest {
     }
 
     @Test
-    fun `first call without confirmed is gated by permission check`() {
-        // The permission check calls ContextCompat.checkSelfPermission
-        // which requires an Android context. In unit tests (no
-        // Robolectric), this throws "TextUtils not mocked". We verify
-        // the gate exists by checking the tool definition includes
-        // the confirmed parameter and the description mentions
-        // confirmation — covered by the two tests above. The
-        // actual gate behavior is verified by reading the source:
-        // line 66 `if (!confirmed) return ToolResult.Ok(preview)`.
-    }
-
-    @Test
     fun `confirmed parameter is in tool definition`() {
         val def = tool.definition()
         assertTrue(def.parameters.properties.containsKey("confirmed"),
@@ -69,5 +57,77 @@ class CalendarWriteToolTest {
         val def = tool.definition()
         assertTrue(def.description.contains("confirm"),
             "description should mention confirmation: ${def.description}")
+    }
+
+    private val draft = CalendarEventDraft(
+        title = "Meeting",
+        start = 1_000L,
+        end = 2_000L,
+        location = "Office",
+        description = null,
+    )
+
+    @Test
+    fun `model cannot confirm without a pending user-reviewed draft`() {
+        val gate = CalendarApprovalGate()
+        val result = gate.authorize(
+            callConfirmed = true,
+            ctx = ToolContext(conversationId = "c1", userMessage = "create a meeting"),
+            draft = draft,
+        )
+        assertTrue(result?.contains("Please confirm") == true)
+    }
+
+    @Test
+    fun `model cannot confirm again on the same user turn`() {
+        val gate = CalendarApprovalGate()
+        val sameTurn = ToolContext(conversationId = "c1", userMessage = "create a meeting")
+        gate.authorize(callConfirmed = false, ctx = sameTurn, draft = draft)
+
+        val result = gate.authorize(callConfirmed = true, ctx = sameTurn, draft = draft)
+
+        assertTrue(result?.contains("explicit confirmation") == true)
+    }
+
+    @Test
+    fun `later explicit user confirmation authorizes the exact pending draft once`() {
+        val gate = CalendarApprovalGate()
+        gate.authorize(
+            callConfirmed = false,
+            ctx = ToolContext(conversationId = "c1", userMessage = "create a meeting"),
+            draft = draft,
+        )
+
+        val approved = gate.authorize(
+            callConfirmed = true,
+            ctx = ToolContext(conversationId = "c1", userMessage = "yes"),
+            draft = draft,
+        )
+        val replay = gate.authorize(
+            callConfirmed = true,
+            ctx = ToolContext(conversationId = "c1", userMessage = "yes"),
+            draft = draft,
+        )
+
+        assertEquals(null, approved)
+        assertTrue(replay?.contains("Please confirm") == true)
+    }
+
+    @Test
+    fun `changed draft requires a new preview even after yes`() {
+        val gate = CalendarApprovalGate()
+        gate.authorize(
+            callConfirmed = false,
+            ctx = ToolContext(conversationId = "c1", userMessage = "create a meeting"),
+            draft = draft,
+        )
+
+        val changed = gate.authorize(
+            callConfirmed = true,
+            ctx = ToolContext(conversationId = "c1", userMessage = "yes"),
+            draft = draft.copy(start = 3_000L),
+        )
+
+        assertTrue(changed?.contains("Please confirm") == true)
     }
 }

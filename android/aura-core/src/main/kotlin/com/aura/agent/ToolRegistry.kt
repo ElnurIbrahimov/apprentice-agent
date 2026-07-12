@@ -47,6 +47,8 @@ sealed class ToolResult {
 data class ToolContext(
     val conversationId: String,
     val userId: String = "default",
+    /** Latest user-authored message for tools that require explicit consent. */
+    val userMessage: String = "",
     val permissions: Set<String> = emptySet(),
     val timeout: Long = 30_000L,
     /**

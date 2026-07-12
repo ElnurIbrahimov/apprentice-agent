@@ -286,6 +286,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             // we process results and continue the loop.
             val ctx = ToolContext(
                 conversationId = currentConversation.id,
+                userMessage = lastUserMessage,
                 memoryEnabled = memoryEnabled,
             )
             val toolResults = coroutineScope {

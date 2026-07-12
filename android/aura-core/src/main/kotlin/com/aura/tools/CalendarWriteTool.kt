@@ -17,6 +17,7 @@ import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.TimeZone
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,6 +29,8 @@ import javax.inject.Singleton
 class CalendarWriteTool @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
+    private val approvalGate = CalendarApprovalGate()
+
     fun definition() = ToolDefinition(
         name = "calendar_write",
         description = "Create a new calendar event with a title, start time, and optional end time and location. Times are ISO 8601 (e.g. '2026-06-26T15:00:00') or HH:mm (today/tomorrow). On the first call, a preview is returned for the user to confirm. Set confirmed=true on the second call to actually insert the event.",
@@ -68,23 +71,9 @@ class CalendarWriteTool @Inject constructor(
                 parseTime(endStr) ?: return@Tool ToolResult.Error("bad 'end' time: $endStr", "bad_args")
             } else start + 60L * 60L * 1000L
 
-            // Confirmation gate: on the first call (confirmed=false), return a
-            // preview of the event for the user to review. The model presents
-            // this to the user and re-calls with confirmed=true if they agree.
-            // This prevents the agent from silently inserting calendar events
-            // without the user seeing the details first.
-            if (!confirmed) {
-                val preview = buildString {
-                    appendLine("Please confirm the following calendar event:")
-                    appendLine("  Title: $title")
-                    appendLine("  Start: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm z", java.util.Locale.getDefault()).format(java.util.Date(start))}")
-                    appendLine("  End:   ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm z", java.util.Locale.getDefault()).format(java.util.Date(end))}")
-                    if (location != null) appendLine("  Location: $location")
-                    if (description != null) appendLine("  Description: $description")
-                    appendLine()
-                    appendLine("Reply with yes to confirm, or tell me what to change.")
-                }
-                return@Tool ToolResult.Ok(preview)
+            val draft = CalendarEventDraft(title, start, end, location, description)
+            approvalGate.authorize(confirmed, ctx, draft)?.let { rationale ->
+                return@Tool ToolResult.NeedsApproval(rationale)
             }
 
             try {
@@ -118,8 +107,9 @@ class CalendarWriteTool @Inject constructor(
             put(CalendarContract.Events.CALENDAR_ID, calId)
             put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
         }
-        val uri: Uri? = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
-        return uri?.let { ContentUris.parseId(it) } ?: -1L
+        val uri: Uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+            ?: throw IllegalStateException("Calendar provider did not return an event URI")
+        return ContentUris.parseId(uri)
     }
 
     private fun primaryCalendarId(): Long? {
@@ -134,5 +124,72 @@ class CalendarWriteTool @Inject constructor(
             return fallback
         }
         return null
+    }
+}
+
+internal data class CalendarEventDraft(
+    val title: String,
+    val start: Long,
+    val end: Long,
+    val location: String?,
+    val description: String?,
+)
+
+/**
+ * Enforces a real two-user-turn confirmation boundary. The model cannot
+ * authorize its own write by setting `confirmed=true`: the exact draft must
+ * have been previewed earlier, and the current user message must explicitly
+ * approve it.
+ */
+internal class CalendarApprovalGate {
+    private data class Pending(val draft: CalendarEventDraft, val requestMessage: String)
+
+    private val pending = ConcurrentHashMap<String, Pending>()
+
+    /** Returns null only when the write is genuinely authorized. */
+    fun authorize(
+        callConfirmed: Boolean,
+        ctx: ToolContext,
+        draft: CalendarEventDraft,
+    ): String? {
+        val conversationId = ctx.conversationId
+        if (conversationId.isBlank()) return "Calendar writes require an active conversation."
+
+        val existing = pending[conversationId]
+        if (!callConfirmed || existing == null || existing.draft != draft) {
+            pending[conversationId] = Pending(draft, ctx.userMessage)
+            return preview(draft)
+        }
+
+        val isLaterTurn = ctx.userMessage.isNotBlank() && ctx.userMessage != existing.requestMessage
+        if (!isLaterTurn || !isExplicitConfirmation(ctx.userMessage)) {
+            return "Reply with an explicit confirmation (for example, ‘yes’ or ‘confirm’) before creating this event."
+        }
+
+        pending.remove(conversationId, existing)
+        return null
+    }
+
+    private fun preview(draft: CalendarEventDraft): String = buildString {
+        val format = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm z", java.util.Locale.getDefault())
+        appendLine("Please confirm the following calendar event:")
+        appendLine("  Title: ${draft.title}")
+        appendLine("  Start: ${format.format(java.util.Date(draft.start))}")
+        appendLine("  End:   ${format.format(java.util.Date(draft.end))}")
+        draft.location?.let { appendLine("  Location: $it") }
+        draft.description?.let { appendLine("  Description: $it") }
+        append("Reply with yes to confirm, or describe what to change.")
+    }
+
+    private fun isExplicitConfirmation(message: String): Boolean {
+        val normalized = message.trim().lowercase().trim('.', '!', '?', ',', ' ')
+        return normalized in CONFIRMATIONS
+    }
+
+    private companion object {
+        val CONFIRMATIONS = setOf(
+            "yes", "yes please", "confirm", "confirmed", "go ahead",
+            "do it", "create it", "add it", "approve", "approved",
+        )
     }
 }
