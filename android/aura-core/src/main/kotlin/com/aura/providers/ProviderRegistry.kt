@@ -1,7 +1,6 @@
 package com.aura.providers
 
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -35,8 +34,22 @@ class ProviderRegistry @Inject constructor(
         }
     }
 
-    fun chat(modelId: String, messages: List<ProviderMessage>, options: ChatOptions = ChatOptions(), tools: List<ToolDefinition> = emptyList()): Flow<ProviderChunk> {
-        val (provider, model) = runBlocking { parse(modelId) }
+    /**
+     * Resolve a model id and dispatch a chat request to the matching
+     * provider. Suspending so the dispatch participates in structured
+     * concurrency — all 7 callers (Brain.stream, LlmWriteGate,
+     * DeepResearchTool, KnowledgeGraphTool, TranslateTool,
+     * QuickAskActivity) are already inside coroutine contexts and
+     * the previous `runBlocking { parse }` was blocking the calling
+     * thread (main thread when invoked from a Compose context).
+     */
+    suspend fun chat(
+        modelId: String,
+        messages: List<ProviderMessage>,
+        options: ChatOptions = ChatOptions(),
+        tools: List<ToolDefinition> = emptyList(),
+    ): Flow<ProviderChunk> {
+        val (provider, model) = parse(modelId)
         return provider.chat(model, messages, options, tools)
     }
 
@@ -44,3 +57,4 @@ class ProviderRegistry @Inject constructor(
     fun all(): List<Provider> = providers.values.toList()
     fun get(prefix: String): Provider? = byPrefix["$prefix:"]
 }
+

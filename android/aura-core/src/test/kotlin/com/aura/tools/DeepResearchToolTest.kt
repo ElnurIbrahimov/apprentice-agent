@@ -7,6 +7,7 @@ import com.aura.providers.ProviderMessage
 import com.aura.providers.ProviderRegistry
 import com.aura.providers.FinishReason
 import com.aura.providers.ProviderChunk
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -54,7 +55,7 @@ class DeepResearchToolTest {
                 ProviderChunk(text = "It runs on the JVM and is fully interoperable with Java [2]."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
-            every { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
+            coEvery { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
         }
 
         val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry).tool
@@ -167,7 +168,7 @@ class DeepResearchToolTest {
                 ProviderChunk(text = "Brave search found Kotlin [1]."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
-            every { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
+            coEvery { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
         }
 
         val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry).tool
@@ -202,7 +203,7 @@ class DeepResearchToolTest {
                 ProviderChunk(text = "Result."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
-            every { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
+            coEvery { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
         }
 
         val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry).tool
@@ -225,7 +226,7 @@ class DeepResearchToolTest {
             body = """{"results":[{"title":"internal","url":"http://127.0.0.1/private","content":"nope"}]}""",
         )
         val registry = mockk<ProviderRegistry> {
-            every { chat(any(), any(), any(), any()) } returns flowOf(
+            coEvery { chat(any(), any(), any(), any()) } returns flowOf(
                 ProviderChunk(text = "Safe answer."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )

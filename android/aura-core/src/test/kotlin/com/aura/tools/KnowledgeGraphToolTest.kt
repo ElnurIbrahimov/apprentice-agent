@@ -37,7 +37,7 @@ class KnowledgeGraphToolTest {
         """.trimIndent()
 
         val mockRegistry = mockk<ProviderRegistry> {
-            every { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
+            coEvery { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
                 ProviderChunk(text = llmResponse),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
@@ -74,7 +74,7 @@ class KnowledgeGraphToolTest {
         val llmResponse = """{"nodes":[],"edges":[]}"""
 
         val mockRegistry = mockk<ProviderRegistry> {
-            every { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
+            coEvery { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
                 ProviderChunk(text = llmResponse),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
@@ -104,7 +104,7 @@ class KnowledgeGraphToolTest {
         """.trimIndent()
 
         val mockRegistry = mockk<ProviderRegistry> {
-            every { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
+            coEvery { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
                 ProviderChunk(text = llmResponse),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
@@ -127,7 +127,7 @@ class KnowledgeGraphToolTest {
         val llmResponse = "This is not JSON at all."
 
         val mockRegistry = mockk<ProviderRegistry> {
-            every { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
+            coEvery { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
                 ProviderChunk(text = llmResponse),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
@@ -160,12 +160,12 @@ class KnowledgeGraphToolTest {
         }
         val mockRegistry = mockk<ProviderRegistry> {
             // First call with "default" throws — parse() can't resolve it
-            every { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } throws
+            coEvery { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } throws
                 IllegalStateException("No configured providers")
             // Fallback path: configured() returns our mock provider
             every { configured() } returns listOf(mockProvider)
             // The fallback call uses the dynamically-built model id
-            every { chat("anthropic:claude-sonnet-4.6", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
+            coEvery { chat("anthropic:claude-sonnet-4.6", any<List<ProviderMessage>>(), any<ChatOptions>()) } returns flowOf(
                 ProviderChunk(text = llmResponse),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
@@ -189,7 +189,7 @@ class KnowledgeGraphToolTest {
         // with a NullPointerException or generic IllegalStateException.
         // This pins the error-message contract callers see.
         val mockRegistry = mockk<ProviderRegistry> {
-            every { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } throws
+            coEvery { chat("default", any<List<ProviderMessage>>(), any<ChatOptions>()) } throws
                 IllegalStateException("No configured providers")
             every { configured() } returns emptyList()
         }

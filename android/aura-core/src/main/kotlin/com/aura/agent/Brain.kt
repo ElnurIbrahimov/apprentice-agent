@@ -88,7 +88,15 @@ class Brain @Inject constructor(
         }
     }
 
-    fun stream(
+    /**
+     * Stream chat tokens from the configured provider. The function is
+     * `suspend` (not `fun`) so the underlying `providerRegistry.chat`
+     * call can dispatch without `runBlocking` — the call site is
+     * already inside a coroutine context, and the previous
+     * thread-blocking call was freezing the main thread when the
+     * call came from a Compose context.
+     */
+    suspend fun stream(
         model: String,
         messages: List<ProviderMessage>,
         tools: List<ToolDefinition> = emptyList(),

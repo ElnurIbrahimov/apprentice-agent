@@ -19,7 +19,7 @@ class LlmWriteGateTest {
 
     private fun makeRegistry(text: String): ProviderRegistry {
         val registry = mockk<ProviderRegistry>(relaxed = true)
-        every { registry.chat(any(), any(), any(), any()) } returns flowOf(
+        coEvery { registry.chat(any(), any(), any(), any()) } returns flowOf(
             ProviderChunk(text = text),
         )
         return registry
@@ -76,7 +76,7 @@ class LlmWriteGateTest {
     @Test
     fun `falls back to heuristic when LLM call throws`() = runTest {
         val registry = mockk<ProviderRegistry>(relaxed = true)
-        every { registry.chat(any(), any(), any(), any()) } throws RuntimeException("network error")
+        coEvery { registry.chat(any(), any(), any(), any()) } throws RuntimeException("network error")
         val gate = LlmWriteGate(WriteGate(), registry, "test:model")
         val decision = gate.evaluate("I prefer dark mode for all my editors", "user")
         assertTrue(decision.shouldStore)

@@ -53,7 +53,7 @@ class AgentIncognitoTest {
     @Test
     fun `memoryEnabled=true (default) writes to memory after a turn`() = runTest {
         // Brain: emit a final text + finish. No tool calls.
-        every { brain.stream(any(), any(), any(), any()) } returns flow {
+        coEvery { brain.stream(any(), any(), any(), any()) } returns flow {
             emit(BrainChunk.Text("hello back"))
             emit(BrainChunk.Finished("stop"))
         }
@@ -83,7 +83,7 @@ class AgentIncognitoTest {
 
     @Test
     fun `memoryEnabled=false skips the auto-store and profile extract`() = runTest {
-        every { brain.stream(any(), any(), any(), any()) } returns flow {
+        coEvery { brain.stream(any(), any(), any(), any()) } returns flow {
             emit(BrainChunk.Text("hello back"))
             emit(BrainChunk.Finished("stop"))
         }
@@ -110,7 +110,7 @@ class AgentIncognitoTest {
 
     @Test
     fun `memoryEnabled=false still returns the assistant text to the caller`() = runTest {
-        every { brain.stream(any(), any(), any(), any()) } returns flow {
+        coEvery { brain.stream(any(), any(), any(), any()) } returns flow {
             emit(BrainChunk.Text("secret answer"))
             emit(BrainChunk.Finished("stop"))
         }
@@ -147,7 +147,7 @@ class AgentIncognitoTest {
             steps = "[{\"tool\":\"send_message\",\"args\":{\"to\":\"slack\",\"body\":\"done\"}}]",
         )
         coEvery { handRepository.getEnabled() } returns listOf(hand)
-        every { brain.stream(any(), any(), any(), any()) } returns flow {
+        coEvery { brain.stream(any(), any(), any(), any()) } returns flow {
             emit(BrainChunk.Text("Running standup hand"))
             emit(BrainChunk.Finished("stop"))
         }
