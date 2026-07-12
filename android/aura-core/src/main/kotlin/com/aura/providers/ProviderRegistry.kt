@@ -1,6 +1,8 @@
 package com.aura.providers
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import com.aura.usage.UsageTracker
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -11,8 +13,9 @@ import javax.inject.Singleton
 @Singleton
 class ProviderRegistry @Inject constructor(
     private val providers: Map<String, @JvmSuppressWildcards Provider>,
+    private val usageTracker: UsageTracker = UsageTracker(),
 ) {
-    private val byPrefix: Map<String, Provider> = providers.mapKeys { (k, _) -> "$k:" }
+    private val byPrefix: Map<String, Provider> = providers.mapKeys { (key, _) -> "$key:" }
 
     /**
      * Resolve a `provider:model` id. The special model id "default" is
@@ -64,7 +67,35 @@ class ProviderRegistry @Inject constructor(
         tools: List<ToolDefinition> = emptyList(),
     ): Flow<ProviderChunk> {
         val (provider, model) = parse(modelId)
-        return provider.chat(model, messages, options, tools)
+        val upstream = provider.chat(model, messages, options, tools)
+        // MoA dispatches its reference and aggregator calls back through this
+        // registry. Track those concrete calls and skip the synthetic outer
+        // flow so a single MoA answer is not double-counted.
+        if (provider.prefix == "moa") return upstream
+        return flow {
+            var outputChars = 0
+            var exactUsage: Usage? = null
+            var billableChunkSeen = false
+            try {
+                upstream.collect { chunk ->
+                    outputChars += chunk.text?.length ?: 0
+                    if (chunk.usage != null) exactUsage = chunk.usage
+                    if (chunk.text != null || chunk.usage != null || chunk.finishReason != null) {
+                        billableChunkSeen = true
+                    }
+                    emit(chunk)
+                }
+            } finally {
+                if (billableChunkSeen) {
+                    usageTracker.recordLlmCall(
+                        modelId = modelId,
+                        inputChars = messages.sumOf { it.content.length },
+                        outputChars = outputChars,
+                        reportedUsage = exactUsage,
+                    )
+                }
+            }
+        }
     }
 
     fun configured(): List<Provider> = providers.values.filter { it.isConfigured() }

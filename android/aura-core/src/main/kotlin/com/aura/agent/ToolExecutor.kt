@@ -2,6 +2,7 @@ package com.aura.agent
 
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
+import com.aura.usage.UsageTracker
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -29,6 +30,7 @@ import javax.inject.Singleton
 class ToolExecutor @Inject constructor(
     private val registry: ToolRegistry,
     @ApplicationContext private val context: Context,
+    private val usageTracker: UsageTracker = UsageTracker(),
 ) {
     suspend fun execute(name: String, argumentsJson: String, ctx: ToolContext): ToolResult {
         val tool = registry.get(name) ?: return ToolResult.Error("Unknown tool: $name", "unknown_tool")
@@ -57,7 +59,7 @@ class ToolExecutor @Inject constructor(
         }
 
         val call = ToolCall(id = "", name = name, arguments = args)
-        return try {
+        val result = try {
             withTimeout(ctx.timeout) {
                 tool.execute(call, ctx)
             }
@@ -71,6 +73,8 @@ class ToolExecutor @Inject constructor(
         } catch (e: Exception) {
             ToolResult.Error(e.message ?: "tool failed", "exception")
         }
+        if (result is ToolResult.Ok) usageTracker.recordToolResult(result.output.length)
+        return result
     }
 
     private fun isGranted(permission: String): Boolean = try {

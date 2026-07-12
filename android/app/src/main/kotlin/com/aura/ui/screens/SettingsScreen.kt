@@ -55,6 +55,7 @@ import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.settings.BackupViewModel
 import com.aura.ui.settings.ProviderKeyField
 import com.aura.ui.settings.SettingsViewModel
+import com.aura.ui.settings.UsageViewModel
 import com.aura.ui.util.modelDisplayName
 import kotlinx.coroutines.launch
 
@@ -142,8 +143,10 @@ fun SettingsScreen(
     onNavigateProfile: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
     backupViewModel: BackupViewModel = hiltViewModel(),
+    usageViewModel: UsageViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    val usage by usageViewModel.usage.collectAsState()
     var showDefaultModelPicker by remember { mutableStateOf(false) }
 
     Column(
@@ -377,6 +380,76 @@ fun SettingsScreen(
                         ),
                     )
                 }
+            }
+        }
+
+        // Usage is provider-central and persistent. Exact counts are shown
+        // when the API reports them; fallback estimates are labelled per model.
+        SettingsSection(
+            emoji = "📊",
+            title = "Usage",
+            subtitle = "${usage.totalTokens} tokens across ${usage.calls} model calls",
+            initialExpanded = false,
+        ) {
+            Text(
+                text = "${usage.promptTokens} input · ${usage.completionTokens} output tokens",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Tool results processed: ${"%.1f".format(usage.toolResultChars / 1000.0)} KB",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (usage.models.isEmpty()) {
+                Text(
+                    "No model calls recorded yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
+                )
+            } else {
+                usage.models.take(8).forEach { model ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = modelDisplayName(model.modelId),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "${model.promptTokens + model.completionTokens} · ${model.calls} calls${if (model.estimated) " ~" else ""}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "~ marks estimated tokens. Cost is not guessed: provider APIs do not return reliable live pricing.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+            )
+            var confirmUsageReset by remember { mutableStateOf(false) }
+            TextButton(onClick = { confirmUsageReset = true }) { Text("Reset usage") }
+            if (confirmUsageReset) {
+                AlertDialog(
+                    onDismissRequest = { confirmUsageReset = false },
+                    title = { Text("Reset usage history?") },
+                    text = { Text("This clears token, call, and tool-result counters on this device.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            usageViewModel.reset()
+                            confirmUsageReset = false
+                        }) { Text("Reset") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmUsageReset = false }) { Text("Cancel") }
+                    },
+                )
             }
         }
 
