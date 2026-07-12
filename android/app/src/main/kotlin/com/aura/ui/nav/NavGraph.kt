@@ -18,12 +18,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Memory
@@ -54,7 +52,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.aura.ui.screens.ChatScreen
-import com.aura.ui.screens.GraphScreen
 import com.aura.ui.screens.HandsScreen
 import com.aura.ui.screens.HistoryScreen
 import com.aura.ui.screens.HomeScreen
@@ -74,7 +71,6 @@ sealed class TopLevelRoute(val route: String, val label: String, val selectedIco
     data object Chat : TopLevelRoute("chat", "Chat", Icons.Filled.Chat, Icons.Outlined.Chat)
     data object Memory : TopLevelRoute("memory", "Memory", Icons.Filled.Memory, Icons.Outlined.Memory)
     data object Settings : TopLevelRoute("settings", "Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
-    data object Graph : TopLevelRoute("graph", "Graph", Icons.Filled.AccountTree, Icons.Outlined.AccountTree)
 }
 
 private val topLevelRoutes = listOf(TopLevelRoute.Home, TopLevelRoute.Chat, TopLevelRoute.Memory, TopLevelRoute.Settings)
@@ -86,13 +82,14 @@ fun NavGraph(
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
-    // The destination's full route includes query params (e.g. "chat?convId=..."),
-    // but the bottom bar's topLevelRoutes are bare ("chat"). Match by prefix so
-    // the bar shows on chat — and any other route that starts with a top-level
-    // name. Without this, the bar disappears on chat and the user can't get back
-    // without force-closing the app.
-    val currentRoute = backStackEntry?.destination?.route
-    val baseRoute = currentRoute?.substringBefore('?')
+    // Show the bottom bar on all screens — not just top-level routes.
+    // The previous check (`topLevelRoutes.any { it.route == baseRoute }`)
+    // hid the bar on every secondary screen (history, hands, tasks, tools,
+    // proactive, reminders, profile, identity_editor), forcing the user
+    // to press the system back button to return to a tab. Keeping the bar
+    // always visible matches the Aura Web pattern where the left sidebar
+    // persists across all views.
+    val showBottomBar = true
 
     LaunchedEffect(openChatOnLaunch) {
         if (openChatOnLaunch) {
@@ -116,11 +113,11 @@ fun NavGraph(
     Scaffold(
         bottomBar = {
             AnimatedVisibility(
-                visible = topLevelRoutes.any { it.route == baseRoute },
+                visible = showBottomBar,
                 enter = slideInVertically { it } + fadeIn(),
                 exit = slideOutVertically { it } + fadeOut(),
             ) {
-                AuraBottomBar(navController, currentRoute)
+                AuraBottomBar(navController, backStackEntry?.destination?.route)
             }
         },
     ) { padding ->
@@ -207,7 +204,6 @@ fun NavGraph(
                     onBack = { navController.popBackStack() },
                 )
             }
-            composable(TopLevelRoute.Graph.route) { GraphScreen() }
             composable("history") {
                 HistoryScreen(onSelect = { convId ->
                     navController.navigate("chat?convId=$convId") {

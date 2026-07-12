@@ -15,6 +15,15 @@ interface MemoryDao {
     @Update
     suspend fun update(memory: MemoryEntity)
 
+    /**
+     * Batch update for decay pass and other bulk operations. Room
+     * wraps the varargs in a single transaction, avoiding N+1
+     * individual UPDATE statements when recomputing decay scores
+     * for thousands of memories.
+     */
+    @Update
+    suspend fun updateAll(memories: List<MemoryEntity>)
+
     @Query("SELECT * FROM memories WHERE id = :id")
     suspend fun getById(id: String): MemoryEntity?
 

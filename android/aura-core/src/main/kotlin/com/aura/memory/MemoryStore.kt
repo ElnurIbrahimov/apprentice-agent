@@ -330,18 +330,24 @@ class MemoryStore @Inject constructor(
     suspend fun count(): Int = dao.countOnce()
 
     /**
-     * Run decay pass: recompute the decay score for every memory. The work
-     * is bounded by the table size; on a large memory DB this is still O(n)
-     * but n is small in practice (hundreds to a few thousand).
+     * Run decay pass: recompute the decay score for every memory.
+     * Uses batch updates (50 per batch) to avoid N+1 individual
+     * UPDATE statements. The threshold (0.05) skips memories whose
+     * score hasn't meaningfully changed since the last pass.
      */
     suspend fun runDecayPass() {
         val now = System.currentTimeMillis()
         val all = dao.recent(10_000)  // hard cap; raise if needed
+        val toUpdate = mutableListOf<MemoryEntity>()
         for (mem in all) {
             val newScore = FadeMem.compute(mem.createdAt, mem.accessedAt, now)
             if (kotlin.math.abs(newScore - mem.decayScore) > 0.05f) {
-                dao.update(mem.copy(decayScore = newScore))
+                toUpdate.add(mem.copy(decayScore = newScore))
             }
+        }
+        // Batch in chunks of 50 to keep each transaction small.
+        toUpdate.chunked(50).forEach { batch ->
+            dao.updateAll(batch)
         }
     }
 }
