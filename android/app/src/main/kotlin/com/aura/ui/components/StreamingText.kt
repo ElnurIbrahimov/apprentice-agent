@@ -98,35 +98,37 @@ fun StreamingText(
     style: TextStyle = MaterialTheme.typography.bodyLarge,
     cursorColor: Color = AuraTokens.Dark.accentPurple,
 ) {
-    // The infinite transition must live in a Composable context.
-    //
-    // Binary on/off blink at 530ms per cycle (53% on, 47% off — a
-    // 50/50 split feels too nervous). Using keyframes with two
-    // steps produces a hard cut between on and off, like a real
-    // terminal cursor and the ChatGPT / Claude streaming
-    // indicator. The previous tween + RepeatMode.Reverse
-    // produced a smooth 0.3 → 1.0 alpha fade, which looks like
-    // throbbing rather than typing.
-    val infiniteTransition = rememberInfiniteTransition(label = "cursor")
-    val cursorAlpha by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = keyframes<Float> {
-                durationMillis = 530
-                1f at 0
-                1f at 280
-                0f at 281
-                0f at 529
-                1f at 530
-            },
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "alpha",
-    )
-    val effectiveCursor = cursorColor.copy(alpha = cursorAlpha)
+    // The infinite transition is only created while streaming. Once
+    // streaming stops, we skip the transition entirely so the cursor
+    // blink animator doesn't drain battery on every completed message
+    // in the conversation list. The cursor color is only applied to
+    // the annotated string when isStreaming is true (see
+    // buildStreamingAnnotatedString), but the underlying
+    // rememberInfiniteTransition would otherwise keep ticking.
     val colors = rememberMarkdownColors()
     val state = remember { StreamingMarkdownState() }
+    val effectiveCursor = if (isStreaming) {
+        val infiniteTransition = rememberInfiniteTransition(label = "cursor")
+        val cursorAlpha by infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = keyframes<Float> {
+                    durationMillis = 530
+                    1f at 0
+                    1f at 280
+                    0f at 281
+                    0f at 529
+                    1f at 530
+                },
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "alpha",
+        )
+        cursorColor.copy(alpha = cursorAlpha)
+    } else {
+        cursorColor
+    }
     val annotated = buildStreamingAnnotatedString(
         text = text,
         cursorColor = effectiveCursor,
