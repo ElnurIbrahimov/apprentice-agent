@@ -25,35 +25,37 @@ object MemoryModule {
                     id TEXT NOT NULL PRIMARY KEY,
                     label TEXT NOT NULL,
                     type TEXT NOT NULL,
-                    confidence REAL NOT NULL DEFAULT 1.0,
-                    properties TEXT NOT NULL DEFAULT '{}',
-                    sourceTurnId TEXT NOT NULL DEFAULT '',
-                    accessCount INTEGER NOT NULL DEFAULT 0,
-                    lastAccessed INTEGER NOT NULL DEFAULT 0,
-                    createdAt INTEGER NOT NULL DEFAULT 0,
-                    updatedAt INTEGER NOT NULL DEFAULT 0
+                    properties TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    sourceTurnId TEXT NOT NULL,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    accessCount INTEGER NOT NULL,
+                    lastAccessed INTEGER NOT NULL
                 )
             """.trimIndent())
             db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_nodes_label ON kg_nodes(label)")
             db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_nodes_type ON kg_nodes(type)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_nodes_label_type ON kg_nodes(label, type)")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_kg_nodes_label_type ON kg_nodes(label, type)")
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS kg_edges (
                     id TEXT NOT NULL PRIMARY KEY,
                     type TEXT NOT NULL,
                     sourceId TEXT NOT NULL,
                     targetId TEXT NOT NULL,
-                    weight REAL NOT NULL DEFAULT 1.0,
-                    properties TEXT NOT NULL DEFAULT '{}',
-                    confidence REAL NOT NULL DEFAULT 1.0,
-                    sourceTurnId TEXT NOT NULL DEFAULT '',
-                    createdAt INTEGER NOT NULL DEFAULT 0,
-                    lastReinforced INTEGER NOT NULL DEFAULT 0
+                    weight REAL NOT NULL,
+                    properties TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    sourceTurnId TEXT NOT NULL,
+                    createdAt INTEGER NOT NULL,
+                    lastReinforced INTEGER NOT NULL,
+                    FOREIGN KEY(sourceId) REFERENCES kg_nodes(id) ON DELETE CASCADE,
+                    FOREIGN KEY(targetId) REFERENCES kg_nodes(id) ON DELETE CASCADE
                 )
             """.trimIndent())
             db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_edges_sourceId ON kg_edges(sourceId)")
             db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_edges_targetId ON kg_edges(targetId)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_edges_sourceId_targetId_type ON kg_edges(sourceId, targetId, type)")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_kg_edges_sourceId_targetId_type ON kg_edges(sourceId, targetId, type)")
         }
     }
 

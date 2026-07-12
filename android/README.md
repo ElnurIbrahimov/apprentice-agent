@@ -26,6 +26,7 @@ This is my personal copy. The plan lives at `.hermes/plans/`.
 - Onboarding wizard (paste API key + verify connectivity)
 - Biometric gate for sensitive tools
 - 512 unit tests passing across `:aura-core` (380) + `:app` (132)
+- 9 connected-device tests passing (7 Room migrations + 2 app smoke tests)
 
 Note: the app uses **cloud providers only** — there is no on-device model.
 

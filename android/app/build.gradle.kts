@@ -98,6 +98,7 @@ dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:1.9.24")
 
     androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)

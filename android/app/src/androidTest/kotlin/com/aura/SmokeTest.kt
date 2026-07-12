@@ -1,6 +1,6 @@
 package com.aura
 
-import androidx.test.ext.junit.runAndroidJUnit4
+import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Test
 import org.junit.Assert.assertEquals
@@ -15,15 +15,15 @@ class SmokeTest {
     @Test
     fun useAppContext() {
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.aura", appContext.packageName)
+        assertEquals(BuildConfig.APPLICATION_ID, appContext.packageName)
     }
 
     @Test
     fun appLaunchesMainActivity() {
-        val intent = androidx.test.core.app.launcher.ActivityLauncher.launch(
-            "com.aura.MainActivity"
-        )
-        // If we got here, the activity launched
-        assert(intent != null)
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                assertEquals(MainActivity::class.java, activity::class.java)
+            }
+        }
     }
 }
