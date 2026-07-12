@@ -1,20 +1,29 @@
 package com.aura.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -25,11 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.text.Regex
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.width
-import androidx.compose.ui.Alignment
-import androidx.compose.foundation.shape.CircleShape
 
 /**
  * Lightweight markdown renderer. Handles the 80% case with regex
@@ -44,8 +48,7 @@ import androidx.compose.foundation.shape.CircleShape
  * - Bullet lists (- item / * item)
  * - Ordered lists (1. item)
  * - Tables (| col1 | col2 |  +  |---|---|)
- * - Links ([label](url)) — rendered as styled text, no click handler
- *   (clickable Compose text would need a separate composable)
+ * - Links ([label](url)) — clickable; taps open the URL via the system URI handler
  *
  * Trade-off vs a real markdown lib: edge cases like nested code
  * inside link text, HTML, and image embeds aren't supported. Good
@@ -80,6 +83,12 @@ private val italicStarRegex = Regex("(?<!\\*)\\*(?!\\s)(?!\\*)([^*]+?)(?<!\\s)(?
 private val italicUnderscoreRegex = Regex("(?<![A-Za-z0-9*])_(?!\\s)([^_\\n]+?)(?<!\\s)_(?![A-Za-z0-9*])")
 private val inlineCodeRegex = Regex("`([^`\\n]+)`")
 private val linkRegex = Regex("\\[([^\\]]+)\\]\\(([^)]+)\\)")
+
+/** Only web links from untrusted model output may reach the system URI handler. */
+internal fun isSafeMarkdownUrl(url: String): Boolean = runCatching {
+    val uri = java.net.URI(url.trim())
+    (uri.scheme == "https" || uri.scheme == "http") && !uri.host.isNullOrBlank()
+}.getOrDefault(false)
 
 // Colors used for inline markdown rendering. Captured at
 // composition time (the only legal place to read
@@ -154,6 +163,41 @@ internal fun parseMarkdown(text: String, colors: MarkdownColors): AnnotatedStrin
     }
 }
 
+/**
+ * Same as [parseMarkdown] but returns an [AnnotatedString] with link annotations
+ * attached so that [ClickableText] can open URLs.
+ */
+internal fun parseMarkdownClickable(text: String, colors: MarkdownColors): AnnotatedString = buildAnnotatedString {
+    val lines = text.split("\n")
+    for ((index, line) in lines.withIndex()) {
+        val headerMatch = headerRegex.find(line)
+        if (headerMatch != null) {
+            val level = headerMatch.groupValues[1].length
+            val headerText = headerMatch.groupValues[2]
+            pushStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = (16 - level).sp))
+            append(headerText)
+            pop()
+        } else {
+            val orderedMatch = orderedListRegex.find(line)
+            if (orderedMatch != null) {
+                val n = orderedMatch.groupValues[1]
+                val content = orderedMatch.groupValues[2]
+                append("${n}. ")
+                appendInlineMarkdownClickable(content, colors)
+            } else {
+                val bulletMatch = bulletRegex.find(line)
+                if (bulletMatch != null) {
+                    append("• ")
+                    appendInlineMarkdownClickable(bulletMatch.groupValues[1], colors)
+                } else {
+                    appendInlineMarkdownClickable(line, colors)
+                }
+            }
+        }
+        if (index < lines.lastIndex) append("\n")
+    }
+}
+
 private fun AnnotatedString.Builder.appendInlineMarkdown(text: String, colors: MarkdownColors) {
     if (text.isEmpty()) return
     // Run all inline patterns. To avoid double-processing, mark
@@ -202,23 +246,97 @@ private fun AnnotatedString.Builder.appendInlineMarkdown(text: String, colors: M
                 pop()
             }
             "l" -> {
-                // Render as underlined + primary color, not a real
-                // hyperlink. Compose clickable links need a
-                // dedicated composable; this is "looks like a link"
-                // which is enough for chat output.
+                val label = match.groupValues[1]
+                val url = match.groupValues[2]
                 pushStyle(SpanStyle(
                     color = colors.link,
                     textDecoration = TextDecoration.Underline,
                 ))
-                append(match.groupValues[1])
+                append(label)
                 pop()
                 append(" (")
                 pushStyle(SpanStyle(
                     color = colors.linkDim,
                 ))
-                append(match.groupValues[2])
+                append(url)
                 pop()
                 append(")")
+            }
+            "is" -> {
+                pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
+                append(match.groupValues[contentGroup])
+                pop()
+            }
+            "iu" -> {
+                pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
+                append(match.groupValues[contentGroup])
+                pop()
+            }
+        }
+        pos += match.range.last + 1
+    }
+}
+
+private fun AnnotatedString.Builder.appendInlineMarkdownClickable(text: String, colors: MarkdownColors) {
+    if (text.isEmpty()) return
+    var pos = 0
+    while (pos < text.length) {
+        val remaining = text.substring(pos)
+        val candidates = listOfNotNull(
+            boldItalicRegex.find(remaining)?.let { Triple("bi", it, 1) },
+            boldRegex.find(remaining)?.let { Triple("b", it, 1) },
+            inlineCodeRegex.find(remaining)?.let { Triple("c", it, 1) },
+            linkRegex.find(remaining)?.let { Triple("l", it, 1) },
+            italicStarRegex.find(remaining)?.let { Triple("is", it, 1) },
+            italicUnderscoreRegex.find(remaining)?.let { Triple("iu", it, 1) },
+        )
+        val next = candidates.minByOrNull { it.second.range.first }
+        if (next == null) {
+            append(text.substring(pos))
+            return
+        }
+        val (kind, match, contentGroup) = next
+        val startInRemaining = match.range.first
+        if (startInRemaining > 0) {
+            append(text.substring(pos, pos + startInRemaining))
+        }
+        when (kind) {
+            "bi" -> {
+                pushStyle(SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic))
+                append(match.groupValues[contentGroup])
+                pop()
+            }
+            "b" -> {
+                pushStyle(SpanStyle(fontWeight = FontWeight.Bold))
+                append(match.groupValues[contentGroup])
+                pop()
+            }
+            "c" -> {
+                pushStyle(SpanStyle(
+                    fontFamily = FontFamily.Monospace,
+                    background = Color(0x1A808080),
+                ))
+                append(match.groupValues[contentGroup])
+                pop()
+            }
+            "l" -> {
+                val label = match.groupValues[1]
+                val url = match.groupValues[2]
+                val start = this.length
+                pushStyle(SpanStyle(
+                    color = colors.link,
+                    textDecoration = TextDecoration.Underline,
+                ))
+                append(label)
+                pop()
+                if (isSafeMarkdownUrl(url)) {
+                    addStringAnnotation(
+                        tag = "URL",
+                        annotation = url,
+                        start = start,
+                        end = start + label.length,
+                    )
+                }
             }
             "is" -> {
                 pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
@@ -266,6 +384,43 @@ fun MarkdownText(
         link = MaterialTheme.colorScheme.primary,
         linkDim = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
     )
+    val annotated = parseMarkdownClickable(text, colors)
+    val uriHandler = LocalUriHandler.current
+    ClickableText(
+        text = annotated,
+        style = style,
+        modifier = modifier,
+        onClick = { offset ->
+            annotated.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                .firstOrNull()
+                ?.let { annotation ->
+                    runCatching { uriHandler.openUri(annotation.item) }
+                }
+        },
+    )
+}
+
+private sealed class MarkdownBlock {
+    data class Text(val content: String) : MarkdownBlock()
+    data class Code(val language: String, val code: String) : MarkdownBlock()
+    data class Table(val headers: List<String>, val rows: List<List<String>>) : MarkdownBlock()
+}
+
+/**
+ * Render a markdown string as a Compose Column.
+ * Code blocks are rendered as separate boxed sections; the rest is
+ * rendered as clickable AnnotatedString so that inline links open URLs.
+ */
+@Composable
+fun MarkdownColumn(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyMedium,
+) {
+    val colors = MarkdownColors(
+        link = MaterialTheme.colorScheme.primary,
+        linkDim = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+    )
     Column(modifier = modifier) {
         val blocks = splitMarkdownBlocks(text)
         for (block in blocks) {
@@ -279,11 +434,7 @@ fun MarkdownText(
                     Spacer(Modifier.height(6.dp))
                 }
                 is MarkdownBlock.Text -> {
-                    Text(
-                        text = parseMarkdown(block.content, colors),
-                        style = style,
-                        overflow = TextOverflow.Visible,
-                    )
+                    ClickableMarkdownBlock(text = block.content, colors = colors, style = style)
                     Spacer(Modifier.height(4.dp))
                 }
             }
@@ -291,10 +442,26 @@ fun MarkdownText(
     }
 }
 
-private sealed class MarkdownBlock {
-    data class Text(val content: String) : MarkdownBlock()
-    data class Code(val language: String, val code: String) : MarkdownBlock()
-    data class Table(val headers: List<String>, val rows: List<List<String>>) : MarkdownBlock()
+@Composable
+private fun ClickableMarkdownBlock(
+    text: String,
+    colors: MarkdownColors,
+    style: androidx.compose.ui.text.TextStyle,
+) {
+    val annotated = parseMarkdownClickable(text, colors)
+    val uriHandler = LocalUriHandler.current
+    ClickableText(
+        text = annotated,
+        style = style,
+        overflow = TextOverflow.Visible,
+        onClick = { offset ->
+            annotated.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                .firstOrNull()
+                ?.let { annotation ->
+                    runCatching { uriHandler.openUri(annotation.item) }
+                }
+        },
+    )
 }
 
 private fun splitMarkdownBlocks(text: String): List<MarkdownBlock> {

@@ -15,6 +15,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -148,8 +152,11 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    fun finish() {
-        viewModelScope.launch { firstRunGate.markComplete() }
+    fun finish(onComplete: () -> Unit) {
+        viewModelScope.launch {
+            firstRunGate.markComplete()
+            onComplete()
+        }
     }
 }
 
@@ -174,7 +181,7 @@ fun OnboardingScreen(
             },
             actions = {
                 if (page < 2) {
-                    TextButton(onClick = onComplete) {
+                    TextButton(onClick = { viewModel.finish(onComplete) }) {
                         Text("Skip", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                     }
                 }
@@ -208,10 +215,7 @@ fun OnboardingScreen(
                 2 -> PageDone(
                     configuredCount = state.configuredCount,
                     moaAvailable = state.moaAvailable,
-                    onFinish = {
-                        viewModel.finish()
-                        onComplete()
-                    },
+                    onFinish = { viewModel.finish(onComplete) },
                 )
             }
         }
@@ -272,10 +276,10 @@ private fun PageWelcome(onNext: () -> Unit) {
         Spacer(modifier = Modifier.height(32.dp))
         // Feature pills — three short promises
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            FeaturePill(icon = "🧠", text = "Remembers what matters to you")
-            FeaturePill(icon = "🎯", text = "Manages tasks and calendar")
-            FeaturePill(icon = "🔌", text = "Connects to the best models")
-            FeaturePill(icon = "🔒", text = "Keys stay on your device")
+            FeaturePill(icon = Icons.Filled.Memory, text = "Remembers what matters to you")
+            FeaturePill(icon = Icons.Filled.TaskAlt, text = "Manages tasks and calendar")
+            FeaturePill(icon = Icons.Filled.Hub, text = "Connects to the best models")
+            FeaturePill(icon = Icons.Filled.Lock, text = "Keys stay on your device")
         }
         Spacer(modifier = Modifier.height(40.dp))
         Button(
@@ -293,7 +297,7 @@ private fun PageWelcome(onNext: () -> Unit) {
 }
 
 @Composable
-private fun FeaturePill(icon: String, text: String) {
+private fun FeaturePill(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -305,7 +309,7 @@ private fun FeaturePill(icon: String, text: String) {
             modifier = Modifier.size(36.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Text(text = icon, style = MaterialTheme.typography.titleMedium)
+                Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
             }
         }
         Text(

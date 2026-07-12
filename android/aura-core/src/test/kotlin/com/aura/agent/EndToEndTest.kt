@@ -42,7 +42,7 @@ class EndToEndTest {
         every { provider.isConfigured() } returns true
 
         val providerRegistry = mockk<ProviderRegistry>(relaxed = true)
-        every { providerRegistry.parse(any<String>()) } returns (provider to "test-model")
+        coEvery { providerRegistry.parse(any<String>()) } returns (provider to "test-model")
 
         val brain = mockk<Brain>(relaxed = true)
         // First call: model emits a remember tool call
@@ -110,7 +110,7 @@ class EndToEndTest {
         every { provider.prefix } returns "test"
         every { provider.isConfigured() } returns true
         val providerRegistry = mockk<ProviderRegistry>(relaxed = true)
-        every { providerRegistry.parse(any<String>()) } returns (provider to "test-model")
+        coEvery { providerRegistry.parse(any<String>()) } returns (provider to "test-model")
 
         val brain = mockk<Brain>(relaxed = true)
         coEvery { brain.stream(any(), any(), any(), any()) } returnsMany listOf(
@@ -155,7 +155,7 @@ class EndToEndTest {
         every { provider.prefix } returns "test"
         every { provider.isConfigured() } returns true
         val providerRegistry = mockk<ProviderRegistry>(relaxed = true)
-        every { providerRegistry.parse(any<String>()) } returns (provider to "test-model")
+        coEvery { providerRegistry.parse(any<String>()) } returns (provider to "test-model")
         val brain = mockk<Brain>(relaxed = true)
         coEvery { brain.stream(any(), any(), any(), any()) } returns flowOf(
             BrainChunk.Text("Nice to meet you, Elnur."),

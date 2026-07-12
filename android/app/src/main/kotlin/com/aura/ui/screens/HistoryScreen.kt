@@ -2,6 +2,11 @@ package com.aura.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
@@ -25,7 +31,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -51,10 +57,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.core.content.FileProvider
 import com.aura.agent.Conversation
+import com.aura.ui.components.AuraScreenHeader
 import com.aura.ui.viewmodel.HistoryViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -69,33 +77,24 @@ fun HistoryScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp).padding(top = 16.dp)) {
-        Text("History", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = if (state.query.isBlank()) "${state.conversations.size} saved conversations"
-                else "${state.conversations.size} match${if (state.conversations.size == 1) "" else "es"} for \"${state.query}\"",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-            )
-            if (state.conversations.isNotEmpty() && state.query.isBlank()) {
+    val subtitle = if (state.query.isBlank()) "${state.conversations.size} saved conversations"
+        else "${state.conversations.size} match${if (state.conversations.size == 1) "" else "es"} for \"${state.query}\""
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
+        AuraScreenHeader(
+            title = "History",
+            subtitle = subtitle,
+            action = if (state.conversations.isNotEmpty() && state.query.isBlank()) ({
                 TextButton(onClick = {
                     coroutineScope.launch {
-                        val md = viewModel.exportAllMarkdown()
-                        shareMarkdown(context, md, "aura-conversations")
+                        shareMarkdown(context, viewModel.exportAllMarkdown(), "aura-conversations")
                     }
                 }) {
                     Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("Export all")
                 }
-            }
-        }
-        Spacer(modifier = Modifier.height(12.dp))
+            }) else null,
+        )
 
         // Search bar.
         OutlinedTextField(
@@ -126,15 +125,17 @@ fun HistoryScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         if (state.loading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            HistorySkeletonLoading()
         } else if (state.conversations.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     val emptyMessage = if (state.query.isBlank()) "No conversations yet"
                     else "No matches for \"${state.query}\""
-                    Text(
-                        text = if (state.query.isBlank()) "💬" else "🔍",
-                        style = MaterialTheme.typography.displayLarge,
+                    Icon(
+                        imageVector = if (state.query.isBlank()) Icons.Filled.Chat else Icons.Filled.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.25f),
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(emptyMessage, style = MaterialTheme.typography.titleMedium)
@@ -275,6 +276,134 @@ private fun HistoryRow(
             IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
             }
+        }
+    }
+}
+
+// ── Skeleton Loading ─────────────────────────────────────────────────────────
+
+/**
+ * Skeleton loading placeholder for the history list. Shows 5 card-shaped
+ * placeholders that mirror the HistoryRow layout — icon, title, preview,
+ * meta lines, and action button slots — pulsing subtly so the transition
+ * to real content feels smooth.
+ */
+@Composable
+private fun HistorySkeletonLoading() {
+    val infiniteTransition = rememberInfiniteTransition(label = "skeleton-pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(animation = tween(durationMillis = 900)),
+        label = "pulse-alpha",
+    )
+
+    LazyColumn(
+        contentPadding = PaddingValues(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(5) {
+            SkeletonHistoryCard(alpha = pulseAlpha)
+        }
+    }
+}
+
+@Composable
+private fun SkeletonHistoryCard(alpha: Float) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Icon placeholder (matches HistoryRow 24dp Chat/PushPin icon)
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .alpha(alpha * 0.5f)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.3f),
+                        shape = CircleShape,
+                    ),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                // Title line
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.55f)
+                        .height(16.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.4f),
+                            shape = RoundedCornerShape(4.dp),
+                        ),
+                )
+                Spacer(Modifier.height(6.dp))
+                // Preview line
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .height(12.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.25f),
+                            shape = RoundedCornerShape(4.dp),
+                        ),
+                )
+                Spacer(Modifier.height(6.dp))
+                // Meta row: model name + date
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .width(120.dp)
+                            .height(10.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                shape = RoundedCornerShape(4.dp),
+                            ),
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(80.dp)
+                            .height(10.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                shape = RoundedCornerShape(4.dp),
+                            ),
+                    )
+                }
+            }
+            Spacer(Modifier.width(4.dp))
+            // Action button placeholders (pin, share, delete)
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                        shape = RoundedCornerShape(6.dp),
+                    ),
+            )
+            Spacer(Modifier.width(4.dp))
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                        shape = RoundedCornerShape(6.dp),
+                    ),
+            )
+            Spacer(Modifier.width(4.dp))
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                        shape = RoundedCornerShape(6.dp),
+                    ),
+            )
         }
     }
 }

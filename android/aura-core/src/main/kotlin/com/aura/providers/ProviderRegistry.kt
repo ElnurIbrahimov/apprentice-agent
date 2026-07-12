@@ -1,6 +1,7 @@
 package com.aura.providers
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -14,7 +15,11 @@ class ProviderRegistry @Inject constructor(
 ) {
     private val byPrefix: Map<String, Provider> = providers.mapKeys { (k, _) -> "$k:" }
 
-    fun parse(modelId: String): Pair<Provider, String> {
+    /**
+     * Resolve a `provider:model` id. The special model id "default" is
+     * routed to the first configured provider's first available model.
+     */
+    suspend fun parse(modelId: String): Pair<Provider, String> {
         val parts = modelId.split(":", limit = 2)
         return if (parts.size == 2) {
             val provider = byPrefix[parts[0] + ":"]
@@ -24,12 +29,14 @@ class ProviderRegistry @Inject constructor(
             // Default: first configured provider
             val default = providers.values.firstOrNull { it.isConfigured() }
                 ?: throw IllegalStateException("No configured providers")
-            default to modelId
+            val firstModel = runCatching { default.listModels().firstOrNull() }.getOrNull()
+            val resolvedModel = firstModel ?: modelId
+            default to resolvedModel
         }
     }
 
     fun chat(modelId: String, messages: List<ProviderMessage>, options: ChatOptions = ChatOptions(), tools: List<ToolDefinition> = emptyList()): Flow<ProviderChunk> {
-        val (provider, model) = parse(modelId)
+        val (provider, model) = runBlocking { parse(modelId) }
         return provider.chat(model, messages, options, tools)
     }
 

@@ -1,5 +1,10 @@
 package com.aura.ui.screens
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,14 +29,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -53,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.kg.KgNode
 import com.aura.kg.KnowledgeGraphRepository
+import com.aura.ui.components.AuraScreenHeader
 import com.aura.ui.viewmodel.GraphUiState
 import com.aura.ui.viewmodel.GraphViewModel
 import kotlinx.serialization.json.Json
@@ -127,7 +134,7 @@ private fun GraphContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(horizontal = 20.dp),
         ) {
             GraphHeader(nodeCount = state.nodes.size)
             Spacer(modifier = Modifier.height(12.dp))
@@ -174,19 +181,10 @@ private fun GraphContent(
 
 @Composable
 private fun GraphHeader(nodeCount: Int) {
-    Column {
-        Text(
-            text = "Knowledge Graph",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Text(
-            text = "$nodeCount nodes in view",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-        )
-    }
+    AuraScreenHeader(
+        title = "Knowledge Graph",
+        subtitle = "$nodeCount node${if (nodeCount == 1) "" else "s"} in view",
+    )
 }
 
 // ── Search Bar ───────────────────────────────────────────────────────────────
@@ -232,8 +230,81 @@ private fun SearchBar(
 
 @Composable
 private fun GraphLoading() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
+    val infiniteTransition = rememberInfiniteTransition()
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.65f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900),
+            repeatMode = RepeatMode.Reverse,
+        ),
+    )
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Branded indeterminate progress bar
+        LinearProgressIndicator(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Skeleton placeholder cards
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            repeat(6) { index ->
+                SkeletonNodeRow(alpha = alpha)
+                if (index < 5) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = alpha * 0.4f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SkeletonNodeRow(alpha: Float) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Skeleton type dot
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .background(
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha),
+                    CircleShape,
+                ),
+        )
+        Spacer(modifier = Modifier.size(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            // Skeleton label line
+            Box(
+                modifier = Modifier
+                    .width(180.dp)
+                    .height(14.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha),
+                        RoundedCornerShape(4.dp),
+                    ),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            // Skeleton metadata line
+            Box(
+                modifier = Modifier
+                    .width(120.dp)
+                    .height(12.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha * 0.7f),
+                        RoundedCornerShape(4.dp),
+                    ),
+            )
+        }
     }
 }
 
@@ -241,20 +312,22 @@ private fun GraphLoading() {
 private fun GraphEmptyState() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "🗂️",
-                style = MaterialTheme.typography.displayLarge,
+            Icon(
+                imageVector = Icons.Outlined.AccountTree,
+                contentDescription = null,
+                modifier = Modifier.size(72.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "No nodes yet",
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
                 text = "The knowledge graph populates as you chat with Aura.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             )
         }
     }

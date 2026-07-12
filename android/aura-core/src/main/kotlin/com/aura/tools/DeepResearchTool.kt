@@ -5,12 +5,14 @@ import com.aura.agent.ToolContext
 import com.aura.agent.ToolResult
 import com.aura.agent.ToolRisk
 import com.aura.core.url.SsrfGuard
+import com.aura.core.util.buildFirecrawlBody
 import com.aura.providers.ChatOptions
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderMessage
 import com.aura.providers.ProviderRegistry
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
+import com.aura.tools.DuckDuckGoSearch
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
@@ -50,6 +52,7 @@ class DeepResearchTool @Inject constructor(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val mediaType = "application/json".toMediaType()
+    private val ddg by lazy { DuckDuckGoSearch(httpClient) }
 
     data class Citation(val index: Int, val title: String, val url: String)
 
@@ -228,35 +231,8 @@ class DeepResearchTool @Inject constructor(
     }
 
     private fun searchDuckDuckGo(encoded: String, maxResults: Int): List<SearchResult> {
-        val url = "https://html.duckduckgo.com/html/?q=$encoded"
-        val req = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 Aura/1.0")
-            .build()
-
-        httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw RuntimeException("DuckDuckGo HTTP ${resp.code}")
-            val html = resp.body?.string() ?: return emptyList()
-            return parseDuckDuckGoHtml(html, maxResults)
-        }
-    }
-
-    private fun parseDuckDuckGoHtml(html: String, maxResults: Int): List<SearchResult> {
-        val out = mutableListOf<SearchResult>()
-        val linkPattern = Regex("""class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>""")
-        val snippetPattern = Regex("""class="result__snippet"[^>]*>([^<]+)</a>""")
-        val links = linkPattern.findAll(html).take(maxResults).toList()
-        val snippets = snippetPattern.findAll(html).take(maxResults).toList()
-        for (i in links.indices) {
-            val m = links[i]
-            val snippet = snippets.getOrNull(i)?.groupValues?.get(1)?.trim() ?: ""
-            out += SearchResult(
-                title = m.groupValues[2].trim(),
-                url = m.groupValues[1].trim(),
-                snippet = snippet,
-            )
-        }
-        return out
+        val query = java.net.URLDecoder.decode(encoded, "UTF-8")
+        return ddg.search(query, maxResults).map { SearchResult(it.title, it.url, it.snippet) }
     }
 
     // ------------------------------------------------------------------
@@ -264,6 +240,11 @@ class DeepResearchTool @Inject constructor(
     // ------------------------------------------------------------------
 
     private fun fetchUrlContent(url: String): String? {
+        // Search-result URLs are untrusted. Apply the guard before choosing
+        // either outbound fetch backend—Firecrawl must not become an SSRF
+        // bypass merely because it is configured.
+        if (SsrfGuard.validate(url) != null) return null
+
         val firecrawlKey = providerKeys.keyFor("firecrawl")
         if (!firecrawlKey.isNullOrBlank()) {
             return fetchViaFirecrawl(url, firecrawlKey)
@@ -271,10 +252,9 @@ class DeepResearchTool @Inject constructor(
         return fetchDirect(url)
     }
 
-    private fun fetchViaFirecrawl(url: String, apiKey: String): String? {
+    private fun fetchViaFirecrawl(url: kotlin.String, apiKey: kotlin.String): kotlin.String? {
         try {
-            val sanitizedUrl = url.replace("\\", "\\\\").replace("\"", "\\\"")
-            val body = """{"url":"$sanitizedUrl","formats":["markdown"]}"""
+            val body = buildFirecrawlBody(url)
 
             val req = Request.Builder()
                 .url("https://api.firecrawl.dev/v1/scrape")

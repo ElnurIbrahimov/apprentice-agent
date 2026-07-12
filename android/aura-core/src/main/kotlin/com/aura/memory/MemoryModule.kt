@@ -26,13 +26,17 @@ object MemoryModule {
                     label TEXT NOT NULL,
                     type TEXT NOT NULL,
                     confidence REAL NOT NULL DEFAULT 1.0,
-                    properties TEXT DEFAULT '{}',
-                    sourceTurnId TEXT DEFAULT '',
+                    properties TEXT NOT NULL DEFAULT '{}',
+                    sourceTurnId TEXT NOT NULL DEFAULT '',
                     accessCount INTEGER NOT NULL DEFAULT 0,
                     lastAccessed INTEGER NOT NULL DEFAULT 0,
+                    createdAt INTEGER NOT NULL DEFAULT 0,
                     updatedAt INTEGER NOT NULL DEFAULT 0
                 )
             """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_nodes_label ON kg_nodes(label)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_nodes_type ON kg_nodes(type)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_nodes_label_type ON kg_nodes(label, type)")
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS kg_edges (
                     id TEXT NOT NULL PRIMARY KEY,
@@ -40,10 +44,16 @@ object MemoryModule {
                     sourceId TEXT NOT NULL,
                     targetId TEXT NOT NULL,
                     weight REAL NOT NULL DEFAULT 1.0,
-                    sourceTurnId TEXT DEFAULT '',
+                    properties TEXT NOT NULL DEFAULT '{}',
+                    confidence REAL NOT NULL DEFAULT 1.0,
+                    sourceTurnId TEXT NOT NULL DEFAULT '',
+                    createdAt INTEGER NOT NULL DEFAULT 0,
                     lastReinforced INTEGER NOT NULL DEFAULT 0
                 )
             """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_edges_sourceId ON kg_edges(sourceId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_edges_targetId ON kg_edges(targetId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_kg_edges_sourceId_targetId_type ON kg_edges(sourceId, targetId, type)")
         }
     }
 

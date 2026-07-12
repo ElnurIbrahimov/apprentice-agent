@@ -32,10 +32,10 @@ class StreamingMarkdownState {
      * Render the cumulative streamed text, suppressing any
      * trailing unclosed bold/code markers.
      */
-    fun render(cumulative: String, colors: MarkdownColors): AnnotatedString {
+    fun render(cumulative: String, colors: MarkdownColors, clickable: Boolean = false): AnnotatedString {
         if (cumulative.isEmpty()) return AnnotatedString("")
         val (visibleText, _) = maskTrailingUnclosedMarkers(cumulative)
-        return parseMarkdown(visibleText, colors)
+        return if (clickable) parseMarkdownClickable(visibleText, colors) else parseMarkdown(visibleText, colors)
     }
 
     /**

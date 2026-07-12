@@ -18,10 +18,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
@@ -348,70 +351,47 @@ fun HomeScreen(
 
 @Composable
 private fun ExamplePromptsGrid(onPromptClick: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
-            text = "Try one of these",
+            text = "Start a conversation",
             style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+            modifier = Modifier.padding(start = 4.dp),
         )
-        // 2-column grid of prompt chips. Each chip is a small action
-        // card — feels like suggestion, not a list of options.
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            examplePrompts.chunked(2).forEach { row ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    row.forEach { prompt ->
-                        ExamplePromptChip(
-                            prompt = prompt,
-                            onClick = { onPromptClick(prompt.prompt) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
-                }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(examplePrompts, key = { it.label }) { prompt ->
+                ExamplePromptChip(prompt = prompt, onClick = { onPromptClick(prompt.prompt) })
             }
         }
     }
 }
 
 @Composable
-private fun ExamplePromptChip(
-    prompt: ExamplePrompt,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+private fun ExamplePromptChip(prompt: ExamplePrompt, onClick: () -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        shape = RoundedCornerShape(16.dp),
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier
+            .width(176.dp)
             .clickable { onClick() },
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 imageVector = prompt.icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(20.dp),
             )
             Text(
                 text = prompt.label,
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = prompt.prompt,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 maxLines = 2,
             )
         }

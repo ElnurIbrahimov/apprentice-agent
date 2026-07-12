@@ -1,5 +1,9 @@
 package com.aura.ui.screens
 
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,6 +61,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.memory.MemoryEntity
+import com.aura.ui.components.AuraScreenHeader
 import com.aura.ui.viewmodel.MemoryViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -79,29 +84,14 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
             .fillMaxSize()
             .padding(horizontal = 20.dp)
     ) {
-        // ── Header ─────────────────────────────────────────────────────
-        Column(modifier = Modifier.padding(top = 16.dp, bottom = 12.dp)) {
-            Text(
-                text = "Memory",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            val filterText = state.categoryFilter?.let { " · $it" } ?: ""
-            val subtitle = when {
-                state.memories.isEmpty() && state.query.isBlank() -> "No memories yet$filterText"
-                state.memories.isEmpty() -> "No memories match your filters$filterText"
-                state.memories.size == 1 -> "1 memory$filterText"
-                else -> "${state.memories.size} memories$filterText"
-            }
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-            )
+        val filterText = state.categoryFilter?.let { " · $it" } ?: ""
+        val subtitle = when {
+            state.memories.isEmpty() && state.query.isBlank() -> "No memories yet$filterText"
+            state.memories.isEmpty() -> "No memories match your filters$filterText"
+            state.memories.size == 1 -> "1 memory$filterText"
+            else -> "${state.memories.size} memories$filterText"
         }
-        Spacer(modifier = Modifier.height(4.dp))
+        AuraScreenHeader(title = "Memory", subtitle = subtitle)
 
         // Rebuild-embeddings banner — shown after the user has run the
         // action. Dismissible. The text comes from the VM so the
@@ -254,7 +244,7 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
         Spacer(modifier = Modifier.height(8.dp))
 
         if (state.loading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            MemorySkeletonLoading()
         } else if (state.memories.isEmpty()) {
             Surface(
                 modifier = Modifier
@@ -609,6 +599,147 @@ private fun CategoryDot(category: String) {
             .size(10.dp)
             .background(color, CircleShape),
     )
+}
+
+// ── Skeleton Loading ─────────────────────────────────────────────────────────
+
+/**
+ * Skeleton loading placeholder for the memories list. Shows 5 card-shaped
+ * placeholders with a pulse animation that mirrors the MemoryRow layout —
+ * category dot, content line, metadata rows, and action icon placeholders.
+ * The header, search bar, and filter chips remain visible throughout so the
+ * transition to full content feels natural.
+ */
+@Composable
+private fun MemorySkeletonLoading() {
+    val infiniteTransition = rememberInfiniteTransition(label = "skeleton-pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(animation = tween(durationMillis = 900)),
+        label = "pulse-alpha",
+    )
+
+    LazyColumn(
+        contentPadding = PaddingValues(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(5) {
+            SkeletonMemoryCard(alpha = pulseAlpha)
+        }
+    }
+}
+
+@Composable
+private fun SkeletonMemoryCard(alpha: Float) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Category dot placeholder
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.4f),
+                        shape = CircleShape,
+                    ),
+            )
+            Spacer(modifier = Modifier.size(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                // Content line placeholder
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.8f)
+                        .height(14.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.35f),
+                            shape = RoundedCornerShape(4.dp),
+                        ),
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                // First metadata line: category · source · age
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .width(40.dp)
+                            .height(10.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                shape = RoundedCornerShape(4.dp),
+                            ),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(60.dp)
+                            .height(10.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                shape = RoundedCornerShape(4.dp),
+                            ),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(36.dp)
+                            .height(10.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                shape = RoundedCornerShape(4.dp),
+                            ),
+                    )
+                }
+                // Second metadata line: importance · recall count · tags
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .width(72.dp)
+                            .height(10.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.15f),
+                                shape = RoundedCornerShape(4.dp),
+                            ),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(52.dp)
+                            .height(10.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.15f),
+                                shape = RoundedCornerShape(4.dp),
+                            ),
+                    )
+                }
+            }
+            // Edit icon placeholder
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.15f),
+                        shape = CircleShape,
+                    ),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            // Delete icon placeholder
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.15f),
+                        shape = CircleShape,
+                    ),
+            )
+        }
+    }
 }
 
 

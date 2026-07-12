@@ -315,6 +315,13 @@ fun ChatScreen(
             )
         }
 
+        state.saveWarning?.let { warning ->
+            SaveWarningBanner(
+                warning = warning,
+                onDismiss = viewModel::dismissSaveWarning,
+            )
+        }
+
         if (state.draft.isNotBlank() || state.selectedSpecialist != null) {
             SpecialistChips(
                 selected = state.selectedSpecialist,
@@ -426,6 +433,11 @@ fun ChatScreen(
             models = state.availableModels,
             isLoading = state.modelsLoading,
             errorMessage = state.modelsError,
+            selectionScopeLabel = "Applies to this chat only",
+            onMakeDefault = {
+                viewModel.makeActiveModelDefault()
+                showModelPicker = false
+            },
             onPick = viewModel::setModel,
             onRefresh = { viewModel.refreshModels() },
             onDismiss = { showModelPicker = false },
@@ -947,6 +959,33 @@ private fun ErrorBanner(
             }
             TextButton(onClick = onDismiss) {
                 Text("✕", color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SaveWarningBanner(
+    warning: String,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        color = AuraTokens.Dark.aiError,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(
+            Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = warning,
+                modifier = Modifier.weight(1f),
+                color = AuraTokens.Dark.textPrimary,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(onClick = onDismiss) {
+                Text("✕", color = AuraTokens.Dark.textPrimary)
             }
         }
     }

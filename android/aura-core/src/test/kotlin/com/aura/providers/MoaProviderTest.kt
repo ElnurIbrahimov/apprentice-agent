@@ -36,7 +36,7 @@ class MoaProviderTest {
             "deepseek" to mockk<Provider>(relaxed = true) {
                 every { prefix } returns "deepseek"
                 every { displayName } returns "DeepSeek"
-                every { chat("deepseek-v4-pro", any(), any(), any()) } returns flowOf()
+                every { chat("deepseek-v4-pro:cloud", any(), any(), any()) } returns flowOf()
             },
         )
         val registry = ProviderRegistry(providers)
@@ -62,7 +62,7 @@ class MoaProviderTest {
         val aggregator = mockk<Provider>(relaxed = true) {
             every { prefix } returns "deepseek"
             every { displayName } returns "DeepSeek"
-            every { chat("deepseek-v4-pro", any(), any(), any()) } returns flowOf()
+            every { chat("deepseek-v4-pro:cloud", any(), any(), any()) } returns flowOf()
         }
 
         val providers = mapOf(
@@ -86,7 +86,7 @@ class MoaProviderTest {
         moa.cancel()
         job.join()
 
-        verify(exactly = 0) { aggregator.chat("deepseek-v4-pro", any(), any(), any()) }
+        verify(exactly = 0) { aggregator.chat("deepseek-v4-pro:cloud", any(), any(), any()) }
     }
 
     @Test
@@ -106,7 +106,7 @@ class MoaProviderTest {
             "deepseek" to mockk<Provider>(relaxed = true) {
                 every { prefix } returns "deepseek"
                 every { displayName } returns "DeepSeek"
-                every { chat("deepseek-v4-pro", any(), any(), any()) } returns flowOf(
+                every { chat("deepseek-v4-pro:cloud", any(), any(), any()) } returns flowOf(
                     ProviderChunk(text = "Aggregated"),
                     ProviderChunk(finishReason = FinishReason.stop),
                 )

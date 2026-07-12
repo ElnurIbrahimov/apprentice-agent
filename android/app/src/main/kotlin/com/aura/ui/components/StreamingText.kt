@@ -48,8 +48,9 @@ fun buildStreamingAnnotatedString(
     isStreaming: Boolean,
     colors: MarkdownColors,
     state: StreamingMarkdownState = StreamingMarkdownState(),
+    clickable: Boolean = true,
 ): AnnotatedString = buildAnnotatedString {
-    append(state.render(text, colors))
+    append(state.render(text, colors, clickable))
     if (isStreaming) {
         withStyle(SpanStyle(color = cursorColor)) {
             append(" ▍")

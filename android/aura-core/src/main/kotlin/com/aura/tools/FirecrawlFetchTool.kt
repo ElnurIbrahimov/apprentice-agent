@@ -4,6 +4,7 @@ import com.aura.agent.Tool
 import com.aura.agent.ToolResult
 import com.aura.agent.ToolRisk
 import com.aura.core.url.SsrfGuard
+import com.aura.core.util.buildFirecrawlBody
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
@@ -79,7 +80,7 @@ class FirecrawlFetchTool @Inject constructor(
     // ------------------------------------------------------------------
 
     private fun fetchUrl(url: String, apiKey: String): String {
-        val requestBody = buildJsonBody(url)
+        val requestBody = buildFirecrawlBody(url)
         val req = Request.Builder()
             .url("https://api.firecrawl.dev/v1/scrape")
             .header("Authorization", "Bearer $apiKey")
@@ -96,10 +97,6 @@ class FirecrawlFetchTool @Inject constructor(
         val body = response.body?.string()
             ?: throw RuntimeException("Empty response body from Firecrawl")
         return parseResponse(body)
-    }
-
-    private fun buildJsonBody(url: String): String {
-        return """{"url":"${url.replace("\\", "\\\\").replace("\"", "\\\"")}","formats":["markdown"]}"""
     }
 
     private fun parseResponse(body: String): String {

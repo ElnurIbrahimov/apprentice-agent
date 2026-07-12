@@ -52,7 +52,7 @@ class MoaProvider(
             ModelRef("ollama", "glm-5.1:cloud"),
             ModelRef("ollama", "kimi-k2.6:cloud"),
         ),
-        aggregator = ModelRef("deepseek", "deepseek-v4-pro"),
+        aggregator = ModelRef("deepseek", "deepseek-v4-pro:cloud"),
     )
 
     private val loadedPresets: Map<String, Preset> = presets.ifEmpty { mapOf("default" to defaultPreset) }

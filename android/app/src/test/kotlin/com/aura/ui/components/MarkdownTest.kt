@@ -84,6 +84,16 @@ class MarkdownTest {
     }
 
     @Test
+    fun `only absolute http links are safe to open`() {
+        assertTrue(isSafeMarkdownUrl("https://example.com/path"))
+        assertTrue(isSafeMarkdownUrl("http://example.com"))
+        assertTrue(!isSafeMarkdownUrl("intent://settings"))
+        assertTrue(!isSafeMarkdownUrl("file:///data/local/tmp/x"))
+        assertTrue(!isSafeMarkdownUrl("javascript:alert(1)"))
+        assertTrue(!isSafeMarkdownUrl("/relative"))
+    }
+
+    @Test
     fun `underscore italic works for single words`() {
         val out = parse("_hello_")
         assertEquals("hello", out)

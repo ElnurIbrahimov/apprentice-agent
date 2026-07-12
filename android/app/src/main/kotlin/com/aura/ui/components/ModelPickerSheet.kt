@@ -30,6 +30,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -100,6 +101,10 @@ fun ModelPickerSheet(
     models: List<String>,
     isLoading: Boolean = false,
     errorMessage: String? = null,
+    /** Explains whether this picker changes chat-only state or the global default. */
+    selectionScopeLabel: String? = null,
+    /** Optional explicit promotion from a chat override to the global default. */
+    onMakeDefault: (() -> Unit)? = null,
     onPick: (String) -> Unit,
     onRefresh: () -> Unit = {},
     onDismiss: () -> Unit,
@@ -148,6 +153,20 @@ fun ModelPickerSheet(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                     )
+                    selectionScopeLabel?.let { label ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            onMakeDefault?.let { promote ->
+                                TextButton(onClick = promote, contentPadding = PaddingValues(start = 8.dp)) {
+                                    Text("Make default", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
                 }
                 IconButton(
                     onClick = onRefresh,

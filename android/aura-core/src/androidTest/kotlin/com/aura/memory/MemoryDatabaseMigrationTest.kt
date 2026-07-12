@@ -29,6 +29,60 @@ class MemoryDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate1To2_preservesKgSchema() {
+        val db = helper.createDatabase("test-aura-memory.db", 1)
+        db.close()
+
+        val migrated = helper.runMigrationsAndValidate(
+            "test-aura-memory.db",
+            2,
+            true,
+            MemoryModule.MIGRATION_1_2,
+        )
+
+        // Verify kg_nodes columns match the v2 schema.
+        val nodeCursor = migrated.query("PRAGMA table_info(kg_nodes)")
+        val nodeColumns = mutableSetOf<String>()
+        nodeCursor.use {
+            while (it.moveToNext()) {
+                nodeColumns.add(it.getString(it.getColumnIndexOrThrow("name")))
+            }
+        }
+        assert("createdAt" in nodeColumns) { "kg_nodes should have createdAt after 1→2" }
+
+        // Verify kg_edges columns match the v2 schema.
+        val edgeCursor = migrated.query("PRAGMA table_info(kg_edges)")
+        val edgeColumns = mutableSetOf<String>()
+        edgeCursor.use {
+            while (it.moveToNext()) {
+                edgeColumns.add(it.getString(it.getColumnIndexOrThrow("name")))
+            }
+        }
+        assert("properties" in edgeColumns) { "kg_edges should have properties after 1→2" }
+        assert("confidence" in edgeColumns) { "kg_edges should have confidence after 1→2" }
+        assert("createdAt" in edgeColumns) { "kg_edges should have createdAt after 1→2" }
+
+        // Verify all expected indices were created.
+        val indexCursor = migrated.query(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'index_kg_%'",
+        )
+        val indexNames = mutableSetOf<String>()
+        indexCursor.use {
+            while (it.moveToNext()) {
+                indexNames.add(it.getString(0))
+            }
+        }
+        assert("index_kg_nodes_label" in indexNames)
+        assert("index_kg_nodes_type" in indexNames)
+        assert("index_kg_nodes_label_type" in indexNames)
+        assert("index_kg_edges_sourceId" in indexNames)
+        assert("index_kg_edges_targetId" in indexNames)
+        assert("index_kg_edges_sourceId_targetId_type" in indexNames)
+
+        migrated.close()
+    }
+
+    @Test
     fun migrate2To3_preservesMemories_andCreatesEditHistory() {
         // Start at v2 (post-KG, pre-edit-history).
         val db = helper.createDatabase("test-aura-memory-v2.db", 2)

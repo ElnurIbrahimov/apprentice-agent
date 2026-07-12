@@ -16,3 +16,9 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.conscrypt.**
 -dontwarn org.openjsse.**
+# Android desugaring rewrites Java 9 string-concatenation call sites; R8 must
+# not require the JVM-only bootstrap implementation in the final APK.
+-dontwarn java.lang.invoke.StringConcatFactory
+# Annotation-processing APIs arrive through transitive compile-time tooling;
+# they are not Android runtime dependencies.
+-dontwarn javax.lang.model.**

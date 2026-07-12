@@ -1,19 +1,20 @@
 package com.aura
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.aura.proactive.ProactiveBootstrap
-import com.aura.providers.ProviderKeys
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
+import javax.inject.Provider
 
 @HiltAndroidApp
 class AuraApp : Application(), Configuration.Provider {
 
     @Inject lateinit var workerFactory: HiltWorkerFactory
-    @Inject lateinit var proactiveBootstrap: ProactiveBootstrap
-    @Inject lateinit var providerKeys: ProviderKeys
+    @Inject lateinit var proactiveBootstrap: Provider<ProactiveBootstrap>
 
     override fun onCreate() {
         super.onCreate()
@@ -26,7 +27,10 @@ class AuraApp : Application(), Configuration.Provider {
         //
         // The previous runBlocking { providerKeys.awaitLoaded() } could
         // ANR on slow storage, corrupt DataStore, or large key files.
-        proactiveBootstrap.start()
+        // Scheduling and monitoring are maintenance work, not first-frame work.
+        Handler(Looper.getMainLooper()).postDelayed({
+            proactiveBootstrap.get().start()
+        }, 750L)
     }
 
     override val workManagerConfiguration: Configuration

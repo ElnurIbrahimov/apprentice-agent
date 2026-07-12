@@ -59,6 +59,9 @@ dependencies {
 
     api(libs.hilt.android)
     ksp(libs.hilt.compiler)
+    // Workers live in this module; this compiler generates the bindings
+    // consumed by HiltWorkerFactory at runtime.
+    ksp(libs.androidx.hilt.compiler)
     api(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.biometric)

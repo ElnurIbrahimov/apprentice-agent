@@ -1,14 +1,20 @@
 package com.aura.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
@@ -22,6 +28,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.hands.Hand
 import com.aura.hands.HandStep
 import com.aura.providers.ToolProperty
+import com.aura.ui.components.AuraScreenHeader
 import com.aura.ui.viewmodel.HandsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,10 +50,13 @@ fun HandsScreen(
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text("Hands", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-            Text("Automation macros. ${state.hands.size} configured.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f))
-            Spacer(Modifier.height(12.dp)); HorizontalDivider(); Spacer(Modifier.height(8.dp))
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp)) {
+            AuraScreenHeader(
+                title = "Hands",
+                subtitle = "${state.hands.size} automation macro${if (state.hands.size == 1) "" else "s"} configured",
+            )
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
 
             state.lastResult?.let { msg ->
                 Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
@@ -54,8 +64,8 @@ fun HandsScreen(
                 }
             }
 
-            if (state.loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            else if (state.hands.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("🤖", style = MaterialTheme.typography.displayLarge); Spacer(Modifier.height(8.dp)); Text("No hands yet", style = MaterialTheme.typography.titleMedium); Text("Tap + to add one, or ask Aura to set one up.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)) } }
+            if (state.loading) HandsSkeletonLoading()
+            else if (state.hands.isEmpty()) HandsEmptyState()
             else LazyColumn(contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(state.hands, key = { it.id }) { h ->
                     HandRow(
@@ -92,6 +102,38 @@ fun HandsScreen(
                 editingHand = null
             },
         )
+    }
+}
+
+@Composable
+private fun HandsSkeletonLoading() {
+    val transition = rememberInfiniteTransition(label = "hands-skeleton")
+    val alpha by transition.animateFloat(0.25f, 0.60f, infiniteRepeatable(tween(850)), label = "pulse")
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        repeat(3) {
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp)) {
+                    Box(Modifier.fillMaxWidth(0.52f).height(16.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha), RoundedCornerShape(4.dp)))
+                    Spacer(Modifier.height(9.dp))
+                    Box(Modifier.fillMaxWidth(0.78f).height(12.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.65f), RoundedCornerShape(4.dp)))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HandsEmptyState() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 32.dp)) {
+            Surface(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), shape = RoundedCornerShape(20.dp)) {
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(18.dp).size(32.dp))
+            }
+            Spacer(Modifier.height(16.dp))
+            Text("Build your first hand", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Text("Hands run repeatable tool sequences for you. Create one here, or ask Aura to help design it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f))
+        }
     }
 }
 

@@ -9,6 +9,7 @@ import com.aura.providers.FinishReason
 import com.aura.providers.ProviderChunk
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -211,6 +212,29 @@ class DeepResearchToolTest {
         assertTrue("expected Ok, got $result") { result is ToolResult.Ok }
         val json = (result as ToolResult.Ok).output
         assertTrue(json.contains("\"answer\""), "should contain answer field: $json")
+    }
+
+    @Test
+    fun `private search result is never forwarded to Firecrawl`() = runTest {
+        val providerKeys = mockk<ProviderKeys> {
+            every { keyFor("tavily") } returns "tavily-key"
+            every { keyFor("firecrawl") } returns "firecrawl-key"
+        }
+        val httpClient = mockHttpClient(
+            contentType = "application/json",
+            body = """{"results":[{"title":"internal","url":"http://127.0.0.1/private","content":"nope"}]}""",
+        )
+        val registry = mockk<ProviderRegistry> {
+            every { chat(any(), any(), any(), any()) } returns flowOf(
+                ProviderChunk(text = "Safe answer."),
+                ProviderChunk(finishReason = FinishReason.stop),
+            )
+        }
+
+        val result = DeepResearchTool(httpClient, providerKeys, registry).tool.execute(call("query" to "test"), ctx())
+
+        assertTrue(result is ToolResult.Ok)
+        verify(exactly = 1) { httpClient.newCall(any()).execute() }
     }
 
     // -----------------------------------------------------------------

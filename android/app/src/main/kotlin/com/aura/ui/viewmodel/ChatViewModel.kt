@@ -84,7 +84,10 @@ data class ChatUiState(
     val draft: String = "",
     val error: String? = null,
     val errorTyped: AuraError? = null,
+    /** Model used by this chat; Settings supplies it until the user picks a session override. */
     val activeModel: String = DEFAULT_MODEL,
+    /** Null means follow the global Settings default; non-null is chat-only. */
+    val sessionModelOverride: String? = null,
     val availableModels: List<String> = emptyList(),
     /**
      * True while [refreshModels] is in flight. Drives a small
@@ -233,7 +236,9 @@ class ChatViewModel @Inject constructor(
         }
         viewModelScope.launch {
             userPreferences.defaultModel.collect { model ->
-                _state.update { it.copy(activeModel = model) }
+                _state.update { current ->
+                    if (current.sessionModelOverride == null) current.copy(activeModel = model) else current
+                }
             }
         }
         // Restore persisted TTS preference so the user's mute/unmute
@@ -353,9 +358,18 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /** Pick a model for this chat only; global default belongs to Settings. */
     fun setModel(model: String) {
-        _state.update { it.copy(activeModel = model) }
-        viewModelScope.launch { userPreferences.setDefaultModel(model) }
+        _state.update { it.copy(activeModel = model, sessionModelOverride = model) }
+    }
+
+    /** Explicitly promote the current chat model to the default for future chats. */
+    fun makeActiveModelDefault() {
+        val model = _state.value.activeModel
+        viewModelScope.launch {
+            userPreferences.setDefaultModel(model)
+            _state.update { it.copy(sessionModelOverride = null) }
+        }
     }
 
     fun setSpecialist(specialist: Specialist?) {
@@ -500,6 +514,10 @@ class ChatViewModel @Inject constructor(
 
     fun dismissError() {
         _state.update { it.copy(error = null, errorRetryable = false, errorTyped = null) }
+    }
+
+    fun dismissSaveWarning() {
+        _state.update { it.copy(saveWarning = null) }
     }
 
     /**

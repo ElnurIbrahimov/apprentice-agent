@@ -21,6 +21,8 @@ import javax.inject.Singleton
 class WebSearchTool @Inject constructor(
     private val httpClient: OkHttpClient,
 ) {
+    private val ddg by lazy { DuckDuckGoSearch(httpClient) }
+
     fun definition() = ToolDefinition(
         name = "web_search",
         description = "Search the web and return top results as title/URL/snippet.",
@@ -53,37 +55,7 @@ class WebSearchTool @Inject constructor(
     private data class Result(val title: String, val url: String, val snippet: String)
 
     private fun search(query: String, maxResults: Int): List<Result> {
-        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-        val url = "https://html.duckduckgo.com/html/?q=$encoded"
-        val req = Request.Builder()
-            .url(url)
-            .header("User-Agent", "Mozilla/5.0 Aura/1.0")
-            .build()
-        httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) throw RuntimeException("HTTP ${resp.code}")
-            val html = resp.body?.string() ?: return emptyList()
-            return parseResults(html, maxResults)
-        }
-    }
-
-    private fun parseResults(html: String, maxResults: Int): List<Result> {
-        // DuckDuckGo HTML format: <a class="result__a" href="URL">Title</a>
-        // followed by <a class="result__snippet">Snippet</a>
-        val out = mutableListOf<Result>()
-        val linkPattern = Regex("""class="result__a"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>""")
-        val snippetPattern = Regex("""class="result__snippet"[^>]*>([^<]+)</a>""")
-        val links = linkPattern.findAll(html).take(maxResults).toList()
-        val snippets = snippetPattern.findAll(html).take(maxResults).toList()
-        for (i in links.indices) {
-            val m = links[i]
-            val snippet = snippets.getOrNull(i)?.groupValues?.get(1)?.trim() ?: ""
-            out += Result(
-                title = m.groupValues[2].trim(),
-                url = m.groupValues[1].trim(),
-                snippet = snippet,
-            )
-        }
-        return out
+        return ddg.search(query, maxResults).map { Result(it.title, it.url, it.snippet) }
     }
 
     private fun formatResults(results: List<Result>): String =

@@ -1,5 +1,10 @@
 package com.aura.ui.screens
 
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,7 +29,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DisplayMode
@@ -53,12 +57,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.tasks.ReminderEntity
 import com.aura.tasks.TaskEntity
+import com.aura.ui.components.AuraScreenHeader
 import com.aura.ui.viewmodel.TasksViewModel
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -86,22 +92,16 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                 .padding(16.dp)
                 .padding(padding),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Tasks", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.weight(1f))
-                val doneCount = state.tasks.count { it.status == "done" }
-                if (doneCount > 0 && state.statusFilter != "pending") {
+            val doneCount = state.tasks.count { it.status == "done" }
+            AuraScreenHeader(
+                title = "Tasks",
+                subtitle = "${state.tasks.size} task${if (state.tasks.size == 1) "" else "s"}",
+                action = if (doneCount > 0 && state.statusFilter != "pending") ({
                     TextButton(onClick = { showClearConfirm = true }) {
                         Text("Clear $doneCount done", color = MaterialTheme.colorScheme.error)
                     }
-                }
-            }
-            Text(
-                "${state.tasks.size} task${if (state.tasks.size == 1) "" else "s"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                }) else null,
             )
-            Spacer(modifier = Modifier.height(8.dp))
 
             // Status filter chips
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -130,7 +130,7 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
             Spacer(modifier = Modifier.height(8.dp))
 
             if (state.loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                TasksSkeletonLoading()
             } else {
                 LazyColumn(
                     contentPadding = PaddingValues(vertical = 8.dp),
@@ -238,6 +238,106 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
         )
     }
 }
+
+// ── Skeleton Loading ─────────────────────────────────────────────────────────
+
+/**
+ * Skeleton loading placeholder for the tasks list. Shows 5 card-shaped
+ * rectangles with a subtle pulse animation that mirrors the real TaskRow
+ * layout — the header, count text, and filter chips remain visible
+ * throughout so the transition to full content feels natural.
+ */
+@Composable
+private fun TasksSkeletonLoading() {
+    val infiniteTransition = rememberInfiniteTransition(label = "skeleton-pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(animation = tween(durationMillis = 900)),
+        label = "pulse-alpha",
+    )
+
+    LazyColumn(
+        contentPadding = PaddingValues(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(5) {
+            SkeletonTaskCard(alpha = pulseAlpha)
+        }
+    }
+}
+
+@Composable
+private fun SkeletonTaskCard(alpha: Float) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                // Title line
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.6f)
+                        .height(16.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.4f),
+                            shape = RoundedCornerShape(4.dp),
+                        ),
+                )
+                Spacer(Modifier.height(8.dp))
+                // Description line
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .height(12.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.25f),
+                            shape = RoundedCornerShape(4.dp),
+                        ),
+                )
+                Spacer(Modifier.height(6.dp))
+                // Meta line (due date + priority chip)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .width(72.dp)
+                            .height(10.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                shape = RoundedCornerShape(4.dp),
+                            ),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(width = 44.dp, height = 20.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                shape = RoundedCornerShape(10.dp),
+                            ),
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            // Action button placeholder
+            Box(
+                modifier = Modifier
+                    .size(width = 48.dp, height = 28.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                        shape = RoundedCornerShape(6.dp),
+                    ),
+            )
+        }
+    }
+}
+
+// ── Reminders Header ─────────────────────────────────────────────────────────
 
 @Composable
 private fun RemindersHeader(onAddReminder: () -> Unit = {}) {
