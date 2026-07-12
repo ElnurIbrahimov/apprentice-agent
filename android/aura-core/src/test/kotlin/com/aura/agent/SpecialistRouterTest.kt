@@ -78,7 +78,7 @@ class SpecialistRouterTest {
     @Test
     fun `creative has expected tools`() {
         assertTrue(Specialist.Creative.toolsAllowed.contains("image_gen"))
-        assertTrue(Specialist.Creative.toolsAllowed.contains("image_input"))
+        assertEquals(setOf("image_gen"), Specialist.Creative.toolsAllowed)
     }
 
     @Test

@@ -60,7 +60,7 @@ data class Specialist(
                 Be playful, enthusiastic, and visually descriptive. When generating
                 images, craft detailed, evocative prompts.
             """.trimIndent(),
-            toolsAllowed = setOf("image_gen", "image_input"),
+            toolsAllowed = setOf("image_gen"),
         )
 
         /** Executive assistant — calendar, contacts, tasks, memory. */

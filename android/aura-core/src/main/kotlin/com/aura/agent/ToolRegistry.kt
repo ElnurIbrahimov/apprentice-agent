@@ -12,7 +12,7 @@ import javax.inject.Singleton
  * - WRITE_LOCAL: changes local state. Examples: calendar_write, app_launcher.
  * - WRITE_REMOTE: makes a network call that mutates remote state. Currently unused by any tool.
  * - PRIVACY: touches personal data. Examples: contacts_get, location_now.
- * - DESTRUCTIVE: irreversible. Examples: file_pick + delete, factory_reset (don't add this).
+ * - DESTRUCTIVE: irreversible. Examples: permanent deletion, factory_reset (don't add this).
  */
 enum class ToolRisk { READ_ONLY, WRITE_LOCAL, WRITE_REMOTE, PRIVACY, DESTRUCTIVE }
 

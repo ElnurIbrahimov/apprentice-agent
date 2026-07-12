@@ -37,8 +37,6 @@ object ToolsModule {
         dndMode: DndModeTool,
         taskManager: TaskManagerTool,
         notificationList: NotificationListTool,
-        imageInput: ImageInputTool,
-        filePicker: FilePickerTool,
         firecrawlFetch: FirecrawlFetchTool,
         deepResearch: DeepResearchTool,
         vision: VisionTool,
@@ -77,8 +75,6 @@ object ToolsModule {
         registry.register(dndMode.tool)
         registry.register(taskManager.tool)
         registry.register(notificationList.tool)
-        registry.register(imageInput.tool)
-        registry.register(filePicker.tool)
         registry.register(firecrawlFetch.tool)
         registry.register(deepResearch.tool)
         registry.register(vision.tool)

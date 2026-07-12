@@ -10,7 +10,7 @@ This is my personal copy. The plan lives at `.hermes/plans/`.
 
 **v0.10.2** (versionCode 3).
 
-- 38 tools (web search x3, vision, image gen, deep research, firecrawl fetch, knowledge graph, weather, translate, timer, SMS, email, biometric prompt, and 25 phone-native tools)
+- 36 tools (web search x3, vision, image gen, deep research, firecrawl fetch, knowledge graph, weather, translate, timer, SMS, email, biometric prompt, and phone-native tools)
 - Memory stack (Room + 384-dim cloud embeddings + 6-signal RRF retrieval + 14-day FadeMem with access-frequency decay + heuristic WriteGate)
 - Knowledge graph (Room-backed, 11 node types, 18 edge types, LLM-extracted per turn)
 - Hands (user-defined automation macros, persisted, triggerable by phrase)
@@ -103,8 +103,7 @@ The `:aura-core` module has no Compose dependencies. If you ever port to iOS via
 | `vision` | Describe an image | READ_ONLY |
 | `image_gen` | Generate an image | WRITE_REMOTE |
 | `transcribe` | Audio → text | READ_ONLY |
-| `image_input` | Attach an image to the next turn | READ_ONLY |
-| `file_pick` | Open file picker, return content | READ_ONLY |
+
 
 ### Knowledge
 | Tool | What it does | Risk |
@@ -161,7 +160,7 @@ Keyword-routed (see `SpecialistRouter`). Each has a system prompt, allowed tool 
 - **general** — fallback, all tools
 - **coder** — brave/tavily search + fetch_url, suggested Claude Sonnet
 - **researcher** — deep_research + brave/tavily, suggested MoA default
-- **creative** — image_gen + image_input, suggested MoA default
+- **creative** — image generation and visual ideation
 - **executive** — calendar + contacts + remember/recall, suggested MoA default
 - **phone_native** — all device-state + camera + location tools
 
