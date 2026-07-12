@@ -19,6 +19,36 @@ import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.ensureActive
 
 /**
+ * Maximum length of a tool result that gets appended to the
+ * conversation history. Tool results that exceed this budget are
+ * truncated and marked so the model can ask for the rest if it
+ * needs more detail. Without this, a single web search or
+ * deep-research tool could blow the context window — 8k tokens
+ * at 4 chars/token = 32k chars per result.
+ *
+ * Per-tool truncation (Firecrawl 8k, DeepResearch 6k) is the
+ * first line of defense; this is the safety net for everything
+ * else.
+ */
+private const val MAX_TOOL_RESULT_CHARS = 4_000
+
+private const val TOOL_RESULT_TRUNCATION_MARKER =
+    "\n\n[...truncated, ask the assistant to retrieve the full result if needed]"
+
+/**
+ * Truncate a tool result string to fit the conversation-history budget.
+ * Long results (deep research, web fetches, photo library) are
+ * truncated at [MAX_TOOL_RESULT_CHARS] with a marker so the model
+ * knows to ask for the rest if it needs more detail.
+ */
+internal fun truncateToolResult(raw: String): String =
+    if (raw.length > MAX_TOOL_RESULT_CHARS) {
+        raw.take(MAX_TOOL_RESULT_CHARS) + TOOL_RESULT_TRUNCATION_MARKER
+    } else {
+        raw
+    }
+
+/**
  * The memory-augmented agentic loop. Pre-pends relevant memories to the system
  * prompt before each model call, and auto-stores memorable user facts after.
  * Also extracts a knowledge graph from each assistant turn (best-effort).
@@ -269,12 +299,13 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             }
             for ((id, nameAndArgs, result) in toolResults) {
                 val (name, args) = nameAndArgs
-                val resultText = when (result) {
+                val rawResultText = when (result) {
                     is ToolResult.Ok -> result.output
                     is ToolResult.Error -> "Error: ${result.message}"
                     is ToolResult.NeedsPermission -> "Permission needed: ${result.permission} — ${result.rationale}"
                     is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
                 }
+                val resultText = truncateToolResult(rawResultText)
                 val needsPerm = if (result is ToolResult.NeedsPermission) result.permission else null
                 val permRationale = if (result is ToolResult.NeedsPermission) result.rationale else null
                 currentConversation = currentConversation.setToolResult(id, resultText)
