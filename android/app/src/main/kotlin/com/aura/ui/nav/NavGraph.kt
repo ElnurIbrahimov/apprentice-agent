@@ -55,6 +55,7 @@ import com.aura.ui.screens.ChatScreen
 import com.aura.ui.screens.HandsScreen
 import com.aura.ui.screens.HistoryScreen
 import com.aura.ui.screens.HomeScreen
+import com.aura.ui.screens.KnowledgeGraphScreen
 import com.aura.ui.screens.ToolsScreen
 import com.aura.ui.screens.MemoryScreen
 import com.aura.ui.screens.ProactiveHistoryScreen
@@ -193,7 +194,9 @@ fun NavGraph(
                     onNavigateHistory = { navController.navigate("history") },
                 )
             }
-            composable(TopLevelRoute.Memory.route) { MemoryScreen() }
+            composable(TopLevelRoute.Memory.route) {
+                MemoryScreen(onOpenKnowledgeGraph = { navController.navigate("knowledge_graph") })
+            }
             composable(TopLevelRoute.Settings.route) {
                 SettingsScreen(
                     onNavigateProfile = { navController.navigate("profile") },
@@ -203,6 +206,9 @@ fun NavGraph(
                 com.aura.ui.screens.IdentityEditorScreen(
                     onBack = { navController.popBackStack() },
                 )
+            }
+            composable("knowledge_graph") {
+                KnowledgeGraphScreen(onBack = { navController.popBackStack() })
             }
             composable("history") {
                 HistoryScreen(onSelect = { convId ->

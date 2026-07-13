@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
@@ -71,7 +72,10 @@ private val MEMORY_CATEGORIES = listOf("fact", "preference", "episode", "person"
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
+fun MemoryScreen(
+    onOpenKnowledgeGraph: () -> Unit = {},
+    viewModel: MemoryViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsState()
     var editingMemory by remember { mutableStateOf<MemoryEntity?>(null) }
     var showRebuildConfirm by remember { mutableStateOf(false) }
@@ -175,6 +179,16 @@ fun MemoryScreen(viewModel: MemoryViewModel = hiltViewModel()) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text("Add note")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onOpenKnowledgeGraph,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+        ) {
+            Icon(Icons.Filled.AccountTree, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Knowledge graph")
         }
 
         if (state.memories.isNotEmpty()) {

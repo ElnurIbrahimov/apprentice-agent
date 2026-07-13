@@ -32,6 +32,8 @@ data class SelectedKgNode(
 
 data class KnowledgeGraphUiState(
     val nodes: List<KgNode> = emptyList(),
+    /** Complete loaded graph slice; used for relation labels and merge targets. */
+    val allNodes: List<KgNode> = emptyList(),
     val stats: KnowledgeGraphRepository.Stats = KnowledgeGraphRepository.Stats(0, 0),
     val query: String = "",
     val typeFilter: NodeType? = null,
@@ -68,6 +70,7 @@ class KnowledgeGraphViewModel @Inject constructor(
                 _state.update {
                     it.copy(
                         nodes = filteredNodes(nodes, it.query, it.typeFilter),
+                        allNodes = nodes,
                         stats = stats,
                         loading = false,
                         error = null,
