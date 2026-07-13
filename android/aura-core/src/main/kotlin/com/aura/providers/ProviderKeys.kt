@@ -217,6 +217,21 @@ class ProviderKeys @Inject constructor(
         }
     }
 
+    suspend fun markValidation(prefix: String, valid: Boolean) {
+        require(prefix in PREFIXES) { "Unknown provider prefix: $prefix" }
+        stateMutex.withLock {
+            val current = _credentialStates.value[prefix]
+            if (current == ProviderCredentialState.Saved ||
+                current == ProviderCredentialState.Valid ||
+                current == ProviderCredentialState.Invalid
+            ) {
+                _credentialStates.value = _credentialStates.value + (
+                    prefix to if (valid) ProviderCredentialState.Valid
+                    else ProviderCredentialState.Invalid
+                )
+            }
+        }
+    }
 
     /** Load the explicit embedding model from DataStore. */
     private suspend fun loadEmbeddingModel(): String {

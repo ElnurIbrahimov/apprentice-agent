@@ -6,11 +6,16 @@ import com.aura.agent.IdentityStore
 import com.aura.data.UserPreferences
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
+import com.aura.providers.ProviderCredentialState
+import com.aura.providers.ModelCatalog
+import com.aura.providers.ModelCatalogRepository
+import com.aura.providers.ProviderStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -22,14 +27,12 @@ data class SettingsUiState(
     val deepseekKey: String = "",
     val groqKey: String = "",
     val openrouterKey: String = "",
-    // Default state value — overwritten by [reload] from the persisted
-    // UserPreferences value, so this only matters for the first render
-    // before the DataStore read completes. Must match a real model id
-    // so the chip-highlight check (`state.defaultModel == id`) is
-    // correct even on the very first frame. The 4d692a7 self-heal
-    // normalizes any legacy stored value (no `:cloud` suffix from the
-    // 2026-07-07 bug) back to the live id on next read.
-    val defaultModel: String = "ollama:deepseek-v4-pro:cloud",
+    val defaultModel: String = "",
+    val visionModel: String = "",
+    val backgroundModel: String = "",
+    val deepModeModel: String = "",
+    val moaReferenceModels: List<String> = emptyList(),
+    val moaAggregatorModel: String = "",
     val firstRunComplete: Boolean = false,
     val configuredProviders: List<String> = emptyList(),
     val appLockEnabled: Boolean = false,
@@ -62,6 +65,16 @@ data class SettingsUiState(
     val availableModels: List<String> = emptyList(),
     val modelsLoading: Boolean = false,
     val modelsError: String? = null,
+    val providerTests: Map<String, ProviderTestResult> = emptyMap(),
+    val credentialStates: Map<String, ProviderCredentialState> = emptyMap(),
+)
+
+enum class ProviderTestPhase { Idle, Saving, Testing, Verified, Failed }
+
+data class ProviderTestResult(
+    val phase: ProviderTestPhase = ProviderTestPhase.Idle,
+    val message: String? = null,
+    val modelCount: Int = 0,
 )
 
 @HiltViewModel
@@ -70,6 +83,7 @@ class SettingsViewModel @Inject constructor(
     private val providerKeys: ProviderKeys,
     private val userPreferences: UserPreferences,
     private val identityStore: IdentityStore,
+    private val modelCatalogRepository: ModelCatalogRepository,
 ) : ViewModel() {
 
     private fun configuredProviderLabels(): List<String> =
@@ -80,7 +94,17 @@ class SettingsViewModel @Inject constructor(
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
 
-    init { reload() }
+    init {
+        reload()
+        viewModelScope.launch {
+            providerKeys.credentialStates.collectLatest { states ->
+                _state.update { it.copy(credentialStates = states) }
+            }
+        }
+        viewModelScope.launch {
+            modelCatalogRepository.catalog.collectLatest(::applyCatalog)
+        }
+    }
 
     fun reload() {
         viewModelScope.launch {
@@ -90,6 +114,11 @@ class SettingsViewModel @Inject constructor(
             providerKeys.loaded.first { it }
             val configured = configuredProviderLabels()
             val defaultModel = userPreferences.defaultModel.first()
+            val visionModel = userPreferences.visionModel.first()
+            val backgroundModel = userPreferences.backgroundModel.first()
+            val deepModeModel = userPreferences.deepModeModel.first()
+            val moaReferenceModels = userPreferences.moaReferenceModels.first()
+            val moaAggregatorModel = userPreferences.moaAggregatorModel.first()
             val firstRunComplete = userPreferences.firstRunComplete.first()
             val appLockEnabled = userPreferences.appLockEnabled.first()
             val morningBriefEnabled = userPreferences.morningBriefEnabled.first()
@@ -109,6 +138,11 @@ class SettingsViewModel @Inject constructor(
                 groqKey = providerKeys.keyFor("groq") ?: "",
                 openrouterKey = providerKeys.keyFor("openrouter") ?: "",
                 defaultModel = defaultModel.orEmpty(),
+                visionModel = visionModel.orEmpty(),
+                backgroundModel = backgroundModel.orEmpty(),
+                deepModeModel = deepModeModel.orEmpty(),
+                moaReferenceModels = moaReferenceModels,
+                moaAggregatorModel = moaAggregatorModel.orEmpty(),
                 firstRunComplete = firstRunComplete,
                 configuredProviders = configured,
                 appLockEnabled = appLockEnabled,
@@ -125,17 +159,55 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun saveOllamaKey(k: String) = updateKey("ollama", k) { _state.update { it.copy(ollamaKey = k) } }
-    fun saveAnthropicKey(k: String) = updateKey("anthropic", k) { _state.update { it.copy(anthropicKey = k) } }
-    fun saveOpenaiKey(k: String) = updateKey("openai", k) { _state.update { it.copy(openaiKey = k) } }
-    fun saveDeepseekKey(k: String) = updateKey("deepseek", k) { _state.update { it.copy(deepseekKey = k) } }
-    fun saveGroqKey(k: String) = updateKey("groq", k) { _state.update { it.copy(groqKey = k) } }
-    fun saveOpenrouterKey(k: String) = updateKey("openrouter", k) { _state.update { it.copy(openrouterKey = k) } }
+    fun saveOllamaKey(k: String) = updateKeyDraft("ollama", k)
+    fun saveAnthropicKey(k: String) = updateKeyDraft("anthropic", k)
+    fun saveOpenaiKey(k: String) = updateKeyDraft("openai", k)
+    fun saveDeepseekKey(k: String) = updateKeyDraft("deepseek", k)
+    fun saveGroqKey(k: String) = updateKeyDraft("groq", k)
+    fun saveOpenrouterKey(k: String) = updateKeyDraft("openrouter", k)
 
     fun setDefaultModel(model: String) {
         viewModelScope.launch {
             userPreferences.setDefaultModel(model)
             _state.update { it.copy(defaultModel = model) }
+        }
+    }
+
+    fun setVisionModel(model: String) {
+        viewModelScope.launch {
+            userPreferences.setVisionModel(model)
+            _state.update { it.copy(visionModel = model) }
+        }
+    }
+
+    fun setBackgroundModel(model: String) {
+        viewModelScope.launch {
+            userPreferences.setBackgroundModel(model)
+            _state.update { it.copy(backgroundModel = model) }
+        }
+    }
+
+    fun setDeepModeModel(model: String) {
+        viewModelScope.launch {
+            userPreferences.setDeepModeModel(model)
+            _state.update { it.copy(deepModeModel = model) }
+        }
+    }
+
+    fun setMoaReferenceModels(models: List<String>) {
+        viewModelScope.launch {
+            val selected = models.distinct().take(4)
+            userPreferences.setMoaReferenceModels(selected)
+            _state.update { it.copy(moaReferenceModels = selected) }
+            modelCatalogRepository.refreshProvider("moa", force = true)
+        }
+    }
+
+    fun setMoaAggregatorModel(model: String) {
+        viewModelScope.launch {
+            userPreferences.setMoaAggregatorModel(model)
+            _state.update { it.copy(moaAggregatorModel = model) }
+            modelCatalogRepository.refreshProvider("moa", force = true)
         }
     }
 
@@ -264,16 +336,112 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun updateKey(prefix: String, value: String, refresh: () -> Unit) {
-        viewModelScope.launch {
-            providerKeys.set(prefix, value)
-            refresh()
-            _state.update {
-                it.copy(
-                    configuredProviders = configuredProviderLabels(),
-                    verifyResults = it.verifyResults - prefix,
-                )
+    private fun updateKeyDraft(prefix: String, value: String) {
+        _state.update { current ->
+            val updated = when (prefix) {
+                "ollama" -> current.copy(ollamaKey = value)
+                "anthropic" -> current.copy(anthropicKey = value)
+                "openai" -> current.copy(openaiKey = value)
+                "deepseek" -> current.copy(deepseekKey = value)
+                "groq" -> current.copy(groqKey = value)
+                "openrouter" -> current.copy(openrouterKey = value)
+                else -> current
             }
+            updated.copy(
+                providerTests = updated.providerTests - prefix,
+                verifyResults = updated.verifyResults - prefix,
+            )
+        }
+    }
+
+    private fun keyDraft(prefix: String): String = when (prefix) {
+        "ollama" -> _state.value.ollamaKey
+        "anthropic" -> _state.value.anthropicKey
+        "openai" -> _state.value.openaiKey
+        "deepseek" -> _state.value.deepseekKey
+        "groq" -> _state.value.groqKey
+        "openrouter" -> _state.value.openrouterKey
+        else -> ""
+    }
+
+    fun saveAndTestProvider(prefix: String) {
+        if (_state.value.verifying != null) return
+        val value = keyDraft(prefix).trim()
+        updateProviderTest(prefix, ProviderTestPhase.Saving, "Saving securely…")
+        viewModelScope.launch {
+            try {
+                providerKeys.set(prefix, value)
+                if (providerKeys.credentialStates.value[prefix] == ProviderCredentialState.StorageError) {
+                    updateProviderTest(prefix, ProviderTestPhase.Failed, "Secure storage failed")
+                    return@launch
+                }
+                if (value.isBlank()) {
+                    modelCatalogRepository.refreshProvider(prefix, force = true)
+                    updateProviderTest(prefix, ProviderTestPhase.Idle, "Credential removed")
+                    return@launch
+                }
+
+                updateProviderTest(prefix, ProviderTestPhase.Testing, "Testing provider…")
+                modelCatalogRepository.refreshProvider(prefix, force = true)
+                val providerState = modelCatalogRepository.catalog.value.providers[prefix]
+                val valid = providerState?.status == ProviderStatus.Ready &&
+                    providerState.errorMessage == null &&
+                    providerState.models.isNotEmpty()
+                providerKeys.markValidation(prefix, valid)
+                if (valid) {
+                    updateProviderTest(
+                        prefix,
+                        ProviderTestPhase.Verified,
+                        "Verified — ${providerState!!.models.size} models",
+                        providerState.models.size,
+                    )
+                } else {
+                    val message = providerState?.errorMessage
+                        ?: providerState?.status?.name
+                        ?: "Provider unavailable"
+                    updateProviderTest(prefix, ProviderTestPhase.Failed, message)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                providerKeys.markValidation(prefix, false)
+                updateProviderTest(
+                    prefix,
+                    ProviderTestPhase.Failed,
+                    error.message?.take(100) ?: "Provider test failed",
+                )
+            } finally {
+                _state.update {
+                    it.copy(
+                        verifying = null,
+                        configuredProviders = configuredProviderLabels(),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun updateProviderTest(
+        prefix: String,
+        phase: ProviderTestPhase,
+        message: String,
+        modelCount: Int = 0,
+    ) {
+        val legacy = when (phase) {
+            ProviderTestPhase.Verified -> "✓ $message"
+            ProviderTestPhase.Failed -> "✗ $message"
+            else -> message
+        }
+        _state.update {
+            it.copy(
+                verifying = if (phase == ProviderTestPhase.Saving || phase == ProviderTestPhase.Testing) {
+                    prefix
+                } else null,
+                providerTests = it.providerTests + (
+                    prefix to ProviderTestResult(phase, message, modelCount)
+                ),
+                verifyResults = it.verifyResults + (prefix to legacy),
+            )
         }
     }
 
@@ -281,73 +449,33 @@ class SettingsViewModel @Inject constructor(
         if (_state.value.modelsLoading) return
         _state.update { it.copy(modelsLoading = true, modelsError = null) }
         viewModelScope.launch {
-            providerKeys.loaded.first { it }
-            val configuredProviders = providerRegistry.configured().sortedBy { it.prefix }
-            if (configuredProviders.isEmpty()) {
-                _state.update {
-                    it.copy(
-                        availableModels = emptyList(),
-                        modelsLoading = false,
-                        modelsError = "No provider API key saved yet. Add one above first.",
-                        configuredProviders = emptyList(),
-                    )
-                }
-                return@launch
-            }
-            val perProviderResults = configuredProviders.associateWith { p ->
-                runCatching { p.listModels() }
-            }
-            val all = perProviderResults.flatMap { (p, result) ->
-                result.getOrDefault(emptyList()).map { "${p.prefix}:$it" }
-            }
-            val errors = perProviderResults
-                .filterValues { it.isFailure }
-                .map { (p, r) -> "${p.displayName}: ${r.exceptionOrNull()?.message ?: r.exceptionOrNull()?.javaClass?.simpleName ?: "unknown"}" }
-            val moaResult = providerRegistry.get("moa")?.let { moa ->
-                if (moa.isConfigured()) runCatching { moa.listModels() }
-                else Result.success(emptyList<String>())
-            }
-            val moaModels = moaResult?.getOrDefault(emptyList())?.map { "moa:$it" } ?: emptyList()
-            val moaError = moaResult?.exceptionOrNull()?.let { "MoA: ${it.message ?: it.javaClass.simpleName}" }
-            val currentModel = _state.value.defaultModel.trim().takeIf { it.isNotBlank() }
-            val merged = (all + moaModels + listOfNotNull(currentModel)).distinct().sorted()
-            val allErrors = errors + listOfNotNull(moaError)
-            val resolvedError = allErrors.firstOrNull()
-                ?: if (merged.isEmpty()) {
-                    "Configured providers returned zero models. Test the API key above."
-                } else null
-            _state.update {
-                it.copy(
-                    configuredProviders = configuredProviderLabels(),
-                    availableModels = merged,
-                    modelsLoading = false,
-                    modelsError = resolvedError,
-                )
-            }
+            modelCatalogRepository.refresh(force = true)
         }
     }
 
-    /**
-     * Verify the saved API key by hitting the provider's models endpoint.
-     * If the call succeeds, the key is good. Same pattern as
-     * OnboardingScreen.OnboardingViewModel.verifyKey.
-     */
-    fun verifyKey(prefix: String) {
-        if (providerRegistry.configured().none { it.prefix == prefix }) {
-            _state.update { it.copy(verifyResults = it.verifyResults + (prefix to "✗ No key saved for $prefix")) }
-            return
-        }
-        _state.update { it.copy(verifying = prefix) }
-        viewModelScope.launch {
-            val provider = providerRegistry.all().firstOrNull { it.prefix == prefix }
-            val result = if (provider == null) {
-                "✗ Provider $prefix not found"
-            } else {
-                runCatching { provider.listModels() }
-                    .map { "✓ Verified — ${it.size} models available" }
-                    .getOrElse { "✗ Failed: ${it.message?.take(80)}" }
+    fun verifyKey(prefix: String) = saveAndTestProvider(prefix)
+
+    private fun applyCatalog(catalog: ModelCatalog) {
+        val failures = catalog.providers.values
+            .filter { provider ->
+                provider.status !in setOf(
+                    ProviderStatus.NotConfigured,
+                    ProviderStatus.Loading,
+                    ProviderStatus.Ready,
+                )
             }
-            _state.update { it.copy(verifying = null, verifyResults = it.verifyResults + (prefix to result)) }
+            .map { provider ->
+                "${provider.providerPrefix}: ${provider.errorMessage ?: provider.status.name}"
+            }
+        _state.update {
+            it.copy(
+                configuredProviders = configuredProviderLabels(),
+                availableModels = catalog.allModels.map { model -> model.id }.distinct().sorted(),
+                modelsLoading = catalog.providers.values.any { provider ->
+                    provider.status == ProviderStatus.Loading
+                },
+                modelsError = failures.firstOrNull(),
+            )
         }
     }
 }

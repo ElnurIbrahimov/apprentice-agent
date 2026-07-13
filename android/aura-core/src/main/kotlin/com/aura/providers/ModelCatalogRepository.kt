@@ -99,6 +99,34 @@ class ModelCatalogRepository @Inject constructor(
         }
     }
 
+    suspend fun refreshProvider(prefix: String, force: Boolean = true) {
+        val generation = ++refreshGeneration
+        refreshJob?.cancel()
+        val provider = providerRegistry.all().firstOrNull { it.prefix == prefix }
+        if (provider == null) {
+            val withoutMissing = _catalog.value.providers - prefix
+            publishIfCurrent(
+                generation,
+                ModelCatalog(withoutMissing, computeAllModels(withoutMissing)),
+            )
+            return
+        }
+
+        val loading = _catalog.value.providers.toMutableMap().apply {
+            this[prefix] = ProviderModelList(
+                providerPrefix = prefix,
+                status = ProviderStatus.Loading,
+                models = this[prefix]?.models.orEmpty(),
+            )
+        }
+        publishIfCurrent(generation, ModelCatalog(loading, computeAllModels(loading)))
+
+        val result = queryProvider(provider, force)
+        if (generation != refreshGeneration) return
+        val final = loading.toMutableMap().apply { this[prefix] = result.second }
+        publishIfCurrent(generation, ModelCatalog(final, computeAllModels(final)))
+    }
+
     private suspend fun doRefresh(generation: Long, force: Boolean) {
         val configured = providerRegistry.all()
         val currentProviders = _catalog.value.providers

@@ -133,6 +133,29 @@ private fun SettingsSection(
     }
 }
 
+@Composable
+private fun RoleModelRow(
+    title: String,
+    value: String,
+    onChoose: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                text = if (value.isBlank()) "Not selected" else modelDisplayName(value),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(onClick = onChoose) { Text("Choose") }
+    }
+}
+
 // ────────────────────────────────────────────────────────────
 // Main Settings screen
 // ────────────────────────────────────────────────────────────
@@ -148,7 +171,7 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val usage by usageViewModel.usage.collectAsState()
-    var showDefaultModelPicker by remember { mutableStateOf(false) }
+    var activeModelRole by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -225,7 +248,7 @@ fun SettingsScreen(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Stored locally, never leave your device. Changes take effect immediately.",
+                text = "Stored locally. Changes take effect only after Save & Test succeeds.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
             )
@@ -239,6 +262,7 @@ fun SettingsScreen(
                 onVerify = { viewModel.verifyKey("ollama") },
                 verifyResult = state.verifyResults["ollama"],
                 verifying = state.verifying == "ollama",
+                credentialState = state.credentialStates["ollama"],
             )
             ProviderKeyField(
                 label = "Anthropic",
@@ -248,6 +272,7 @@ fun SettingsScreen(
                 onVerify = { viewModel.verifyKey("anthropic") },
                 verifyResult = state.verifyResults["anthropic"],
                 verifying = state.verifying == "anthropic",
+                credentialState = state.credentialStates["anthropic"],
             )
             ProviderKeyField(
                 label = "OpenAI",
@@ -257,6 +282,7 @@ fun SettingsScreen(
                 onVerify = { viewModel.verifyKey("openai") },
                 verifyResult = state.verifyResults["openai"],
                 verifying = state.verifying == "openai",
+                credentialState = state.credentialStates["openai"],
             )
             ProviderKeyField(
                 label = "DeepSeek",
@@ -266,6 +292,7 @@ fun SettingsScreen(
                 onVerify = { viewModel.verifyKey("deepseek") },
                 verifyResult = state.verifyResults["deepseek"],
                 verifying = state.verifying == "deepseek",
+                credentialState = state.credentialStates["deepseek"],
             )
             ProviderKeyField(
                 label = "Groq",
@@ -275,6 +302,7 @@ fun SettingsScreen(
                 onVerify = { viewModel.verifyKey("groq") },
                 verifyResult = state.verifyResults["groq"],
                 verifying = state.verifying == "groq",
+                credentialState = state.credentialStates["groq"],
             )
             ProviderKeyField(
                 label = "OpenRouter",
@@ -284,103 +312,142 @@ fun SettingsScreen(
                 onVerify = { viewModel.verifyKey("openrouter") },
                 verifyResult = state.verifyResults["openrouter"],
                 verifying = state.verifying == "openrouter",
+                credentialState = state.credentialStates["openrouter"],
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // ── Default model picker ──
+            // ── Catalog-backed model roles ──
             Text(
-                text = "Default model",
+                text = "Model roles",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Default: ${state.defaultModel}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = modelDisplayName(state.defaultModel),
+                text = "Every role is selected from verified provider catalogs. Unset roles never invent a fallback model.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = {
-                        showDefaultModelPicker = true
-                        viewModel.refreshModels()
-                    },
-                ) {
-                    Text("Choose model")
-                }
-                if (state.modelsError == null && state.availableModels.isNotEmpty()) {
-                    Text(
-                        text = "${state.availableModels.size} live models loaded",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-                    )
-                } else if (state.modelsError != null) {
-                    Text(
-                        text = "Model refresh failed — open the picker for details",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+
+            RoleModelRow("Chat default", state.defaultModel) {
+                activeModelRole = "chat"
+            }
+            RoleModelRow("Embedding", state.embeddingModel) {
+                activeModelRole = "embedding"
+            }
+            RoleModelRow("Vision", state.visionModel) {
+                activeModelRole = "vision"
+            }
+            RoleModelRow("Background tasks", state.backgroundModel) {
+                activeModelRole = "background"
+            }
+            RoleModelRow("Deep Mode", state.deepModeModel) {
+                activeModelRole = "deep"
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Mixture of Agents",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Choose at least two reference models and one aggregator. Aura then exposes the virtual MoA custom model.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                state.moaReferenceModels.forEach { model ->
+                    AssistChip(
+                        onClick = {
+                            viewModel.setMoaReferenceModels(
+                                state.moaReferenceModels.filterNot { it == model },
+                            )
+                        },
+                        label = { Text("${modelDisplayName(model)} ×") },
                     )
                 }
             }
-            if (showDefaultModelPicker) {
-                ModelPickerSheet(
-                    currentModel = state.defaultModel,
-                    models = state.availableModels,
-                    isLoading = state.modelsLoading,
-                    errorMessage = state.modelsError,
-                    onPick = viewModel::setDefaultModel,
-                    onRefresh = { viewModel.refreshModels() },
-                    onDismiss = { showDefaultModelPicker = false },
+            RoleModelRow(
+                title = "Reference models (${state.moaReferenceModels.size}/4)",
+                value = state.moaReferenceModels.firstOrNull().orEmpty(),
+            ) {
+                activeModelRole = "moa-reference"
+            }
+            RoleModelRow("Aggregator", state.moaAggregatorModel) {
+                activeModelRole = "moa-aggregator"
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedButton(
+                    onClick = viewModel::refreshModels,
+                    enabled = !state.modelsLoading,
+                ) {
+                    Text(if (state.modelsLoading) "Refreshing…" else "Refresh catalog")
+                }
+                Text(
+                    text = when {
+                        state.modelsError != null -> state.modelsError!!
+                        state.availableModels.isEmpty() -> "Save & Test a provider to load models"
+                        else -> "${state.availableModels.size} verified models"
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (state.modelsError == null) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // ── Embedding model ──
-            Text(
-                text = "Embedding model",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "Used to turn memories into vectors locally. Current: ${state.embeddingModel}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(
-                    "nomic-embed-text" to "Nomic Embed (default)",
-                    "mxbai-embed-large" to "mixed-bread large",
-                    "all-minilm" to "all-MiniLM",
-                    "snowflake-arctic-embed" to "Snowflake Arctic",
-                ).forEach { (id, label) ->
-                    AssistChip(
-                        onClick = { viewModel.setEmbeddingModel(id) },
-                        label = { Text(label) },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = if (state.embeddingModel == id)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.surfaceVariant,
-                            labelColor = if (state.embeddingModel == id)
-                                MaterialTheme.colorScheme.onPrimary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    )
+            activeModelRole?.let { role ->
+                val selectableModels = when (role) {
+                    "embedding" -> state.availableModels.filter { it.startsWith("ollama:") }
+                    "moa-reference", "moa-aggregator" ->
+                        state.availableModels.filterNot { it.startsWith("moa:") }
+                    else -> state.availableModels
                 }
+                val current = when (role) {
+                    "chat" -> state.defaultModel
+                    "embedding" -> state.embeddingModel
+                    "vision" -> state.visionModel
+                    "background" -> state.backgroundModel
+                    "deep" -> state.deepModeModel
+                    "moa-aggregator" -> state.moaAggregatorModel
+                    "moa-reference" -> state.moaReferenceModels.firstOrNull().orEmpty()
+                    else -> ""
+                }
+                ModelPickerSheet(
+                    currentModel = current,
+                    models = selectableModels,
+                    isLoading = state.modelsLoading,
+                    errorMessage = state.modelsError,
+                    onPick = { model ->
+                        when (role) {
+                            "chat" -> viewModel.setDefaultModel(model)
+                            "embedding" -> viewModel.setEmbeddingModel(model)
+                            "vision" -> viewModel.setVisionModel(model)
+                            "background" -> viewModel.setBackgroundModel(model)
+                            "deep" -> viewModel.setDeepModeModel(model)
+                            "moa-aggregator" -> viewModel.setMoaAggregatorModel(model)
+                            "moa-reference" -> {
+                                val selected = state.moaReferenceModels
+                                viewModel.setMoaReferenceModels(
+                                    if (model in selected) selected - model else selected + model,
+                                )
+                            }
+                        }
+                        if (role != "moa-reference") activeModelRole = null
+                    },
+                    onRefresh = viewModel::refreshModels,
+                    onDismiss = { activeModelRole = null },
+                )
             }
         }
 

@@ -23,6 +23,16 @@ object ProviderModule {
 
     @Provides
     @Singleton
+    fun provideModelCatalogRepository(
+        registry: ProviderRegistry,
+        cache: ModelCatalogCache,
+    ): ModelCatalogRepository = ModelCatalogRepository(
+        providerRegistry = registry,
+        cache = cache,
+    )
+
+    @Provides
+    @Singleton
     fun provideOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)

@@ -59,12 +59,16 @@ class CloudEmbedder @Inject constructor(
             cache[cacheKey]?.let { return@withContext it }
         }
 
-        // 2. Try cloud
+        // 2. Try cloud only for a selected Ollama catalog model.
         val apiKey = providerKeys.keyFor("ollama")
-        val embeddingModel = providerKeys.embeddingModel
-        if (apiKey != null && embeddingModel.isNotBlank()) {
+        val selected = providerKeys.embeddingModel
+        val parts = selected.split(":", limit = 2)
+        val model = parts.getOrNull(1)?.takeIf {
+            parts.firstOrNull() == "ollama" && it.isNotBlank()
+        }
+        if (!apiKey.isNullOrBlank() && model != null) {
             try {
-                val vec = cloudEmbed(text, apiKey, embeddingModel)
+                val vec = cloudEmbed(text, apiKey, model)
                 synchronized(cache) { cache[cacheKey] = vec }
                 return@withContext vec
             } catch (_: Exception) {

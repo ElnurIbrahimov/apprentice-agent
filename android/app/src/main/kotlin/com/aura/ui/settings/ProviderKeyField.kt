@@ -29,6 +29,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.unit.dp
+import com.aura.providers.ProviderCredentialState
 
 @Composable
 fun ProviderKeyField(
@@ -40,6 +41,7 @@ fun ProviderKeyField(
     onVerify: (() -> Unit)? = null,
     verifyResult: String? = null,
     verifying: Boolean = false,
+    credentialState: ProviderCredentialState? = null,
 ) {
     var visible by remember { mutableStateOf(false) }
     Column(modifier = modifier.fillMaxWidth().padding(vertical = 6.dp)) {
@@ -50,11 +52,24 @@ fun ProviderKeyField(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
-            if (value.isNotEmpty()) {
+            val statusLabel = when {
+                verifying -> "Testing"
+                verifyResult?.startsWith("✓") == true || credentialState == ProviderCredentialState.Valid -> "Verified"
+                credentialState == ProviderCredentialState.Invalid -> "Invalid"
+                credentialState == ProviderCredentialState.StorageError -> "Storage error"
+                credentialState == ProviderCredentialState.Saved -> "Saved · test required"
+                value.isNotEmpty() -> "Unsaved draft"
+                else -> null
+            }
+            if (statusLabel != null) {
                 Text(
-                    text = "✓ set",
+                    text = statusLabel,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = when (statusLabel) {
+                        "Verified" -> MaterialTheme.colorScheme.primary
+                        "Invalid", "Storage error" -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
         }
@@ -84,7 +99,7 @@ fun ProviderKeyField(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
         }
-        if (onVerify != null && value.isNotEmpty()) {
+        if (onVerify != null) {
             Spacer(modifier = Modifier.height(4.dp))
             Row(
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
@@ -94,7 +109,7 @@ fun ProviderKeyField(
                     if (verifying) {
                         CircularProgressIndicator(modifier = Modifier.height(16.dp), strokeWidth = 2.dp)
                     } else {
-                        Text("Test")
+                        Text("Save & Test")
                     }
                 }
                 if (verifyResult != null) {
