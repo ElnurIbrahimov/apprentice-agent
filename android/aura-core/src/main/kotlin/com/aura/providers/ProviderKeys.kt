@@ -2,6 +2,7 @@ package com.aura.providers
 
 import com.aura.security.SecureDataStore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,7 +29,8 @@ import javax.inject.Singleton
  * This singleton reads the keys from DataStore on demand. The Hilt graph still
  * constructs one ProviderKeys instance (singleton), and providers call
  * [keyFor] at every [Provider.chat] / [Provider.isConfigured] call. The
- * StateFlow cache is invalidated on every DataStore write.
+ * StateFlow cache is invalidated per-provider on every DataStore write
+ * (no full loadAllKeys after each set).
  *
  * The initial load runs asynchronously to avoid ANR during Hilt graph
  * construction. [keyFor] returns null until that load completes. To avoid a
@@ -41,15 +43,44 @@ import javax.inject.Singleton
 class ProviderKeys @Inject constructor(
     private val secureDataStore: SecureDataStore,
 ) {
+    /**
+     * The raw key-value map, published for backward compatibility.
+     * Only contains entries for providers with non-blank keys.
+     * Use [credentialStates] for richer lifecycle information.
+     */
     private val _state = MutableStateFlow<Map<String, String>>(emptyMap())
     val state: StateFlow<Map<String, String>> = _state.asStateFlow()
+
+    /**
+     * Per-provider credential lifecycle state. Each provider in [PREFIXES]
+     * appears as a key in this map.
+     *
+     * Transitions:
+     * - [ProviderCredentialState.Loading] → [ProviderCredentialState.NotConfigured]
+     *   (no saved key) or [ProviderCredentialState.Saved] (key loaded) or
+     *   [ProviderCredentialState.StorageError] (decryption failure)
+     * - [ProviderCredentialState.NotConfigured] → [ProviderCredentialState.Saved]
+     *   (via [set])
+     * - [ProviderCredentialState.Saved] → [ProviderCredentialState.NotConfigured]
+     *   (via [set] with blank key)
+     * - Any → [ProviderCredentialState.StorageError] on decryption failure
+     */
+    private val _credentialStates = MutableStateFlow(
+        PREFIXES.associateWith { ProviderCredentialState.Loading }
+    )
+    val credentialStates: StateFlow<Map<String, ProviderCredentialState>> =
+        _credentialStates.asStateFlow()
 
     /**
      * True once the initial DataStore load completes. The Settings
      * and Onboarding screens wait on this before showing the
      * "configured providers" list so the user never sees a
      * momentary "0 configured" flicker. Set in [init] after
-     * [loadAllKeys] finishes.
+     * per-provider state is populated.
+     *
+     * Always becomes true even when individual providers encounter
+     * decryption errors — consumers are never stuck in a
+     * perpetual loading state.
      */
     private val _loaded = MutableStateFlow(false)
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
@@ -65,11 +96,9 @@ class ProviderKeys @Inject constructor(
     )
 
     /**
-     * Guards the DataStore load-and-publish sequence. The initial async load in
-     * [init] and the explicit write in [set] both call [loadAllKeys] and
-     * publish the result to [_state]. Without the mutex a user who saves a key
-     * immediately after app start could have that write overwritten by the
-     * still-running init load.
+     * Guards all state mutations. The initial async load in [init] and the
+     * explicit write in [set] both go through this mutex to prevent the init
+     * load from overwriting a user's freshly-written key.
      */
     private val stateMutex = Mutex()
 
@@ -80,21 +109,57 @@ class ProviderKeys @Inject constructor(
      * "no provider configured" for a few hundred ms after app start, then
      * their saved key takes effect. This is the same behavior as before the
      * fix (the env-var approach also had no notion of "saved in DataStore").
+     *
+     * Individual decryption failures are handled per-provider (resulting in
+     * [ProviderCredentialState.StorageError]) so a corrupted entry for one
+     * provider does not block all other providers or leave [loaded] stuck at
+     * false.
      */
     init {
         scope.launch {
-            val loaded = loadAllKeys()
+            val values = mutableMapOf<String, String>()
+            val states = mutableMapOf<String, ProviderCredentialState>()
+
+            for (prefix in PREFIXES) {
+                try {
+                    val key = secureDataStore.getString("${prefix}_api_key")?.takeIf { it.isNotBlank() }
+                    if (key == null) {
+                        states[prefix] = ProviderCredentialState.NotConfigured
+                    } else {
+                        values[prefix] = key
+                        states[prefix] = ProviderCredentialState.Saved
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    states[prefix] = ProviderCredentialState.StorageError
+                }
+            }
+
             val model = loadEmbeddingModel()
             stateMutex.withLock {
-                _state.value = loaded
+                _state.value = values
+                _values.clear()
+                _values.putAll(values)
+                _credentialStates.value = states.toMap()
                 _embeddingModel.value = model
             }
-            // Flip the loaded signal last, after the state is
+            // Flip the loaded signal last, after all state is
             // populated, so a consumer waiting on loaded.value
             // sees the populated state in the same read.
+            // Always set to true, even if individual providers
+            // encountered StorageError — terminal error is not
+            // "still loading".
             _loaded.value = true
         }
     }
+
+    /**
+     * Internal decrypted values cache. Mirrors [state] for fast [keyFor]
+     * access without map reconstruction. Modified directly in [set] and
+     * [init] under [stateMutex].
+     */
+    private val _values = mutableMapOf<String, String>()
 
     /**
      * Returns the current API key for the given provider prefix, or null if
@@ -122,28 +187,36 @@ class ProviderKeys @Inject constructor(
     /**
      * Write a new key and refresh the cached state. Persisted via DataStore
      * so the value survives process death.
+     *
+     * Unlike the previous implementation, this updates only the affected
+     * provider in memory (no full loadAllKeys after each write). This ensures
+     * writes are O(1) per provider and a concurrent older write cannot
+     * overwrite a newer one because the targeted provider state is always
+     * derived from the most recent write that acquired [stateMutex].
+     *
+     * Blank or whitespace-only keys are normalized to clear, removing the
+     * stored entry from both DataStore and in-memory state.
+     *
+     * Never logs the key value.
      */
     suspend fun set(prefix: String, key: String) {
+        val trimmed = key.trim()
         val datastoreKey = "${prefix}_api_key"
-        if (key.isBlank()) {
-            secureDataStore.removeString(datastoreKey)
-        } else {
-            secureDataStore.putString(datastoreKey, key)
-        }
-        val loaded = loadAllKeys()
         stateMutex.withLock {
-            _state.value = loaded
+            if (trimmed.isBlank()) {
+                secureDataStore.removeString(datastoreKey)
+                _values.remove(prefix)
+                _state.value = _state.value - prefix
+                _credentialStates.value = _credentialStates.value + (prefix to ProviderCredentialState.NotConfigured)
+            } else {
+                secureDataStore.putString(datastoreKey, trimmed)
+                _values[prefix] = trimmed
+                _state.value = _state.value + (prefix to trimmed)
+                _credentialStates.value = _credentialStates.value + (prefix to ProviderCredentialState.Saved)
+            }
         }
     }
 
-    private suspend fun loadAllKeys(): Map<String, String> {
-        val out = mutableMapOf<String, String>()
-        for (prefix in PREFIXES) {
-            val datastoreKey = "${prefix}_api_key"
-            secureDataStore.getString(datastoreKey)?.let { out[prefix] = it }
-        }
-        return out
-    }
 
     /** Load the embedding model from DataStore, returning the fallback if absent. */
     private suspend fun loadEmbeddingModel(): String {
