@@ -1,8 +1,14 @@
 package com.aura.providers
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -13,6 +19,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.sse.EventSources
+import java.io.IOException
 
 /**
  * Anthropic Messages API. Tool use blocks are converted to ToolCall chunks.
@@ -23,6 +30,15 @@ import okhttp3.sse.EventSources
 class AnthropicProvider(
     private val providerKeys: ProviderKeys,
     private val httpClient: OkHttpClient,
+    /**
+     * Base URL for the Anthropic API. Injectable so tests can point at a
+     * MockWebServer without changing production defaults.
+     */
+    private val baseUrl: String = "https://api.anthropic.com",
+    /**
+     * Endpoint path for model catalog discovery, relative to [baseUrl].
+     */
+    private val modelsEndpoint: String = "/v1/models",
 ) : Provider {
     override val prefix = "anthropic"
     override val displayName = "Anthropic"
@@ -62,7 +78,7 @@ class AnthropicProvider(
             }
         }
         val request = Request.Builder()
-            .url("https://api.anthropic.com/v1/messages")
+            .url("$baseUrl/v1/messages")
             .addHeader("x-api-key", apiKey)
             .addHeader("anthropic-version", "2023-06-01")
             .addHeader("Content-Type", "application/json")
@@ -135,28 +151,62 @@ class AnthropicProvider(
     }
 
     override suspend fun listModels(): List<String> {
-        // Call the Anthropic /v1/models endpoint to get the live list.
-        // Falls back to a minimal hardcoded list only if the API call fails.
         return try {
-            val req = Request.Builder()
-                .url("https://api.anthropic.com/v1/models?limit=100")
+            runInterruptible(Dispatchers.IO) {
+                val request = Request.Builder()
+                .url("$baseUrl$modelsEndpoint?limit=100")
                 .addHeader("x-api-key", apiKey)
                 .addHeader("anthropic-version", "2023-06-01")
                 .build()
-            httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return fallbackModels
-                val body = resp.body?.string() ?: return fallbackModels
-                val obj = Json.parseToJsonElement(body).jsonObject
-                val data = (obj["data"] as? kotlinx.serialization.json.JsonArray) ?: return fallbackModels
-                data.mapNotNull { (it as? JsonObject)?.get("id")?.let { id -> (id as? JsonPrimitive)?.content }
+                httpClient.newCall(request).execute().use { response ->
+                    when (response.code) {
+                        401 -> throw ProviderCatalogException.AuthenticationException()
+                        429 -> throw ProviderCatalogException.RateLimitedException(
+                            retryAfterMs = response.header("Retry-After")?.toLongOrNull()?.times(1_000L),
+                        )
+                        in 200..299 -> Unit
+                        else -> throw ProviderCatalogException.NetworkException(
+                            message = "Anthropic catalog request failed with HTTP ${response.code}.",
+                            statusCode = response.code,
+                        )
+                    }
+                    val body = response.body?.string()?.takeIf(String::isNotBlank)
+                        ?: throw ProviderCatalogException.MalformedResponseException(
+                            "Anthropic returned an empty model catalog response.",
+                        )
+                    val data = try {
+                        Json.parseToJsonElement(body).jsonObject["data"] as? JsonArray
+                            ?: throw ProviderCatalogException.MalformedResponseException(
+                                "Missing data[] in Anthropic response.",
+                            )
+                    } catch (e: ProviderCatalogException) {
+                        throw e
+                    } catch (e: Exception) {
+                        throw ProviderCatalogException.MalformedResponseException(
+                            "Anthropic returned malformed model catalog JSON.",
+                            e,
+                        )
+                    }
+                    data.mapNotNull { item ->
+                        (item as? JsonObject)?.get("id")?.let { it as? JsonPrimitive }?.content
+                    }.filter(String::isNotBlank)
+                        .ifEmpty { throw ProviderCatalogException.EmptyCatalogException() }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ProviderCatalogException) {
+            throw e
+        } catch (e: IOException) {
+            currentCoroutineContext().ensureActive()
+            throw ProviderCatalogException.NetworkException(cause = e)
         } catch (e: Exception) {
-            fallbackModels
+            throw ProviderCatalogException.MalformedResponseException(
+                "Anthropic model catalog could not be read.",
+                e,
+            )
         }
     }
-
-    private val fallbackModels = listOf("claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5")
 
     override suspend fun cancel() {
         activeCall?.cancel()

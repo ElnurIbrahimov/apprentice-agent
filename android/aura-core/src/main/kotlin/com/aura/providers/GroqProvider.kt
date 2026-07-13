@@ -15,10 +15,11 @@ import okhttp3.OkHttpClient
 class GroqProvider(
     providerKeys: ProviderKeys,
     httpClient: OkHttpClient,
+    baseUrl: String = "https://api.groq.com/openai/v1",
 ) : OpenAiCompatProvider(
     prefix = "groq",
     displayName = "Groq",
-    baseUrl = "https://api.groq.com/openai/v1",
+    baseUrl = baseUrl,
     providerKeys = providerKeys,
     httpClient = httpClient,
 )

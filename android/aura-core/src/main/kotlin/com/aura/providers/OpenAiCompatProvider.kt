@@ -112,21 +112,63 @@ open class OpenAiCompatProvider(
 
     override suspend fun listModels(): List<String> = withContext(Dispatchers.IO) {
         if (defaultModels.isNotEmpty()) return@withContext defaultModels
-        val req = Request.Builder().url("$baseUrl/models")
-            .addHeader("Authorization", "Bearer $apiKey")
-            .build()
-        httpClient.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                val detail = resp.body?.string()?.take(200)?.trim().orEmpty()
-                val suffix = if (detail.isNotBlank()) " — $detail" else ""
-                throw IllegalStateException("HTTP ${resp.code} ${resp.message}$suffix".trim())
+        try {
+            val request = Request.Builder()
+                .url("$baseUrl/models")
+                .addHeader("Authorization", "Bearer $apiKey")
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                when (response.code) {
+                    401 -> throw ProviderCatalogException.AuthenticationException()
+                    429 -> {
+                        val retryAfterMs = response.header("Retry-After")
+                            ?.toLongOrNull()
+                            ?.times(1_000L)
+                        throw ProviderCatalogException.RateLimitedException(retryAfterMs = retryAfterMs)
+                    }
+                    in 200..299 -> Unit
+                    else -> throw ProviderCatalogException.NetworkException(
+                        message = "Provider catalog request failed with HTTP ${response.code}.",
+                        statusCode = response.code,
+                    )
+                }
+                val body = response.body?.string()?.takeIf { it.isNotBlank() }
+                    ?: throw ProviderCatalogException.MalformedResponseException(
+                        "Provider returned an empty model catalog response.",
+                    )
+                val data = try {
+                    val root = Json.parseToJsonElement(body).jsonObject
+                    root["data"] as? JsonArray
+                        ?: throw ProviderCatalogException.MalformedResponseException(
+                            "Missing data[] in provider response.",
+                        )
+                } catch (e: ProviderCatalogException) {
+                    throw e
+                } catch (e: Exception) {
+                    throw ProviderCatalogException.MalformedResponseException(
+                        "Provider returned malformed model catalog JSON.",
+                        e,
+                    )
+                }
+                data.mapNotNull { item ->
+                    (item as? JsonObject)
+                        ?.get("id")
+                        ?.let { it as? JsonPrimitive }
+                        ?.content
+                        ?.takeIf(String::isNotBlank)
+                }.ifEmpty { throw ProviderCatalogException.EmptyCatalogException() }
             }
-            val body = resp.body?.string() ?: throw IllegalStateException("Empty /models response")
-            val obj = Json.parseToJsonElement(body).jsonObject
-            val data = (obj["data"] as? JsonArray)
-                ?: throw IllegalStateException("Missing data[] in /models response")
-            data.mapNotNull { (it as? JsonObject)?.get("id")?.let { id -> (id as? JsonPrimitive)?.content } }
-                .ifEmpty { throw IllegalStateException("Provider returned zero models") }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: ProviderCatalogException) {
+            throw e
+        } catch (e: java.io.IOException) {
+            throw ProviderCatalogException.NetworkException(cause = e)
+        } catch (e: Exception) {
+            throw ProviderCatalogException.MalformedResponseException(
+                "Provider model catalog could not be read.",
+                e,
+            )
         }
     }
 

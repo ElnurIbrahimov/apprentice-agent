@@ -18,26 +18,26 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * MockWebServer tests for [GeminiProvider.listModels].
+ * MockWebServer tests for [AnthropicProvider.listModels].
  *
  * Every test uses a local MockWebServer so no real network calls are made.
  * The hardcoded fallback catalog has been removed — only live API responses
  * or typed exceptions are acceptable.
  */
-class GeminiProviderTest {
+class AnthropicProviderTest {
 
     private lateinit var server: MockWebServer
-    private lateinit var provider: GeminiProvider
+    private lateinit var provider: AnthropicProvider
 
     @Before
     fun setUp() {
         server = MockWebServer()
         server.start()
         val keys = mockk<ProviderKeys> {
-            every { keyFor("gemini") } returns "test-api-key"
-            every { isConfigured("gemini") } returns true
+            every { keyFor("anthropic") } returns "test-api-key"
+            every { isConfigured("anthropic") } returns true
         }
-        provider = GeminiProvider(
+        provider = AnthropicProvider(
             providerKeys = keys,
             httpClient = OkHttpClient(),
             baseUrl = server.url("/").toString().removeSuffix("/"),
@@ -52,24 +52,14 @@ class GeminiProviderTest {
     // ── Success ──
 
     @Test
-    fun `listModels returns model IDs with models prefix stripped`() = runBlocking<Unit> {
+    fun `listModels returns model IDs from valid Anthropic response`() = runBlocking<Unit> {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
-                .setBody("""{"models":[{"name":"models/gemini-2.5-pro","version":"001"},{"name":"models/gemini-2.5-flash","version":"001"}]}""")
+                .setBody("""{"data":[{"id":"claude-sonnet-4-20250514","type":"model"},{"id":"claude-haiku-4-20250514","type":"model"}]}""")
         )
         val models = provider.listModels()
-        assertEquals(listOf("gemini-2.5-pro", "gemini-2.5-flash"), models)
-    }
-
-    @Test
-    fun `listModels returns single model without prefix`() = runBlocking<Unit> {
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(200)
-                .setBody("""{"models":[{"name":"models/gemini-1.5-pro"}]}""")
-        )
-        assertEquals(listOf("gemini-1.5-pro"), provider.listModels())
+        assertEquals(listOf("claude-sonnet-4-20250514", "claude-haiku-4-20250514"), models)
     }
 
     // ── 401 ──
@@ -102,15 +92,6 @@ class GeminiProviderTest {
         }
     }
 
-    @Test
-    fun `listModels throws NetworkException on 403`() = runBlocking<Unit> {
-        server.enqueue(MockResponse().setResponseCode(403))
-        val ex = assertFailsWith<ProviderCatalogException.NetworkException> {
-            provider.listModels()
-        }
-        assertEquals(403, ex.statusCode)
-    }
-
     // ── Malformed response ──
 
     @Test
@@ -122,17 +103,17 @@ class GeminiProviderTest {
     }
 
     @Test
-    fun `listModels throws MalformedResponseException when models field is missing`() = runBlocking<Unit> {
+    fun `listModels throws MalformedResponseException when data field is missing`() = runBlocking<Unit> {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"other":[]}"""))
         val ex = assertFailsWith<ProviderCatalogException.MalformedResponseException> {
             provider.listModels()
         }
-        assertTrue(ex.message?.contains("Missing models[]") == true)
+        assertTrue(ex.message?.contains("Missing data[]") == true)
     }
 
     @Test
-    fun `listModels throws EmptyCatalogException when models array is empty`() = runBlocking<Unit> {
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"models":[]}"""))
+    fun `listModels throws EmptyCatalogException when data array is empty`() = runBlocking<Unit> {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"data":[]}"""))
         assertFailsWith<ProviderCatalogException.EmptyCatalogException> {
             provider.listModels()
         }
@@ -142,24 +123,33 @@ class GeminiProviderTest {
 
     @Test
     fun `listModels throws NetworkException when server is unreachable`() = runBlocking<Unit> {
-        val offline = GeminiProvider(
+        val unavailable = MockWebServer()
+        unavailable.start()
+        val unavailableBaseUrl = unavailable.url("/").toString().removeSuffix("/")
+        unavailable.shutdown()
+        val offline = AnthropicProvider(
             providerKeys = mockk {
-                every { keyFor("gemini") } returns "key"
-                every { isConfigured("gemini") } returns true
+                every { keyFor("anthropic") } returns "key"
+                every { isConfigured("anthropic") } returns true
             },
             httpClient = OkHttpClient.Builder()
                 .connectTimeout(1, java.util.concurrent.TimeUnit.SECONDS)
                 .build(),
+            baseUrl = unavailableBaseUrl,
         )
         assertFailsWith<ProviderCatalogException.NetworkException> {
             offline.listModels()
         }
     }
 
-    // ── CancellationException is rethrown ──
+    // ── CancellationException is rethrown by listModels (via CancellationException catch in impl) ──
 
     @Test
     fun `CancellationException is rethrown by listModels`() = runBlocking<Unit> {
+        // The CancellationException handler is verified by the OpenAiCompatProvider
+        // CancellationException test which uses the same pattern. Anthropic uses
+        // the same catch blocks. Here we verify the catch exists by covering the
+        // full method via MockWebServer + coroutine cancellation.
         server.enqueue(
             MockResponse().setResponseCode(200).setBody("incomplete".repeat(1000))
                 .throttleBody(1, 1, java.util.concurrent.TimeUnit.SECONDS)
@@ -167,12 +157,13 @@ class GeminiProviderTest {
         val job = launch {
             assertFailsWith<CancellationException> { provider.listModels() }
         }
+        // Cancel before the slow response completes
         delay(50)
         job.cancel()
         job.join()
     }
 
-    // ── Legacy contract ──
+    // ── Legacy contract: prefix, displayName, isConfigured, cancel ──
 
     @Test
     fun `isConfigured returns true when API key is set`() {
@@ -181,10 +172,10 @@ class GeminiProviderTest {
 
     @Test
     fun `isConfigured returns false when API key is not set`() {
-        val unconfigured = GeminiProvider(
+        val unconfigured = AnthropicProvider(
             providerKeys = mockk {
-                every { keyFor("gemini") } returns null
-                every { isConfigured("gemini") } returns false
+                every { keyFor("anthropic") } returns null
+                every { isConfigured("anthropic") } returns false
             },
             httpClient = OkHttpClient(),
         )
@@ -193,8 +184,8 @@ class GeminiProviderTest {
 
     @Test
     fun `prefix and displayName are correct`() {
-        assertEquals("gemini", provider.prefix)
-        assertEquals("Google Gemini", provider.displayName)
+        assertEquals("anthropic", provider.prefix)
+        assertEquals("Anthropic", provider.displayName)
     }
 
     @Test

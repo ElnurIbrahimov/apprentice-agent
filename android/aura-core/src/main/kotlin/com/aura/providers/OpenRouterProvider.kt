@@ -24,10 +24,11 @@ import okhttp3.OkHttpClient
 class OpenRouterProvider(
     providerKeys: ProviderKeys,
     httpClient: OkHttpClient,
+    baseUrl: String = "https://openrouter.ai/api/v1",
 ) : OpenAiCompatProvider(
     prefix = "openrouter",
     displayName = "OpenRouter",
-    baseUrl = "https://openrouter.ai/api/v1",
+    baseUrl = baseUrl,
     providerKeys = providerKeys,
     httpClient = httpClient.newBuilder()
         .addInterceptor(Interceptor { chain ->

@@ -2,6 +2,10 @@ package com.aura.providers
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -35,6 +39,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class GeminiProvider(
     private val providerKeys: ProviderKeys,
     private val httpClient: OkHttpClient,
+    private val baseUrl: String = "https://generativelanguage.googleapis.com/v1beta",
 ) : Provider {
 
     override val prefix = "gemini"
@@ -60,7 +65,7 @@ class GeminiProvider(
             return@flow
         }
         val request = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:streamGenerateContent")
+            .url("$baseUrl/models/$model:streamGenerateContent")
             .addHeader("Content-Type", "application/json")
             .addHeader("X-Goog-Api-Key", key)
             .post(body.toString().toRequestBody("application/json".toMediaType()))
@@ -130,38 +135,61 @@ class GeminiProvider(
     }
 
     override suspend fun listModels(): List<String> {
-        // Fetch the live model list from the Gemini API. Fall back to
-        // a small hardcoded list only if the API call fails — same
-        // shape as AnthropicProvider.listModels. The hardcoded list is
-        // intentionally minimal: only models the user can fall back to
-        // when the API is unreachable. Live verification beats stale
-        // defaults every time.
-        val fallback = listOf(
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-        )
         return try {
-            val req = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models")
+            runInterruptible(Dispatchers.IO) {
+                val request = Request.Builder()
+                .url("$baseUrl/models")
                 .addHeader("Content-Type", "application/json")
                 .addHeader("X-Goog-Api-Key", apiKey)
                 .get()
                 .build()
-            httpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return fallback
-                val body = resp.body?.string() ?: return fallback
-                val obj = Json.parseToJsonElement(body).jsonObject
-                val models = (obj["models"] as? JsonArray) ?: return fallback
-                models.mapNotNull { (it as? JsonObject)?.get("name")?.let { n -> (n as? JsonPrimitive)?.content } }
-                    .mapNotNull { fullName ->
-                        // The "name" field is "models/gemini-2.5-pro" — strip the
-                        // "models/" prefix to get the bare model id used in
-                        // chat requests.
-                        fullName.removePrefix("models/").takeIf { it.isNotBlank() }
+                httpClient.newCall(request).execute().use { response ->
+                    when (response.code) {
+                        401 -> throw ProviderCatalogException.AuthenticationException()
+                        429 -> throw ProviderCatalogException.RateLimitedException(
+                            retryAfterMs = response.header("Retry-After")?.toLongOrNull()?.times(1_000L),
+                        )
+                        in 200..299 -> Unit
+                        else -> throw ProviderCatalogException.NetworkException(
+                            message = "Gemini catalog request failed with HTTP ${response.code}.",
+                            statusCode = response.code,
+                        )
                     }
+                    val body = response.body?.string()?.takeIf(String::isNotBlank)
+                        ?: throw ProviderCatalogException.MalformedResponseException(
+                            "Gemini returned an empty model catalog response.",
+                        )
+                    val models = try {
+                        Json.parseToJsonElement(body).jsonObject["models"] as? JsonArray
+                            ?: throw ProviderCatalogException.MalformedResponseException(
+                                "Missing models[] in Gemini response.",
+                            )
+                    } catch (e: ProviderCatalogException) {
+                        throw e
+                    } catch (e: Exception) {
+                        throw ProviderCatalogException.MalformedResponseException(
+                            "Gemini returned malformed model catalog JSON.",
+                            e,
+                        )
+                    }
+                    models.mapNotNull { (it as? JsonObject)?.get("name")?.let { n -> (n as? JsonPrimitive)?.content } }
+                        .mapNotNull { fullName ->
+                            fullName.removePrefix("models/").takeIf { it.isNotBlank() }
+                        }.ifEmpty { throw ProviderCatalogException.EmptyCatalogException() }
+                }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: ProviderCatalogException) {
+            throw e
+        } catch (e: java.io.IOException) {
+            currentCoroutineContext().ensureActive()
+            throw ProviderCatalogException.NetworkException(cause = e)
         } catch (e: Exception) {
-            fallback
+            throw ProviderCatalogException.MalformedResponseException(
+                "Gemini model catalog could not be read.",
+                e,
+            )
         }
     }
 
