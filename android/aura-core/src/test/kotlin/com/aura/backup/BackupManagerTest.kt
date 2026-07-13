@@ -21,25 +21,35 @@ import kotlin.test.assertTrue
 class BackupManagerTest {
 
     private val memoryDao = mockk<com.aura.memory.MemoryDao>(relaxed = true)
+    private val memoryEditDao = mockk<com.aura.memory.MemoryEditDao>(relaxed = true)
     private val conversationDao = mockk<com.aura.agent.ConversationDao>(relaxed = true)
     private val kgDao = mockk<com.aura.kg.KnowledgeGraphDao>(relaxed = true)
     private val handDao = mockk<com.aura.hands.HandDao>(relaxed = true)
     private val taskDao = mockk<com.aura.tasks.TaskDao>(relaxed = true)
+    private val reminderDao = mockk<com.aura.tasks.ReminderDao>(relaxed = true)
+    private val proactiveEventDao = mockk<com.aura.proactive.ProactiveEventDao>(relaxed = true)
     private val userProfileDao = mockk<com.aura.profile.UserProfileDao>(relaxed = true)
     private val providerKeys = mockk<com.aura.providers.ProviderKeys>(relaxed = true)
     private val userPreferences = mockk<com.aura.data.UserPreferences>(relaxed = true)
     private val context = mockk<android.content.Context>(relaxed = true)
+    private val reminderScheduler = mockk<com.aura.tasks.ReminderScheduler>(relaxed = true)
+    private val usageTracker = com.aura.usage.UsageTracker()
 
     private val manager = BackupManager(
         context = context,
         memoryDao = memoryDao,
+        memoryEditDao = memoryEditDao,
         conversationDao = conversationDao,
         kgDao = kgDao,
         handDao = handDao,
         taskDao = taskDao,
+        reminderDao = reminderDao,
+        proactiveEventDao = proactiveEventDao,
         userProfileDao = userProfileDao,
         providerKeys = providerKeys,
         userPreferences = userPreferences,
+        reminderScheduler = reminderScheduler,
+        usageTracker = usageTracker,
     )
 
     @Test
@@ -47,15 +57,28 @@ class BackupManagerTest {
         // Empty tables — the call should not throw and should return a
         // valid AuraBackup with the metadata fields populated.
         coEvery { memoryDao.allForExport() } returns emptyList()
+        coEvery { memoryEditDao.allForBackup() } returns emptyList()
         coEvery { conversationDao.allForExport() } returns emptyList()
         coEvery { kgDao.allNodes() } returns emptyList()
         coEvery { kgDao.allEdges() } returns emptyList()
         coEvery { handDao.getAll() } returns emptyList()
         coEvery { taskDao.all() } returns emptyList()
+        coEvery { reminderDao.allForBackup() } returns emptyList()
+        coEvery { proactiveEventDao.allForBackup() } returns emptyList()
         coEvery { userProfileDao.get() } returns null
         every { userPreferences.defaultModel } returns flowOf("ollama:deepseek-v4-pro:cloud")
         every { userPreferences.firstRunComplete } returns flowOf(true)
         every { userPreferences.appLockEnabled } returns flowOf(false)
+        every { userPreferences.lastSeenProactiveAt } returns flowOf(0L)
+        every { userPreferences.morningBriefEnabled } returns flowOf(true)
+        every { userPreferences.calendarMonitorEnabled } returns flowOf(true)
+        every { userPreferences.ttsEnabled } returns flowOf(true)
+        every { userPreferences.incognitoDefault } returns flowOf(false)
+        every { userPreferences.themeMode } returns flowOf("system")
+        every { userPreferences.customIdentity } returns flowOf("")
+        every { userPreferences.specialistOverrides } returns flowOf("{}")
+        every { userPreferences.morningBriefHour } returns flowOf(7)
+        every { userPreferences.specialistToolOverrides } returns flowOf("{}")
         every { providerKeys.embeddingModel } returns "nomic-embed-text"
 
         val backup = manager.snapshot(appVersionName = "0.1.0")
@@ -199,6 +222,47 @@ class BackupManagerTest {
         assertEquals(1, counts.tasks)
         assertEquals(1, counts.profile)
         assertEquals(7, counts.total)
+    }
+
+    @Test
+    fun `restore reschedules future reminders with fresh work`() = runTest {
+        val future = System.currentTimeMillis() + 3_600_000L
+        val restored = com.aura.tasks.ReminderEntity(
+            id = "reminder-1",
+            workId = "",
+            message = "Call home",
+            triggerAt = future,
+            recurrence = "weekly",
+        )
+        coEvery { reminderScheduler.schedule(any()) } returns restored.copy(workId = "fresh-work")
+
+        val counts = manager.restore(
+            AuraBackup(
+                exportedAt = 0L,
+                appVersionName = "0.2.0",
+                reminders = listOf(
+                    ReminderBackup(
+                        id = "reminder-1",
+                        message = "Call home",
+                        triggerAt = future,
+                        createdAt = 1L,
+                        taskId = "",
+                        recurrence = "weekly",
+                        status = "scheduled",
+                    ),
+                ),
+            ),
+        )
+
+        coVerify {
+            reminderScheduler.schedule(
+                match {
+                    it.id == "reminder-1" && it.workId.isEmpty() &&
+                        it.recurrence == "weekly" && it.triggerAt == future
+                },
+            )
+        }
+        assertEquals(1, counts.reminders)
     }
 
     @Test

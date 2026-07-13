@@ -212,6 +212,20 @@ private class FakeProactiveEventDao : ProactiveEventDao {
         return id
     }
 
+    override suspend fun insertAll(events: List<ProactiveEventEntity>) {
+        events.forEach { event ->
+            rows.removeAll { it.id == event.id }
+            rows.add(event)
+        }
+    }
+
+    override suspend fun allForBackup(): List<ProactiveEventEntity> =
+        rows.sortedBy { it.timestamp }
+
+    override suspend fun deleteAll() {
+        rows.clear()
+    }
+
     override suspend fun recent(limit: Int): List<ProactiveEventEntity> =
         rows.sortedByDescending { it.timestamp }.take(limit)
 

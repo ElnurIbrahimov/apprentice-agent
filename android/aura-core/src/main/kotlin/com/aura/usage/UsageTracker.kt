@@ -104,6 +104,14 @@ class UsageTracker private constructor(
     }
 
     @Synchronized
+    fun restore(usage: UsageSnapshot) {
+        val normalized = usage.copy(
+            models = usage.models.sortedByDescending { it.promptTokens + it.completionTokens },
+        )
+        update(normalized)
+    }
+
+    @Synchronized
     fun reset() {
         update(UsageSnapshot())
     }

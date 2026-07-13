@@ -10,13 +10,22 @@ import com.aura.kg.KnowledgeGraphDao
 import com.aura.kg.EdgeEntity
 import com.aura.kg.NodeEntity
 import com.aura.memory.MemoryDao
+import com.aura.memory.MemoryEditDao
+import com.aura.memory.MemoryEditEntity
 import com.aura.memory.MemoryEntity
 import com.aura.profile.UserProfile
 import com.aura.profile.UserProfileDao
 import com.aura.profile.UserProfileEntity
 import com.aura.providers.ProviderKeys
+import com.aura.proactive.ProactiveEventDao
+import com.aura.proactive.ProactiveEventEntity
+import com.aura.tasks.ReminderDao
+import com.aura.tasks.ReminderEntity
+import com.aura.tasks.ReminderRecurrence
+import com.aura.tasks.ReminderScheduler
 import com.aura.tasks.TaskDao
 import com.aura.tasks.TaskEntity
+import com.aura.usage.UsageTracker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -50,13 +59,18 @@ import javax.inject.Singleton
 class BackupManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val memoryDao: MemoryDao,
+    private val memoryEditDao: MemoryEditDao,
     private val conversationDao: ConversationDao,
     private val kgDao: KnowledgeGraphDao,
     private val handDao: HandDao,
     private val taskDao: TaskDao,
+    private val reminderDao: ReminderDao,
+    private val proactiveEventDao: ProactiveEventDao,
     private val userProfileDao: UserProfileDao,
     private val providerKeys: ProviderKeys,
     private val userPreferences: UserPreferences,
+    private val reminderScheduler: ReminderScheduler,
+    private val usageTracker: UsageTracker,
 ) {
     private val json = Json {
         prettyPrint = true
@@ -81,6 +95,7 @@ class BackupManager @Inject constructor(
             exportedAt = now,
             appVersionName = appVersionName,
             memories = memoryDao.allForExport().map { it.toBackup() },
+            memoryEdits = memoryEditDao.allForBackup().map { it.toBackup() },
             conversations = conversationDao.allForExport().map { it.toBackup() },
             knowledgeGraph = KnowledgeGraphBackup(
                 nodes = kgDao.allNodes().map { it.toBackup() },
@@ -88,13 +103,26 @@ class BackupManager @Inject constructor(
             ),
             hands = handDao.getAll().map { it.toBackup() },
             tasks = taskDao.all().map { it.toBackup() },
+            reminders = reminderDao.allForBackup().map { it.toBackup() },
+            proactiveEvents = proactiveEventDao.allForBackup().map { it.toBackup() },
             userProfile = userProfileDao.get()?.toBackup(),
             preferences = PreferencesBackup(
                 defaultModel = userPreferences.defaultModel.first().takeIf { it.isNotBlank() },
                 firstRunComplete = userPreferences.firstRunComplete.first(),
                 appLockEnabled = userPreferences.appLockEnabled.first(),
                 embeddingModel = providerKeys.embeddingModel.takeIf { it.isNotBlank() },
+                lastSeenProactiveAt = userPreferences.lastSeenProactiveAt.first(),
+                morningBriefEnabled = userPreferences.morningBriefEnabled.first(),
+                calendarMonitorEnabled = userPreferences.calendarMonitorEnabled.first(),
+                ttsEnabled = userPreferences.ttsEnabled.first(),
+                incognitoDefault = userPreferences.incognitoDefault.first(),
+                themeMode = userPreferences.themeMode.first(),
+                customIdentity = userPreferences.customIdentity.first(),
+                specialistOverrides = userPreferences.specialistOverrides.first(),
+                morningBriefHour = userPreferences.morningBriefHour.first(),
+                specialistToolOverrides = userPreferences.specialistToolOverrides.first(),
             ),
+            usage = usageTracker.snapshot.value,
         )
     }
 
@@ -134,19 +162,25 @@ class BackupManager @Inject constructor(
      */
     suspend fun restore(backup: AuraBackup): RestoreCounts = withContext(Dispatchers.IO) {
         val memRows = backup.memories.map { it.toEntity() }
+        val editRows = backup.memoryEdits.map { it.toEntity() }
         val convRows = backup.conversations.map { it.toEntity() }
         val nodeRows = backup.knowledgeGraph.nodes.map { it.toEntity() }
         val edgeRows = backup.knowledgeGraph.edges.map { it.toEntity() }
         val handRows = backup.hands.map { it.toEntity() }
         val taskRows = backup.tasks.map { it.toEntity() }
+        val reminderRows = backup.reminders.map { it.toEntity() }
+        val proactiveRows = backup.proactiveEvents.map { it.toEntity() }
         val profileRow = backup.userProfile?.toEntity()
 
         if (memRows.isNotEmpty()) memoryDao.insertAll(memRows)
+        if (editRows.isNotEmpty()) memoryEditDao.insertAll(editRows)
         if (convRows.isNotEmpty()) conversationDao.insertAll(convRows)
         if (nodeRows.isNotEmpty()) kgDao.insertAllNodes(nodeRows)
         if (edgeRows.isNotEmpty()) kgDao.insertAllEdges(edgeRows)
         if (handRows.isNotEmpty()) handDao.insertAll(handRows)
         if (taskRows.isNotEmpty()) taskDao.insertAll(taskRows)
+        if (proactiveRows.isNotEmpty()) proactiveEventDao.insertAll(proactiveRows)
+        restoreReminders(reminderRows)
         // If the backup has a profile, replace the current one.
         // If it doesn't, clear the existing profile so stale identity
         // data doesn't survive a restore.
@@ -156,9 +190,20 @@ class BackupManager @Inject constructor(
             userProfileDao.deleteAll()
         }
         backup.preferences.defaultModel?.let { userPreferences.setDefaultModel(it) }
-        if (backup.preferences.appLockEnabled) userPreferences.setAppLockEnabled(true)
-        if (backup.preferences.firstRunComplete) userPreferences.setFirstRunComplete(true)
+        userPreferences.setAppLockEnabled(backup.preferences.appLockEnabled)
+        userPreferences.setFirstRunComplete(backup.preferences.firstRunComplete)
         backup.preferences.embeddingModel?.let { providerKeys.setEmbeddingModel(it) }
+        userPreferences.setLastSeenProactiveAt(backup.preferences.lastSeenProactiveAt)
+        userPreferences.setMorningBriefEnabled(backup.preferences.morningBriefEnabled)
+        userPreferences.setCalendarMonitorEnabled(backup.preferences.calendarMonitorEnabled)
+        userPreferences.setTtsEnabled(backup.preferences.ttsEnabled)
+        userPreferences.setIncognitoDefault(backup.preferences.incognitoDefault)
+        userPreferences.setThemeMode(backup.preferences.themeMode)
+        userPreferences.setCustomIdentity(backup.preferences.customIdentity)
+        userPreferences.setSpecialistOverrides(backup.preferences.specialistOverrides)
+        userPreferences.setMorningBriefHour(backup.preferences.morningBriefHour)
+        userPreferences.setSpecialistToolOverrides(backup.preferences.specialistToolOverrides)
+        usageTracker.restore(backup.usage)
 
         RestoreCounts(
             memories = memRows.size,
@@ -167,8 +212,35 @@ class BackupManager @Inject constructor(
             edges = edgeRows.size,
             hands = handRows.size,
             tasks = taskRows.size,
+            memoryEdits = editRows.size,
+            reminders = reminderRows.size,
+            proactiveEvents = proactiveRows.size,
             profile = if (profileRow != null) 1 else 0,
         )
+    }
+
+    private suspend fun restoreReminders(rows: List<ReminderEntity>) {
+        val now = System.currentTimeMillis()
+        rows.forEach { row ->
+            if (row.status != "scheduled") {
+                reminderDao.insert(row.copy(workId = ""))
+                return@forEach
+            }
+            val nextTrigger = if (row.triggerAt > now) {
+                row.triggerAt
+            } else {
+                ReminderRecurrence.nextTrigger(row.triggerAt, row.recurrence, now)
+            }
+            if (nextTrigger == null) {
+                reminderDao.insert(
+                    row.copy(workId = "", status = "fired", firedAt = row.firedAt ?: now),
+                )
+            } else {
+                reminderScheduler.schedule(
+                    row.copy(workId = "", triggerAt = nextTrigger, status = "scheduled"),
+                )
+            }
+        }
     }
 
     /**
@@ -181,12 +253,15 @@ class BackupManager @Inject constructor(
         // Conversations, memories, hands, tasks are independent
         // tables — we use a single bulk DELETE via a one-off
         // Query to avoid N round-trips.
+        memoryEditDao.deleteAll()
         memoryDao.deleteAll()
         conversationDao.deleteAll()
         kgDao.deleteAllEdges()
         kgDao.deleteAllNodes()
         handDao.deleteAll()
+        reminderDao.deleteAll()
         taskDao.deleteAll()
+        proactiveEventDao.deleteAll()
         userProfileDao.deleteAll()
     }
 
@@ -204,14 +279,17 @@ class BackupManager @Inject constructor(
 
     data class RestoreCounts(
         val memories: Int,
+        val memoryEdits: Int,
         val conversations: Int,
         val nodes: Int,
         val edges: Int,
         val hands: Int,
         val tasks: Int,
+        val reminders: Int,
+        val proactiveEvents: Int,
         val profile: Int,
     ) {
-        val total: Int get() = memories + conversations + nodes + edges + hands + tasks + profile
+        val total: Int get() = memories + memoryEdits + conversations + nodes + edges + hands + tasks + reminders + proactiveEvents + profile
     }
 }
 
@@ -245,6 +323,14 @@ private fun MemoryBackup.toEntity() = MemoryEntity(
     decayScore = decayScore,
     tags = tags,
     metadata = metadata,
+)
+
+private fun MemoryEditEntity.toBackup() = MemoryEditBackup(
+    id, memoryId, oldContent, newContent, oldCategory, newCategory, editedAt, editedBy,
+)
+
+private fun MemoryEditBackup.toEntity() = MemoryEditEntity(
+    id, memoryId, oldContent, newContent, oldCategory, newCategory, editedAt, editedBy,
 )
 
 private fun ConversationEntity.toBackup() = ConversationBackup(
@@ -341,6 +427,30 @@ private fun TaskBackup.toEntity() = TaskEntity(
     id = id, title = title, description = description,
     createdAt = createdAt, dueAt = dueAt, completedAt = completedAt,
     status = status, priority = priority, tags = tags,
+)
+
+private fun ReminderEntity.toBackup() = ReminderBackup(
+    id, message, triggerAt, createdAt, taskId, recurrence, status, firedAt,
+)
+
+private fun ReminderBackup.toEntity() = ReminderEntity(
+    id = id,
+    workId = "",
+    message = message,
+    triggerAt = triggerAt,
+    createdAt = createdAt,
+    taskId = taskId,
+    recurrence = recurrence,
+    status = status,
+    firedAt = firedAt,
+)
+
+private fun ProactiveEventEntity.toBackup() = ProactiveEventBackup(
+    id, eventType, title, body, timestamp, payload,
+)
+
+private fun ProactiveEventBackup.toEntity() = ProactiveEventEntity(
+    id, eventType, title, body, timestamp, payload,
 )
 
 private fun UserProfileEntity.toBackup() = UserProfileBackup(

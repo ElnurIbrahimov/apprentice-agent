@@ -2,12 +2,22 @@ package com.aura.proactive
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 
 @Dao
 interface ProactiveEventDao {
     @Insert
     suspend fun insert(event: ProactiveEventEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(events: List<ProactiveEventEntity>)
+
+    @Query("SELECT * FROM proactive_events ORDER BY timestamp ASC")
+    suspend fun allForBackup(): List<ProactiveEventEntity>
+
+    @Query("DELETE FROM proactive_events")
+    suspend fun deleteAll()
 
     @Query("SELECT * FROM proactive_events ORDER BY timestamp DESC LIMIT :limit")
     suspend fun recent(limit: Int = 100): List<ProactiveEventEntity>

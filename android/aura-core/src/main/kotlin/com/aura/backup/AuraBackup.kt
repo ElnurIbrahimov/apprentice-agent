@@ -1,5 +1,6 @@
 package com.aura.backup
 
+import com.aura.usage.UsageSnapshot
 import kotlinx.serialization.Serializable
 
 /**
@@ -27,15 +28,19 @@ data class AuraBackup(
     val exportedBy: String = "aura-android",
     val appVersionName: String,
     val memories: List<MemoryBackup> = emptyList(),
+    val memoryEdits: List<MemoryEditBackup> = emptyList(),
     val conversations: List<ConversationBackup> = emptyList(),
     val knowledgeGraph: KnowledgeGraphBackup = KnowledgeGraphBackup(),
     val hands: List<HandBackup> = emptyList(),
     val tasks: List<TaskBackup> = emptyList(),
+    val reminders: List<ReminderBackup> = emptyList(),
+    val proactiveEvents: List<ProactiveEventBackup> = emptyList(),
     val userProfile: UserProfileBackup? = null,
     val preferences: PreferencesBackup = PreferencesBackup(),
+    val usage: UsageSnapshot = UsageSnapshot(),
 ) {
     companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
     }
 }
 
@@ -52,6 +57,18 @@ data class MemoryBackup(
     val decayScore: Float,
     val tags: String,
     val metadata: String,
+)
+
+@Serializable
+data class MemoryEditBackup(
+    val id: Long,
+    val memoryId: String,
+    val oldContent: String,
+    val newContent: String,
+    val oldCategory: String,
+    val newCategory: String,
+    val editedAt: Long,
+    val editedBy: String,
 )
 
 @Serializable
@@ -124,6 +141,28 @@ data class TaskBackup(
 )
 
 @Serializable
+data class ReminderBackup(
+    val id: String,
+    val message: String,
+    val triggerAt: Long,
+    val createdAt: Long,
+    val taskId: String,
+    val recurrence: String,
+    val status: String,
+    val firedAt: Long? = null,
+)
+
+@Serializable
+data class ProactiveEventBackup(
+    val id: Long,
+    val eventType: String,
+    val title: String,
+    val body: String,
+    val timestamp: Long,
+    val payload: String,
+)
+
+@Serializable
 data class UserProfileBackup(
     val name: String?,
     val traitsJson: String,
@@ -138,4 +177,14 @@ data class PreferencesBackup(
     val firstRunComplete: Boolean = false,
     val appLockEnabled: Boolean = false,
     val embeddingModel: String? = null,
+    val lastSeenProactiveAt: Long = 0L,
+    val morningBriefEnabled: Boolean = true,
+    val calendarMonitorEnabled: Boolean = true,
+    val ttsEnabled: Boolean = true,
+    val incognitoDefault: Boolean = false,
+    val themeMode: String = "system",
+    val customIdentity: String = "",
+    val specialistOverrides: String = "{}",
+    val morningBriefHour: Int = 7,
+    val specialistToolOverrides: String = "{}",
 )
