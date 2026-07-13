@@ -52,6 +52,33 @@ class TaskDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate3To4_preservesReminders_andAddsLifecycleColumns() {
+        val db = helper.createDatabase("test-tasks-3-4.db", 3)
+        db.execSQL(
+            "INSERT INTO reminders (id, message, triggerAt, createdAt, taskId) VALUES ('r1', 'Call', 12345, 100, '')",
+        )
+        db.close()
+
+        val migrated = helper.runMigrationsAndValidate(
+            "test-tasks-3-4.db",
+            4,
+            true,
+            TasksModule.MIGRATION_3_4,
+        )
+        migrated.query(
+            "SELECT id, workId, recurrence, status, firedAt FROM reminders WHERE id = 'r1'",
+        ).use { cursor ->
+            assert(cursor.moveToFirst())
+            assert(cursor.getString(0) == "r1")
+            assert(cursor.getString(1) == "r1")
+            assert(cursor.getString(2) == "none")
+            assert(cursor.getString(3) == "scheduled")
+            assert(cursor.isNull(4))
+        }
+        migrated.close()
+    }
+
+    @Test
     fun migrate2To3_preservesData_andAddsQueryIndexes() {
         val db = helper.createDatabase("test-tasks-2-3.db", 2)
         db.execSQL("INSERT INTO tasks (id, title, description, createdAt, dueAt, completedAt, status, priority, tags) VALUES ('task-2', 'Indexed', '', 1, 2, NULL, 'pending', 0, '')")

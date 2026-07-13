@@ -52,6 +52,20 @@ object TasksModule {
         }
     }
 
+    /** Migration 3→4: durable reminder lifecycle and recurring scheduling. */
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE reminders ADD COLUMN workId TEXT NOT NULL DEFAULT ''")
+            db.execSQL("UPDATE reminders SET workId = id WHERE workId = ''")
+            db.execSQL("ALTER TABLE reminders ADD COLUMN recurrence TEXT NOT NULL DEFAULT 'none'")
+            db.execSQL("ALTER TABLE reminders ADD COLUMN status TEXT NOT NULL DEFAULT 'scheduled'")
+            db.execSQL("ALTER TABLE reminders ADD COLUMN firedAt INTEGER")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_reminders_status_triggerAt ON reminders(status, triggerAt)",
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): TaskDatabase =
@@ -59,7 +73,7 @@ object TasksModule {
             context,
             TaskDatabase::class.java,
             "aura-tasks.db",
-            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4),
         ).build()
 
     @Provides

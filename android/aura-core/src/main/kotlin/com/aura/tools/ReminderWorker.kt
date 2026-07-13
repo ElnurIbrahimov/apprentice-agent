@@ -11,6 +11,8 @@ import androidx.work.WorkerParameters
 import androidx.work.CoroutineWorker
 import com.aura.core.R
 import com.aura.tasks.ReminderDao
+import com.aura.tasks.ReminderRecurrence
+import com.aura.tasks.ReminderScheduler
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 
@@ -24,27 +26,41 @@ class ReminderWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted params: WorkerParameters,
     private val reminderDao: ReminderDao,
+    private val reminderScheduler: ReminderScheduler,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val title = inputData.getString("title") ?: "\u23F0 Reminder"
-        val body = inputData.getString("body") ?: ""
+        val reminderId = inputData.getString(KEY_REMINDER_ID)
+        val title = inputData.getString(KEY_TITLE) ?: "\u23F0 Reminder"
+        val body = inputData.getString(KEY_BODY) ?: ""
         // Use the stable notificationId that SetReminderTool reserved for us.
         // If it is missing, fall back to a deterministic range derived from
         // the work request id hash so the worst case is still a collision
         // within the reminder namespace, not with morning-brief / proactive.
-        val notificationId = inputData.getInt("notificationId", id.hashCode().let {
+        val notificationId = inputData.getInt(KEY_NOTIFICATION_ID, id.hashCode().let {
             val h = if (it < 0) -it else it
             (h % REMINDER_ID_RANGE) + REMINDER_ID_START
         })
         postNotification(applicationContext, title, body, notificationId)
-        // Clean up the metadata row; the reminder has fired.
-        runCatching { reminderDao.delete(id.toString()) }
-            .onFailure { e ->
-                try {
-                    android.util.Log.w("ReminderWorker", "failed to delete reminder metadata for ${id}: ${e.message}")
-                } catch (_: RuntimeException) {}
+        if (reminderId != null) {
+            val row = reminderDao.get(reminderId)
+            if (row != null) {
+                val firedAt = System.currentTimeMillis()
+                val next = ReminderRecurrence.nextTrigger(row.triggerAt, row.recurrence, firedAt)
+                if (next == null) {
+                    reminderDao.insert(row.copy(status = "fired", firedAt = firedAt))
+                } else {
+                    runCatching {
+                        reminderScheduler.schedule(
+                            row.copy(triggerAt = next, firedAt = firedAt, status = "scheduled"),
+                        )
+                    }.onFailure { error ->
+                        reminderDao.insert(row.copy(status = "fired", firedAt = firedAt))
+                        android.util.Log.w("ReminderWorker", "failed to schedule next occurrence", error)
+                    }
+                }
             }
+        }
         return Result.success()
     }
 
@@ -77,6 +93,10 @@ class ReminderWorker @AssistedInject constructor(
     }
 
     companion object {
+        const val KEY_REMINDER_ID = "reminderId"
+        const val KEY_TITLE = "title"
+        const val KEY_BODY = "body"
+        const val KEY_NOTIFICATION_ID = "notificationId"
         /** Fallback notification ID namespace when inputData misses the reserved id. */
         private const val REMINDER_ID_START = 10_000
         private const val REMINDER_ID_RANGE = 90_000

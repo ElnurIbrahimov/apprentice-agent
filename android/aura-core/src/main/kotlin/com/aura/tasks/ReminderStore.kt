@@ -1,67 +1,48 @@
 package com.aura.tasks
 
-import android.content.Context
-import androidx.work.WorkManager
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Single source of truth for the user-facing "my reminders" view.
- *
- * Wraps the [ReminderDao] (Room) and WorkManager (cancellation) so
- * callers don't have to know about either. The upcoming list is
- * a Flow so the screen redraws on insert / delete.
- *
- * Why one place for both? `ReminderEntity.id` is the WorkManager
- * request id (a UUID), so cancelling a reminder means:
- *
- *   1. WorkManager.cancelUniqueWork(...) — actually stops the
- *      scheduled fire (just deleting the Room row would leak the
- *      WorkManager job and the notification would still appear).
- *   2. ReminderDao.delete(id) — removes the row so the UI updates.
- *
- * The DAO has `deleteExpired` for a sweep job, but the live UI uses
- * [observeUpcoming] which is already filtered to `triggerAt > now`.
- */
+/** User-facing reminder lifecycle facade shared by Tasks and Reminders screens. */
 @Singleton
 class ReminderStore @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val reminderDao: ReminderDao,
+    private val reminderScheduler: ReminderScheduler,
 ) {
-    /** Live list of reminders scheduled in the future, soonest first. */
     fun observeUpcoming(): Flow<List<ReminderEntity>> =
         reminderDao.observeUpcoming(System.currentTimeMillis())
 
-    /**
-     * Cancel a reminder. Idempotent: cancelling a non-existent
-     * work request is a no-op for WorkManager, and the DAO delete
-     * is also a no-op if the row is already gone.
-     *
-     * WorkManager has two cancellation paths:
-     *   - cancelUniqueWork(uniqueName) — requires the original
-     *     `workName` we used at enqueue time
-     *     (`"reminder-${currentTimeMillis()}"`)
-     *   - cancelWorkById(uuid) — takes the WorkManager request id
-     *     directly
-     *
-     * SetReminderTool persists the **request id** (the UUID) as
-     * the Room row id, not the work name. So we cancel by UUID —
-     * that's the supported path for "I have the id, stop the
-     * work" and survives the case where the work has already
-     * been enqueued with a different name (e.g. during a config
-     * change).
-     *
-     * Both calls are best-effort: if WorkManager doesn't know
-     * the id (e.g. it already ran), the runCatching swallows the
-     * throw. The Room delete is the source of truth for the UI
-     * — that's what unlists the reminder.
-     */
-    suspend fun cancel(id: String) {
-        runCatching {
-            WorkManager.getInstance(context).cancelWorkById(java.util.UUID.fromString(id))
-        }
-        reminderDao.delete(id)
+    fun observeHistory(): Flow<List<ReminderEntity>> = reminderDao.observeHistory()
+
+    suspend fun create(
+        message: String,
+        triggerAt: Long,
+        recurrence: String = "none",
+    ): ReminderEntity = reminderScheduler.create(message, triggerAt, recurrence)
+
+    suspend fun update(
+        id: String,
+        message: String,
+        triggerAt: Long,
+        recurrence: String,
+    ): ReminderEntity? {
+        val existing = reminderDao.get(id) ?: return null
+        return reminderScheduler.schedule(
+            existing.copy(
+                message = message.trim(),
+                triggerAt = triggerAt,
+                recurrence = ReminderRecurrence.normalize(recurrence),
+                status = "scheduled",
+            ),
+        )
     }
+
+    /** Keep the row as history while cancelling the underlying work. */
+    suspend fun cancel(id: String) = reminderScheduler.cancel(id)
+
+    /** Permanently remove a lifecycle row and any outstanding work. */
+    suspend fun delete(id: String) = reminderScheduler.delete(id)
+
+    suspend fun clearHistory() = reminderDao.deleteHistoryBefore(Long.MAX_VALUE)
 }

@@ -78,6 +78,7 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
     var editingTask by remember { mutableStateOf<TaskEntity?>(null) }
     var showClearConfirm by remember { mutableStateOf(false) }
     var showAddReminder by remember { mutableStateOf(false) }
+    var editingReminder by remember { mutableStateOf<ReminderEntity?>(null) }
 
     Scaffold(
         floatingActionButton = {
@@ -141,6 +142,7 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                         items(state.reminders, key = { "reminder-${it.id}" }) { reminder ->
                             ReminderRow(
                                 reminder = reminder,
+                                onEdit = { editingReminder = reminder },
                                 onCancel = { viewModel.cancelReminder(reminder.id) },
                             )
                         }
@@ -229,11 +231,28 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
     }
 
     if (showAddReminder) {
-        AddReminderDialog(
+        ReminderEditorDialog(
+            title = "Add reminder",
+            confirmLabel = "Add",
             onDismiss = { showAddReminder = false },
-            onAdd = { message, triggerAt ->
-                viewModel.createReminder(message, triggerAt)
+            onConfirm = { message, triggerAt, recurrence ->
+                viewModel.createReminder(message, triggerAt, recurrence)
                 showAddReminder = false
+            },
+        )
+    }
+
+    editingReminder?.let { reminder ->
+        ReminderEditorDialog(
+            title = "Edit reminder",
+            confirmLabel = "Save",
+            initialMessage = reminder.message,
+            initialTriggerAt = reminder.triggerAt,
+            initialRecurrence = reminder.recurrence,
+            onDismiss = { editingReminder = null },
+            onConfirm = { message, triggerAt, recurrence ->
+                viewModel.updateReminder(reminder.id, message, triggerAt, recurrence)
+                editingReminder = null
             },
         )
     }
@@ -363,6 +382,7 @@ private fun RemindersHeader(onAddReminder: () -> Unit = {}) {
 @Composable
 private fun ReminderRow(
     reminder: ReminderEntity,
+    onEdit: () -> Unit,
     onCancel: () -> Unit,
 ) {
     val fmt = SimpleDateFormat("MMM d, HH:mm", Locale.US)
@@ -384,10 +404,16 @@ private fun ReminderRow(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    fmt.format(Date(reminder.triggerAt)),
+                    buildString {
+                        append(fmt.format(Date(reminder.triggerAt)))
+                        if (reminder.recurrence != "none") append(" · ${reminder.recurrence}")
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 )
+            }
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Filled.Edit, contentDescription = "Edit reminder")
             }
             IconButton(onClick = onCancel) {
                 Icon(

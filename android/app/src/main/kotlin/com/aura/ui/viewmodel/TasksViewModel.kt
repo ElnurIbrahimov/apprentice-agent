@@ -6,9 +6,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.WorkManager
 import com.aura.tasks.ReminderDao
 import com.aura.tasks.ReminderEntity
+import com.aura.tasks.ReminderStore
 import com.aura.tasks.TaskDao
 import com.aura.tasks.TaskEntity
-import com.aura.tools.ReminderWorker
+
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +33,7 @@ class TasksViewModel @Inject constructor(
     app: Application,
     private val taskDao: TaskDao,
     private val reminderDao: ReminderDao,
+    private val reminderStore: ReminderStore,
 ) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(TasksUiState())
     val state: StateFlow<TasksUiState> = _state.asStateFlow()
@@ -45,7 +47,7 @@ class TasksViewModel @Inject constructor(
             _state.update { it.copy(tasks = tasks, loading = false) }
         }
         viewModelScope.launch {
-            reminderDao.observeUpcoming(System.currentTimeMillis()).collectLatest { reminders ->
+            reminderStore.observeUpcoming().collectLatest { reminders ->
                 _state.update { it.copy(reminders = reminders) }
             }
         }
@@ -158,8 +160,7 @@ class TasksViewModel @Inject constructor(
 
     fun cancelReminder(id: String) {
         viewModelScope.launch {
-            reminderDao.delete(id)
-            WorkManager.getInstance(getApplication()).cancelWorkById(UUID.fromString(id))
+            reminderStore.cancel(id)
         }
     }
 
@@ -169,29 +170,9 @@ class TasksViewModel @Inject constructor(
      * values. The reminder ID stays the same — we update the Room row
      * and replace the WorkManager work.
      */
-    fun updateReminder(id: String, message: String, triggerAt: Long) {
+    fun updateReminder(id: String, message: String, triggerAt: Long, recurrence: String) {
         viewModelScope.launch {
-            // Cancel the old work
-            WorkManager.getInstance(getApplication()).cancelWorkById(UUID.fromString(id))
-            // Update the Room row
-            val existing = reminderDao.get(id) ?: return@launch
-            reminderDao.insert(existing.copy(message = message, triggerAt = triggerAt))
-            // Schedule new work with the same ID
-            val delayMs = (triggerAt - System.currentTimeMillis()).coerceAtLeast(0L)
-            val notificationId = nextNotificationId.getAndIncrement()
-            val work = androidx.work.OneTimeWorkRequestBuilder<ReminderWorker>()
-                .setInitialDelay(delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-                .setInputData(
-                    androidx.work.Data.Builder()
-                        .putString("title", "⏰ Reminder")
-                        .putString("body", message)
-                        .putInt("notificationId", notificationId)
-                        .build()
-                )
-                .addTag("reminder")
-                .build()
-            androidx.work.WorkManager.getInstance(getApplication())
-                .enqueueUniqueWork("reminder-$id", androidx.work.ExistingWorkPolicy.REPLACE, work)
+            reminderStore.update(id, message, triggerAt, recurrence)
         }
     }
 
@@ -201,37 +182,10 @@ class TasksViewModel @Inject constructor(
      * Schedules a [ReminderWorker] via WorkManager and persists a
      * [ReminderEntity] so the reminder shows in the upcoming list.
      */
-    fun createReminder(message: String, triggerAt: Long) {
+    fun createReminder(message: String, triggerAt: Long, recurrence: String = "none") {
         if (message.isBlank()) return
         viewModelScope.launch {
-            val delayMs = (triggerAt - System.currentTimeMillis()).coerceAtLeast(0L)
-            val notificationId = nextNotificationId.getAndIncrement()
-            val work = androidx.work.OneTimeWorkRequestBuilder<ReminderWorker>()
-                .setInitialDelay(delayMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-                .setInputData(
-                    androidx.work.Data.Builder()
-                        .putString("title", "⏰ Reminder")
-                        .putString("body", message)
-                        .putInt("notificationId", notificationId)
-                        .build()
-                )
-                .addTag("reminder")
-                .build()
-            androidx.work.WorkManager.getInstance(getApplication())
-                .enqueueUniqueWork("reminder-${work.id}", androidx.work.ExistingWorkPolicy.REPLACE, work)
-            runCatching {
-                reminderDao.insert(
-                    ReminderEntity(
-                        id = work.id.toString(),
-                        message = message,
-                        triggerAt = triggerAt,
-                    )
-                )
-            }
+            reminderStore.create(message, triggerAt, recurrence)
         }
-    }
-
-    companion object {
-        private val nextNotificationId = java.util.concurrent.atomic.AtomicInteger(1000)
     }
 }

@@ -1,7 +1,6 @@
 package com.aura.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -10,19 +9,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.outlined.NotificationsOff
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,8 +28,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -41,172 +37,201 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.tasks.ReminderEntity
+import com.aura.ui.components.AuraScreenHeader
 import com.aura.ui.viewmodel.RemindersViewModel
-import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
 
-/**
- * "My Reminders" — the missing UI for the [com.aura.tasks.ReminderEntity]
- * data that the `set_reminder` tool has been writing to Room for
- * weeks. Before this screen existed, the only way to know about
- * upcoming reminders was to wait for them to fire (or grep the
- * WorkManager database).
- *
- * Each row shows the message and the time it'll fire. The trash
- * icon cancels the reminder: removes the Room row AND cancels the
- * WorkManager job so the notification never appears.
- */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RemindersScreen(
-    onBack: () -> Unit,
+    onBack: () -> Unit = {},
     viewModel: RemindersViewModel = hiltViewModel(),
 ) {
-    val reminders by viewModel.reminders.collectAsState()
-    var pendingCancel by remember { mutableStateOf<ReminderEntity?>(null) }
+    androidx.activity.compose.BackHandler(onBack = onBack)
+    val state by viewModel.state.collectAsState()
+    var showHistory by remember { mutableStateOf(false) }
+    var showAdd by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<ReminderEntity?>(null) }
+    var cancelling by remember { mutableStateOf<ReminderEntity?>(null) }
+    var confirmClearHistory by remember { mutableStateOf(false) }
 
+    val rows = if (showHistory) state.history else state.upcoming
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Reminders", fontWeight = FontWeight.SemiBold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
-            )
+        floatingActionButton = {
+            if (!showHistory) {
+                FloatingActionButton(onClick = { showAdd = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "Add reminder")
+                }
+            }
         },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (reminders.isEmpty()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
+        ) {
+            AuraScreenHeader(
+                title = "Reminders",
+                subtitle = if (showHistory) "${state.history.size} completed or cancelled" else "${state.upcoming.size} upcoming",
+                action = if (showHistory && state.history.isNotEmpty()) ({
+                    TextButton(onClick = { confirmClearHistory = true }) { Text("Clear history") }
+                }) else null,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(
+                    onClick = { showHistory = false },
+                    label = { Text("Upcoming") },
+                    colors = if (!showHistory) AssistChipDefaults.assistChipColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    ) else AssistChipDefaults.assistChipColors(),
+                )
+                AssistChip(
+                    onClick = { showHistory = true },
+                    label = { Text("History") },
+                    colors = if (showHistory) AssistChipDefaults.assistChipColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    ) else AssistChipDefaults.assistChipColors(),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            if (!state.loading && rows.isEmpty()) {
                 Column(
-                    modifier = Modifier.fillMaxSize().padding(32.dp),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.NotificationsOff,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                    )
-                    Spacer(Modifier.height(16.dp))
                     Text(
-                        text = "No upcoming reminders",
+                        if (showHistory) "No reminder history" else "Nothing scheduled",
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "Ask Aura to set one — \"remind me to call mom at 6pm\".",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                    )
+                    if (!showHistory) {
+                        TextButton(onClick = { showAdd = true }) { Text("Add a reminder") }
+                    }
                 }
             } else {
                 LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    item {
-                        Text(
-                            text = "${reminders.size} upcoming",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                            modifier = Modifier.padding(bottom = 4.dp),
+                    items(rows, key = { it.id }) { reminder ->
+                        ReminderLifecycleRow(
+                            reminder = reminder,
+                            isHistory = showHistory,
+                            onEdit = { editing = reminder },
+                            onCancel = { cancelling = reminder },
+                            onDelete = { viewModel.delete(reminder.id) },
                         )
-                    }
-                    items(reminders, key = { it.id }) { r ->
-                        ReminderRow(reminder = r, onCancel = { pendingCancel = r })
                     }
                 }
             }
         }
     }
 
-    // Cancel confirmation
-    pendingCancel?.let { r ->
-        AlertDialog(
-            onDismissRequest = { pendingCancel = null },
-            title = { Text("Cancel reminder?") },
-            text = {
-                Text(
-                    "\"${r.message}\" was scheduled for " +
-                        "${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(r.triggerAt))}. " +
-                        "It will not fire.",
-                )
+    if (showAdd) {
+        ReminderEditorDialog(
+            title = "Add reminder",
+            confirmLabel = "Add",
+            onDismiss = { showAdd = false },
+            onConfirm = { message, triggerAt, recurrence ->
+                viewModel.create(message, triggerAt, recurrence)
+                showAdd = false
             },
+        )
+    }
+    editing?.let { reminder ->
+        ReminderEditorDialog(
+            title = "Edit reminder",
+            confirmLabel = "Save",
+            initialMessage = reminder.message,
+            initialTriggerAt = reminder.triggerAt,
+            initialRecurrence = reminder.recurrence,
+            onDismiss = { editing = null },
+            onConfirm = { message, triggerAt, recurrence ->
+                viewModel.update(reminder.id, message, triggerAt, recurrence)
+                editing = null
+            },
+        )
+    }
+    cancelling?.let { reminder ->
+        AlertDialog(
+            onDismissRequest = { cancelling = null },
+            title = { Text("Cancel reminder?") },
+            text = { Text("${reminder.message}\n\nThe reminder stays in History.") },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.cancel(r.id)
-                    pendingCancel = null
-                }) { Text("Cancel reminder") }
+                    viewModel.cancel(reminder.id)
+                    cancelling = null
+                }) { Text("Cancel reminder", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = {
-                TextButton(onClick = { pendingCancel = null }) { Text("Keep") }
+            dismissButton = { TextButton(onClick = { cancelling = null }) { Text("Keep") } },
+        )
+    }
+    if (confirmClearHistory) {
+        AlertDialog(
+            onDismissRequest = { confirmClearHistory = false },
+            title = { Text("Clear reminder history?") },
+            text = { Text("This permanently removes fired and cancelled reminder records.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearHistory()
+                    confirmClearHistory = false
+                }) { Text("Clear", color = MaterialTheme.colorScheme.error) }
             },
+            dismissButton = { TextButton(onClick = { confirmClearHistory = false }) { Text("Keep") } },
         )
     }
 }
 
 @Composable
-private fun ReminderRow(reminder: ReminderEntity, onCancel: () -> Unit) {
-    val now = remember(reminder.triggerAt) { System.currentTimeMillis() }
-    val when_ = remember(reminder.triggerAt) {
-        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-            .format(Date(reminder.triggerAt))
-    }
-    val relative = remember(reminder.triggerAt, now) {
-        val ms = reminder.triggerAt - now
-        when {
-            ms < 0 -> "firing now"
-            ms < 60_000L -> "in <1 min"
-            ms < 3_600_000L -> "in ${ms / 60_000} min"
-            ms < 86_400_000L -> "in ${ms / 3_600_000}h"
-            else -> "in ${ms / 86_400_000}d"
-        }
-    }
+private fun ReminderLifecycleRow(
+    reminder: ReminderEntity,
+    isHistory: Boolean,
+    onEdit: () -> Unit,
+    onCancel: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val format = SimpleDateFormat("MMM d, yyyy · HH:mm", Locale.US)
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(12.dp),
-        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                imageVector = Icons.Default.NotificationsActive,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = reminder.message,
+                    reminder.message,
                     style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(3.dp))
                 Text(
-                    text = "$when_ · $relative",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    buildString {
+                        append(if (isHistory) reminder.status.replaceFirstChar { it.uppercase() } else format.format(Date(reminder.triggerAt)))
+                        if (reminder.recurrence != "none") append(" · ${reminder.recurrence}")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
                 )
             }
-            IconButton(onClick = onCancel) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Cancel reminder",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
+            if (isHistory) {
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Delete history record")
+                }
+            } else {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Edit reminder")
+                }
+                IconButton(onClick = onCancel) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Cancel reminder")
+                }
             }
         }
     }
