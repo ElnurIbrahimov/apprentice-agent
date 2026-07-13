@@ -441,6 +441,8 @@ fun ChatScreen(
             models = state.availableModels,
             isLoading = state.modelsLoading,
             errorMessage = state.modelsError,
+            staleProviderPrefixes = (state.modelSelection as? com.aura.ui.viewmodel.ModelSelectionState.Ready)
+                ?.staleProviders.orEmpty(),
             selectionScopeLabel = "Applies to this chat only",
             onMakeDefault = {
                 viewModel.makeActiveModelDefault()

@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -101,6 +102,7 @@ fun ModelPickerSheet(
     models: List<String>,
     isLoading: Boolean = false,
     errorMessage: String? = null,
+    staleProviderPrefixes: Set<String> = emptySet(),
     /** Explains whether this picker changes chat-only state or the global default. */
     selectionScopeLabel: String? = null,
     /** Optional explicit promotion from a chat override to the global default. */
@@ -125,8 +127,7 @@ fun ModelPickerSheet(
             .toSortedMap()
     }
     val totalCount = grouped.values.sumOf { it.size }
-    val trimmedQuery = query.trim()
-    val showCustomModelRow = trimmedQuery.contains(":") && models.none { it.equals(trimmedQuery, ignoreCase = true) }
+    val currentUnavailable = currentModel.isNotBlank() && currentModel !in models
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -134,7 +135,10 @@ fun ModelPickerSheet(
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("model-picker")
+                .padding(horizontal = 20.dp, vertical = 8.dp),
         ) {
             // Header row: title + model count
             Row(
@@ -191,7 +195,10 @@ fun ModelPickerSheet(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("model-search")
+                    .padding(bottom = 12.dp),
                 placeholder = { Text("Search models…", style = MaterialTheme.typography.bodyMedium) },
                 leadingIcon = {
                     Icon(
@@ -228,7 +235,7 @@ fun ModelPickerSheet(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )
                 }
-            } else if (models.isEmpty() && !showCustomModelRow && errorMessage != null) {
+            } else if (models.isEmpty() && errorMessage != null) {
                 // Surface the error so the user knows it's a network/key problem,
                 // not "the app doesn't have any models"
                 Column(
@@ -253,14 +260,14 @@ fun ModelPickerSheet(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )
                 }
-            } else if (models.isEmpty() && !showCustomModelRow) {
+            } else if (models.isEmpty()) {
                 Text(
-                    text = "No models available. Add a provider API key in Settings, or paste a full model ID.",
+                    text = "No verified models available. Save & Test a provider in Settings.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     modifier = Modifier.padding(vertical = 24.dp),
                 )
-            } else if (grouped.isEmpty() && !showCustomModelRow) {
+            } else if (grouped.isEmpty()) {
                 Text(
                     text = "No models match \"$query\"",
                     style = MaterialTheme.typography.bodyMedium,
@@ -297,19 +304,18 @@ fun ModelPickerSheet(
                             }
                         }
                     }
-                    if (showCustomModelRow) {
-                        item(key = "custom-model-header") {
-                            ProviderHeader(name = "Custom", count = 1)
+                    if (currentUnavailable) {
+                        item(key = "unavailable-model-header") {
+                            ProviderHeader(name = "Current selection", count = 1)
                         }
-                        item(key = "custom-model-row") {
+                        item(key = "unavailable-model-row") {
                             ModelRow(
-                                id = trimmedQuery,
-                                displayName = "Use custom model ID",
-                                isCurrent = trimmedQuery == currentModel,
-                                onClick = {
-                                    onPick(trimmedQuery)
-                                    onDismiss()
-                                },
+                                id = currentModel,
+                                displayName = formatModelName(currentModel),
+                                isCurrent = true,
+                                enabled = false,
+                                statusLabel = "Unavailable",
+                                onClick = {},
                             )
                         }
                     }
@@ -325,6 +331,7 @@ fun ModelPickerSheet(
                                 id = id,
                                 displayName = formatModelName(id),
                                 isCurrent = id == currentModel,
+                                statusLabel = if (provider in staleProviderPrefixes) "Cached" else null,
                                 onClick = {
                                     onPick(id)
                                     onDismiss()
@@ -373,6 +380,8 @@ private fun ModelRow(
     id: String,
     displayName: String,
     isCurrent: Boolean,
+    enabled: Boolean = true,
+    statusLabel: String? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -380,7 +389,8 @@ private fun ModelRow(
         modifier = Modifier
             .fillMaxWidth()
             .widthIn(min = 0.dp)
-            .clickable(onClick = onClick)
+            .testTag("model-row-$id")
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 12.dp, horizontal = 4.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -388,8 +398,11 @@ private fun ModelRow(
                 text = displayName,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (isCurrent) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurface,
+                color = when {
+                    !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                    isCurrent -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
             )
             Text(
                 text = id,
@@ -397,10 +410,18 @@ private fun ModelRow(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
             )
         }
-        if (isCurrent) {
+        statusLabel?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (enabled) MaterialTheme.colorScheme.tertiary
+                    else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+        }
+        if (isCurrent && enabled) {
             Box(
-                modifier = Modifier
-                    .size(28.dp),
+                modifier = Modifier.size(28.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
