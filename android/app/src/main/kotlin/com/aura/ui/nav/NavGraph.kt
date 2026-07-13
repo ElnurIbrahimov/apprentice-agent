@@ -16,6 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
@@ -252,6 +253,7 @@ private fun AuraBottomBar(navController: NavHostController, currentRoute: String
         shape = RoundedCornerShape(16.dp),
         shadowElevation = 8.dp,
         modifier = Modifier
+            .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 12.dp)
             .fillMaxWidth(),
     ) {
