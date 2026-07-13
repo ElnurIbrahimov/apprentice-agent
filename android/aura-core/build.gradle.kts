@@ -82,6 +82,7 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation("org.jetbrains.kotlin:kotlin-test:1.9.24")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:1.9.24")
     androidTestImplementation(libs.androidx.test.junit)

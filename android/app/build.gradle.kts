@@ -16,7 +16,7 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "0.10.2"
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "com.aura.testing.HiltTestRunner"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -94,6 +94,7 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation("org.jetbrains.kotlin:kotlin-test:1.9.24")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:1.9.24")
 
@@ -102,4 +103,7 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
+    androidTestImplementation(libs.hilt.android.testing)
+    androidTestImplementation(libs.okhttp.mockwebserver)
+    kspAndroidTest(libs.hilt.compiler)
 }
