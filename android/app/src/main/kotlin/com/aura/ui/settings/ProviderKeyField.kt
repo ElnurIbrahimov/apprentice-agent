@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -44,6 +45,7 @@ fun ProviderKeyField(
     credentialState: ProviderCredentialState? = null,
 ) {
     var visible by remember { mutableStateOf(false) }
+    val testId = label.lowercase().replace(' ', '-')
     Column(modifier = modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Text(
@@ -77,7 +79,7 @@ fun ProviderKeyField(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("provider-key-$testId"),
             placeholder = { Text("Paste API key") },
             singleLine = true,
             visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
@@ -105,7 +107,11 @@ fun ProviderKeyField(
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                TextButton(onClick = onVerify, enabled = !verifying) {
+                TextButton(
+                    onClick = onVerify,
+                    enabled = !verifying,
+                    modifier = Modifier.testTag("provider-test-$testId"),
+                ) {
                     if (verifying) {
                         CircularProgressIndicator(modifier = Modifier.height(16.dp), strokeWidth = 2.dp)
                     } else {

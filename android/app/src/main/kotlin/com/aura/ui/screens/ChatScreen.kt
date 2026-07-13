@@ -71,6 +71,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -642,6 +643,7 @@ private fun ChatHeader(
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(16.dp))
+                .testTag("chat-model-pill")
                 .background(AuraTokens.Dark.surface2)
                 .clickable { onShowModelPicker() }
                 .padding(horizontal = 12.dp, vertical = 6.dp),
