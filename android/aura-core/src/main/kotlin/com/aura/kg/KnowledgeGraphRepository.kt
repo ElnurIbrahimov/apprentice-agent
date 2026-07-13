@@ -3,6 +3,8 @@ package com.aura.kg
 import com.aura.memory.escapeLikeWildcards
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.util.ArrayDeque
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -63,6 +65,81 @@ class KnowledgeGraphRepository @Inject constructor(
 
     suspend fun getNodeByLabel(label: String): KgNode? =
         dao.getNodeByLabel(label)?.let { KgNode.fromEntity(it) }
+
+    /**
+     * Edit user-correctable fields without changing the stable node id or
+     * extraction provenance. Relations continue to point at the same node.
+     */
+    suspend fun updateNode(
+        id: String,
+        label: String,
+        type: NodeType,
+        properties: JsonObject,
+        now: Long = System.currentTimeMillis(),
+    ): KgNode = mutex.withLock {
+        require(label.isNotBlank()) { "Node label cannot be blank" }
+        val original = dao.getNode(id)
+            ?: throw NoSuchElementException("Knowledge graph node not found: $id")
+        val updated = original.copy(
+            label = label.trim(),
+            type = type.name.lowercase(),
+            properties = Json.encodeToString(JsonObject.serializer(), properties),
+            updatedAt = now,
+        )
+        dao.updateNode(updated)
+        KgNode.fromEntity(updated)
+    }
+
+    /**
+     * Merge [sourceId] into [targetId]. Target identity/provenance wins;
+     * source-only properties and relations are retained. Relations that would
+     * become target→target are discarded. The DAO publishes this atomically.
+     */
+    suspend fun mergeNodes(
+        sourceId: String,
+        targetId: String,
+        now: Long = System.currentTimeMillis(),
+    ): KgNode = mutex.withLock {
+        require(sourceId != targetId) { "A node cannot be merged into itself" }
+        val sourceEntity = dao.getNode(sourceId)
+            ?: throw NoSuchElementException("Knowledge graph node not found: $sourceId")
+        val targetEntity = dao.getNode(targetId)
+            ?: throw NoSuchElementException("Knowledge graph node not found: $targetId")
+        val source = KgNode.fromEntity(sourceEntity)
+        val target = KgNode.fromEntity(targetEntity)
+        val mergedProperties = JsonObject(source.properties + target.properties)
+        val mergedTarget = targetEntity.copy(
+            properties = Json.encodeToString(JsonObject.serializer(), mergedProperties),
+            confidence = maxOf(sourceEntity.confidence, targetEntity.confidence),
+            updatedAt = now,
+            accessCount = sourceEntity.accessCount + targetEntity.accessCount,
+            lastAccessed = maxOf(sourceEntity.lastAccessed, targetEntity.lastAccessed),
+        )
+
+        val rewritten = dao.neighbors(sourceId)
+            .mapNotNull { edge ->
+                val newSource = if (edge.sourceId == sourceId) targetId else edge.sourceId
+                val newTarget = if (edge.targetId == sourceId) targetId else edge.targetId
+                if (newSource == newTarget) return@mapNotNull null
+                val type = EdgeType.from(edge.type)
+                edge.copy(
+                    id = KgId.edge(type, newSource, newTarget),
+                    sourceId = newSource,
+                    targetId = newTarget,
+                    lastReinforced = maxOf(edge.lastReinforced, now),
+                )
+            }
+            .distinctBy { Triple(it.sourceId, it.targetId, it.type) }
+
+        dao.mergeNodeRecords(sourceId, mergedTarget, rewritten)
+        target.copy(
+            properties = mergedProperties,
+            confidence = mergedTarget.confidence,
+            updatedAt = now,
+            accessCount = mergedTarget.accessCount,
+            lastAccessed = mergedTarget.lastAccessed,
+        )
+    }
 
     suspend fun getNeighbors(id: String): Neighbors {
         val edges = dao.edgesForNode(id)

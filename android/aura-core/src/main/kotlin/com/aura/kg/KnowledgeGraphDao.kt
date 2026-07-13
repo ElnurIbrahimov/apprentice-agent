@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 
 @Dao
@@ -14,6 +15,9 @@ interface KnowledgeGraphDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertEdge(edge: EdgeEntity)
+
+    @Update
+    suspend fun updateNode(node: NodeEntity)
 
     @Query("SELECT * FROM kg_nodes WHERE id = :id")
     suspend fun getNode(id: String): NodeEntity?
@@ -48,6 +52,9 @@ interface KnowledgeGraphDao {
     @Query("SELECT * FROM kg_edges WHERE sourceId = :id OR targetId = :id")
     suspend fun edgesForNode(id: String): List<EdgeEntity>
 
+    /** Alias with management-domain wording. */
+    suspend fun neighbors(id: String): List<EdgeEntity> = edgesForNode(id)
+
     @Query("SELECT * FROM kg_edges WHERE sourceId = :sourceId")
     suspend fun edgesFrom(sourceId: String): List<EdgeEntity>
 
@@ -77,6 +84,21 @@ interface KnowledgeGraphDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAllEdges(rows: List<EdgeEntity>)
+
+    /**
+     * Atomically publish the merged target and its rewritten relations before
+     * deleting the source. Deleting the source cascades its old incident edges.
+     */
+    @Transaction
+    suspend fun mergeNodeRecords(
+        sourceId: String,
+        target: NodeEntity,
+        rewrittenEdges: List<EdgeEntity>,
+    ) {
+        updateNode(target)
+        if (rewrittenEdges.isNotEmpty()) insertAllEdges(rewrittenEdges)
+        deleteNode(sourceId)
+    }
 
     @Query("DELETE FROM kg_edges")
     suspend fun deleteAllEdges()
