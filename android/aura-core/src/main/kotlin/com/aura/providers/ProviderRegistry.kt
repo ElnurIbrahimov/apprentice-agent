@@ -17,38 +17,15 @@ class ProviderRegistry @Inject constructor(
 ) {
     private val byPrefix: Map<String, Provider> = providers.mapKeys { (key, _) -> "$key:" }
 
-    /**
-     * Resolve a `provider:model` id. The special model id "default" is
-     * routed to the first configured provider's first available model.
-     */
+    /** Resolve a fully-qualified `provider:model` id without network I/O. */
     suspend fun parse(modelId: String): Pair<Provider, String> {
         val parts = modelId.split(":", limit = 2)
-        return if (parts.size == 2) {
-            val provider = byPrefix[parts[0] + ":"]
-                ?: throw IllegalArgumentException("Unknown provider prefix: ${parts[0]}")
-            provider to parts[1]
-        } else {
-            val resolvedId = firstConfiguredModelId()
-                ?: throw IllegalStateException("No configured provider with an available model")
-            val (prefix, model) = resolvedId.split(":", limit = 2)
-            providers.getValue(prefix) to model
+        require(parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+            "Model id must be fully qualified as provider:model."
         }
-    }
-
-    /**
-     * Resolve the first real model exposed by a configured provider. Providers
-     * with failed or empty catalogs are skipped; callers must never synthesize
-     * a `provider:default` id that the provider does not advertise.
-     */
-    suspend fun firstConfiguredModelId(
-        excludedPrefixes: Set<String> = emptySet(),
-    ): String? {
-        for (provider in providers.values) {
-            if (provider.prefix in excludedPrefixes || !provider.isConfigured()) continue
-            val model = runCatching { provider.listModels().firstOrNull() }.getOrNull()
-            if (!model.isNullOrBlank()) return "${provider.prefix}:$model"
-        }
-        return null
+        val provider = byPrefix[parts[0] + ":"]
+            ?: throw IllegalArgumentException("Unknown provider prefix: ${parts[0]}")
+        return provider to parts[1]
     }
 
     /**

@@ -61,9 +61,10 @@ class CloudEmbedder @Inject constructor(
 
         // 2. Try cloud
         val apiKey = providerKeys.keyFor("ollama")
-        if (apiKey != null) {
+        val embeddingModel = providerKeys.embeddingModel
+        if (apiKey != null && embeddingModel.isNotBlank()) {
             try {
-                val vec = cloudEmbed(text, apiKey)
+                val vec = cloudEmbed(text, apiKey, embeddingModel)
                 synchronized(cache) { cache[cacheKey] = vec }
                 return@withContext vec
             } catch (_: Exception) {
@@ -81,8 +82,7 @@ class CloudEmbedder @Inject constructor(
      * Makes the HTTP call to the Ollama Cloud embeddings API.
      * Throws on any failure (network, HTTP error, bad response).
      */
-    private fun cloudEmbed(text: String, apiKey: String): FloatArray {
-        val model = providerKeys.embeddingModel
+    private fun cloudEmbed(text: String, apiKey: String, model: String): FloatArray {
         val requestBody = buildJsonObject {
             put("model", model)
             put("prompt", text)

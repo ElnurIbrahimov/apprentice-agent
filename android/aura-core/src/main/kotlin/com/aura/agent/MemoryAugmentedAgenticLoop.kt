@@ -7,6 +7,7 @@ import com.aura.memory.WriteGate
 import com.aura.providers.ChatOptions
 import com.aura.providers.ProviderMessage
 import com.aura.providers.ProviderMessage.Role
+import com.aura.providers.ModelCatalogRepository
 import com.aura.providers.ToolDefinition
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -64,6 +65,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
     private val handRepository: com.aura.hands.HandRepository,
     private val providerRegistry: com.aura.providers.ProviderRegistry,
     private val conversationCompactor: ConversationCompactor,
+    private val modelCatalogRepository: ModelCatalogRepository? = null,
 ) {
 
     /**
@@ -223,7 +225,12 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                                     val triedPrefixes = triedModels.mapTo(mutableSetOf()) {
                                         it.substringBefore(":")
                                     }
-                                    val nextModel = providerRegistry.firstConfiguredModelId(triedPrefixes)
+                                    val nextModel = modelCatalogRepository
+                                        ?.catalog
+                                        ?.value
+                                        ?.allModels
+                                        ?.firstOrNull { it.providerPrefix !in triedPrefixes }
+                                        ?.id
                                     if (nextModel != null) {
                                         emit(AgentEvent.Warning("Provider ${currentModel} failed (${chunk.code}), falling back to $nextModel"))
                                         currentModel = nextModel
@@ -328,7 +335,13 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                 // runs when the heuristic says "store", so this is one
                 // lightweight call per memorable turn — not per message.
                 val gateModel = if (model.startsWith("moa:")) {
-                    providerRegistry.firstConfiguredModelId(setOf("moa")) ?: model
+                    modelCatalogRepository
+                        ?.catalog
+                        ?.value
+                        ?.allModels
+                        ?.firstOrNull { it.providerPrefix != "moa" }
+                        ?.id
+                        ?: return@runCatching
                 } else {
                     model
                 }

@@ -9,6 +9,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.aura.agent.Conversation
 import com.aura.core.R
+import com.aura.data.UserPreferences
 import com.aura.kg.KnowledgeGraphRepository
 import com.aura.memory.MemoryStore
 import com.aura.providers.ChatOptions
@@ -18,6 +19,7 @@ import com.aura.tools.CalendarReadTool
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -47,6 +49,7 @@ class MorningBriefBuilder @Inject constructor(
     private val kgRepository: KnowledgeGraphRepository,
     private val calendarReadTool: CalendarReadTool,
     private val eventBus: ProactiveEventBus,
+    private val userPreferences: UserPreferences,
 ) {
     suspend fun runNow(): androidx.work.ListenableWorker.Result {
         val now = System.currentTimeMillis()
@@ -145,22 +148,9 @@ class MorningBriefBuilder @Inject constructor(
     }
 
     private suspend fun llmGreeting(now: Long): String {
-        val moaProvider = providerRegistry.get("moa")
-        val (provider, model) = if (moaProvider?.isConfigured() == true) {
-            providerRegistry.parse("moa:default")
-        } else {
-            val solo = providerRegistry.all().firstOrNull { it.isConfigured() }
-                ?: return ""
-            val modelId = solo.listModels().firstOrNull()
-                ?.let { "${solo.prefix}:$it" }
-                ?: defaultModelIdForProvider(solo.prefix)
-            if (modelId == null) return ""
-            try {
-                providerRegistry.parse(modelId)
-            } catch (e: IllegalArgumentException) {
-                return ""
-            }
-        }
+        val modelId = userPreferences.backgroundModel.first()
+            ?: userPreferences.defaultModel.first()
+            ?: return ""
         val dateStr = java.text.SimpleDateFormat("EEEE, MMM d", java.util.Locale.US)
             .format(java.util.Date(now))
         val systemPrompt = """
@@ -173,7 +163,12 @@ class MorningBriefBuilder @Inject constructor(
         val conversation = Conversation(systemPrompt = systemPrompt).addUser(userMessage)
         val text = StringBuilder()
         try {
-            provider.chat(model, conversation.toMessages(), options, emptyList<com.aura.providers.ToolDefinition>()).collect { chunk ->
+            providerRegistry.chat(
+                modelId,
+                conversation.toMessages(),
+                options,
+                emptyList<com.aura.providers.ToolDefinition>(),
+            ).collect { chunk ->
                 chunk.text?.let { text.append(it) }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -184,13 +179,6 @@ class MorningBriefBuilder @Inject constructor(
         return text.toString().trim()
     }
 
-    private suspend fun defaultModelIdForProvider(prefix: String): String? {
-        val provider = providerRegistry.all().firstOrNull { it.prefix == prefix }
-            ?: providerRegistry.configured().firstOrNull()
-            ?: return null
-        val model = runCatching { provider.listModels().firstOrNull() }.getOrNull()
-        return if (model != null) "${provider.prefix}:$model" else null
-    }
 
     private fun postNotification(ctx: Context, title: String, body: String, summary: String) {
         val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

@@ -5,6 +5,7 @@ import com.aura.agent.ToolContext
 import com.aura.agent.ToolResult
 import com.aura.agent.ToolRisk
 import com.aura.core.url.SsrfGuard
+import com.aura.data.UserPreferences
 import com.aura.core.util.buildFirecrawlBody
 import com.aura.providers.ChatOptions
 import com.aura.providers.ProviderKeys
@@ -15,6 +16,7 @@ import com.aura.providers.ToolProperty
 import com.aura.tools.DuckDuckGoSearch
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
@@ -49,6 +51,7 @@ class DeepResearchTool @Inject constructor(
     private val httpClient: OkHttpClient,
     private val providerKeys: ProviderKeys,
     private val providerRegistry: ProviderRegistry,
+    private val userPreferences: UserPreferences? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val mediaType = "application/json".toMediaType()
@@ -68,7 +71,7 @@ class DeepResearchTool @Inject constructor(
             ),
             "model" to ToolProperty(
                 type = "string",
-                description = "Model ID for synthesis, e.g. \"ollama:deepseek-v4-pro\" or \"openai:gpt-4o\" (default: first configured provider)",
+                description = "Optional fully-qualified synthesis model. Defaults to the background model selected in Settings.",
             ),
         ),
         required = listOf("query"),
@@ -127,10 +130,11 @@ class DeepResearchTool @Inject constructor(
         // Step 4 — Build context block (truncated to ~6000 chars total)
         val contextBlock = buildContextBlock(citations, contents)
 
-        // Step 5 — Call LLM to synthesize. Never manufacture a
-        // `provider:default` model when catalog discovery fails.
-        val modelId = modelArg ?: providerRegistry.firstConfiguredModelId()
-            ?: throw IllegalStateException("No configured provider with an available model for research synthesis")
+        // Step 5 — use an explicit argument or the user's selected role.
+        val modelId = modelArg?.takeIf(String::isNotBlank)
+            ?: userPreferences?.backgroundModel?.first()
+            ?: userPreferences?.defaultModel?.first()
+            ?: throw IllegalStateException("Choose a background model in Settings for research synthesis")
         val answer = synthesizeAnswer(query, contextBlock, modelId)
 
         // Step 6 — Build & return JSON output

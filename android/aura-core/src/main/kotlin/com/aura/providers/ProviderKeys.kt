@@ -85,8 +85,8 @@ class ProviderKeys @Inject constructor(
     private val _loaded = MutableStateFlow(false)
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
 
-    /** Embedding model name (default: "nomic-embed-text"). */
-    private val _embeddingModel = MutableStateFlow(DEFAULT_EMBEDDING_MODEL)
+    /** Explicit embedding model id; blank means use the local embedder. */
+    private val _embeddingModel = MutableStateFlow("")
     val embeddingModel: String get() = _embeddingModel.value
 
     // Process-scoped: the @Singleton lives for the lifetime of the app, so we
@@ -218,16 +218,16 @@ class ProviderKeys @Inject constructor(
     }
 
 
-    /** Load the embedding model from DataStore, returning the fallback if absent. */
+    /** Load the explicit embedding model from DataStore. */
     private suspend fun loadEmbeddingModel(): String {
         val saved = secureDataStore.getString("embedding_model")
-        return if (!saved.isNullOrBlank()) saved else DEFAULT_EMBEDDING_MODEL
+        return saved?.trim().orEmpty()
     }
 
-    /** Persist a new embedding model name. */
+    /** Persist and immediately expose a new embedding model. */
     suspend fun setEmbeddingModel(model: String) {
-        val value = model.takeIf { it.isNotBlank() } ?: DEFAULT_EMBEDDING_MODEL
-        if (value == DEFAULT_EMBEDDING_MODEL) {
+        val value = model.trim()
+        if (value.isBlank()) {
             secureDataStore.removeString("embedding_model")
         } else {
             secureDataStore.putString("embedding_model", value)
@@ -239,6 +239,5 @@ class ProviderKeys @Inject constructor(
 
     companion object {
         val PREFIXES = listOf("ollama", "anthropic", "openai", "deepseek", "gemini", "groq", "openrouter", "brave", "tavily", "firecrawl")
-        const val DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"
     }
 }

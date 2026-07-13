@@ -6,7 +6,7 @@ import android.net.Uri
 import android.util.Base64
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.aura.data.DEFAULT_MODEL
+
 import com.aura.data.UserPreferences
 import com.aura.agent.AgentEvent
 import com.aura.agent.ConversationStore
@@ -85,7 +85,7 @@ data class ChatUiState(
     val error: String? = null,
     val errorTyped: AuraError? = null,
     /** Model used by this chat; Settings supplies it until the user picks a session override. */
-    val activeModel: String = DEFAULT_MODEL,
+    val activeModel: String = "",
     /** Null means follow the global Settings default; non-null is chat-only. */
     val sessionModelOverride: String? = null,
     val availableModels: List<String> = emptyList(),
@@ -112,6 +112,8 @@ data class ChatUiState(
     val deepModeEnabled: Boolean = false,
     /** True when the current turn is running through MoA. */
     val deepModeActive: Boolean = false,
+    /** Explicit model role used while Deep Mode is enabled. */
+    val deepModeModel: String = "",
     /**
      * True when incognito mode is on. The agent still runs and
      * reads memory (so the user can ask questions about their
@@ -237,8 +239,13 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferences.defaultModel.collect { model ->
                 _state.update { current ->
-                    if (current.sessionModelOverride == null) current.copy(activeModel = model) else current
+                    if (current.sessionModelOverride == null) current.copy(activeModel = model.orEmpty()) else current
                 }
+            }
+        }
+        viewModelScope.launch {
+            userPreferences.deepModeModel.collect { model ->
+                _state.update { it.copy(deepModeModel = model.orEmpty()) }
             }
         }
         // Restore persisted TTS preference so the user's mute/unmute

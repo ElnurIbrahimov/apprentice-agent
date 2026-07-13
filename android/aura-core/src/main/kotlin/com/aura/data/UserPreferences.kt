@@ -2,6 +2,7 @@ package com.aura.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -11,7 +12,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
+
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -35,38 +36,15 @@ import javax.inject.Singleton
  */
 private val Context.auraPrefs by preferencesDataStore(name = "aura_settings")
 internal val KEY_DEFAULT_MODEL = stringPreferencesKey("default_model")
+internal val KEY_VISION_MODEL = stringPreferencesKey("vision_model")
+internal val KEY_BACKGROUND_MODEL = stringPreferencesKey("background_model")
+internal val KEY_DEEP_MODE_MODEL = stringPreferencesKey("deep_mode_model")
+internal val KEY_MOA_REFERENCE_MODELS = stringPreferencesKey("moa_reference_models")
+internal val KEY_MOA_AGGREGATOR_MODEL = stringPreferencesKey("moa_aggregator_model")
 
-/**
- * The default chat model used when the user hasn't picked one yet.
- * Pinned in DefaultModelTest to prevent a regression. Verified against
- * https://ollama.com/v1/models on 2026-07-09: every Ollama Cloud model
- * id has the `:cloud` suffix on the wire. A bare `ollama:deepseek-v4-pro`
- * (no suffix) 404s — confirmed by direct API call. The picker
- * refreshes from the live `/v1/models` endpoint on open, so this is
- * only the model used for the very first chat before the user has
- * touched the picker.
- *
- * Public (not `internal`) because the UI module's [ChatUiState] default
- * also reads it, and `internal` is module-scoped in Kotlin.
- */
-const val DEFAULT_MODEL = "ollama:deepseek-v4-pro:cloud"
+/** Normalize a catalog model id without inventing or rewriting it. */
+internal fun normalizeModelId(model: String): String = model.trim()
 
-/**
- * Normalize a model id. Currently a no-op for ollama-cloud-shaped ids
- * (we want the `:cloud` suffix kept — that's the live id). Kept as a
- * function so we have a single chokepoint for any future id
- * canonicalization (e.g. lowercasing provider prefixes, collapsing
- * `models/<name>` shapes). Runs on every read of
- * [UserPreferences.defaultModel] so any future migration has one
- * place to plug in.
- *
- * Why not strip the suffix: verified directly against
- * https://ollama.com/v1/models on 2026-07-09 that every Ollama Cloud
- * model id has the `:cloud` suffix on the wire. A bare id 404s. The
- * picker refreshes from the live endpoint on open, so the canonical
- * answer is the live API, not a regex.
- */
-internal fun normalizeModelId(model: String): String = model
 internal val KEY_APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
 internal val KEY_FIRST_RUN_COMPLETE = booleanPreferencesKey("first_run_complete")
 internal val KEY_LAST_SEEN_PROACTIVE_AT = longPreferencesKey("last_seen_proactive_at")
@@ -89,22 +67,20 @@ internal val KEY_SPECIALIST_TOOL_OVERRIDES = stringPreferencesKey("specialist_to
 class UserPreferences @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    val defaultModel: Flow<String> = context.auraPrefs.data
-        .onEach { prefs ->
-            // Self-heal: if the persisted default is the broken
-            // `:cloud` form from a pre-2026-07-09 install, rewrite
-            // to the bare form and persist. Runs on every emission
-            // of `data` but only writes when the value actually
-            // changed, so it's effectively a one-shot migration.
-            val stored = prefs[KEY_DEFAULT_MODEL] ?: return@onEach
-            val normalized = normalizeModelId(stored)
-            if (normalized != stored) {
-                context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = normalized }
-            }
-        }
-        .map { prefs ->
-            normalizeModelId(prefs[KEY_DEFAULT_MODEL] ?: DEFAULT_MODEL)
-        }
+    val defaultModel: Flow<String?> = optionalModel(KEY_DEFAULT_MODEL)
+    val visionModel: Flow<String?> = optionalModel(KEY_VISION_MODEL)
+    val backgroundModel: Flow<String?> = optionalModel(KEY_BACKGROUND_MODEL)
+    val deepModeModel: Flow<String?> = optionalModel(KEY_DEEP_MODE_MODEL)
+    val moaReferenceModels: Flow<List<String>> = context.auraPrefs.data.map { prefs ->
+        prefs[KEY_MOA_REFERENCE_MODELS]
+            ?.lineSequence()
+            ?.map(::normalizeModelId)
+            ?.filter(String::isNotBlank)
+            ?.distinct()
+            ?.toList()
+            ?: emptyList()
+    }
+    val moaAggregatorModel: Flow<String?> = optionalModel(KEY_MOA_AGGREGATOR_MODEL)
 
     /**
      * Whether the user has enabled biometric app lock. When true,
@@ -229,9 +205,23 @@ class UserPreferences @Inject constructor(
         prefs[KEY_SPECIALIST_TOOL_OVERRIDES] ?: "{}"
     }
 
-    suspend fun setDefaultModel(model: String) {
-        context.auraPrefs.edit { it[KEY_DEFAULT_MODEL] = model }
+    suspend fun setDefaultModel(model: String?) = setOptionalModel(KEY_DEFAULT_MODEL, model)
+    suspend fun setVisionModel(model: String?) = setOptionalModel(KEY_VISION_MODEL, model)
+    suspend fun setBackgroundModel(model: String?) = setOptionalModel(KEY_BACKGROUND_MODEL, model)
+    suspend fun setDeepModeModel(model: String?) = setOptionalModel(KEY_DEEP_MODE_MODEL, model)
+    suspend fun setMoaReferenceModels(models: List<String>) {
+        val value = models.map(::normalizeModelId)
+            .filter(String::isNotBlank)
+            .distinct()
+            .take(4)
+            .joinToString("\n")
+        context.auraPrefs.edit { prefs ->
+            if (value.isBlank()) prefs.remove(KEY_MOA_REFERENCE_MODELS)
+            else prefs[KEY_MOA_REFERENCE_MODELS] = value
+        }
     }
+    suspend fun setMoaAggregatorModel(model: String?) =
+        setOptionalModel(KEY_MOA_AGGREGATOR_MODEL, model)
 
     suspend fun setAppLockEnabled(enabled: Boolean) {
         context.auraPrefs.edit { it[KEY_APP_LOCK_ENABLED] = enabled }
@@ -286,4 +276,16 @@ class UserPreferences @Inject constructor(
      * one-shot. Used by callers that need a synchronous-style read.
      */
     suspend fun isFirstRunComplete(): Boolean = firstRunComplete.first()
+
+    private fun optionalModel(key: Preferences.Key<String>): Flow<String?> =
+        context.auraPrefs.data.map { prefs ->
+            prefs[key]?.let(::normalizeModelId)?.takeIf(String::isNotBlank)
+        }
+
+    private suspend fun setOptionalModel(key: Preferences.Key<String>, model: String?) {
+        val normalized = model?.let(::normalizeModelId)?.takeIf(String::isNotBlank)
+        context.auraPrefs.edit { prefs ->
+            if (normalized == null) prefs.remove(key) else prefs[key] = normalized
+        }
+    }
 }

@@ -1,14 +1,19 @@
 package com.aura.providers
 
+import com.aura.data.UserPreferences
 import dagger.Lazy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 
 /**
@@ -26,6 +31,8 @@ class MoaProvider(
     override val displayName: String = "Mixture of Agents",
     private val registry: Lazy<ProviderRegistry>,
     presets: Map<String, Preset> = emptyMap(),
+    userPreferences: UserPreferences? = null,
+    scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : Provider {
 
     /** Reference model descriptor — provider prefix + model name. */
@@ -45,8 +52,41 @@ class MoaProvider(
     // missing or invalid the provider stays unavailable rather than silently
     // falling back to model names that may have gone stale.
     private val loadedPresets: Map<String, Preset> = presets
-    private val defaultPreset: Preset?
-        get() = loadedPresets["default"] ?: loadedPresets.values.firstOrNull { it.enabled }
+    private val referenceRole = userPreferences?.moaReferenceModels?.stateIn(
+        scope,
+        SharingStarted.Eagerly,
+        emptyList(),
+    )
+    private val aggregatorRole = userPreferences?.moaAggregatorModel?.stateIn(
+        scope,
+        SharingStarted.Eagerly,
+        null,
+    )
+
+    private fun currentPresets(): Map<String, Preset> = buildMap {
+        putAll(loadedPresets)
+        customPreset()?.let { put(CUSTOM_PRESET, it) }
+    }
+
+    private fun customPreset(): Preset? {
+        val references = referenceRole?.value
+            ?.mapNotNull(::toModelRef)
+            ?.distinct()
+            .orEmpty()
+        val aggregator = aggregatorRole?.value?.let(::toModelRef)
+        if (references.size < 2 || aggregator == null) return null
+        return Preset(
+            name = CUSTOM_PRESET,
+            referenceModels = references,
+            aggregator = aggregator,
+        )
+    }
+
+    private fun toModelRef(modelId: String): ModelRef? {
+        val parts = modelId.split(":", limit = 2)
+        if (parts.size != 2 || parts.any(String::isBlank)) return null
+        return ModelRef(parts[0], parts[1])
+    }
 
     // Parent job for all in-flight MoA work. Cancelling it tears down the
     // aggregator stream and every reference-model coroutine launched in it.
@@ -60,7 +100,7 @@ class MoaProvider(
         // checked only that the aggregator prefix was parseable — a
         // provider with no key would still parse, making MoA appear
         // available in the model picker and then fail on first send.
-        val preset = defaultPreset ?: return false
+        val preset = currentPresets().values.firstOrNull { it.enabled } ?: return false
         val aggProvider = runCatching {
             registry.get().get(preset.aggregator.providerPrefix)
         }.getOrNull() ?: return false
@@ -74,7 +114,7 @@ class MoaProvider(
         return true
     }
 
-    override suspend fun listModels(): List<String> = loadedPresets.keys.toList()
+    override suspend fun listModels(): List<String> = currentPresets().keys.toList()
 
     override suspend fun cancel() {
         activeJob?.cancel()
@@ -98,7 +138,7 @@ class MoaProvider(
         options: ChatOptions,
         tools: List<ToolDefinition>,
     ): Flow<ProviderChunk> = channelFlow {
-        val preset = loadedPresets[model] ?: defaultPreset
+        val preset = currentPresets()[model]
         if (preset == null) {
             send(
                 ProviderChunk(
@@ -234,5 +274,9 @@ class MoaProvider(
             content = lastUser.content + "\n\n" + referenceBlock,
         )
         return amendedMessages
+    }
+
+    private companion object {
+        const val CUSTOM_PRESET = "custom"
     }
 }

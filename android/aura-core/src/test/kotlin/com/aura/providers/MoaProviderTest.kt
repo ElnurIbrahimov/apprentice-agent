@@ -1,6 +1,7 @@
 package com.aura.providers
 
 import app.cash.turbine.test
+import com.aura.data.UserPreferences
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -176,6 +177,32 @@ class MoaProviderTest {
     }
 
     @Test
+    fun `user configured roles expose custom preset`() = runTest {
+        val preferences = mockk<UserPreferences> {
+            every { moaReferenceModels } returns flowOf(
+                listOf("ref-one:test-a", "ref-two:test-b"),
+            )
+            every { moaAggregatorModel } returns flowOf("agg:test-c")
+        }
+        val providers = mapOf(
+            "ref-one" to configuredProvider("ref-one"),
+            "ref-two" to configuredProvider("ref-two"),
+            "agg" to configuredProvider("agg"),
+        )
+        val registry = ProviderRegistry(providers)
+        val moa = MoaProvider(
+            registry = mockk { every { get() } returns registry },
+            userPreferences = preferences,
+            scope = this,
+        )
+
+        runCurrent()
+
+        assertTrue(moa.isConfigured())
+        assertEquals(listOf("custom"), moa.listModels())
+    }
+
+    @Test
     fun `missing presets disable MoA and return a typed error`() = runTest {
         val registry = ProviderRegistry(emptyMap())
         val moa = MoaProvider(
@@ -189,5 +216,10 @@ class MoaProviderTest {
             assertEquals("moa_no_presets", awaitItem().error?.code)
             awaitComplete()
         }
+    }
+
+    private fun configuredProvider(providerPrefix: String): Provider = mockk(relaxed = true) {
+        every { prefix } returns providerPrefix
+        every { isConfigured() } returns true
     }
 }

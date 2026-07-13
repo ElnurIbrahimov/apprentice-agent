@@ -85,7 +85,16 @@ class QuickAskActivity : ComponentActivity() {
         lifecycleScope.launch {
             val defaultModel = userPreferences.defaultModel.first()
             // Use widget-specific config if available, else fall back to default.
-            val model = WidgetConfig.modelFor(this@QuickAskActivity, appWidgetId, defaultModel)
+            val model = WidgetConfig.modelFor(
+                this@QuickAskActivity,
+                appWidgetId,
+                defaultModel.orEmpty(),
+            ).takeIf { it.isNotBlank() }
+            if (model == null) {
+                responseFlow.value = "Choose and verify a model in Aura Settings first."
+                loadingFlow.value = false
+                return@launch
+            }
             val prefix = WidgetConfig.prefixFor(this@QuickAskActivity, appWidgetId)
             val systemPrompt = "You are Aura. Answer concisely in 1-3 sentences. Be direct and helpful." +
                 if (prefix.isNotBlank()) "\n\n$prefix" else ""

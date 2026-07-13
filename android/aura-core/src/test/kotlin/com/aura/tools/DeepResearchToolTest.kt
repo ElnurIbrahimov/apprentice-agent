@@ -1,6 +1,7 @@
 package com.aura.tools
 
 import com.aura.agent.ToolResult
+import com.aura.data.UserPreferences
 import com.aura.providers.ChatOptions
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderMessage
@@ -55,11 +56,10 @@ class DeepResearchToolTest {
                 ProviderChunk(text = "It runs on the JVM and is fully interoperable with Java [2]."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
-            coEvery { firstConfiguredModelId(any()) } returns "test:model"
             coEvery { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
         }
 
-        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry).tool
+        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry, prefs()).tool
         val result = tool.execute(
             call("query" to "What is Kotlin?", "max_sources" to 2),
             ctx(),
@@ -85,7 +85,7 @@ class DeepResearchToolTest {
         val httpClient = mockk<OkHttpClient>()
         val mockRegistry = mockk<ProviderRegistry>()
 
-        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry).tool
+        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry, prefs()).tool
         val result = tool.execute(call(), ctx())
 
         assertTrue("expected Error, got $result") { result is ToolResult.Error }
@@ -111,7 +111,7 @@ class DeepResearchToolTest {
 
         val mockRegistry = mockk<ProviderRegistry>()
 
-        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry).tool
+        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry, prefs()).tool
         val result = tool.execute(call("query" to "nothing"), ctx())
 
         assertTrue("expected Ok, got $result") { result is ToolResult.Ok }
@@ -140,7 +140,7 @@ class DeepResearchToolTest {
 
         val mockRegistry = mockk<ProviderRegistry>()
 
-        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry).tool
+        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry, prefs()).tool
         val result = tool.execute(call("query" to "test"), ctx())
 
         assertTrue("expected Error, got $result") { result is ToolResult.Error }
@@ -169,11 +169,10 @@ class DeepResearchToolTest {
                 ProviderChunk(text = "Brave search found Kotlin [1]."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
-            coEvery { firstConfiguredModelId(any()) } returns "test:model"
             coEvery { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
         }
 
-        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry).tool
+        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry, prefs()).tool
         val result = tool.execute(call("query" to "Kotlin"), ctx())
 
         assertTrue("expected Ok, got $result") { result is ToolResult.Ok }
@@ -205,11 +204,10 @@ class DeepResearchToolTest {
                 ProviderChunk(text = "Result."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
-            coEvery { firstConfiguredModelId(any()) } returns "test:model"
             coEvery { chat(any(), any(), any(), any()) } returns flowOf(*chunks.toTypedArray())
         }
 
-        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry).tool
+        val tool = DeepResearchTool(httpClient, providerKeys, mockRegistry, prefs()).tool
         // Only query, no max_sources — should default to 5
         val result = tool.execute(call("query" to "test"), ctx())
 
@@ -229,14 +227,14 @@ class DeepResearchToolTest {
             body = """{"results":[{"title":"internal","url":"http://127.0.0.1/private","content":"nope"}]}""",
         )
         val registry = mockk<ProviderRegistry> {
-            coEvery { firstConfiguredModelId(any()) } returns "test:model"
             coEvery { chat(any(), any(), any(), any()) } returns flowOf(
                 ProviderChunk(text = "Safe answer."),
                 ProviderChunk(finishReason = FinishReason.stop),
             )
         }
 
-        val result = DeepResearchTool(httpClient, providerKeys, registry).tool.execute(call("query" to "test"), ctx())
+        val result = DeepResearchTool(httpClient, providerKeys, registry, prefs()).tool
+            .execute(call("query" to "test"), ctx())
 
         assertTrue(result is ToolResult.Ok)
         verify(exactly = 1) { httpClient.newCall(any()).execute() }
@@ -250,6 +248,11 @@ class DeepResearchToolTest {
         com.aura.agent.ToolCall(id = "tc1", name = "deep_research", arguments = mapOf(*pairs))
 
     private fun ctx() = com.aura.agent.ToolContext(conversationId = "conv-1")
+
+    private fun prefs(): UserPreferences = mockk {
+        every { backgroundModel } returns flowOf("test:research-model")
+        every { defaultModel } returns flowOf(null)
+    }
 
     /**
      * Returns a mock OkHttpClient that returns the given body/status.

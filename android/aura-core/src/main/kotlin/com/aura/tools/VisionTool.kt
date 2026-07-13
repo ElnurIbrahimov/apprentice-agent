@@ -3,9 +3,11 @@ package com.aura.tools
 import com.aura.agent.Tool
 import com.aura.agent.ToolResult
 import com.aura.agent.ToolRisk
+import com.aura.data.UserPreferences
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ToolParameters
 import com.aura.providers.ToolProperty
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -20,29 +22,15 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Vision tool: sends a base64-encoded image to a vision-capable cloud LLM
- * (Gemini, GPT-4o, or Ollama Cloud gemma3) and returns the generated text.
- *
- * Provider selection order:
- * 1. Gemini (gemini-2.5-flash) — if a Gemini API key is configured
- * 2. OpenAI (gpt-4o) — if an OpenAI API key is configured
- * 3. Ollama Cloud (gemma3:12b:cloud) — if an Ollama Cloud API key is configured
- *
- * Risk: READ_ONLY (network egress only, no phone permissions).
- */
+/** Image analysis routed through the catalog model selected for the vision role. */
 @Singleton
 class VisionTool @Inject constructor(
     private val httpClient: OkHttpClient,
     private val providerKeys: ProviderKeys,
+    private val userPreferences: UserPreferences? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val mediaTypeJson = "application/json".toMediaType()
-
-    companion object {
-        /** Maximum allowed decoded image size: 2 MB. */
-        private const val MAX_IMAGE_BYTES = 2 * 1024 * 1024
-    }
 
     fun definition() = ToolParameters(
         properties = mapOf(
@@ -52,7 +40,7 @@ class VisionTool @Inject constructor(
             ),
             "prompt" to ToolProperty(
                 type = "string",
-                description = "What to ask about the image (default: 'Describe this image in detail')",
+                description = "What to ask about the image",
             ),
         ),
         required = listOf("image_base64"),
@@ -60,68 +48,62 @@ class VisionTool @Inject constructor(
 
     val tool = Tool(
         name = "vision",
-        description = "Analyze an image using a vision-capable AI model. Provide the image as base64-encoded JPEG data and an optional prompt. The image must be 2 MB or smaller.",
+        description = "Analyze an image using the vision model selected in Settings.",
         risk = ToolRisk.READ_ONLY,
         parameters = definition(),
         execute = { call, _ ->
-            val imageBase64 = call.arguments["image_base64"] as? String
+            val imageBase64 = call.arguments["image_base64"] as? kotlin.String
                 ?: return@Tool ToolResult.Error("missing 'image_base64' argument", "bad_args")
-            val prompt = call.arguments["prompt"] as? String ?: "Describe this image in detail"
-
-            // Image size check: estimate decoded bytes from base64 length
-            // base64 encodes 3 bytes into 4 chars, so length * 3/4 ≈ decoded size
-            val estimatedBytes = (imageBase64.length * 3L) / 4
+            val prompt = call.arguments["prompt"] as? kotlin.String
+                ?: "Describe this image in detail"
+            val estimatedBytes = (imageBase64.length * 3L) / 4L
             if (estimatedBytes > MAX_IMAGE_BYTES) {
                 return@Tool ToolResult.Error(
-                    "Image too large (${estimatedBytes / 1024} KB). Maximum is 2 MB. Please take a smaller photo.",
+                    "Image too large (${estimatedBytes / 1024L} KB). Maximum is 2 MB.",
                     "image_too_large",
                 )
             }
-
             try {
-                val result = analyzeImage(imageBase64, prompt)
-                ToolResult.Ok(result)
+                ToolResult.Ok(analyzeImage(imageBase64, prompt))
             } catch (e: Exception) {
                 ToolResult.Error("vision analysis failed: ${e.message}", "http_error")
             }
         },
-    category = "vision")
-    /**
-     * Routes to the first configured vision-capable provider.
-     *
-     * Order: Gemini → OpenAI → Ollama Cloud.
-     *
-     * @throws RuntimeException if no vision provider is configured.
-     */
-    private fun analyzeImage(imageBase64: String, prompt: String): String {
-        val geminiKey = providerKeys.keyFor("gemini")
-        if (!geminiKey.isNullOrBlank()) {
-            return analyzeWithGemini(imageBase64, prompt, geminiKey)
-        }
+        category = "vision",
+    )
 
-        val openaiKey = providerKeys.keyFor("openai")
-        if (!openaiKey.isNullOrBlank()) {
-            return analyzeWithOpenAi(imageBase64, prompt, openaiKey)
+    private suspend fun analyzeImage(
+        imageBase64: kotlin.String,
+        prompt: kotlin.String,
+    ): kotlin.String {
+        val selected = userPreferences?.visionModel?.first()
+            ?: throw RuntimeException("Choose a vision model in Settings first.")
+        val parts = selected.split(":", limit = 2)
+        require(parts.size == 2 && parts.all(kotlin.String::isNotBlank)) {
+            "Vision model must be fully qualified as provider:model."
         }
+        val providerPrefix = parts[0]
+        val model = parts[1]
+        val key = providerKeys.keyFor(providerPrefix)
+            ?: throw RuntimeException("The selected vision provider is not configured.")
 
-        val ollamaKey = providerKeys.keyFor("ollama")
-        if (!ollamaKey.isNullOrBlank()) {
-            return analyzeWithOllama(imageBase64, prompt, ollamaKey)
+        return when (providerPrefix) {
+            "gemini" -> analyzeWithGemini(imageBase64, prompt, key, model)
+            "anthropic" -> analyzeWithAnthropic(imageBase64, prompt, key, model)
+            "openai", "deepseek", "groq", "openrouter", "ollama" ->
+                analyzeWithOpenAiCompatible(imageBase64, prompt, key, providerPrefix, model)
+            else -> throw RuntimeException(
+                "The selected provider does not support Aura's vision transport.",
+            )
         }
-
-        throw RuntimeException(
-            "No vision-capable provider configured. Please configure Gemini, OpenAI, or Ollama Cloud in Settings."
-        )
     }
 
-    // ------------------------------------------------------------------
-    // Gemini API (gemini-2.5-flash)
-    // ------------------------------------------------------------------
-    // POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
-    // Body: { contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: image_base64 } }] }] }
-    // ------------------------------------------------------------------
-
-    private fun analyzeWithGemini(imageBase64: String, prompt: String, apiKey: kotlin.String): String {
+    private fun analyzeWithGemini(
+        imageBase64: kotlin.String,
+        prompt: kotlin.String,
+        key: kotlin.String,
+        model: kotlin.String,
+    ): kotlin.String {
         val body = buildJsonObject {
             put("contents", JsonArray(listOf(buildJsonObject {
                 put("parts", JsonArray(listOf(
@@ -135,46 +117,46 @@ class VisionTool @Inject constructor(
                 )))
             })))
         }
-
-        val requestBody = body.toString().toRequestBody(mediaTypeJson)
-        // API key in header, not URL query — the URL is logged in HTTP
-        // traces, proxy captures, and crash reports. The X-Goog-Api-Key
-        // header is the documented mechanism and keeps the key out of logs.
-        val req = Request.Builder()
-            .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+        val request = Request.Builder()
+            .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
             .header("Content-Type", "application/json")
-            .header("X-Goog-Api-Key", apiKey)
-            .post(requestBody)
+            .header("X-Goog-Api-Key", key)
+            .post(body.toString().toRequestBody(mediaTypeJson))
             .build()
-
-        val response = httpClient.newCall(req).execute()
-        if (!response.isSuccessful) {
-            val errorBody = response.body?.string() ?: ""
-            throw RuntimeException("Gemini API HTTP ${response.code}: $errorBody")
-        }
-        val respBody = response.body?.string()
-            ?: throw RuntimeException("Empty response from Gemini")
-
-        val root = json.parseToJsonElement(respBody).jsonObject
-        val candidates = root["candidates"]?.jsonArray
-        val candidate = candidates?.firstOrNull()?.jsonObject
-        val content = candidate?.get("content")?.jsonObject
-        val parts = content?.get("parts")?.jsonArray
-        val text = parts?.firstOrNull()?.jsonObject?.get("text")?.jsonPrimitive?.content
+        val responseBody = execute(request, "Gemini")
+        return json.parseToJsonElement(responseBody).jsonObject["candidates"]
+            ?.jsonArray
+            ?.firstOrNull()
+            ?.jsonObject
+            ?.get("content")
+            ?.jsonObject
+            ?.get("parts")
+            ?.jsonArray
+            ?.firstOrNull()
+            ?.jsonObject
+            ?.get("text")
+            ?.jsonPrimitive
+            ?.content
             ?: throw RuntimeException("Gemini response missing text")
-        return text
     }
 
-    // ------------------------------------------------------------------
-    // OpenAI / GPT-4o API
-    // ------------------------------------------------------------------
-    // POST https://api.openai.com/v1/chat/completions
-    // Body: { model: "gpt-4o", messages: [{ role:"user", content:[{type:"text",text:prompt},{type:"image_url",image_url:{url:"data:image/jpeg;base64,..."}}] }] }
-    // ------------------------------------------------------------------
-
-    private fun analyzeWithOpenAi(imageBase64: String, prompt: String, apiKey: String): String {
+    private fun analyzeWithOpenAiCompatible(
+        imageBase64: kotlin.String,
+        prompt: kotlin.String,
+        key: kotlin.String,
+        providerPrefix: kotlin.String,
+        model: kotlin.String,
+    ): kotlin.String {
+        val baseUrl = when (providerPrefix) {
+            "openai" -> "https://api.openai.com/v1"
+            "deepseek" -> "https://api.deepseek.com/v1"
+            "groq" -> "https://api.groq.com/openai/v1"
+            "openrouter" -> "https://openrouter.ai/api/v1"
+            "ollama" -> "https://ollama.com/v1"
+            else -> error("Unsupported OpenAI-compatible provider")
+        }
         val body = buildJsonObject {
-            put("model", "gpt-4o")
+            put("model", model)
             put("messages", JsonArray(listOf(buildJsonObject {
                 put("role", "user")
                 put("content", JsonArray(listOf(
@@ -188,78 +170,82 @@ class VisionTool @Inject constructor(
                 )))
             })))
         }
-
-        val requestBody = body.toString().toRequestBody(mediaTypeJson)
-        val req = Request.Builder()
-            .url("https://api.openai.com/v1/chat/completions")
-            .header("Authorization", "Bearer $apiKey")
+        val builder = Request.Builder()
+            .url("$baseUrl/chat/completions")
+            .header("Authorization", "Bearer $key")
             .header("Content-Type", "application/json")
-            .post(requestBody)
-            .build()
-
-        val response = httpClient.newCall(req).execute()
-        if (!response.isSuccessful) {
-            val errorBody = response.body?.string() ?: ""
-            throw RuntimeException("OpenAI API HTTP ${response.code}: $errorBody")
+            .post(body.toString().toRequestBody(mediaTypeJson))
+        if (providerPrefix == "openrouter") {
+            builder.header("HTTP-Referer", "https://aura-android")
+                .header("X-Title", "Aura Android")
         }
-        val respBody = response.body?.string()
-            ?: throw RuntimeException("Empty response from OpenAI")
-
-        val root = json.parseToJsonElement(respBody).jsonObject
-        val choices = root["choices"]?.jsonArray
-        val choice = choices?.firstOrNull()?.jsonObject
-        val message = choice?.get("message")?.jsonObject
-        val text = message?.get("content")?.jsonPrimitive?.content
-            ?: throw RuntimeException("OpenAI response missing content")
-        return text
+        val responseBody = execute(builder.build(), "Vision provider")
+        return json.parseToJsonElement(responseBody).jsonObject["choices"]
+            ?.jsonArray
+            ?.firstOrNull()
+            ?.jsonObject
+            ?.get("message")
+            ?.jsonObject
+            ?.get("content")
+            ?.jsonPrimitive
+            ?.content
+            ?: throw RuntimeException("Vision provider response missing content")
     }
 
-    // ------------------------------------------------------------------
-    // Ollama Cloud (gemma3:12b:cloud) — OpenAI-compatible API
-    // ------------------------------------------------------------------
-    // POST https://ollama.com/v1/chat/completions
-    // Body: { model: "gemma3:12b:cloud", messages: [{ role:"user", content:[...] }] }
-    // ------------------------------------------------------------------
-
-    private fun analyzeWithOllama(imageBase64: String, prompt: String, apiKey: String): String {
+    private fun analyzeWithAnthropic(
+        imageBase64: kotlin.String,
+        prompt: kotlin.String,
+        key: kotlin.String,
+        model: kotlin.String,
+    ): kotlin.String {
         val body = buildJsonObject {
-            put("model", "gemma3:12b:cloud")
+            put("model", model)
+            put("max_tokens", 1024)
             put("messages", JsonArray(listOf(buildJsonObject {
                 put("role", "user")
                 put("content", JsonArray(listOf(
-                    buildJsonObject { put("type", "text"); put("text", prompt) },
                     buildJsonObject {
-                        put("type", "image_url")
-                        put("image_url", buildJsonObject {
-                            put("url", "data:image/jpeg;base64,$imageBase64")
+                        put("type", "image")
+                        put("source", buildJsonObject {
+                            put("type", "base64")
+                            put("media_type", "image/jpeg")
+                            put("data", imageBase64)
                         })
                     },
+                    buildJsonObject { put("type", "text"); put("text", prompt) },
                 )))
             })))
         }
-
-        val requestBody = body.toString().toRequestBody(mediaTypeJson)
-        val req = Request.Builder()
-            .url("https://ollama.com/v1/chat/completions")
-            .header("Authorization", "Bearer $apiKey")
+        val request = Request.Builder()
+            .url("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", key)
+            .header("anthropic-version", "2023-06-01")
             .header("Content-Type", "application/json")
-            .post(requestBody)
+            .post(body.toString().toRequestBody(mediaTypeJson))
             .build()
+        val responseBody = execute(request, "Anthropic")
+        return json.parseToJsonElement(responseBody).jsonObject["content"]
+            ?.jsonArray
+            ?.firstOrNull { element ->
+                element.jsonObject["type"]?.jsonPrimitive?.content == "text"
+            }
+            ?.jsonObject
+            ?.get("text")
+            ?.jsonPrimitive
+            ?.content
+            ?: throw RuntimeException("Anthropic response missing content")
+    }
 
-        val response = httpClient.newCall(req).execute()
-        if (!response.isSuccessful) {
-            val errorBody = response.body?.string() ?: ""
-            throw RuntimeException("Ollama Cloud API HTTP ${response.code}: $errorBody")
+    private fun execute(request: Request, providerName: kotlin.String): kotlin.String =
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw RuntimeException("$providerName HTTP ${response.code}")
+            }
+            response.body?.string()
+                ?: throw RuntimeException("Empty response from $providerName")
         }
-        val respBody = response.body?.string()
-            ?: throw RuntimeException("Empty response from Ollama Cloud")
 
-        val root = json.parseToJsonElement(respBody).jsonObject
-        val choices = root["choices"]?.jsonArray
-        val choice = choices?.firstOrNull()?.jsonObject
-        val message = choice?.get("message")?.jsonObject
-        val text = message?.get("content")?.jsonPrimitive?.content
-            ?: throw RuntimeException("Ollama Cloud response missing content")
-        return text
+    private companion object {
+        const val MAX_IMAGE_BYTES = 2 * 1024 * 1024
     }
 }

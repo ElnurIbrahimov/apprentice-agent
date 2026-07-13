@@ -86,7 +86,7 @@ class ChatSendController(
         // Adaptive MoA escalation: if the user corrected the last response
         // or the model has been struggling, auto-enable Deep Mode.
         val userIsCorrecting = correctionPatterns.any { it.containsMatchIn(text) }
-        val shouldEscalate = !current.deepModeEnabled && (
+        val shouldEscalate = current.deepModeModel.isNotBlank() && !current.deepModeEnabled && (
             userIsCorrecting || consecutiveFailures >= 3
         )
         if (shouldEscalate) {
@@ -94,9 +94,21 @@ class ChatSendController(
         }
         lastUserMessage = text
 
-        // If Deep Mode is enabled, use the MoA provider for this turn.
+        // Deep Mode uses the explicit role selected by the user.
         val useMoa = state.value.deepModeEnabled
-        val model = if (useMoa) "moa:default" else current.activeModel
+        val model = if (useMoa) current.deepModeModel else current.activeModel
+        if (model.isBlank()) {
+            state.update {
+                it.copy(
+                    error = if (useMoa) {
+                        "Choose a Deep Mode model in Settings before sending."
+                    } else {
+                        "Choose and verify a chat model before sending."
+                    },
+                )
+            }
+            return
+        }
 
         state.update { it.copy(
             conversation = it.conversation.addUser(text),

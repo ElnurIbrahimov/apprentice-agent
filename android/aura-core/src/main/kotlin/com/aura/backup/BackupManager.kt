@@ -111,7 +111,7 @@ class BackupManager @Inject constructor(
             proactiveEvents = proactiveEventDao.allForBackup().map { it.toBackup() },
             userProfile = userProfileDao.get()?.toBackup(),
             preferences = PreferencesBackup(
-                defaultModel = userPreferences.defaultModel.first().takeIf { it.isNotBlank() },
+                defaultModel = userPreferences.defaultModel.first()?.takeIf { it.isNotBlank() },
                 firstRunComplete = userPreferences.firstRunComplete.first(),
                 appLockEnabled = userPreferences.appLockEnabled.first(),
                 embeddingModel = providerKeys.embeddingModel.takeIf { it.isNotBlank() },

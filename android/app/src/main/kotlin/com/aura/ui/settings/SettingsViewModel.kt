@@ -40,7 +40,7 @@ data class SettingsUiState(
      * to drive the Settings embedding-model picker and to restore
      * the choice after backup import.
      */
-    val embeddingModel: String = ProviderKeys.DEFAULT_EMBEDDING_MODEL,
+    val embeddingModel: String = "",
     val themeMode: String = "system",
     val customIdentity: String = "",
     /**
@@ -108,7 +108,7 @@ class SettingsViewModel @Inject constructor(
                 deepseekKey = providerKeys.keyFor("deepseek") ?: "",
                 groqKey = providerKeys.keyFor("groq") ?: "",
                 openrouterKey = providerKeys.keyFor("openrouter") ?: "",
-                defaultModel = defaultModel,
+                defaultModel = defaultModel.orEmpty(),
                 firstRunComplete = firstRunComplete,
                 configuredProviders = configured,
                 appLockEnabled = appLockEnabled,

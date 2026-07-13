@@ -1,6 +1,7 @@
 package com.aura.providers
 
 import com.aura.security.SecureDataStore
+import com.aura.data.UserPreferences
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -100,9 +101,11 @@ object ProviderModule {
     fun provideMoa(
         registry: dagger.Lazy<ProviderRegistry>,
         presetRepo: MoaPresetRepository,
+        userPreferences: UserPreferences,
     ): Provider = MoaProvider(
         registry = registry,
         presets = presetRepo.loadPresets(),
+        userPreferences = userPreferences,
     )
 
 }

@@ -1,13 +1,1 @@
-[
-  {
-    "name": "default",
-    "referenceModels": [
-      { "providerPrefix": "ollama", "modelName": "glm-5.1:cloud" },
-      { "providerPrefix": "ollama", "modelName": "kimi-k2.6:cloud" }
-    ],
-    "aggregator": { "providerPrefix": "deepseek", "modelName": "deepseek-v4-pro:cloud" },
-    "referenceTemperature": 0.6,
-    "aggregatorTemperature": 0.4,
-    "enabled": true
-  }
-]
+[]

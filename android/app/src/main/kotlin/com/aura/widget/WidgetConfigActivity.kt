@@ -90,7 +90,7 @@ class WidgetConfigActivity : ComponentActivity() {
                     userPreferences.defaultModel.first()
                 }
                 availableModels = models
-                defaultModel = dm
+                defaultModel = dm.orEmpty()
             } catch (_: Exception) {
                 // If catalogs fail to load, fall back to the stored
                 // default model so the user can still save.
