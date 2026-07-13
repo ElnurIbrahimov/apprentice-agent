@@ -23,6 +23,9 @@ import com.aura.core.error.AuraError
 import com.aura.kg.KnowledgeGraphRepository
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
+import com.aura.providers.ModelCatalog
+import com.aura.providers.ModelCatalogRepository
+import com.aura.providers.ProviderStatus
 import com.aura.tools.Citation
 import com.aura.voice.TextToSpeech
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -78,6 +81,50 @@ private fun extractCitations(toolName: String, result: String): List<Citation> {
     }
 }
 
+sealed interface ModelSelectionState {
+    data object Missing : ModelSelectionState
+    data class Loading(val activeModel: String?, val models: List<String>) : ModelSelectionState
+    data class Ready(
+        val activeModel: String,
+        val models: List<String>,
+        val staleProviders: Set<String> = emptySet(),
+    ) : ModelSelectionState
+    data class Failed(
+        val activeModel: String?,
+        val models: List<String>,
+        val message: String,
+    ) : ModelSelectionState
+}
+
+internal fun resolveModelSelection(
+    activeModel: String,
+    catalog: ModelCatalog,
+): ModelSelectionState {
+    val active = activeModel.takeIf(String::isNotBlank) ?: return ModelSelectionState.Missing
+    val models = catalog.allModels.map { it.id }.distinct().sorted()
+    if (catalog.providers.values.any { it.status == ProviderStatus.Loading }) {
+        return ModelSelectionState.Loading(active, models)
+    }
+    val staleProviders = catalog.providers.values
+        .filter { it.status == ProviderStatus.Ready && it.errorMessage != null }
+        .mapTo(mutableSetOf()) { it.providerPrefix }
+    if (active in models) return ModelSelectionState.Ready(active, models, staleProviders)
+
+    val failure = catalog.providers.values.firstOrNull {
+        it.status !in setOf(
+            ProviderStatus.NotConfigured,
+            ProviderStatus.Loading,
+            ProviderStatus.Ready,
+        )
+    }
+    val message = when {
+        models.isNotEmpty() -> "The selected model is no longer available. Choose another model."
+        failure != null -> failure.errorMessage ?: failure.status.name
+        else -> "No verified models are available. Save & Test a provider in Settings."
+    }
+    return ModelSelectionState.Failed(active, models, message)
+}
+
 data class ChatUiState(
     val conversation: com.aura.agent.Conversation = com.aura.agent.Conversation(),
     val streaming: Boolean = false,
@@ -99,6 +146,7 @@ data class ChatUiState(
      * "Couldn't load models — tap to retry". Null on success.
      */
     val modelsError: String? = null,
+    val modelSelection: ModelSelectionState = ModelSelectionState.Missing,
     val ttsEnabled: Boolean = true,
     val selectedSpecialist: Specialist? = null,
     val suggestedSpecialist: Specialist? = null,
@@ -173,6 +221,7 @@ class ChatViewModel @Inject constructor(
     private val conversationStore: ConversationStore,
     private val knowledgeGraphRepository: KnowledgeGraphRepository,
     private val crashLogger: com.aura.core.error.CrashLogger,
+    private val modelCatalogRepository: ModelCatalogRepository? = null,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -222,7 +271,6 @@ class ChatViewModel @Inject constructor(
     }
 
     init {
-        refreshModels()
         textToSpeech.initialize()
         viewModelScope.launch {
             val recent = conversationStore.mostRecent()
@@ -239,8 +287,16 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             userPreferences.defaultModel.collect { model ->
                 _state.update { current ->
-                    if (current.sessionModelOverride == null) current.copy(activeModel = model.orEmpty()) else current
+                    if (current.sessionModelOverride == null) {
+                        current.copy(activeModel = model.orEmpty())
+                    } else current
                 }
+                applyModelCatalog(modelCatalogRepository?.catalog?.value)
+            }
+        }
+        modelCatalogRepository?.let { repository ->
+            viewModelScope.launch {
+                repository.catalog.collect(::applyModelCatalog)
             }
         }
         viewModelScope.launch {
@@ -306,53 +362,59 @@ class ChatViewModel @Inject constructor(
      *   - a manual retry tap from the picker
      */
     fun refreshModels() {
-        if (_state.value.modelsLoading) return
-        _state.update { it.copy(modelsLoading = true, modelsError = null) }
-        viewModelScope.launch {
-            providerKeys.loaded.first { it }
-            // Only show models from configured providers (where an API
-            // key is present). Showing models for unconfigured providers
-            // leads to a 401 on first send — confusing UX.
-            val configuredProviders = providerRegistry.configured()
-            if (configuredProviders.isEmpty()) {
-                _state.update {
-                    it.copy(
-                        availableModels = emptyList(),
-                        modelsLoading = false,
-                        modelsError = "No provider API key saved yet. Add one in Settings first.",
-                    )
-                }
-                return@launch
-            }
-            val perProviderResults = configuredProviders.associateWith { p ->
-                runCatching { p.listModels() }
-            }
-            val all = perProviderResults.flatMap { (p, result) ->
-                result.getOrDefault(emptyList()).map { "${p.prefix}:$it" }
-            }
-            val errors = perProviderResults
-                .filterValues { it.isFailure }
-                .map { (p, r) -> "${p.displayName}: ${r.exceptionOrNull()?.message ?: r.exceptionOrNull()?.javaClass?.simpleName ?: "unknown"}" }
-            val moaResult = providerRegistry.get("moa")?.let { moa ->
-                if (moa.isConfigured()) runCatching { moa.listModels() }
-                else Result.success(emptyList<String>())
-            }
-            val moaModels = moaResult?.getOrDefault(emptyList())?.map { "moa:$it" } ?: emptyList()
-            val moaError = moaResult?.exceptionOrNull()?.let { "MoA: ${it.message ?: it.javaClass.simpleName}" }
-            val currentModel = _state.value.activeModel.trim().takeIf { it.isNotBlank() }
-            val merged = (all + moaModels + listOfNotNull(currentModel)).distinct().sorted()
-            val allErrors = (errors + listOfNotNull(moaError))
-            val resolvedError = allErrors.firstOrNull()
-                ?: if (merged.isEmpty()) {
-                    "Configured providers returned zero models. Test the API key in Settings."
-                } else null
+        val repository = modelCatalogRepository
+        if (repository == null) {
             _state.update {
                 it.copy(
-                    availableModels = merged,
-                    modelsLoading = false,
-                    modelsError = resolvedError,
+                    modelSelection = ModelSelectionState.Failed(
+                        activeModel = it.activeModel.takeIf(String::isNotBlank),
+                        models = it.availableModels,
+                        message = "Model catalog is unavailable.",
+                    ),
+                    modelsError = "Model catalog is unavailable.",
                 )
             }
+            return
+        }
+        val current = _state.value
+        _state.update {
+            it.copy(
+                modelsLoading = true,
+                modelsError = null,
+                modelSelection = ModelSelectionState.Loading(
+                    current.activeModel.takeIf(String::isNotBlank),
+                    current.availableModels,
+                ),
+            )
+        }
+        repository.refresh(force = true)
+    }
+
+    private fun applyModelCatalog(catalog: ModelCatalog?) {
+        val current = _state.value
+        if (catalog == null) {
+            val selection = if (current.activeModel.isBlank()) {
+                ModelSelectionState.Missing
+            } else {
+                ModelSelectionState.Failed(
+                    current.activeModel,
+                    current.availableModels,
+                    "Model catalog is unavailable.",
+                )
+            }
+            _state.update { it.copy(modelSelection = selection) }
+            return
+        }
+
+        val models = catalog.allModels.map { it.id }.distinct().sorted()
+        val selection = resolveModelSelection(current.activeModel, catalog)
+        _state.update {
+            it.copy(
+                availableModels = models,
+                modelsLoading = selection is ModelSelectionState.Loading,
+                modelsError = (selection as? ModelSelectionState.Failed)?.message,
+                modelSelection = selection,
+            )
         }
     }
 
@@ -366,12 +428,19 @@ class ChatViewModel @Inject constructor(
 
     /** Pick a model for this chat only; global default belongs to Settings. */
     fun setModel(model: String) {
-        _state.update { it.copy(activeModel = model, sessionModelOverride = model) }
+        _state.update {
+            it.copy(
+                activeModel = model,
+                sessionModelOverride = model,
+                modelSelection = ModelSelectionState.Ready(model, it.availableModels),
+            )
+        }
     }
 
     /** Explicitly promote the current chat model to the default for future chats. */
     fun makeActiveModelDefault() {
         val model = _state.value.activeModel
+        if (model.isBlank()) return
         viewModelScope.launch {
             userPreferences.setDefaultModel(model)
             _state.update { it.copy(sessionModelOverride = null) }

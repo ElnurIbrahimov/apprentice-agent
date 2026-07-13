@@ -17,10 +17,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -391,10 +391,24 @@ fun ChatScreen(
             }
         }
 
+        val modelSelection = state.modelSelection
+        if (modelSelection is com.aura.ui.viewmodel.ModelSelectionState.Missing) {
+            ModelSelectionBanner(
+                message = "Choose a model before sending.",
+                onChooseModel = { showModelPicker = true },
+            )
+        } else if (modelSelection is com.aura.ui.viewmodel.ModelSelectionState.Failed) {
+            ModelSelectionBanner(
+                message = modelSelection.message,
+                onChooseModel = { showModelPicker = true },
+            )
+        }
+
         ChatInputBar(
             hapticView = hapticView,
             draft = state.draft,
             streaming = state.streaming,
+            sendEnabled = state.modelSelection is com.aura.ui.viewmodel.ModelSelectionState.Ready,
             onDraftChange = viewModel::setDraft,
             onSend = viewModel::send,
             onCancel = viewModel::cancel,
@@ -421,12 +435,6 @@ fun ChatScreen(
         )
     }
 
-    // Re-fetch the model list every time the picker opens, so a key
-    // added in Settings shows up without a manual app restart. The
-    // refresh is a no-op if a fetch is already in flight.
-    LaunchedEffect(showModelPicker) {
-        if (showModelPicker) viewModel.refreshModels()
-    }
     if (showModelPicker) {
         ModelPickerSheet(
             currentModel = state.activeModel,
@@ -610,7 +618,7 @@ private fun ChatHeader(
     onToggleIncognito: () -> Unit,
     onShowModelPicker: () -> Unit,
 ) {
-    val displayModel = conversationModel ?: activeModel
+    val displayModel = (conversationModel ?: activeModel).takeIf { it.isNotBlank() } ?: "Choose model"
     val modelMismatch = conversationModel != null && conversationModel != activeModel
     // Web-style compact top bar: model picker pill on the
     // left, a row of 32dp icon buttons on the right, with
@@ -622,7 +630,6 @@ private fun ChatHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .statusBarsPadding()
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1001,12 +1008,38 @@ private fun TypingIndicator() {
     com.aura.ui.components.ThinkingShimmer()
 }
 
+@Composable
+private fun ModelSelectionBanner(
+    message: String,
+    onChooseModel: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            TextButton(onClick = onChooseModel) { Text("Choose model") }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatInputBar(
     hapticView: android.view.View,
     draft: String,
     streaming: Boolean,
+    sendEnabled: Boolean,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     onCancel: () -> Unit,
@@ -1027,7 +1060,6 @@ private fun ChatInputBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1084,7 +1116,9 @@ private fun ChatInputBar(
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                     imeAction = androidx.compose.ui.text.input.ImeAction.Send,
                 ),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { onSend() }),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSend = { if (sendEnabled && draft.isNotBlank()) onSend() },
+                ),
             )
         }
         if (streaming) {
@@ -1130,7 +1164,7 @@ private fun ChatInputBar(
             // and pill (20dp, ready). The animation is spring-eased
             // matching the web's
             // `transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)`.
-            val canSend = draft.isNotBlank()
+            val canSend = sendEnabled && draft.isNotBlank()
             val targetRadius = if (canSend) 20.dp else 12.dp
             val targetScale = if (canSend) 1f else 0.9f
             val animatedRadius by animateDpAsState(
