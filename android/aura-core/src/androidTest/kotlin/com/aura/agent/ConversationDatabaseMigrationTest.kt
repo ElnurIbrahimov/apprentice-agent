@@ -48,6 +48,30 @@ class ConversationDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate3To4_preservesTurns_andAddsCompactionState() {
+        val db = helper.createDatabase("test-conversations-3-4.db", 3)
+        db.execSQL(
+            "INSERT INTO conversations (id, title, createdAt, updatedAt, systemPrompt, model, metadataJson, turnsJson, embedding) " +
+                "VALUES ('conv-3', 'Long chat', 1, 2, '', 'test:model', '{}', '[{\"user\":\"hello\"}]', NULL)",
+        )
+        db.close()
+
+        val migrated = helper.runMigrationsAndValidate(
+            "test-conversations-3-4.db", 4, true, ConversationModule.MIGRATION_3_4,
+        )
+
+        migrated.query(
+            "SELECT turnsJson, contextSummary, summaryThroughTurn FROM conversations WHERE id = 'conv-3'",
+        ).use {
+            assert(it.moveToFirst())
+            assert(it.getString(0).contains("hello"))
+            assert(it.getString(1) == "")
+            assert(it.getInt(2) == 0)
+        }
+        migrated.close()
+    }
+
+    @Test
     fun migrate2To3_preservesConversations_andAddsUpdatedAtIndex() {
         val db = helper.createDatabase("test-conversations-2-3.db", 2)
         db.execSQL(

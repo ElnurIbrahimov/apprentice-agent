@@ -26,6 +26,11 @@ import kotlin.test.assertTrue
  */
 class EndToEndTest {
 
+    private fun passthroughCompactor(): ConversationCompactor =
+        mockk<ConversationCompactor>().also { compactor ->
+            coEvery { compactor.compactIfNeeded(any(), any()) } answers { firstArg() }
+        }
+
     @Test
     fun `user says I prefer dark mode - model calls remember tool - fact is stored`() = runTest {
         // 1. Set up the real memory store and a mock tool executor
@@ -73,7 +78,7 @@ class EndToEndTest {
         val handRepository = io.mockk.mockk<com.aura.hands.HandRepository>(relaxed = true)
         io.mockk.every { userProfileStore.getSystemPrompt() } returns ""
         io.mockk.coEvery { handRepository.getEnabled() } returns emptyList()
-        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore, handRepository, providerRegistry)
+        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore, handRepository, providerRegistry, passthroughCompactor())
 
         // 3. Run a conversation
         val conv = Conversation().addUser("I prefer dark mode")
@@ -132,7 +137,7 @@ class EndToEndTest {
         val handRepository = io.mockk.mockk<com.aura.hands.HandRepository>(relaxed = true)
         io.mockk.every { userProfileStore.getSystemPrompt() } returns ""
         io.mockk.coEvery { handRepository.getEnabled() } returns emptyList()
-        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore, handRepository, providerRegistry)
+        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore, handRepository, providerRegistry, passthroughCompactor())
 
         val conv = Conversation().addUser("what do you remember about my preferences?")
         val events = mutableListOf<AgentEvent>()
@@ -167,7 +172,7 @@ class EndToEndTest {
         val handRepository = io.mockk.mockk<com.aura.hands.HandRepository>(relaxed = true)
         io.mockk.every { userProfileStore.getSystemPrompt() } returns ""
         io.mockk.coEvery { handRepository.getEnabled() } returns emptyList()
-        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore, handRepository, providerRegistry)
+        val loop = MemoryAugmentedAgenticLoop(brain, toolRegistry, executor, memoryStore, kgExtractor, userProfileStore, handRepository, providerRegistry, passthroughCompactor())
 
         val conv = Conversation().addUser("my name is Elnur")
         loop.run(conv, model = "test:model", maxSteps = 2).collect { /* discard */ }

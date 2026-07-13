@@ -63,7 +63,9 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
     private val userProfileStore: com.aura.profile.UserProfileStore,
     private val handRepository: com.aura.hands.HandRepository,
     private val providerRegistry: com.aura.providers.ProviderRegistry,
+    private val conversationCompactor: ConversationCompactor,
 ) {
+
     /**
      * Run the agentic loop, optionally overriding the base system prompt
      * with a [Specialist]'s system prompt.
@@ -96,9 +98,9 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         var step = 0
         var finished = false
         var lastUserMessage = ""
-        var currentConversation = conversation
-        // Tracks the most recent recall across all steps. The
-        // agentic loop can run multiple model steps per turn (e.g.
+        var currentConversation = conversationCompactor.compactIfNeeded(conversation, model)
+
+        // Tracks the most recent recall across all steps. The agentic loop
         // one with tools, one without); we capture the recall
         // from the last step that actually performed recall so the
         // chip shows the most relevant memories for the final
@@ -168,7 +170,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                     userProfileStore.getSystemPrompt().ifBlank { null },
                 ).joinToString("\n\n") + memoryContext + handContext
                 if (sys.isNotBlank()) add(ProviderMessage(role = Role.system, content = sys))
-                addAll(currentConversation.toMessages())
+                addAll(currentConversation.toMessages(includeSystemPrompt = false))
             }
 
             // 3) Stream the model step

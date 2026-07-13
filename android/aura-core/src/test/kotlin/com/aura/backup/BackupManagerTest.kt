@@ -121,6 +121,7 @@ class BackupManagerTest {
                     id = "c1", title = "Onboarding help", createdAt = 1L, updatedAt = 2L,
                     systemPrompt = "be brief", model = "ollama:deepseek-v4-pro:cloud",
                     metadataJson = "{}", turnsJson = "[]",
+                    contextSummary = "User chose dark mode.", summaryThroughTurn = 12,
                 ),
             ),
         )
@@ -132,6 +133,8 @@ class BackupManagerTest {
         assertEquals(original.memories.size, parsed.memories.size)
         assertEquals("prefers dark mode", parsed.memories[0].content)
         assertEquals("Onboarding help", parsed.conversations[0].title)
+        assertEquals("User chose dark mode.", parsed.conversations[0].contextSummary)
+        assertEquals(12, parsed.conversations[0].summaryThroughTurn)
     }
 
     @Test
@@ -192,7 +195,10 @@ class BackupManagerTest {
                     MemoryBackup("m1", "c", "user", "preference", 0.5f, 1L, 1L, 0, 1f, "", "{}")
                 ),
                 conversations = listOf(
-                    ConversationBackup("c1", "t", 1L, 2L, null, "m", "{}", "[]")
+                    ConversationBackup(
+                        "c1", "t", 1L, 2L, null, "m", "{}", "[]",
+                        contextSummary = "Durable context", summaryThroughTurn = 5,
+                    )
                 ),
                 knowledgeGraph = KnowledgeGraphBackup(
                     nodes = listOf(
@@ -222,6 +228,14 @@ class BackupManagerTest {
         assertEquals(1, counts.tasks)
         assertEquals(1, counts.profile)
         assertEquals(7, counts.total)
+        coVerify {
+            conversationDao.insertAll(
+                match { rows ->
+                    rows.single().contextSummary == "Durable context" &&
+                        rows.single().summaryThroughTurn == 5
+                },
+            )
+        }
     }
 
     @Test

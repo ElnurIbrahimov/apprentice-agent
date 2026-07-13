@@ -40,7 +40,7 @@ data class AuraBackup(
     val usage: UsageSnapshot = UsageSnapshot(),
 ) {
     companion object {
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
     }
 }
 
@@ -81,6 +81,8 @@ data class ConversationBackup(
     val model: String?,
     val metadataJson: String,
     val turnsJson: String,
+    val contextSummary: String = "",
+    val summaryThroughTurn: Int = 0,
 )
 
 @Serializable

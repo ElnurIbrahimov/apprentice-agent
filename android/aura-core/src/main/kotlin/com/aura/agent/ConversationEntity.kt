@@ -24,6 +24,9 @@ data class ConversationEntity(
      * performed — lazy population to avoid embedding every save.
      */
     val embedding: ByteArray? = null,
+    /** Durable compression of turns before [summaryThroughTurn]. */
+    val contextSummary: String = "",
+    val summaryThroughTurn: Int = 0,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

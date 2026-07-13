@@ -37,6 +37,11 @@ class AgentIncognitoTest {
     private val userProfileStore = mockk<UserProfileStore>(relaxed = true)
     private val handRepository = mockk<com.aura.hands.HandRepository>(relaxed = true)
     private val providerRegistry = mockk<com.aura.providers.ProviderRegistry>(relaxed = true)
+    private val conversationCompactor = mockk<ConversationCompactor>()
+
+    init {
+        coEvery { conversationCompactor.compactIfNeeded(any(), any()) } answers { firstArg() }
+    }
 
     private fun makeLoop(): MemoryAugmentedAgenticLoop =
         MemoryAugmentedAgenticLoop(
@@ -48,6 +53,7 @@ class AgentIncognitoTest {
             userProfileStore = userProfileStore,
             handRepository = handRepository,
             providerRegistry = providerRegistry,
+            conversationCompactor = conversationCompactor,
         )
 
     @Test

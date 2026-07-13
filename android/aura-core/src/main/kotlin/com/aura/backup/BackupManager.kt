@@ -342,6 +342,8 @@ private fun ConversationEntity.toBackup() = ConversationBackup(
     model = model,
     metadataJson = metadataJson,
     turnsJson = turnsJson,
+    contextSummary = contextSummary,
+    summaryThroughTurn = summaryThroughTurn,
 )
 
 private fun ConversationBackup.toEntity() = ConversationEntity(
@@ -353,6 +355,8 @@ private fun ConversationBackup.toEntity() = ConversationEntity(
     model = model,
     metadataJson = metadataJson,
     turnsJson = turnsJson,
+    contextSummary = contextSummary,
+    summaryThroughTurn = summaryThroughTurn,
 )
 
 private fun NodeEntity.toBackup() = NodeBackup(

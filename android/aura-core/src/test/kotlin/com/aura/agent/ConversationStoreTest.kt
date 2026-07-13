@@ -23,6 +23,8 @@ class ConversationStoreTest {
             title = "Test chat",
             systemPrompt = "be helpful",
             model = "test:model",
+            contextSummary = "Earlier decisions are durable.",
+            summaryThroughTurn = 1,
             turns = listOf(
                 Turn(user = "hi"),
                 Turn(assistant = "hello", toolTurns = listOf(ToolTurn("t1", "echo", "{}", "echoed"))),
@@ -40,6 +42,8 @@ class ConversationStoreTest {
         assertEquals("Test chat", captured!!.title)
         assertEquals("be helpful", captured!!.systemPrompt)
         assertEquals("test:model", captured!!.model)
+        assertEquals("Earlier decisions are durable.", captured!!.contextSummary)
+        assertEquals(1, captured!!.summaryThroughTurn)
     }
 
     @Test
@@ -69,6 +73,29 @@ class ConversationStoreTest {
         coEvery { dao.delete("id1") } returns Unit
         store.delete("id1")
         coVerify { dao.delete("id1") }
+    }
+
+    @Test
+    fun `load restores durable summary boundary`() = runTest {
+        val store = ConversationStore(dao, embedder)
+        coEvery { dao.getById("summarized") } returns ConversationEntity(
+            id = "summarized",
+            title = "Long chat",
+            createdAt = 1L,
+            updatedAt = 2L,
+            systemPrompt = null,
+            model = "test:model",
+            turnsJson = """[{"user":"old"},{"user":"recent"}]""",
+            contextSummary = "Old context preserved.",
+            summaryThroughTurn = 1,
+        )
+
+        val result = store.load("summarized")
+
+        assertNotNull(result)
+        assertEquals("Old context preserved.", result.contextSummary)
+        assertEquals(1, result.summaryThroughTurn)
+        assertEquals(2, result.turns.size)
     }
 
     @Test

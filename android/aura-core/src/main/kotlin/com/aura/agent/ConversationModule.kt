@@ -36,6 +36,14 @@ object ConversationModule {
         }
     }
 
+    /** Durable rolling-summary state; full turns remain untouched. */
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE conversations ADD COLUMN contextSummary TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE conversations ADD COLUMN summaryThroughTurn INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): ConversationDatabase =
@@ -43,7 +51,7 @@ object ConversationModule {
             context,
             ConversationDatabase::class.java,
             "aura-conversations.db",
-            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4),
         ).build()
 
     @Provides

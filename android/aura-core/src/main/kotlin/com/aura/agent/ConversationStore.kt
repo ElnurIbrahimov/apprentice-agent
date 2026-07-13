@@ -23,6 +23,8 @@ class ConversationStore @Inject constructor(
             model = conversation.model,
             metadataJson = convJson.encodeToString(conversation.metadata),
             turnsJson = convJson.encodeToString(conversation.turns),
+            contextSummary = conversation.contextSummary,
+            summaryThroughTurn = conversation.summaryThroughTurn.coerceIn(0, conversation.turns.size),
         )
         // Use insert (REPLACE strategy) for upsert
         dao.insert(entity)
@@ -164,6 +166,9 @@ class ConversationStore @Inject constructor(
         val forkedTurns = allTurns.take(fromTurnIndex + 1)
         val forkId = java.util.UUID.randomUUID().toString()
         val forkTitle = "${original.title} (fork)"
+        val forkTurnCount = fromTurnIndex + 1
+        val canReuseSummary = original.contextSummary.isNotBlank() &&
+            original.summaryThroughTurn in 1..forkTurnCount
         dao.insert(ConversationEntity(
             id = forkId,
             title = forkTitle,
@@ -173,6 +178,8 @@ class ConversationStore @Inject constructor(
             model = original.model,
             metadataJson = convJson.encodeToString(metadata),
             turnsJson = convJson.encodeToString(forkedTurns),
+            contextSummary = if (canReuseSummary) original.contextSummary else "",
+            summaryThroughTurn = if (canReuseSummary) original.summaryThroughTurn else 0,
         ))
         return forkId
     }
@@ -206,6 +213,8 @@ class ConversationStore @Inject constructor(
             updatedAt = e.updatedAt,
             systemPrompt = e.systemPrompt,
             model = e.model,
+            contextSummary = e.contextSummary,
+            summaryThroughTurn = e.summaryThroughTurn.coerceIn(0, turns.size),
             metadata = metadata,
             turns = turns,
         )
