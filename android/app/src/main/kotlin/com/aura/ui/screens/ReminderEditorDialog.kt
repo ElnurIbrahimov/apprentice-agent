@@ -115,18 +115,33 @@ internal fun ReminderEditorDialog(
                     }
                 }
                 Text("Repeat")
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("none", "daily", "weekly", "monthly").forEach { option ->
-                        AssistChip(
-                            onClick = { recurrence = option },
-                            label = { Text(option.replaceFirstChar { it.uppercase() }) },
-                            colors = if (recurrence == option) {
-                                AssistChipDefaults.assistChipColors(
-                                    containerColor = androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer,
-                                )
-                            } else AssistChipDefaults.assistChipColors(),
-                        )
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("none", "daily", "weekly", "monthly")
+                        .chunked(2)
+                        .forEach { rowOptions ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                rowOptions.forEach { option ->
+                                    AssistChip(
+                                        onClick = { recurrence = option },
+                                        label = {
+                                            Text(
+                                                option.replaceFirstChar { it.uppercase() },
+                                                maxLines = 1,
+                                            )
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        colors = if (recurrence == option) {
+                                            AssistChipDefaults.assistChipColors(
+                                                containerColor = androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer,
+                                            )
+                                        } else AssistChipDefaults.assistChipColors(),
+                                    )
+                                }
+                            }
+                        }
                 }
             }
         },
