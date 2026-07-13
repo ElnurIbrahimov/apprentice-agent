@@ -9,22 +9,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Fingerprint
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -33,13 +20,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.core.content.IntentCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
@@ -48,6 +32,8 @@ import androidx.lifecycle.lifecycleScope
 import com.aura.data.UserPreferences
 import com.aura.security.BiometricActivityHolder
 import com.aura.tools.BiometricAuthHandler
+import com.aura.ui.components.AuraAppLockContent
+import com.aura.ui.components.AuraStartupState
 import com.aura.ui.nav.NavGraph
 import com.aura.ui.screens.OnboardingScreen
 import com.aura.ui.theme.AuraTheme
@@ -187,10 +173,7 @@ fun AuraRoot() {
             color = MaterialTheme.colorScheme.background,
         ) {
             when {
-                firstRunComplete == null -> Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator() }
+                firstRunComplete == null -> AuraStartupState()
 
                 firstRunComplete == false -> OnboardingScreen(
                     onComplete = { firstRunComplete = true },
@@ -221,49 +204,14 @@ private fun AppLockScreen(onUnlocked: () -> Unit) {
     }
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
-    Box(
-        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            Spacer(Modifier.height(120.dp))
-            Icon(
-                imageVector = Icons.Filled.Lock,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.height(64.dp),
-            )
-            Text(
-                text = "Aura is locked",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "Authenticate to open your conversations.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-            )
-            statusMessage?.let { msg ->
-                Text(
-                    text = msg,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
+    AuraAppLockContent(
+        statusMessage = statusMessage,
+        onUnlock = {
+            promptForUnlock(ctx, mainEntry, lifecycleOwner, onUnlocked) { message ->
+                statusMessage = message
             }
-            Spacer(Modifier.height(24.dp))
-            Button(
-                onClick = { promptForUnlock(ctx, mainEntry, lifecycleOwner, onUnlocked) { msg -> statusMessage = msg } },
-            ) {
-                Icon(Icons.Filled.Fingerprint, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Unlock")
-            }
-        }
-    }
+        },
+    )
 }
 
 private fun promptForUnlock(
