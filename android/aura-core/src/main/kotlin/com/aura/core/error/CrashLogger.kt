@@ -8,93 +8,199 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+@Serializable
+data class CrashLogEntry(
+    val timestamp: Long,
+    val code: String,
+    val message: String,
+    val stackTrace: String? = null,
+    val threadName: String = "",
+    val fatal: Boolean = false,
+)
 
 /**
- * Persistent crash/error logger. Writes errors to a rolling file in
- * the app cache dir so they survive the 5-second UI auto-dismiss.
+ * Local-only structured diagnostics logger. New entries use JSON Lines so one
+ * physical line is one complete record; [entries] also understands the legacy
+ * multiline format shipped before Phase 2.
  *
- * The log file is capped at [MAX_LOG_BYTES] (100KB). When the cap is
- * exceeded, the oldest half is truncated — keeping the most recent
- * errors which are the ones the user is most likely to investigate.
- *
- * No telemetry — the log is local only, never sent anywhere. The
- * user can view it via Settings → Diagnostics → View error log.
+ * Nothing is uploaded. The only egress is an explicit user share of a file
+ * returned by [exportTo].
  */
 @Singleton
 class CrashLogger @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val logFile: File by lazy { File(context.cacheDir, LOG_FILENAME) }
 
-    /**
-     * Append an error entry to the log file.
-     *
-     * @param code Error code (e.g. "http_500", "tool_error")
-     * @param message Human-readable error message
-     * @param stackTrace Optional stack trace string
-     */
-    fun log(code: String, message: String, stackTrace: String? = null) {
+    /** Append one complete diagnostic record. Never throws. */
+    fun log(
+        code: String,
+        message: String,
+        stackTrace: String? = null,
+        threadName: String = Thread.currentThread().name,
+        timestamp: Long = System.currentTimeMillis(),
+        fatal: Boolean = false,
+    ) {
         try {
-            val timestamp = dateFormat.format(Date())
-            val entry = buildString {
-                append("[$timestamp] $code: $message")
-                if (stackTrace != null) {
-                    append("\n")
-                    append(stackTrace.take(2000))  // cap trace length
-                }
-                append("\n")
-            }
+            val entry = CrashLogEntry(
+                timestamp = timestamp,
+                code = code.trim().ifBlank { "unknown_error" },
+                message = message,
+                stackTrace = stackTrace?.take(MAX_STACK_TRACE_CHARS),
+                threadName = threadName,
+                fatal = fatal,
+            )
             synchronized(this) {
-                logFile.appendText(entry)
+                logFile.parentFile?.mkdirs()
+                logFile.appendText(json.encodeToString(entry) + "\n")
                 rollIfNeeded()
             }
         } catch (_: Exception) {
-            // Best-effort logging — if the filesystem is full or
-            // read-only, we can't do anything about it. Don't crash
-            // the app trying to log an error.
+            // Diagnostics must never become the crash.
+        }
+    }
+
+    /** Convenience for process and worker exception boundaries. */
+    fun logException(
+        code: String,
+        throwable: Throwable,
+        fatal: Boolean = false,
+        threadName: String = Thread.currentThread().name,
+        timestamp: Long = System.currentTimeMillis(),
+    ) {
+        log(
+            code = code,
+            message = throwable.message ?: throwable.javaClass.simpleName,
+            stackTrace = throwable.stackTraceToString(),
+            threadName = threadName,
+            timestamp = timestamp,
+            fatal = fatal,
+        )
+    }
+
+    /** Raw on-disk representation, used only for explicit export. */
+    fun read(): String = synchronized(this) {
+        try {
+            if (logFile.exists()) logFile.readText() else ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    /** Parse all supported formats and return newest first. */
+    fun entries(): List<CrashLogEntry> = synchronized(this) {
+        try {
+            if (!logFile.exists()) emptyList()
+            else parseEntries(logFile.readText()).asReversed()
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
     /**
-     * Read the full log contents. Returns empty string if the log
-     * file doesn't exist yet.
+     * Copy the exact current log into [directory] for a FileProvider share.
+     * Export survives a later [clear], which is deliberate: once the user has
+     * asked to share a snapshot it should remain stable for the chooser.
      */
-    fun read(): String = try {
-        if (logFile.exists()) logFile.readText() else ""
-    } catch (_: Exception) {
-        ""
+    fun exportTo(
+        directory: File = context.cacheDir,
+        timestamp: Long = System.currentTimeMillis(),
+    ): File = synchronized(this) {
+        directory.mkdirs()
+        File(directory, "aura-diagnostics-$timestamp.jsonl").apply {
+            writeText(if (logFile.exists()) logFile.readText() else "")
+        }
     }
 
-    /**
-     * Delete the log file. Used by the "Clear log" button in Settings.
-     */
     fun clear() {
-        try {
-            logFile.delete()
-        } catch (_: Exception) {}
+        synchronized(this) {
+            try {
+                logFile.delete()
+            } catch (_: Exception) {
+                // Best effort.
+            }
+        }
+    }
+
+    private fun parseEntries(content: String): List<CrashLogEntry> {
+        if (content.isBlank()) return emptyList()
+        val parsed = mutableListOf<CrashLogEntry>()
+        var legacyHeader: MatchResult? = null
+        val legacyStack = mutableListOf<String>()
+
+        fun flushLegacy() {
+            val header = legacyHeader ?: return
+            val timestamp = runCatching {
+                dateFormat.parse(header.groupValues[1])?.time ?: 0L
+            }.getOrDefault(0L)
+            parsed += CrashLogEntry(
+                timestamp = timestamp,
+                code = header.groupValues[2].trim(),
+                message = header.groupValues[3],
+                stackTrace = legacyStack.joinToString("\n").trim().ifBlank { null },
+            )
+            legacyHeader = null
+            legacyStack.clear()
+        }
+
+        content.lineSequence().forEach { rawLine ->
+            val line = rawLine.removeSuffix("\r")
+            if (line.trimStart().startsWith("{")) {
+                flushLegacy()
+                runCatching { json.decodeFromString<CrashLogEntry>(line) }
+                    .getOrNull()
+                    ?.let(parsed::add)
+                return@forEach
+            }
+            val header = LEGACY_HEADER.matchEntire(line)
+            if (header != null) {
+                flushLegacy()
+                legacyHeader = header
+            } else if (legacyHeader != null) {
+                legacyStack += line
+            }
+        }
+        flushLegacy()
+        return parsed
     }
 
     /**
-     * If the log file exceeds [MAX_LOG_BYTES], truncate to the last
-     * half so the most recent errors are preserved.
+     * Keep complete newest entries under the byte cap. Re-encoding during a
+     * roll also upgrades retained legacy multiline entries to JSONL, so a
+     * midpoint can never strand half a stack trace at the beginning.
      */
     private fun rollIfNeeded() {
         if (!logFile.exists() || logFile.length() <= MAX_LOG_BYTES) return
         try {
-            val content = logFile.readText()
-            var keepFrom = content.length / 2
-            // Advance to the next newline after the midpoint so we
-            // don't split a log entry or a surrogate pair.
-            val nextNewline = content.indexOf('\n', keepFrom)
-            if (nextNewline != -1) keepFrom = nextNewline + 1
-            val truncated = content.substring(keepFrom)
-            logFile.writeText(truncated)
-        } catch (_: Exception) {}
+            val newestFirst = parseEntries(logFile.readText()).asReversed()
+            val keptNewestFirst = mutableListOf<String>()
+            var bytes = 0
+            for (entry in newestFirst) {
+                val encoded = json.encodeToString(entry) + "\n"
+                val encodedBytes = encoded.toByteArray().size
+                if (keptNewestFirst.isNotEmpty() && bytes + encodedBytes > ROLL_TARGET_BYTES) break
+                keptNewestFirst += encoded
+                bytes += encodedBytes
+            }
+            logFile.writeText(keptNewestFirst.asReversed().joinToString(""))
+        } catch (_: Exception) {
+            // Leave the existing log intact if rolling fails.
+        }
     }
 
     companion object {
         private const val LOG_FILENAME = "aura-error-log.txt"
-        private const val MAX_LOG_BYTES = 100 * 1024L  // 100KB
+        private const val MAX_LOG_BYTES = 100 * 1024L
+        private const val ROLL_TARGET_BYTES = MAX_LOG_BYTES / 2
+        private const val MAX_STACK_TRACE_CHARS = 8_000
+        private val LEGACY_HEADER = Regex(
+            """^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})]\s+([^:]+):\s?(.*)$""",
+        )
     }
 }

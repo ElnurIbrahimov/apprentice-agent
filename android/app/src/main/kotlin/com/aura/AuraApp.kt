@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.aura.core.error.CrashHandler
+import com.aura.core.error.CrashLogger
 import com.aura.proactive.ProactiveBootstrap
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -15,9 +17,11 @@ class AuraApp : Application(), Configuration.Provider {
 
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var proactiveBootstrap: Provider<ProactiveBootstrap>
+    @Inject lateinit var crashLogger: CrashLogger
 
     override fun onCreate() {
         super.onCreate()
+        CrashHandler.install(crashLogger)
         // Do NOT block the main thread on the DataStore load. The
         // initial key load runs asynchronously in ProviderKeys.init
         // on Dispatchers.IO. UI consumers that need the keys gate on
