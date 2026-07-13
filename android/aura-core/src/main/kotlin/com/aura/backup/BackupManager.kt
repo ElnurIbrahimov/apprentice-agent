@@ -6,6 +6,8 @@ import com.aura.agent.ConversationEntity
 import com.aura.data.UserPreferences
 import com.aura.hands.Hand
 import com.aura.hands.HandDao
+import com.aura.hands.HandRun
+import com.aura.hands.HandScheduler
 import com.aura.kg.KnowledgeGraphDao
 import com.aura.kg.EdgeEntity
 import com.aura.kg.NodeEntity
@@ -70,6 +72,7 @@ class BackupManager @Inject constructor(
     private val providerKeys: ProviderKeys,
     private val userPreferences: UserPreferences,
     private val reminderScheduler: ReminderScheduler,
+    private val handScheduler: HandScheduler,
     private val usageTracker: UsageTracker,
 ) {
     private val json = Json {
@@ -102,6 +105,7 @@ class BackupManager @Inject constructor(
                 edges = kgDao.allEdges().map { it.toBackup() },
             ),
             hands = handDao.getAll().map { it.toBackup() },
+            handRuns = handDao.allRunsForBackup().map { it.toBackup() },
             tasks = taskDao.all().map { it.toBackup() },
             reminders = reminderDao.allForBackup().map { it.toBackup() },
             proactiveEvents = proactiveEventDao.allForBackup().map { it.toBackup() },
@@ -167,6 +171,7 @@ class BackupManager @Inject constructor(
         val nodeRows = backup.knowledgeGraph.nodes.map { it.toEntity() }
         val edgeRows = backup.knowledgeGraph.edges.map { it.toEntity() }
         val handRows = backup.hands.map { it.toEntity() }
+        val handRunRows = backup.handRuns.map { it.toEntity() }
         val taskRows = backup.tasks.map { it.toEntity() }
         val reminderRows = backup.reminders.map { it.toEntity() }
         val proactiveRows = backup.proactiveEvents.map { it.toEntity() }
@@ -177,7 +182,11 @@ class BackupManager @Inject constructor(
         if (convRows.isNotEmpty()) conversationDao.insertAll(convRows)
         if (nodeRows.isNotEmpty()) kgDao.insertAllNodes(nodeRows)
         if (edgeRows.isNotEmpty()) kgDao.insertAllEdges(edgeRows)
-        if (handRows.isNotEmpty()) handDao.insertAll(handRows)
+        if (handRows.isNotEmpty()) {
+            handDao.insertAll(handRows)
+            handRows.forEach(handScheduler::schedule)
+        }
+        if (handRunRows.isNotEmpty()) handDao.insertAllRuns(handRunRows)
         if (taskRows.isNotEmpty()) taskDao.insertAll(taskRows)
         if (proactiveRows.isNotEmpty()) proactiveEventDao.insertAll(proactiveRows)
         restoreReminders(reminderRows)
@@ -211,6 +220,7 @@ class BackupManager @Inject constructor(
             nodes = nodeRows.size,
             edges = edgeRows.size,
             hands = handRows.size,
+            handRuns = handRunRows.size,
             tasks = taskRows.size,
             memoryEdits = editRows.size,
             reminders = reminderRows.size,
@@ -258,6 +268,8 @@ class BackupManager @Inject constructor(
         conversationDao.deleteAll()
         kgDao.deleteAllEdges()
         kgDao.deleteAllNodes()
+        handDao.getAll().forEach { handScheduler.cancel(it.id) }
+        handDao.deleteRunHistory()
         handDao.deleteAll()
         reminderDao.deleteAll()
         taskDao.deleteAll()
@@ -284,12 +296,13 @@ class BackupManager @Inject constructor(
         val nodes: Int,
         val edges: Int,
         val hands: Int,
+        val handRuns: Int,
         val tasks: Int,
         val reminders: Int,
         val proactiveEvents: Int,
         val profile: Int,
     ) {
-        val total: Int get() = memories + memoryEdits + conversations + nodes + edges + hands + tasks + reminders + proactiveEvents + profile
+        val total: Int get() = memories + memoryEdits + conversations + nodes + edges + hands + handRuns + tasks + reminders + proactiveEvents + profile
     }
 }
 
@@ -412,13 +425,43 @@ private fun EdgeBackup.toEntity() = EdgeEntity(
 )
 
 private fun Hand.toBackup() = HandBackup(
-    id = id, name = name, triggerPhrase = triggerPhrase, steps = steps,
-    enabled = enabled, createdAt = createdAt,
+    id = id,
+    name = name,
+    triggerPhrase = triggerPhrase,
+    steps = steps,
+    enabled = enabled,
+    createdAt = createdAt,
+    variables = variables,
+    conditions = conditions,
+    scheduleType = scheduleType,
+    scheduleHour = scheduleHour,
+    scheduleMinute = scheduleMinute,
+    scheduleDayOfWeek = scheduleDayOfWeek,
+    updatedAt = updatedAt,
 )
 
 private fun HandBackup.toEntity() = Hand(
-    id = id, name = name, triggerPhrase = triggerPhrase, steps = steps,
-    enabled = enabled, createdAt = createdAt,
+    id = id,
+    name = name,
+    triggerPhrase = triggerPhrase,
+    steps = steps,
+    variables = variables,
+    conditions = conditions,
+    scheduleType = scheduleType,
+    scheduleHour = scheduleHour,
+    scheduleMinute = scheduleMinute,
+    scheduleDayOfWeek = scheduleDayOfWeek,
+    enabled = enabled,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+private fun HandRun.toBackup() = HandRunBackup(
+    id, handId, handName, trigger, status, startedAt, finishedAt, output, failedStep, variablesJson,
+)
+
+private fun HandRunBackup.toEntity() = HandRun(
+    id, handId, handName, trigger, status, startedAt, finishedAt, output, failedStep, variablesJson,
 )
 
 private fun TaskEntity.toBackup() = TaskBackup(

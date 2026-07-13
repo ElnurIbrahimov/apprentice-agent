@@ -33,6 +33,7 @@ class BackupManagerTest {
     private val userPreferences = mockk<com.aura.data.UserPreferences>(relaxed = true)
     private val context = mockk<android.content.Context>(relaxed = true)
     private val reminderScheduler = mockk<com.aura.tasks.ReminderScheduler>(relaxed = true)
+    private val handScheduler = mockk<com.aura.hands.HandScheduler>(relaxed = true)
     private val usageTracker = com.aura.usage.UsageTracker()
 
     private val manager = BackupManager(
@@ -49,6 +50,7 @@ class BackupManagerTest {
         providerKeys = providerKeys,
         userPreferences = userPreferences,
         reminderScheduler = reminderScheduler,
+        handScheduler = handScheduler,
         usageTracker = usageTracker,
     )
 
@@ -62,6 +64,7 @@ class BackupManagerTest {
         coEvery { kgDao.allNodes() } returns emptyList()
         coEvery { kgDao.allEdges() } returns emptyList()
         coEvery { handDao.getAll() } returns emptyList()
+        coEvery { handDao.allRunsForBackup() } returns emptyList()
         coEvery { taskDao.all() } returns emptyList()
         coEvery { reminderDao.allForBackup() } returns emptyList()
         coEvery { proactiveEventDao.allForBackup() } returns emptyList()
@@ -160,6 +163,8 @@ class BackupManagerTest {
         coEvery { conversationDao.deleteAll() } returns Unit
         coEvery { kgDao.deleteAllEdges() } returns Unit
         coEvery { kgDao.deleteAllNodes() } returns Unit
+        coEvery { handDao.deleteRunHistory() } returns Unit
+        coEvery { handDao.getAll() } returns listOf(com.aura.hands.Hand("old-hand", "Old"))
         coEvery { handDao.deleteAll() } returns Unit
         coEvery { taskDao.deleteAll() } returns Unit
 
@@ -170,6 +175,8 @@ class BackupManagerTest {
         coVerify { kgDao.deleteAllNodes() }
         coVerify { memoryDao.deleteAll() }
         coVerify { conversationDao.deleteAll() }
+        coVerify { handDao.deleteRunHistory() }
+        coVerify { handScheduler.cancel("old-hand") }
         coVerify { handDao.deleteAll() }
         coVerify { taskDao.deleteAll() }
     }
@@ -181,6 +188,7 @@ class BackupManagerTest {
         coEvery { kgDao.insertAllNodes(any()) } returns Unit
         coEvery { kgDao.insertAllEdges(any()) } returns Unit
         coEvery { handDao.insertAll(any()) } returns Unit
+        coEvery { handDao.insertAllRuns(any()) } returns Unit
         coEvery { taskDao.insertAll(any()) } returns Unit
         coEvery { userProfileDao.upsert(any()) } returns Unit
         coEvery { userPreferences.setDefaultModel(any()) } returns Unit
@@ -208,7 +216,19 @@ class BackupManagerTest {
                         EdgeBackup("e1", "KNOWS", "n1", "n2", 0.5f, "{}", 0.8f, "", 1L, 1L)
                     ),
                 ),
-                hands = listOf(HandBackup("h1", "h", "", "[]", true, 1L)),
+                hands = listOf(
+                    HandBackup(
+                        "h1", "h", "", "[]", true, 1L,
+                        variables = "{\"city\":\"Baku\"}",
+                        scheduleType = "daily", scheduleHour = 8,
+                    ),
+                ),
+                handRuns = listOf(
+                    HandRunBackup(
+                        "run-1", "h1", "h", "manual", "success", 1L,
+                        finishedAt = 2L, output = "done",
+                    ),
+                ),
                 tasks = listOf(TaskBackup("t1", "t", "", 1L, null, null, "pending", 0, "")),
                 userProfile = UserProfileBackup(null, "[]", "{}", "[]", 1L),
                 preferences = PreferencesBackup(
@@ -225,9 +245,12 @@ class BackupManagerTest {
         assertEquals(1, counts.nodes)
         assertEquals(1, counts.edges)
         assertEquals(1, counts.hands)
+        assertEquals(1, counts.handRuns)
         assertEquals(1, counts.tasks)
         assertEquals(1, counts.profile)
-        assertEquals(7, counts.total)
+        assertEquals(8, counts.total)
+        coVerify { handScheduler.schedule(match { it.id == "h1" && it.scheduleType == "daily" }, any()) }
+        coVerify { handDao.insertAllRuns(match { it.single().id == "run-1" }) }
         coVerify {
             conversationDao.insertAll(
                 match { rows ->

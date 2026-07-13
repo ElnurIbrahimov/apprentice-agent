@@ -22,6 +22,9 @@ interface HandDao {
     @Query("SELECT * FROM hands WHERE name = :name LIMIT 1")
     suspend fun getByName(name: String): Hand?
 
+    @Query("SELECT * FROM hands WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): Hand?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(hand: Hand)
 
@@ -39,4 +42,25 @@ interface HandDao {
 
     @Query("DELETE FROM hands")
     suspend fun deleteAll()
+
+    @Query("SELECT * FROM hand_runs ORDER BY startedAt DESC LIMIT :limit")
+    fun observeRecentRuns(limit: Int = 100): Flow<List<HandRun>>
+
+    @Query("SELECT * FROM hand_runs WHERE handId = :handId ORDER BY startedAt DESC LIMIT :limit")
+    fun observeRunsForHand(handId: String, limit: Int = 50): Flow<List<HandRun>>
+
+    @Query("SELECT * FROM hand_runs ORDER BY startedAt DESC")
+    suspend fun allRunsForBackup(): List<HandRun>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRun(run: HandRun)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllRuns(runs: List<HandRun>)
+
+    @Update
+    suspend fun updateRun(run: HandRun)
+
+    @Query("DELETE FROM hand_runs")
+    suspend fun deleteRunHistory()
 }

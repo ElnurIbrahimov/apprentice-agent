@@ -6,12 +6,14 @@ import com.aura.agent.ToolResult
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
+import kotlin.test.assertFailsWith
 
 class HandRepositoryTest {
 
@@ -145,6 +147,169 @@ class HandRepositoryTest {
         val ok = result as? ToolResult.Ok
         assertNotNull(ok)
         assertEquals("No steps defined for hand 'EmptyHand'", ok?.output)
+    }
+
+    @Test
+    fun `variables substitute into step args and successful run is persisted`() = runTest {
+        val hand = Hand(
+            id = "weather",
+            name = "Weather",
+            variables = """{"city":"Baku","unit":"metric"}""",
+            steps = """[{"tool":"web_search","args":{"query":"weather in {{city}} using {{unit}}"}}]""",
+        )
+        coEvery { dao.insertRun(any()) } returns Unit
+        coEvery { dao.updateRun(any()) } returns Unit
+        coEvery {
+            executor.execute("web_search", """{"query":"weather in Tokyo using metric"}""", ctx)
+        } returns ToolResult.Ok("Sunny")
+
+        val result = repository.run(
+            hand = hand,
+            executor = executor,
+            ctx = ctx,
+            variables = mapOf("city" to "Tokyo"),
+            trigger = HandRunTrigger.MANUAL.value,
+        )
+
+        assertEquals(true, result is ToolResult.Ok)
+        coVerify {
+            dao.updateRun(match {
+                it.handId == "weather" && it.status == HandRunStatus.SUCCESS.value &&
+                    it.trigger == HandRunTrigger.MANUAL.value && it.finishedAt != null
+            })
+        }
+    }
+
+    @Test
+    fun `failed condition skips execution and records reason`() = runTest {
+        val hand = Hand(
+            id = "work",
+            name = "Work only",
+            variables = """{"mode":"home"}""",
+            conditions = """[{"variable":"mode","operator":"equals","value":"work"}]""",
+            steps = """[{"tool":"web_search","args":{"query":"status"}}]""",
+        )
+        coEvery { dao.insertRun(any()) } returns Unit
+        coEvery { dao.updateRun(any()) } returns Unit
+
+        val result = repository.run(hand, executor, ctx)
+
+        val ok = result as ToolResult.Ok
+        assertEquals(true, ok.output.contains("Skipped"))
+        coVerify(exactly = 0) { executor.execute(any(), any(), any()) }
+        coVerify {
+            dao.updateRun(match {
+                it.status == HandRunStatus.SKIPPED.value && it.output.contains("mode")
+            })
+        }
+    }
+
+    @Test
+    fun `failed step records failed history with step number`() = runTest {
+        val hand = Hand(
+            id = "broken",
+            name = "Broken",
+            steps = """[{"tool":"battery_state","args":{}}]""",
+        )
+        coEvery { dao.insertRun(any()) } returns Unit
+        coEvery { dao.updateRun(any()) } returns Unit
+        coEvery { executor.execute("battery_state", "{}", ctx) } returns
+            ToolResult.Error("unavailable", "sensor_error")
+
+        repository.run(hand, executor, ctx, trigger = HandRunTrigger.AGENT.value)
+
+        coVerify {
+            dao.updateRun(match {
+                it.status == HandRunStatus.FAILED.value && it.failedStep == 1 &&
+                    it.trigger == HandRunTrigger.AGENT.value && it.output.contains("unavailable")
+            })
+        }
+    }
+
+    @Test
+    fun `thrown tool exception becomes terminal failed history`() = runTest {
+        val hand = Hand(
+            id = "throws",
+            name = "Throws",
+            steps = """[{"tool":"unstable","args":{}}]""",
+        )
+        coEvery { dao.insertRun(any()) } returns Unit
+        coEvery { dao.updateRun(any()) } returns Unit
+        coEvery { executor.execute("unstable", "{}", ctx) } throws IllegalStateException("boom")
+
+        val result = repository.run(hand, executor, ctx)
+
+        assertEquals(true, result is ToolResult.Error)
+        coVerify {
+            dao.updateRun(match {
+                it.status == HandRunStatus.FAILED.value && it.finishedAt != null &&
+                    it.failedStep == 1 && it.output.contains("boom")
+            })
+        }
+    }
+
+    @Test
+    fun `tool cancellation propagates without a false terminal result`() = runTest {
+        val hand = Hand(
+            id = "cancelled",
+            name = "Cancelled",
+            steps = """[{"tool":"slow","args":{}}]""",
+        )
+        coEvery { dao.insertRun(any()) } returns Unit
+        coEvery { dao.updateRun(any()) } returns Unit
+        coEvery { executor.execute("slow", "{}", ctx) } throws CancellationException("stop")
+
+        assertFailsWith<CancellationException> { repository.run(hand, executor, ctx) }
+        coVerify(exactly = 0) {
+            dao.updateRun(match { it.finishedAt != null })
+        }
+    }
+
+    @Test
+    fun `history redacts secret inputs caps output and begins in running state`() = runTest {
+        val secret = "do-not-store-this"
+        val hand = Hand(
+            id = "bounded",
+            name = "Bounded",
+            variables = """{"apiKey":"$secret"}""",
+            steps = """[{"tool":"large_output","args":{}}]""",
+        )
+        coEvery { dao.insertRun(any()) } returns Unit
+        coEvery { dao.updateRun(any()) } returns Unit
+        coEvery { executor.execute("large_output", "{}", ctx) } returns ToolResult.Ok("x".repeat(9_000))
+
+        repository.run(hand, executor, ctx)
+
+        coVerify {
+            dao.insertRun(match { it.status == HandRunStatus.RUNNING.value })
+        }
+        coVerify {
+            dao.updateRun(match {
+                it.status == HandRunStatus.SUCCESS.value &&
+                    it.output.length == 8_000 &&
+                    it.variablesJson.contains("[redacted]") &&
+                    !it.variablesJson.contains(secret)
+            })
+        }
+    }
+
+    @Test
+    fun `malformed automation configuration fails closed before tools execute`() = runTest {
+        coEvery { dao.insertRun(any()) } returns Unit
+        coEvery { dao.updateRun(any()) } returns Unit
+        val malformedHands = listOf(
+            Hand(id = "vars", name = "Bad variables", variables = "{", steps = "[]"),
+            Hand(id = "conditions", name = "Bad conditions", conditions = "[", steps = "[]"),
+            Hand(id = "steps", name = "Bad steps", steps = "not-json"),
+        )
+
+        val results = malformedHands.map { repository.run(it, executor, ctx) }
+
+        assertEquals(true, results.all { it is ToolResult.Error })
+        coVerify(exactly = 0) { executor.execute(any(), any(), any()) }
+        coVerify(exactly = 3) {
+            dao.updateRun(match { it.status == HandRunStatus.FAILED.value })
+        }
     }
 
     @Test

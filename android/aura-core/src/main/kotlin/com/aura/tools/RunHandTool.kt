@@ -34,6 +34,10 @@ class RunHandTool @Inject constructor(
         parameters = ToolParameters(
             properties = mapOf(
                 "name" to ToolProperty(type = "string", description = "The name of the hand to execute"),
+                "variables_json" to ToolProperty(
+                    type = "string",
+                    description = "Optional JSON object overriding the hand's template variables, for example {\"city\":\"Baku\"}",
+                ),
             ),
             required = listOf("name"),
         ),
@@ -49,7 +53,21 @@ class RunHandTool @Inject constructor(
                 ?: return@Tool ToolResult.Error("missing 'name' argument", "bad_args")
             val hand = repository.getByName(name)
                 ?: return@Tool ToolResult.Error("Hand not found: $name", "not_found")
-            repository.run(hand, executor.get(), ctx)
+            val variablesRaw = call.arguments["variables_json"] as? String ?: "{}"
+            val variables = repository.parseVariables(variablesRaw)
+            val phraseTriggered = hand.triggerPhrase.isNotBlank() &&
+                ctx.userMessage.contains(hand.triggerPhrase, ignoreCase = true)
+            repository.run(
+                hand = hand,
+                executor = executor.get(),
+                ctx = ctx,
+                variables = variables,
+                trigger = if (phraseTriggered) {
+                    com.aura.hands.HandRunTrigger.PHRASE.value
+                } else {
+                    com.aura.hands.HandRunTrigger.AGENT.value
+                },
+            )
         },
     category = "automation")
 }

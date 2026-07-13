@@ -32,6 +32,7 @@ data class AuraBackup(
     val conversations: List<ConversationBackup> = emptyList(),
     val knowledgeGraph: KnowledgeGraphBackup = KnowledgeGraphBackup(),
     val hands: List<HandBackup> = emptyList(),
+    val handRuns: List<HandRunBackup> = emptyList(),
     val tasks: List<TaskBackup> = emptyList(),
     val reminders: List<ReminderBackup> = emptyList(),
     val proactiveEvents: List<ProactiveEventBackup> = emptyList(),
@@ -127,6 +128,27 @@ data class HandBackup(
     val steps: String,
     val enabled: Boolean,
     val createdAt: Long,
+    val variables: String = "{}",
+    val conditions: String = "[]",
+    val scheduleType: String = "none",
+    val scheduleHour: Int = 9,
+    val scheduleMinute: Int = 0,
+    val scheduleDayOfWeek: Int = 1,
+    val updatedAt: Long = createdAt,
+)
+
+@Serializable
+data class HandRunBackup(
+    val id: String,
+    val handId: String,
+    val handName: String,
+    val trigger: String,
+    val status: String,
+    val startedAt: Long,
+    val finishedAt: Long? = null,
+    val output: String = "",
+    val failedStep: Int? = null,
+    val variablesJson: String = "{}",
 )
 
 @Serializable

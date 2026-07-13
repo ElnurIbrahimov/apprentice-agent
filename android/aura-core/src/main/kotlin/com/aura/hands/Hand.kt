@@ -14,6 +14,17 @@ data class Hand(
     val triggerPhrase: String = "",
     /** JSON array of {tool:String, args:Map<String,String>} */
     val steps: String = "[]",
+    /** JSON object of template-variable defaults. */
+    val variables: String = "{}",
+    /** JSON array of [HandCondition] records. */
+    val conditions: String = "[]",
+    /** none, daily, weekdays, or weekly. */
+    val scheduleType: String = "none",
+    val scheduleHour: Int = 9,
+    val scheduleMinute: Int = 0,
+    /** java.time.DayOfWeek value (1 = Monday, 7 = Sunday). */
+    val scheduleDayOfWeek: Int = 1,
     val enabled: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = createdAt,
 )
