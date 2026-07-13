@@ -9,6 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -19,12 +20,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.core.content.IntentCompat
+import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -35,8 +38,9 @@ import com.aura.tools.BiometricAuthHandler
 import com.aura.ui.components.AuraAppLockContent
 import com.aura.ui.components.AuraStartupState
 import com.aura.ui.nav.NavGraph
-import com.aura.ui.screens.OnboardingScreen
+import com.aura.ui.screens.onboarding.OnboardingRoute
 import com.aura.ui.theme.AuraTheme
+import com.aura.ui.theme.resolvesDarkTheme
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
@@ -138,6 +142,16 @@ fun AuraRoot() {
     // apply live without a restart.
     val themeMode by mainEntry.userPreferences().themeMode
         .collectAsState(initial = "system")
+    val darkTheme = resolvesDarkTheme(themeMode, isSystemInDarkTheme())
+
+    SideEffect {
+        mainActivity?.window?.let { window ->
+            WindowCompat.getInsetsController(window, window.decorView).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         val entry = EntryPointAccessors.fromApplication(
@@ -175,7 +189,7 @@ fun AuraRoot() {
             when {
                 firstRunComplete == null -> AuraStartupState()
 
-                firstRunComplete == false -> OnboardingScreen(
+                firstRunComplete == false -> OnboardingRoute(
                     onComplete = { firstRunComplete = true },
                 )
 

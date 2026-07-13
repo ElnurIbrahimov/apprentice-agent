@@ -1,8 +1,11 @@
 package com.aura.debug
 
 import android.os.Bundle
+import android.graphics.Color
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -22,6 +27,14 @@ import com.aura.ui.components.AuraLoadingState
 import com.aura.ui.components.InlineStatusTone
 import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.components.ResponsiveContainer
+import com.aura.providers.ModelCatalog
+import com.aura.providers.ModelDescriptor
+import com.aura.providers.ProviderModelList
+import com.aura.providers.ProviderStatus
+import com.aura.ui.screens.onboarding.OnboardingContent
+import com.aura.ui.screens.onboarding.OnboardingCredentialStatus
+import com.aura.ui.screens.onboarding.OnboardingStep
+import com.aura.ui.screens.onboarding.OnboardingUiState
 import com.aura.ui.theme.AuraSpacing
 import com.aura.ui.theme.AuraTheme
 import com.aura.ui.theme.AuraThemeTokens
@@ -35,6 +48,12 @@ class UiCatalogActivity : ComponentActivity() {
             ?.takeIf(CatalogStates::contains) ?: "content"
         val theme = intent.getStringExtra(EXTRA_THEME)
             ?.takeIf(CatalogThemes::contains) ?: "dark"
+        val barStyle = if (theme == "dark") {
+            SystemBarStyle.dark(Color.TRANSPARENT)
+        } else {
+            SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+        }
+        enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
         setContent {
             AuraTheme(themeMode = theme) {
                 UiCatalog(surface = surface, state = state)
@@ -65,6 +84,57 @@ val CatalogThemes = setOf("light", "dark")
 @Composable
 private fun UiCatalog(surface: kotlin.String, state: kotlin.String) {
     val colors = AuraThemeTokens.colors
+    if (surface == "onboarding") {
+        val descriptor = ModelDescriptor("ollama:model-a", "model-a", "ollama")
+        val catalog = ModelCatalog(
+            providers = mapOf(
+                "ollama" to ProviderModelList(
+                    providerPrefix = "ollama",
+                    status = ProviderStatus.Ready,
+                    models = listOf(descriptor),
+                ),
+            ),
+            allModels = listOf(descriptor),
+        )
+        val onboardingState = when (state) {
+            "selected" -> OnboardingUiState(
+                step = OnboardingStep.Complete,
+                credentialStatus = mapOf("ollama" to OnboardingCredentialStatus.Verified),
+                catalog = catalog,
+                selectedDefaultModel = descriptor.id,
+            )
+            "empty", "no-provider" -> OnboardingUiState(step = OnboardingStep.Provider)
+            "loading" -> OnboardingUiState(
+                step = OnboardingStep.Provider,
+                keyDrafts = mapOf("ollama" to "test-key"),
+                credentialStatus = mapOf("ollama" to OnboardingCredentialStatus.Saving),
+            )
+            else -> OnboardingUiState(
+                step = OnboardingStep.Provider,
+                keyDrafts = mapOf("ollama" to "test-key"),
+                credentialStatus = mapOf("ollama" to OnboardingCredentialStatus.Verified),
+                providerMessages = mapOf("ollama" to "✓ Verified · 1 model"),
+                catalog = catalog,
+            )
+        }
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.onBackground,
+        ) {
+            OnboardingContent(
+                state = onboardingState,
+                onBack = {},
+                onSkip = {},
+                onNext = {},
+                onKeyDraftChanged = { _, _ -> },
+                onSaveAndTest = {},
+                onModelSelected = {},
+                onFinish = {},
+            )
+        }
+        return
+    }
     if (surface == "model-picker") {
         Box(
             modifier = Modifier

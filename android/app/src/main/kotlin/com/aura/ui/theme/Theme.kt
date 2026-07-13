@@ -31,11 +31,7 @@ fun AuraTheme(
 ) {
     val context = LocalContext.current
     val systemDark = isSystemInDarkTheme()
-    val darkTheme = when (themeMode) {
-        "light" -> false
-        "dark" -> true
-        else -> systemDark
-    }
+    val darkTheme = resolvesDarkTheme(themeMode, systemDark)
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && themeMode == "system" -> {
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -52,6 +48,12 @@ fun AuraTheme(
             content = content,
         )
     }
+}
+
+internal fun resolvesDarkTheme(themeMode: String, systemDark: Boolean): Boolean = when (themeMode) {
+    "light" -> false
+    "dark" -> true
+    else -> systemDark
 }
 
 // ── Dark scheme — Aura brand (vivid violet on near-black) ─────────────────

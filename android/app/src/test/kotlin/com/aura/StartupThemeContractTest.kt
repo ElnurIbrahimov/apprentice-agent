@@ -4,8 +4,18 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import com.aura.ui.theme.resolvesDarkTheme
 
 class StartupThemeContractTest {
+
+    @Test
+    fun `explicit app theme overrides system theme for platform chrome`() {
+        assertTrue(resolvesDarkTheme("dark", systemDark = false))
+        assertFalse(resolvesDarkTheme("light", systemDark = true))
+        assertTrue(resolvesDarkTheme("system", systemDark = true))
+        assertFalse(resolvesDarkTheme("system", systemDark = false))
+    }
 
     private fun themeFile(sourceSet: String): String {
         val candidates = listOf(
