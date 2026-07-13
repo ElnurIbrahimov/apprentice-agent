@@ -3,6 +3,7 @@ package com.aura.ui.screens
 import android.content.Intent
 import android.provider.CalendarContract
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -88,6 +89,7 @@ fun ProactiveHistoryScreen(
     val context = LocalContext.current
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar(
                 title = {

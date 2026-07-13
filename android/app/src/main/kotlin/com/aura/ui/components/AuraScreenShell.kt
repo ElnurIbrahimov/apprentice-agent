@@ -1,5 +1,7 @@
 package com.aura.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -15,58 +18,75 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aura.ui.theme.AuraDimensions
+import com.aura.ui.theme.AuraSpacing
+import com.aura.ui.theme.AuraThemeTokens
 
 /**
- * Shared personal-use screen rhythm for Aura's secondary surfaces.
- * Keeps the app visually coherent without imposing a route or state abstraction.
+ * Shared child-screen shell. System bars and root navigation are owned by NavGraph;
+ * this shell owns only content width, horizontal rhythm, and screen identity.
  */
 @Composable
 fun AuraScreenShell(
-    title: String,
-    subtitle: String,
+    title: kotlin.String,
+    subtitle: kotlin.String,
     modifier: Modifier = Modifier,
     action: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.(PaddingValues) -> Unit,
 ) {
-    Column(
+    val colors = AuraThemeTokens.colors
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp),
+            .background(colors.background),
     ) {
-        AuraScreenHeader(title = title, subtitle = subtitle, action = action)
-        content(PaddingValues(top = 4.dp, bottom = 16.dp))
+        ResponsiveContainer(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                AuraScreenHeader(title = title, subtitle = subtitle, action = action)
+                content(PaddingValues(top = AuraSpacing.xxs, bottom = AuraSpacing.md))
+            }
+        }
     }
 }
 
 @Composable
 fun AuraScreenHeader(
-    title: String,
-    subtitle: String,
+    title: kotlin.String,
+    subtitle: kotlin.String,
     modifier: Modifier = Modifier,
     action: (@Composable () -> Unit)? = null,
 ) {
-    Column(modifier = modifier.padding(top = 16.dp, bottom = 12.dp)) {
+    val colors = AuraThemeTokens.colors
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = AuraDimensions.topAppBarHeight)
+            .padding(top = AuraSpacing.sm, bottom = AuraSpacing.xs),
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = title,
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            if (action != null) {
-                Spacer(Modifier.weight(1f))
-                action()
-            }
+            action?.invoke()
         }
         Spacer(Modifier.height(3.dp))
         Text(
             text = subtitle,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.62f),
+            color = colors.textSecondary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

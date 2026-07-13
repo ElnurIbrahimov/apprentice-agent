@@ -1,5 +1,6 @@
 package com.aura.ui.screens
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -62,6 +63,7 @@ fun RemindersScreen(
 
     val rows = if (showHistory) state.history else state.upcoming
     Scaffold(
+        contentWindowInsets = WindowInsets(0),
         floatingActionButton = {
             if (!showHistory) {
                 FloatingActionButton(onClick = { showAdd = true }) {
