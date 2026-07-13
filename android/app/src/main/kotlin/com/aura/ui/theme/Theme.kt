@@ -8,6 +8,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
@@ -42,12 +43,15 @@ fun AuraTheme(
         darkTheme -> DarkColors
         else -> LightColors
     }
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = AuraTypography,
-        shapes = AuraShapes,
-        content = content,
-    )
+    val semanticColors = if (darkTheme) DarkAuraSemanticColors else LightAuraSemanticColors
+    CompositionLocalProvider(LocalAuraSemanticColors provides semanticColors) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = AuraTypography,
+            shapes = AuraShapes,
+            content = content,
+        )
+    }
 }
 
 // ── Dark scheme — Aura brand (vivid violet on near-black) ─────────────────

@@ -56,7 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aura.tools.Citation
-import com.aura.ui.theme.AuraTokens
+import com.aura.ui.theme.AuraThemeTokens
 import com.aura.ui.theme.Fraunces
 import com.aura.ui.theme.InterDisplay
 import com.aura.ui.theme.JetBrainsMono
@@ -126,8 +126,8 @@ fun AuraAiAvatar(
                 .background(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            AuraTokens.Dark.glowPurple,
-                            AuraTokens.Dark.glowBlue.copy(alpha = 0.20f),
+                            AuraThemeTokens.colors.assistantAccent,
+                            AuraThemeTokens.colors.info.copy(alpha = 0.20f),
                             Color.Transparent,
                         ),
                         radius = (size.value * 1.4f),
@@ -141,12 +141,23 @@ fun AuraAiAvatar(
                 .size(size)
                 .clip(CircleShape)
                 .background(
-                    brush = if (isProactive) AuraTokens.proactiveAvatarGradient
-                            else AuraTokens.avatarGradient,
+                    brush = Brush.linearGradient(
+                        colors = if (isProactive) {
+                            listOf(
+                                AuraThemeTokens.colors.assistantAccent.copy(alpha = 0.28f),
+                                AuraThemeTokens.colors.surface1,
+                            )
+                        } else {
+                            listOf(
+                                AuraThemeTokens.colors.surface3,
+                                AuraThemeTokens.colors.surface1,
+                            )
+                        },
+                    ),
                 )
                 .border(
                     width = 1.dp,
-                    color = AuraTokens.Dark.avatarBorder,
+                    color = AuraThemeTokens.colors.borderStrong,
                     shape = CircleShape,
                 ),
             contentAlignment = Alignment.Center,
@@ -154,7 +165,11 @@ fun AuraAiAvatar(
             Icon(
                 imageVector = if (isProactive || isThinking) Icons.Filled.Bolt else Icons.Filled.AutoAwesome,
                 contentDescription = null,
-                tint = if (isProactive) AuraTokens.Dark.accentPurple else Color.White,
+                tint = if (isProactive) {
+                    AuraThemeTokens.colors.assistantAccent
+                } else {
+                    AuraThemeTokens.colors.textPrimary
+                },
                 modifier = Modifier.size(size * 0.5f),
             )
         }
@@ -165,7 +180,7 @@ fun AuraAiAvatar(
                     .align(Alignment.TopEnd)
                     .size(10.dp)
                     .background(
-                        color = AuraTokens.Dark.proactivePing,
+                        color = AuraThemeTokens.colors.info,
                         shape = CircleShape,
                     ),
             )
@@ -215,7 +230,7 @@ fun ThinkingShimmer(modifier: Modifier = Modifier) {
                     .alpha(alpha)
                     .size(6.dp)
                     .background(
-                        color = AuraTokens.Dark.textSecondary,
+                        color = AuraThemeTokens.colors.textSecondary,
                         shape = CircleShape,
                     ),
             )
@@ -315,8 +330,8 @@ private fun UserBubble(text: String, animationIndex: Int) {
                 .background(
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            AuraTokens.Dark.userBubbleBg,
-                            AuraTokens.Dark.userBubbleBg,
+                            AuraThemeTokens.colors.userBubble,
+                            AuraThemeTokens.colors.userBubble,
                         ),
                     ),
                 )
@@ -324,7 +339,7 @@ private fun UserBubble(text: String, animationIndex: Int) {
         ) {
             Text(
                 text = text.ifBlank { "…" },
-                color = AuraTokens.Dark.userBubbleText,
+                color = AuraThemeTokens.colors.onUserBubble,
                 fontFamily = InterDisplay,
                 fontWeight = FontWeight.Medium,
                 fontSize = 16.sp,
@@ -391,12 +406,12 @@ private fun AssistantMessage(
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 12.sp,
                 letterSpacing = 0.5.sp,
-                color = AuraTokens.Dark.textPrimary,
+                color = AuraThemeTokens.colors.textPrimary,
             )
             if (isProactive) {
                 Spacer(Modifier.height(4.dp))
                 Surface(
-                    color = AuraTokens.Dark.modeAgent,
+                    color = AuraThemeTokens.colors.aiToolCall,
                     shape = RoundedCornerShape(999.dp),
                 ) {
                     Text(
@@ -404,7 +419,7 @@ private fun AssistantMessage(
                         fontFamily = InterDisplay,
                         fontWeight = FontWeight.Medium,
                         fontSize = 10.sp,
-                        color = AuraTokens.Dark.accentPurple,
+                        color = AuraThemeTokens.colors.assistantAccent,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                     )
                 }
@@ -415,7 +430,7 @@ private fun AssistantMessage(
                 text = text.ifBlank { "…" },
                 isStreaming = isStreaming,
                 style = MaterialTheme.typography.bodyLarge.copy(
-                    color = AuraTokens.Dark.textPrimary,
+                    color = AuraThemeTokens.colors.textPrimary,
                 ),
             )
             // Citations row
@@ -435,7 +450,7 @@ private fun AssistantMessage(
                             text = modelLabel,
                             fontFamily = JetBrainsMono,
                             fontSize = 10.sp,
-                            color = AuraTokens.Dark.textTertiary,
+                            color = AuraThemeTokens.colors.textTertiary,
                         )
                     }
                     if (timestamp > 0) {
@@ -443,7 +458,7 @@ private fun AssistantMessage(
                             text = com.aura.ui.util.formatRelativeTime(timestamp),
                             fontFamily = InterDisplay,
                             fontSize = 10.sp,
-                            color = AuraTokens.Dark.textQuaternary,
+                            color = AuraThemeTokens.colors.textTertiary,
                         )
                     }
                     Spacer(Modifier.weight(1f))
@@ -485,7 +500,7 @@ private fun CitationChipRow(citations: List<Citation>, onShowSources: () -> Unit
                                 text = c.url,
                                 fontFamily = JetBrainsMono,
                                 fontSize = 12.sp,
-                                color = AuraTokens.Dark.accentPurple,
+                                color = AuraThemeTokens.colors.assistantAccent,
                             )
                         }
                     },
@@ -516,11 +531,11 @@ private fun CitationChip(index: Int, onClick: () -> Unit) {
             .size(18.dp)
             .clip(CircleShape)
             .background(
-                color = AuraTokens.Dark.glowPurple.copy(alpha = 0.35f),
+                color = AuraThemeTokens.colors.assistantAccent.copy(alpha = 0.35f),
             )
             .border(
                 width = 1.dp,
-                color = AuraTokens.Dark.accentPurple.copy(alpha = 0.5f),
+                color = AuraThemeTokens.colors.assistantAccent.copy(alpha = 0.5f),
                 shape = CircleShape,
             )
             .clickable(onClick = onClick),
@@ -531,7 +546,7 @@ private fun CitationChip(index: Int, onClick: () -> Unit) {
             fontFamily = InterDisplay,
             fontWeight = FontWeight.Bold,
             fontSize = 10.sp,
-            color = AuraTokens.Dark.textPrimary,
+            color = AuraThemeTokens.colors.textPrimary,
         )
     }
 }
@@ -553,7 +568,7 @@ private fun BubbleAction(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = AuraTokens.Dark.textTertiary,
+            tint = AuraThemeTokens.colors.textTertiary,
             modifier = Modifier.size(14.dp),
         )
         if (label.isNotBlank()) {
@@ -561,7 +576,7 @@ private fun BubbleAction(
                 text = label,
                 fontFamily = InterDisplay,
                 fontSize = 10.sp,
-                color = AuraTokens.Dark.textTertiary,
+                color = AuraThemeTokens.colors.textTertiary,
             )
         }
     }

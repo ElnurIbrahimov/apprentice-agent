@@ -81,7 +81,7 @@ import com.aura.agent.Specialist
 import com.aura.ui.components.MarkdownText
 import com.aura.ui.components.MoaThinkingIndicator
 import com.aura.ui.components.ModelPickerSheet
-import com.aura.ui.theme.AuraTokens
+import com.aura.ui.theme.AuraThemeTokens
 import com.aura.ui.components.SpecialistChips
 import com.aura.ui.viewmodel.ChatViewModel
 import com.aura.ui.voice.VoiceOverlay
@@ -366,7 +366,7 @@ fun ChatScreen(
                             listState.animateScrollToItem(state.conversation.turns.size - 1)
                         }
                     },
-                    color = AuraTokens.Dark.surface2,
+                    color = AuraThemeTokens.colors.surface2,
                     shape = RoundedCornerShape(16.dp),
                     shadowElevation = 4.dp,
                 ) {
@@ -378,14 +378,14 @@ fun ChatScreen(
                             imageVector = Icons.Filled.ArrowDownward,
                             contentDescription = "Jump to latest",
                             modifier = Modifier.size(14.dp),
-                            tint = AuraTokens.Dark.textSecondary,
+                            tint = AuraThemeTokens.colors.textSecondary,
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
                             text = "Jump to latest",
                             fontFamily = com.aura.ui.theme.InterDisplay,
                             fontSize = 12.sp,
-                            color = AuraTokens.Dark.textSecondary,
+                            color = AuraThemeTokens.colors.textSecondary,
                         )
                     }
                 }
@@ -644,7 +644,7 @@ private fun ChatHeader(
             modifier = Modifier
                 .clip(RoundedCornerShape(16.dp))
                 .testTag("chat-model-pill")
-                .background(AuraTokens.Dark.surface2)
+                .background(AuraThemeTokens.colors.surface2)
                 .clickable { onShowModelPicker() }
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -655,7 +655,7 @@ private fun ChatHeader(
                 modifier = Modifier
                     .size(6.dp)
                     .clip(androidx.compose.foundation.shape.CircleShape)
-                    .background(AuraTokens.Dark.accentPurple),
+                    .background(AuraThemeTokens.colors.actionPrimary),
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
@@ -663,14 +663,14 @@ private fun ChatHeader(
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 fontFamily = com.aura.ui.theme.InterDisplay,
-                color = if (modelMismatch) AuraTokens.Dark.glowOrange
-                       else AuraTokens.Dark.textPrimary,
+                color = if (modelMismatch) AuraThemeTokens.colors.warning
+                       else AuraThemeTokens.colors.textPrimary,
             )
             Spacer(modifier = Modifier.width(4.dp))
             Icon(
                 imageVector = Icons.Filled.ArrowDropDown,
                 contentDescription = "Change model",
-                tint = AuraTokens.Dark.textTertiary,
+                tint = AuraThemeTokens.colors.textTertiary,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -681,7 +681,7 @@ private fun ChatHeader(
             Spacer(modifier = Modifier.width(8.dp))
             ModeChip(
                 label = if (deepModeActive) "Thinking…" else "Deep",
-                accent = AuraTokens.Dark.glowBlue,
+                accent = AuraThemeTokens.colors.info,
                 onClick = onToggleDeepMode,
             )
         }
@@ -689,7 +689,7 @@ private fun ChatHeader(
             Spacer(modifier = Modifier.width(8.dp))
             ModeChip(
                 label = "Incognito",
-                accent = AuraTokens.Dark.glowOrange,
+                accent = AuraThemeTokens.colors.warning,
                 onClick = onToggleIncognito,
             )
         }
@@ -699,8 +699,8 @@ private fun ChatHeader(
         HeaderIconButton(
             icon = if (ttsEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
             contentDescription = if (ttsEnabled) "Mute TTS" else "Enable TTS",
-            tint = if (ttsEnabled) AuraTokens.Dark.accentPurple
-                   else AuraTokens.Dark.textSecondary,
+            tint = if (ttsEnabled) AuraThemeTokens.colors.actionPrimary
+                   else AuraThemeTokens.colors.textSecondary,
             onClick = onToggleTts,
         )
         // The web has 4 small icons in the top-right
@@ -731,7 +731,7 @@ private fun HeaderIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
-    tint: androidx.compose.ui.graphics.Color = AuraTokens.Dark.textSecondary,
+    tint: androidx.compose.ui.graphics.Color = AuraThemeTokens.colors.textSecondary,
 ) {
     Box(
         modifier = Modifier
@@ -981,7 +981,7 @@ private fun SaveWarningBanner(
     onDismiss: () -> Unit,
 ) {
     Surface(
-        color = AuraTokens.Dark.aiError,
+        color = AuraThemeTokens.colors.error.copy(alpha = 0.15f),
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         shape = RoundedCornerShape(8.dp),
     ) {
@@ -992,11 +992,11 @@ private fun SaveWarningBanner(
             Text(
                 text = warning,
                 modifier = Modifier.weight(1f),
-                color = AuraTokens.Dark.textPrimary,
+                color = AuraThemeTokens.colors.textPrimary,
                 style = MaterialTheme.typography.bodySmall,
             )
             TextButton(onClick = onDismiss) {
-                Text("✕", color = AuraTokens.Dark.textPrimary)
+                Text("✕", color = AuraThemeTokens.colors.textPrimary)
             }
         }
     }
@@ -1073,12 +1073,12 @@ private fun ChatInputBar(
             modifier = Modifier
                 .size(40.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(AuraTokens.Dark.surface2),
+                .background(AuraThemeTokens.colors.surface2),
         ) {
             Icon(
                 Icons.Filled.AddAPhoto,
                 contentDescription = "Attach",
-                tint = AuraTokens.Dark.textSecondary,
+                tint = AuraThemeTokens.colors.textSecondary,
             )
         }
         // Glass input — surface-1 + border-subtle + 24dp radius.
@@ -1090,16 +1090,16 @@ private fun ChatInputBar(
             modifier = Modifier
                 .weight(1f)
                 .clip(RoundedCornerShape(24.dp))
-                .background(AuraTokens.Dark.surface1)
-                .border(1.dp, AuraTokens.Dark.borderSubtle, RoundedCornerShape(24.dp)),
+                .background(AuraThemeTokens.colors.surface1)
+                .border(1.dp, AuraThemeTokens.colors.borderSubtle, RoundedCornerShape(24.dp)),
         ) {
             BasicTextField(
                 value = draft,
                 onValueChange = onDraftChange,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = AuraTokens.Dark.textPrimary,
+                    color = AuraThemeTokens.colors.textPrimary,
                 ),
-                cursorBrush = SolidColor(AuraTokens.Dark.accentPurple),
+                cursorBrush = SolidColor(AuraThemeTokens.colors.actionPrimary),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 14.dp),
@@ -1112,7 +1112,7 @@ private fun ChatInputBar(
                             // Brighter than textTertiary (0xFF6B6B6B) which
                             // was barely visible against surface-1
                             // (0xFF202022) — placeholder now reads.
-                            color = AuraTokens.Dark.textSecondary,
+                            color = AuraThemeTokens.colors.textSecondary,
                         )
                     }
                     inner()
@@ -1131,8 +1131,8 @@ private fun ChatInputBar(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(AuraTokens.Dark.glowRed.copy(alpha = 0.15f))
-                    .border(1.dp, AuraTokens.Dark.glowRed.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                    .background(AuraThemeTokens.colors.error.copy(alpha = 0.15f))
+                    .border(1.dp, AuraThemeTokens.colors.error.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
                     .clickable { onCancel() },
                 contentAlignment = Alignment.Center,
             ) {
@@ -1160,7 +1160,7 @@ private fun ChatInputBar(
                 Icon(
                     Icons.Filled.Mic,
                     contentDescription = "Voice input",
-                    tint = AuraTokens.Dark.textSecondary,
+                    tint = AuraThemeTokens.colors.textSecondary,
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -1193,12 +1193,12 @@ private fun ChatInputBar(
                     .graphicsLayer { scaleX = animatedScale; scaleY = animatedScale }
                     .clip(RoundedCornerShape(animatedRadius))
                     .background(
-                        if (canSend) AuraTokens.Dark.sendReady
-                        else AuraTokens.Dark.surface2,
+                        if (canSend) AuraThemeTokens.colors.actionPrimary
+                        else AuraThemeTokens.colors.surface2,
                     )
                     .border(
                         width = if (canSend) 0.dp else 1.dp,
-                        color = AuraTokens.Dark.borderSubtle,
+                        color = AuraThemeTokens.colors.borderSubtle,
                         shape = RoundedCornerShape(animatedRadius),
                     )
                     .clickable(enabled = canSend) {
@@ -1211,7 +1211,7 @@ private fun ChatInputBar(
                     imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send,
                     contentDescription = "Send",
                     tint = if (canSend) Color.White
-                           else AuraTokens.Dark.textTertiary,
+                           else AuraThemeTokens.colors.textTertiary,
                     modifier = Modifier.size(18.dp),
                 )
             }

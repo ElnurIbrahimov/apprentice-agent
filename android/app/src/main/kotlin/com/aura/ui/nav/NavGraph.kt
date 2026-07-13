@@ -11,12 +11,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
@@ -65,7 +73,8 @@ import com.aura.ui.screens.RemindersScreen
 import com.aura.ui.screens.ProfileScreen
 import com.aura.ui.screens.SettingsScreen
 import com.aura.ui.screens.TasksScreen
-import com.aura.ui.theme.AuraTokens
+import com.aura.ui.theme.AuraDimensions
+import com.aura.ui.theme.AuraThemeTokens
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.unit.dp
 
@@ -114,6 +123,9 @@ fun NavGraph(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing.only(
+            WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
+        ),
         bottomBar = {
             AnimatedVisibility(
                 visible = showBottomBar,
@@ -241,45 +253,38 @@ fun NavGraph(
 
 @Composable
 private fun AuraBottomBar(navController: NavHostController, currentRoute: String?) {
-    // Web-style floating pill bottom bar. The Material 3
-    // NavigationBar is a flat full-width strip with tonal
-    // elevation; the web uses a 16dp-radius floating pill
-    // with border-subtle and surface-1 background, padded
-    // 12dp above the navigation bar. We mimic that here
-    // with a custom Row inside a Surface that floats with
-    // bottom padding.
+    val colors = AuraThemeTokens.colors
     Surface(
-        color = AuraTokens.Dark.surface1,
-        shape = RoundedCornerShape(16.dp),
-        shadowElevation = 8.dp,
+        color = colors.surface0,
+        shape = RectangleShape,
+        shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, colors.borderSubtle),
         modifier = Modifier
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
             .fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(4.dp),
+                .height(AuraDimensions.bottomNavigationHeight)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             topLevelRoutes.forEach { route ->
-                // currentRoute may be "chat?convId=..." — strip the query for comparison
-        val baseRoute = currentRoute?.substringBefore('?')
-        val selected = baseRoute == route.route
+                val baseRoute = currentRoute?.substringBefore('?')
+                val selected = baseRoute == route.route
                 val containerColor by animateColorAsState(
-                    targetValue = if (selected) AuraTokens.Dark.surface3
-                                  else Color.Transparent,
-                    animationSpec = tween(durationMillis = 180),
+                    targetValue = if (selected) colors.selection else Color.Transparent,
+                    animationSpec = tween(durationMillis = AuraDimensions.motionStandardMs),
                     label = "bar-item-bg",
                 )
-                val contentColor = if (selected) AuraTokens.Dark.textPrimary
-                                   else AuraTokens.Dark.textTertiary
+                val contentColor = if (selected) colors.textPrimary else colors.textTertiary
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
+                        .heightIn(min = AuraDimensions.minimumTouchTarget)
+                        .clip(RoundedCornerShape(AuraDimensions.controlRadius))
                         .background(containerColor)
                         .clickable {
                             if (!selected) {
@@ -289,8 +294,7 @@ private fun AuraBottomBar(navController: NavHostController, currentRoute: String
                                     restoreState = true
                                 }
                             }
-                        }
-                        .padding(vertical = 8.dp),
+                        },
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(
@@ -301,12 +305,12 @@ private fun AuraBottomBar(navController: NavHostController, currentRoute: String
                             imageVector = if (selected) route.selectedIcon else route.unselectedIcon,
                             contentDescription = route.label,
                             tint = contentColor,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(21.dp),
                         )
                         Text(
                             text = route.label,
-                            fontSize = 10.sp,
-                            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                            fontSize = 11.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                             color = contentColor,
                         )
                     }

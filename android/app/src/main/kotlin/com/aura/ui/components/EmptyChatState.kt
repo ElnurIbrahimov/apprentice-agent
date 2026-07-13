@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
@@ -34,7 +36,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aura.ui.theme.AuraTokens
+import com.aura.ui.theme.AuraThemeTokens
 import com.aura.ui.theme.Fraunces
 import com.aura.ui.theme.InterDisplay
 
@@ -50,35 +52,34 @@ import com.aura.ui.theme.InterDisplay
 data class QuickChip(
     val prompt: String,
     val label: String,
-    val emoji: String,
-    val icon: ImageVector? = null,
+    val icon: ImageVector,
 )
 
 val DefaultQuickChips: List<QuickChip> = listOf(
     QuickChip(
         prompt = "Research the latest on quantum computing",
         label = "Research",
-        emoji = "🔍",
+        icon = Icons.Filled.Search,
     ),
     QuickChip(
         prompt = "Help me write a Python script",
         label = "Code",
-        emoji = "💻",
+        icon = Icons.Filled.Code,
     ),
     QuickChip(
         prompt = "Brainstorm 5 product names for a meditation app",
         label = "Brainstorm",
-        emoji = "💡",
+        icon = Icons.Filled.Lightbulb,
     ),
     QuickChip(
         prompt = "Rewrite this to be more confident: 'I think maybe we could'",
         label = "Rewrite",
-        emoji = "✍️",
+        icon = Icons.Filled.SwapHoriz,
     ),
     QuickChip(
         prompt = "Search my memories for anything I saved",
         label = "Memory",
-        emoji = "🧠",
+        icon = Icons.Filled.Memory,
     ),
 )
 
@@ -97,6 +98,7 @@ val DefaultQuickChips: List<QuickChip> = listOf(
 fun EmptyChatState(
     modifier: Modifier = Modifier,
 ) {
+    val colors = AuraThemeTokens.colors
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier.fillMaxSize(),
@@ -117,7 +119,7 @@ fun EmptyChatState(
             fontSize = 28.sp,
             // Brighter than textSecondary (0xFFA1A1AA) so the
             // welcome actually reads on the dark background.
-            color = AuraTokens.Dark.textPrimary,
+            color = colors.textPrimary,
         )
         Spacer(Modifier.height(6.dp))
         Text(
@@ -127,7 +129,7 @@ fun EmptyChatState(
             fontSize = 15.sp,
             // Brighter than textTertiary (0xFF6B6B6B) which was
             // near-invisible. textSecondary reads well.
-            color = AuraTokens.Dark.textSecondary,
+            color = colors.textSecondary,
         )
         // Push the rest of the screen to the bottom so the
         // input bar (rendered separately by ChatScreen) lines
@@ -145,15 +147,16 @@ fun EmptyChatState(
  */
 @Composable
 fun AuraLogomark(size: androidx.compose.ui.unit.Dp = 28.dp) {
+    val colors = AuraThemeTokens.colors
     Box(
         modifier = Modifier
             .size(size)
             .clip(CircleShape)
-            .background(AuraTokens.Dark.glowPurple.copy(alpha = 0.18f))
+            .background(colors.selection.copy(alpha = 0.18f))
             .background(
                 brush = androidx.compose.ui.graphics.Brush.linearGradient(
                     colors = listOf(
-                        AuraTokens.Dark.glowPurple.copy(alpha = 0.35f),
+                        colors.selection.copy(alpha = 0.35f),
                         Color.Transparent,
                     ),
                 ),
@@ -164,7 +167,7 @@ fun AuraLogomark(size: androidx.compose.ui.unit.Dp = 28.dp) {
             text = "✦",
             fontFamily = Fraunces,
             fontSize = (size.value * 0.6f).sp,
-            color = AuraTokens.Dark.accentPurple,
+            color = colors.assistantAccent,
         )
     }
 }
@@ -193,26 +196,30 @@ private fun androidx.compose.foundation.lazy.LazyListScope.items(
 
 @Composable
 private fun QuickChipView(chip: QuickChip, onClick: () -> Unit) {
+    val colors = AuraThemeTokens.colors
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(AuraTokens.Dark.surface2)
-            .border(1.dp, AuraTokens.Dark.borderSubtle, RoundedCornerShape(999.dp))
+            .background(colors.surface2)
+            .border(1.dp, colors.borderSubtle, RoundedCornerShape(999.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        Text(
-            text = chip.emoji,
-            fontSize = 12.sp,
+        Icon(
+            imageVector = chip.icon,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = colors.textSecondary,
         )
         Text(
             text = chip.label,
             fontFamily = InterDisplay,
             fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
-            color = AuraTokens.Dark.textSecondary,
+            color = colors.textSecondary,
         )
     }
 }

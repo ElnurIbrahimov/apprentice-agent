@@ -32,7 +32,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aura.ui.theme.AuraTokens
+import com.aura.ui.theme.AuraThemeTokens
 import com.aura.ui.theme.JetBrainsMono
 
 /**
@@ -96,7 +96,7 @@ fun StreamingText(
     isStreaming: Boolean,
     modifier: Modifier = Modifier,
     style: TextStyle = MaterialTheme.typography.bodyLarge,
-    cursorColor: Color = AuraTokens.Dark.accentPurple,
+    cursorColor: Color = Color.Unspecified,
 ) {
     // The infinite transition is only created while streaming. Once
     // streaming stops, we skip the transition entirely so the cursor
@@ -106,6 +106,8 @@ fun StreamingText(
     // buildStreamingAnnotatedString), but the underlying
     // rememberInfiniteTransition would otherwise keep ticking.
     val colors = rememberMarkdownColors()
+    val semanticColors = AuraThemeTokens.colors
+    val resolvedCursorColor = if (cursorColor == Color.Unspecified) semanticColors.streaming else cursorColor
     val state = remember { StreamingMarkdownState() }
     val effectiveCursor = if (isStreaming) {
         val infiniteTransition = rememberInfiniteTransition(label = "cursor")
@@ -125,9 +127,9 @@ fun StreamingText(
             ),
             label = "alpha",
         )
-        cursorColor.copy(alpha = cursorAlpha)
+        resolvedCursorColor.copy(alpha = cursorAlpha)
     } else {
-        cursorColor
+        resolvedCursorColor
     }
     val annotated = buildStreamingAnnotatedString(
         text = text,
@@ -168,14 +170,14 @@ fun StreamingText(
         if (isStreaming && tokensPerSec > 0) {
             Spacer(Modifier.width(8.dp))
             Surface(
-                color = AuraTokens.Dark.surface2,
+                color = semanticColors.surface2,
                 shape = RoundedCornerShape(6.dp),
             ) {
                 Text(
                     text = "$tokensPerSec tok/s",
                     fontFamily = JetBrainsMono,
                     fontSize = 10.sp,
-                    color = AuraTokens.Dark.textSecondary,
+                    color = semanticColors.textSecondary,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
