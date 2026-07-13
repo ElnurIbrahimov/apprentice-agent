@@ -141,6 +141,7 @@ private fun SettingsSection(
 @Composable
 fun SettingsScreen(
     onNavigateProfile: () -> Unit,
+    onNavigateDiagnostics: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
     backupViewModel: BackupViewModel = hiltViewModel(),
     usageViewModel: UsageViewModel = hiltViewModel(),
@@ -814,9 +815,25 @@ fun SettingsScreen(
         SettingsSection(
             emoji = "\uD83D\uDCBE",
             title = "Data & Backup",
-            subtitle = "Export or restore memories, conversations, and profile",
+            subtitle = "Export, restore, and inspect local diagnostics",
             initialExpanded = false,
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Diagnostics", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Local crash and error history",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                    )
+                }
+                TextButton(onClick = onNavigateDiagnostics) { Text("Open") }
+            }
+            Spacer(Modifier.height(8.dp))
+
             OutlinedButton(
                 onClick = {
                     coroutineScope.launch {

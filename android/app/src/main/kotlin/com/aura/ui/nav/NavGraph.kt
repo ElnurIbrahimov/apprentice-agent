@@ -52,6 +52,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.aura.ui.screens.ChatScreen
+import com.aura.ui.screens.DiagnosticsScreen
 import com.aura.ui.screens.HandsScreen
 import com.aura.ui.screens.HistoryScreen
 import com.aura.ui.screens.HomeScreen
@@ -200,7 +201,11 @@ fun NavGraph(
             composable(TopLevelRoute.Settings.route) {
                 SettingsScreen(
                     onNavigateProfile = { navController.navigate("profile") },
+                    onNavigateDiagnostics = { navController.navigate("diagnostics") },
                 )
+            }
+            composable("diagnostics") {
+                DiagnosticsScreen(onBack = { navController.popBackStack() })
             }
             composable("identity_editor") {
                 com.aura.ui.screens.IdentityEditorScreen(
