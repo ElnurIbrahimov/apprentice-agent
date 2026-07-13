@@ -1,5 +1,6 @@
 package com.aura.providers
 
+import com.aura.security.SecureDataStore
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -13,6 +14,11 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object ProviderModule {
+
+    @Provides
+    @Singleton
+    fun provideModelCatalogCache(store: SecureDataStore): ModelCatalogCache =
+        SecureModelCatalogCache(store)
 
     @Provides
     @Singleton
