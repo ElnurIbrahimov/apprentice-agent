@@ -663,7 +663,7 @@ fun SettingsScreen(
                         text = if (notificationAccessEnabled)
                             "Enabled — Aura can read active device notifications"
                         else
-                            "Off — notification summaries only see Aura itself",
+                            "Off — enable to summarize device notifications",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                     )
