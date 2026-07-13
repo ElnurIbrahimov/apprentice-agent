@@ -14,6 +14,7 @@ import com.aura.agent.ToolResult
 import com.aura.kg.KnowledgeGraphRepository
 import com.aura.memory.MemoryStore
 import com.aura.providers.ProviderKeys
+import com.aura.providers.ModelCatalogRepository
 import com.aura.providers.ProviderRegistry
 import com.aura.voice.TextToSpeech
 import com.aura.core.error.CrashLogger
@@ -91,7 +92,9 @@ class ChatViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun createViewModel(): ChatViewModel = ChatViewModel(
+    private fun createViewModel(
+        modelCatalogRepository: ModelCatalogRepository? = null,
+    ): ChatViewModel = ChatViewModel(
         application = application,
         loop = loop,
         providerKeys = providerKeys,
@@ -104,6 +107,7 @@ class ChatViewModelTest {
         conversationStore = conversationStore,
         knowledgeGraphRepository = knowledgeGraphRepository,
         crashLogger = crashLogger,
+        modelCatalogRepository = modelCatalogRepository,
     )
 
     @Test
@@ -111,11 +115,17 @@ class ChatViewModelTest {
         val provider = mockk<com.aura.providers.Provider>(relaxed = true)
         every { provider.prefix } returns "ollama"
         every { provider.displayName } returns "Ollama Cloud"
+        every { provider.isConfigured() } returns true
         coEvery { provider.listModels() } returns listOf("qwen3.5:cloud", "deepseek-v4-pro:cloud")
-        every { providerRegistry.configured() } returns listOf(provider)
+        every { providerRegistry.all() } returns listOf(provider)
         every { providerRegistry.get("moa") } returns null
 
-        val vm = createViewModel()
+        val repository = ModelCatalogRepository(
+            providerRegistry = providerRegistry,
+            scope = this,
+        )
+        val vm = createViewModel(repository)
+        vm.refreshModels()
         advanceUntilIdle()
 
         assertEquals(

@@ -79,9 +79,12 @@ class CloudEmbedderTest {
         }
     }
 
-    private fun providerKeys(apiKey: String?, model: String = "nomic-embed-text"): ProviderKeys {
+    private fun providerKeys(
+        key: kotlin.String?,
+        model: kotlin.String = "ollama:nomic-embed-text",
+    ): ProviderKeys {
         val pk = mockk<ProviderKeys>(relaxed = true)
-        every { pk.keyFor("ollama") } returns apiKey
+        every { pk.keyFor("ollama") } returns key
         every { pk.embeddingModel } returns model
         return pk
     }
@@ -103,7 +106,7 @@ class CloudEmbedderTest {
                 sampleEmbedding.joinToString(",") { it.toString() }
             }]}"""
         val httpClient = mockHttp(embedBody)
-        val keys = providerKeys(apiKey = "sk-test-key")
+        val keys = providerKeys(key = "sk-test-key")
         val local = mockk<LocalEmbedder>(relaxed = true)
 
         val sut = CloudEmbedder(local, keys, httpClient)
@@ -118,7 +121,7 @@ class CloudEmbedderTest {
     @Test
     fun `fallback to local when api key is blank`() = runTest {
         val httpClient = mockHttp("""{"embedding":[]}""")
-        val keys = providerKeys(apiKey = null)
+        val keys = providerKeys(key = null)
         val local = mockk<LocalEmbedder>(relaxed = true)
         coEvery { local.embed(any()) } returns FloatArray(384) { 1f }
 
@@ -133,7 +136,7 @@ class CloudEmbedderTest {
     @Test
     fun `fallback to local on http error`() = runTest {
         val httpClient = mockHttpError(500)
-        val keys = providerKeys(apiKey = "sk-test-key")
+        val keys = providerKeys(key = "sk-test-key")
         val local = mockk<LocalEmbedder>(relaxed = true)
         coEvery { local.embed(any()) } returns FloatArray(384) { 2f }
 
@@ -147,7 +150,7 @@ class CloudEmbedderTest {
     @Test
     fun `fallback to local on network exception`() = runTest {
         val httpClient = mockHttpException()
-        val keys = providerKeys(apiKey = "sk-test-key")
+        val keys = providerKeys(key = "sk-test-key")
         val local = mockk<LocalEmbedder>(relaxed = true)
         coEvery { local.embed(any()) } returns FloatArray(384) { 3f }
 
@@ -165,7 +168,7 @@ class CloudEmbedderTest {
                 sampleEmbedding.joinToString(",") { it.toString() }
             }]}"""
         val httpClient = mockHttp(embedBody)
-        val keys = providerKeys(apiKey = "sk-test-key")
+        val keys = providerKeys(key = "sk-test-key")
         val local = mockk<LocalEmbedder>(relaxed = true)
 
         val sut = CloudEmbedder(local, keys, httpClient)
@@ -214,7 +217,7 @@ class CloudEmbedderTest {
         val httpClient = mockk<OkHttpClient> {
             every { newCall(any()) } returnsMany listOf(callA, callB)
         }
-        val keys = providerKeys(apiKey = "sk-test-key")
+        val keys = providerKeys(key = "sk-test-key")
         val local = mockk<LocalEmbedder>(relaxed = true)
 
         val sut = CloudEmbedder(local, keys, httpClient)

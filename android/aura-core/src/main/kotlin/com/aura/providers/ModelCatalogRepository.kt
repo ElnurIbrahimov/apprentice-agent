@@ -79,6 +79,10 @@ class ModelCatalogRepository @Inject constructor(
      */
     private var refreshJob: Job? = null
 
+    init {
+        scope.launch { hydrateConfiguredProviderCache() }
+    }
+
     /**
      * Trigger a catalog refresh. Any in-flight refresh is cancelled
      * and superseded. The new refresh runs asynchronously on [scope];
@@ -125,6 +129,29 @@ class ModelCatalogRepository @Inject constructor(
         if (generation != refreshGeneration) return
         val final = loading.toMutableMap().apply { this[prefix] = result.second }
         publishIfCurrent(generation, ModelCatalog(final, computeAllModels(final)))
+    }
+
+    /**
+     * Restore persisted catalog entries without issuing network calls.
+     * A live refresh that starts while hydration is reading wins via the
+     * same generation guard used by provider refreshes.
+     */
+    private suspend fun hydrateConfiguredProviderCache() {
+        val generation = refreshGeneration
+        val hydrated = linkedMapOf<String, ProviderModelList>()
+        for (provider in providerRegistry.all()) {
+            if (!runCatching { provider.isConfigured() }.getOrDefault(false)) continue
+            val cached = cache.getCachedModels(provider.prefix) ?: continue
+            hydrated[provider.prefix] = ProviderModelList(
+                providerPrefix = provider.prefix,
+                status = ProviderStatus.Ready,
+                models = cached.models,
+                errorMessage = if (cached.isStale) "Using cached model catalog." else null,
+            )
+        }
+        if (hydrated.isEmpty()) return
+        if (generation != refreshGeneration || _catalog.value.providers.isNotEmpty()) return
+        publishIfCurrent(generation, ModelCatalog(hydrated, computeAllModels(hydrated)))
     }
 
     private suspend fun doRefresh(generation: Long, force: Boolean) {

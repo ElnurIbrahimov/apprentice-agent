@@ -91,12 +91,13 @@ class ChatViewModelScreenTest {
     }
 
     @Test
-    fun `setDraft updates draft and clears on send if empty`() {
+    fun `send retains draft when no verified model is ready`() {
         val viewModel = buildViewModel()
         viewModel.setDraft("hello")
         assertEquals("hello", viewModel.state.value.draft)
         viewModel.send()
-        assertEquals("", viewModel.state.value.draft)
+        assertEquals("hello", viewModel.state.value.draft)
+        assertTrue(viewModel.state.value.error?.contains("model", ignoreCase = true) == true)
     }
 }
 
