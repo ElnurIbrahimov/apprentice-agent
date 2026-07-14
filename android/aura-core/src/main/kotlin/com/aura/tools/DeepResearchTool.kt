@@ -5,6 +5,7 @@ import com.aura.agent.ToolContext
 import com.aura.agent.ToolResult
 import com.aura.agent.ToolRisk
 import com.aura.core.url.SsrfGuard
+import com.aura.core.url.SsrfValidation
 import com.aura.data.UserPreferences
 import com.aura.core.util.buildFirecrawlBody
 import com.aura.providers.ChatOptions
@@ -236,16 +237,16 @@ class DeepResearchTool @Inject constructor(
     // ------------------------------------------------------------------
 
     private fun fetchUrlContent(url: String): String? {
-        // Search-result URLs are untrusted. Apply the guard before choosing
-        // either outbound fetch backend—Firecrawl must not become an SSRF
-        // bypass merely because it is configured.
-        if (SsrfGuard.validate(url) != null) return null
+        // Search-result URLs are untrusted. Resolve every address once and
+        // carry that immutable decision into the direct fetch. Firecrawl is a
+        // remote fetch service, so only the initial target can be validated here.
+        val target = SsrfGuard.inspect(url) as? SsrfValidation.Safe ?: return null
 
         val firecrawlKey = providerKeys.keyFor("firecrawl")
         if (!firecrawlKey.isNullOrBlank()) {
-            return fetchViaFirecrawl(url, firecrawlKey)
+            return fetchViaFirecrawl(target.url, firecrawlKey)
         }
-        return fetchDirect(url)
+        return fetchDirect(target)
     }
 
     private fun fetchViaFirecrawl(url: kotlin.String, apiKey: kotlin.String): kotlin.String? {
@@ -272,22 +273,16 @@ class DeepResearchTool @Inject constructor(
         }
     }
 
-    private fun fetchDirect(url: String): String? {
-        // SSRF guard: reject non-http(s) schemes, localhost, and private IPs.
-        // This is the same check FirecrawlFetchTool applies; without it, a
-        // search result URL pointing at an internal address would be fetched
-        // directly, leaking internal network state.
-        val ssrfError = SsrfGuard.validate(url)
-        if (ssrfError != null) return null
-
+    private fun fetchDirect(target: SsrfValidation.Safe): String? {
         try {
+            val pinnedClient = SsrfGuard.pinnedClient(httpClient, target)
             val req = Request.Builder()
-                .url(url)
+                .url(target.url)
                 .header("User-Agent", "Mozilla/5.0 Aura/1.0")
                 .header("Accept", "text/html,text/plain,*/*")
                 .build()
 
-            httpClient.newCall(req).execute().use { resp ->
+            pinnedClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return null
                 val body = resp.body?.string() ?: return null
                 // Strip HTML tags and collapse whitespace
