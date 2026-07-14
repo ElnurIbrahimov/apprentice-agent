@@ -99,43 +99,29 @@ fun EmptyChatState(
     modifier: Modifier = Modifier,
 ) {
     val colors = AuraThemeTokens.colors
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = modifier.fillMaxSize(),
     ) {
-        // Spacer pushes the welcome down from the top bar by
-        // ~25% of the available height. Web has roughly the
-        // same offset (the welcome sits between the top bar
-        // and the input, biased toward the top).
-        Spacer(Modifier.weight(0.6f))
-        // Logomark — slightly bigger than the tiny 28dp we had
-        // before, so the empty state has a visible anchor.
-        AuraLogomark(size = 40.dp)
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = "Welcome to Aura",
-            fontFamily = Fraunces,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 28.sp,
-            // Brighter than textSecondary (0xFFA1A1AA) so the
-            // welcome actually reads on the dark background.
-            color = colors.textPrimary,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "What should we explore?",
-            fontFamily = InterDisplay,
-            fontWeight = FontWeight.Medium,
-            fontSize = 15.sp,
-            // Brighter than textTertiary (0xFF6B6B6B) which was
-            // near-invisible. textSecondary reads well.
-            color = colors.textSecondary,
-        )
-        // Push the rest of the screen to the bottom so the
-        // input bar (rendered separately by ChatScreen) lines
-        // up with where the user expects to see it.
-        Spacer(Modifier.weight(1f))
-        // (chips are rendered by ChatScreen below the input bar — not here)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            AuraLogomark(size = 40.dp)
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "Welcome to Aura",
+                fontFamily = Fraunces,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 28.sp,
+                color = colors.textPrimary,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "What should we explore?",
+                fontFamily = InterDisplay,
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+                color = colors.textSecondary,
+            )
+        }
     }
 }
 

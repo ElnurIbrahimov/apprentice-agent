@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -65,6 +66,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -104,6 +106,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.graphicsLayer
@@ -114,6 +117,8 @@ import androidx.compose.animation.core.animateFloat
 interface HiltEntryPoint {
     fun incomingShareStore(): IncomingShareStore
 }
+
+private enum class ChatVoiceMode { Tap, Hold, Continuous }
 
 @Composable
 fun ChatRoute(
@@ -135,17 +140,26 @@ fun ChatRoute(
 
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
-    // Show the "jump to bottom" pill when the user has scrolled up
-    // by more than 5 messages. The web has this as a small floating
-    // button bottom-right; on Android a small pill above the input
-    // bar is more discoverable.
-    val showJumpToBottom by remember(listState) {
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
+    var followLiveEdge by remember { mutableStateOf(true) }
+    val physicallyAtLiveEdge by remember(listState) {
         derivedStateOf {
             val total = listState.layoutInfo.totalItemsCount
-            val visible = listState.firstVisibleItemIndex
-            total > 0 && visible > 5
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            total == 0 || lastVisible >= total - 1
         }
     }
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) {
+            snapshotFlow { physicallyAtLiveEdge }.collect { atEdge ->
+                if (shouldDetachFromLiveEdge(isUserDragging, atEdge)) followLiveEdge = false
+            }
+        }
+    }
+    LaunchedEffect(state.conversation.id) {
+        followLiveEdge = true
+    }
+    val showJumpToBottom = shouldShowJumpToLatest(state.conversation.turns.size, followLiveEdge)
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -173,13 +187,23 @@ fun ChatRoute(
         },
         onKeepStreaming = { showStopStreamConfirm = false },
     )
-    var showAttachmentSheet by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val hasMicPermission = rememberMicPermission()
+    var pendingVoiceMode by remember { mutableStateOf<ChatVoiceMode?>(null) }
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-    ) { granted -> if (granted) showVoiceOverlay = true }
+    ) { granted ->
+        if (granted) {
+            when (pendingVoiceMode) {
+                ChatVoiceMode.Tap -> showVoiceOverlay = true
+                ChatVoiceMode.Hold -> showHoldToTalk = true
+                ChatVoiceMode.Continuous -> showContinuousVoice = true
+                null -> Unit
+            }
+        }
+        pendingVoiceMode = null
+    }
 
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.TakePicturePreview()
@@ -207,22 +231,11 @@ fun ChatRoute(
 
     ConsumeIncomingShare(context, viewModel)
 
-    // Auto-scroll on:
-    // 1. New turn added (size change)
-    // 2. Streaming token arrives on the last turn (assistant length change)
-    // 3. First message after send
     val lastTurn = state.conversation.turns.lastOrNull()
     val assistantLen = lastTurn?.assistant?.length ?: 0
     LaunchedEffect(state.conversation.turns.size, assistantLen) {
-        if (state.conversation.turns.isNotEmpty()) {
-            val target = state.conversation.turns.size - 1
-            // Only auto-scroll if user is near the bottom. If they've
-            // scrolled up to read old messages, don't yank them back.
-            val visible = listState.layoutInfo.visibleItemsInfo
-            val lastVisible = visible.lastOrNull()?.index ?: 0
-            if (lastVisible >= target - 1) {
-                listState.animateScrollToItem(target)
-            }
+        if (shouldAutoFollow(state.conversation.turns.size, followLiveEdge)) {
+            listState.scrollToItem(state.conversation.turns.size - 1)
         }
     }
 
@@ -243,6 +256,7 @@ fun ChatRoute(
         listState = listState,
         showJumpToLatest = showJumpToBottom,
         onJumpToLatest = {
+            followLiveEdge = true
             coroutineScope.launch {
                 if (state.conversation.turns.isNotEmpty()) {
                     listState.animateScrollToItem(state.conversation.turns.size - 1)
@@ -252,11 +266,15 @@ fun ChatRoute(
         onShowModelPicker = { showModelPicker = true },
         onToggleTts = viewModel::toggleTts,
         onHistory = onNavigateHistory,
-        onNewConversation = viewModel::newConversation,
+        onNewConversation = {
+            followLiveEdge = true
+            viewModel.newConversation()
+        },
         onDeleteConversation = { showDeleteConfirm = true },
         onToggleDeepMode = viewModel::toggleDeepMode,
         onToggleIncognito = viewModel::toggleIncognito,
         onSendSuggestion = { prompt ->
+            followLiveEdge = true
             viewModel.setDraft(prompt)
             viewModel.send()
         },
@@ -268,21 +286,36 @@ fun ChatRoute(
         onDismissVision = viewModel::dismissPendingVision,
         onShowSources = { showSources = true },
         composer = {
-            ChatInputBar(
-                hapticView = hapticView,
+            ChatComposer(
                 draft = state.draft,
                 streaming = state.streaming,
                 sendEnabled = state.modelSelection is com.aura.ui.viewmodel.ModelSelectionState.Ready,
                 onDraftChange = viewModel::setDraft,
-                onSend = viewModel::send,
-                onCancel = viewModel::cancel,
-                onMicClick = {
-                    if (hasMicPermission) showVoiceOverlay = true
-                    else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                onSend = {
+                    followLiveEdge = true
+                    viewModel.send()
                 },
-                onMicLongPress = {
+                onCancel = viewModel::cancel,
+                onTapToSpeak = {
+                    if (hasMicPermission) showVoiceOverlay = true
+                    else {
+                        pendingVoiceMode = ChatVoiceMode.Tap
+                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onHoldToTalk = {
                     if (hasMicPermission) showHoldToTalk = true
-                    else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    else {
+                        pendingVoiceMode = ChatVoiceMode.Hold
+                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
+                },
+                onContinuousVoice = {
+                    if (hasMicPermission) showContinuousVoice = true
+                    else {
+                        pendingVoiceMode = ChatVoiceMode.Continuous
+                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    }
                 },
                 onCameraClick = {
                     if (hasCameraPermission) cameraLauncher.launch(null)
@@ -296,8 +329,6 @@ fun ChatRoute(
                     )
                 },
                 onAudioClick = { audioLauncher.launch("audio/*") },
-                showAttachmentSheet = showAttachmentSheet,
-                onAttachmentSheetChange = { showAttachmentSheet = it },
             )
         },
     )
@@ -416,250 +447,6 @@ fun ChatRoute(
 
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ChatInputBar(
-    hapticView: android.view.View,
-    draft: String,
-    streaming: Boolean,
-    sendEnabled: Boolean,
-    onDraftChange: (String) -> Unit,
-    onSend: () -> Unit,
-    onCancel: () -> Unit,
-    onMicClick: () -> Unit,
-    onMicLongPress: () -> Unit = {},
-    onCameraClick: () -> Unit,
-    onGalleryClick: () -> Unit,
-    onAudioClick: () -> Unit,
-    showAttachmentSheet: Boolean,
-    onAttachmentSheetChange: (Boolean) -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    // The input bar has no surface of its own — the screen
-    // background bleeds through so the glass text-field looks
-    // like it's floating on the chat, not sitting in a separate
-    // panel. The Web does the same with no border on the bottom
-    // row.
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        IconButton(
-            onClick = { onAttachmentSheetChange(true) },
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(AuraThemeTokens.colors.surface2),
-        ) {
-            Icon(
-                Icons.Filled.AddAPhoto,
-                contentDescription = "Attach",
-                tint = AuraThemeTokens.colors.textSecondary,
-            )
-        }
-        // Glass input — surface-1 + border-subtle + 24dp radius.
-        // The web does the same but with backdrop-blur 24dp; on
-        // Android Compose there's no equivalent for arbitrary
-        // composables (only for whole surfaces), so we use a
-        // slightly-opaque surface-1 instead.
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(24.dp))
-                .background(AuraThemeTokens.colors.surface1)
-                .border(1.dp, AuraThemeTokens.colors.borderSubtle, RoundedCornerShape(24.dp)),
-        ) {
-            BasicTextField(
-                value = draft,
-                onValueChange = onDraftChange,
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = AuraThemeTokens.colors.textPrimary,
-                ),
-                cursorBrush = SolidColor(AuraThemeTokens.colors.actionPrimary),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                decorationBox = { inner ->
-                    if (draft.isEmpty()) {
-                        Text(
-                            text = "Message AURA…",
-                            fontFamily = com.aura.ui.theme.InterDisplay,
-                            fontSize = 16.sp,
-                            // Brighter than textTertiary (0xFF6B6B6B) which
-                            // was barely visible against surface-1
-                            // (0xFF202022) — placeholder now reads.
-                            color = AuraThemeTokens.colors.textSecondary,
-                        )
-                    }
-                    inner()
-                },
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Send,
-                ),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                    onSend = { if (sendEnabled && draft.isNotBlank()) onSend() },
-                ),
-            )
-        }
-        if (streaming) {
-            // Stop button — square (12dp) red surface.
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(AuraThemeTokens.colors.error.copy(alpha = 0.15f))
-                    .border(1.dp, AuraThemeTokens.colors.error.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                    .clickable { onCancel() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Stop,
-                    contentDescription = "Stop",
-                    tint = Color(0xFFF87171),
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        } else {
-            // Mic button — 40dp circle, no background. Long-press
-            // opens push-to-talk. Tap opens the tap-to-speak
-            // overlay.
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(androidx.compose.foundation.shape.CircleShape)
-                    .clickable { onMicClick() }
-                    .pointerInput(Unit) {
-                        detectTapGestures(onLongPress = { onMicLongPress() })
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Mic,
-                    contentDescription = "Voice input",
-                    tint = AuraThemeTokens.colors.textSecondary,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            // Send button — morphs between square (12dp, empty)
-            // and pill (20dp, ready). The animation is spring-eased
-            // matching the web's
-            // `transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)`.
-            val canSend = sendEnabled && draft.isNotBlank()
-            val targetRadius = if (canSend) 20.dp else 12.dp
-            val targetScale = if (canSend) 1f else 0.9f
-            val animatedRadius by animateDpAsState(
-                targetValue = targetRadius,
-                animationSpec = spring(
-                    dampingRatio = 0.65f,
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
-                ),
-                label = "send-radius",
-            )
-            val animatedScale by animateFloatAsState(
-                targetValue = targetScale,
-                animationSpec = spring(
-                    dampingRatio = 0.65f,
-                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
-                ),
-                label = "send-scale",
-            )
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .graphicsLayer { scaleX = animatedScale; scaleY = animatedScale }
-                    .clip(RoundedCornerShape(animatedRadius))
-                    .background(
-                        if (canSend) AuraThemeTokens.colors.actionPrimary
-                        else AuraThemeTokens.colors.surface2,
-                    )
-                    .border(
-                        width = if (canSend) 0.dp else 1.dp,
-                        color = AuraThemeTokens.colors.borderSubtle,
-                        shape = RoundedCornerShape(animatedRadius),
-                    )
-                    .clickable(enabled = canSend) {
-                        com.aura.ui.util.Haptics.send(hapticView)
-                        onSend()
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Send",
-                    tint = if (canSend) Color.White
-                           else AuraThemeTokens.colors.textTertiary,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        }
-    }
-
-    if (showAttachmentSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { onAttachmentSheetChange(false) },
-            sheetState = sheetState,
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = "Attach",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                AttachmentOption(
-                    icon = Icons.Filled.PhotoLibrary,
-                    label = "Gallery",
-                    onClick = {
-                        onAttachmentSheetChange(false)
-                        onGalleryClick()
-                    }
-                )
-                AttachmentOption(
-                    icon = Icons.Filled.AddAPhoto,
-                    label = "Camera",
-                    onClick = {
-                        onAttachmentSheetChange(false)
-                        onCameraClick()
-                    }
-                )
-                AttachmentOption(
-                    icon = Icons.Filled.AudioFile,
-                    label = "Audio",
-                    onClick = {
-                        onAttachmentSheetChange(false)
-                        onAudioClick()
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AttachmentOption(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        Spacer(modifier = Modifier.width(16.dp))
-        Text(text = label, style = MaterialTheme.typography.bodyLarge)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ConsumeIncomingShare(context: android.content.Context, viewModel: ChatViewModel) {
     val store = remember {
