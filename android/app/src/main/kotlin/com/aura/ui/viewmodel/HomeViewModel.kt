@@ -16,6 +16,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -31,13 +32,41 @@ import java.util.Locale
  */
 private const val DECAY_FADING_THRESHOLD = 0.4f
 
+sealed interface HomeLoadState {
+    data object Loading : HomeLoadState
+    data object Empty : HomeLoadState
+    data object Content : HomeLoadState
+    data class Error(
+        val message: String,
+        val hasPartialContent: Boolean,
+    ) : HomeLoadState
+}
+
+fun resolveHomeLoadState(hasData: Boolean, dataSourceError: String?): HomeLoadState = when {
+    dataSourceError != null -> HomeLoadState.Error(dataSourceError, hasPartialContent = hasData)
+    hasData -> HomeLoadState.Content
+    else -> HomeLoadState.Empty
+}
+
+internal fun extractUserName(memories: List<MemoryEntity>): String? = memories.firstNotNullOfOrNull { memory ->
+    val content = memory.content.trim()
+    val candidate = when {
+        content.contains("my name is ", ignoreCase = true) ->
+            Regex("my name is\\s+(.+)", RegexOption.IGNORE_CASE).find(content)?.groupValues?.get(1).orEmpty()
+        content.startsWith("i am ", ignoreCase = true) && memory.category == "person" -> content.drop(5)
+        content.startsWith("call me ", ignoreCase = true) -> content.drop(8)
+        else -> ""
+    }.trim().trimEnd('.', ',', '!', '?').take(39)
+    candidate.takeIf { it.isNotBlank() }
+}
+
 data class HomeUiState(
     val today: List<String> = emptyList(),  // calendar events (formatted)
     val recentMemories: List<MemoryEntity> = emptyList(),
     val pendingTasks: List<String> = emptyList(),
     val userName: String? = null,
     val hour: Int = 0,
-    val loading: Boolean = true,
+    val loadState: HomeLoadState = HomeLoadState.Loading,
     val proactiveEvent: ProactiveEventBus.Event? = null,
     /**
      * Count of proactive events emitted since the user last opened
@@ -66,7 +95,18 @@ data class HomeUiState(
     val handsCount: Int = 0,
     val toolsCount: Int = 0,
     val proactiveCount: Int = 0,
-)
+) {
+    val isEmptyResolved: Boolean get() = loadState is HomeLoadState.Empty
+
+    fun hasHomeData(): Boolean = today.isNotEmpty() ||
+        recentMemories.isNotEmpty() ||
+        pendingTasks.isNotEmpty() ||
+        upcomingReminders.isNotEmpty() ||
+        proactiveEvent != null ||
+        proactiveUnreadCount > 0 ||
+        handsCount > 0 ||
+        proactiveCount > 0
+}
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -84,6 +124,20 @@ class HomeViewModel @Inject constructor(
     private val _state = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
 
+    private fun updateObserved(transform: (HomeUiState) -> HomeUiState) {
+        _state.update { current ->
+            val updated = transform(current)
+            when (current.loadState) {
+                HomeLoadState.Loading,
+                is HomeLoadState.Error,
+                -> updated
+                else -> updated.copy(
+                    loadState = resolveHomeLoadState(updated.hasHomeData(), dataSourceError = null),
+                )
+            }
+        }
+    }
+
     init {
         refresh()
         observeProactiveEvents()
@@ -99,9 +153,9 @@ class HomeViewModel @Inject constructor(
             reminderDao.observeUpcoming(System.currentTimeMillis()).collect { rs ->
                 val fmt = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
                 val lines = rs.take(3).map { r ->
-                    "⏰ ${fmt.format(java.util.Date(r.triggerAt))} — ${r.message}"
+                    "${fmt.format(java.util.Date(r.triggerAt))} · ${r.message}"
                 }
-                _state.update { it.copy(upcomingReminders = lines) }
+                updateObserved { it.copy(upcomingReminders = lines) }
             }
         }
     }
@@ -109,17 +163,17 @@ class HomeViewModel @Inject constructor(
     private fun observeProactiveEvents() {
         viewModelScope.launch {
             proactiveEvents.latest.collect { event ->
-                _state.update { it.copy(proactiveEvent = event) }
+                updateObserved { it.copy(proactiveEvent = event) }
             }
         }
         viewModelScope.launch {
             proactiveEvents.unreadCount.collect { count ->
-                _state.update { it.copy(proactiveUnreadCount = count) }
+                updateObserved { it.copy(proactiveUnreadCount = count) }
             }
         }
         viewModelScope.launch {
             proactiveEvents.history.collect { events ->
-                _state.update { it.copy(proactiveCount = events.size) }
+                updateObserved { it.copy(proactiveCount = events.size) }
             }
         }
     }
@@ -142,7 +196,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             taskDao.observeAll().collect { tasks ->
                 val titles = tasks.take(5).map { t -> t.title }
-                _state.update { it.copy(pendingTasks = titles) }
+                updateObserved { it.copy(pendingTasks = titles) }
                 rebuildBriefContext()
             }
         }
@@ -151,14 +205,14 @@ class HomeViewModel @Inject constructor(
     private fun observeHands() {
         viewModelScope.launch {
             handDao.observeAll().collect { hands ->
-                _state.update { it.copy(handsCount = hands.size) }
+                updateObserved { it.copy(handsCount = hands.size) }
             }
         }
     }
 
     private fun loadToolsCount() {
         viewModelScope.launch {
-            _state.update { it.copy(toolsCount = toolRegistry.definitions().size) }
+            updateObserved { it.copy(toolsCount = toolRegistry.definitions().size) }
         }
     }
 
@@ -167,7 +221,7 @@ class HomeViewModel @Inject constructor(
             memoryStore.observeCount().collect { _ ->
                 // When memories change, refresh the recent list
                 val recent = memoryStore.recent(5)
-                _state.update { it.copy(recentMemories = recent) }
+                updateObserved { it.copy(recentMemories = recent) }
                 rebuildBriefContext()
             }
         }
@@ -175,36 +229,56 @@ class HomeViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            _state.update { it.copy(loading = true) }
-            val cal = java.util.Calendar.getInstance()
-            val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
-            // Recent memories
-            val recent = memoryStore.recent(5)
-            // Try to find the user's name in a memory (preference: "i am X" or "my name is X")
-            val name = memoryStore.recent(50).mapNotNull { mem ->
-                val lower = mem.content.lowercase()
-                when {
-                    lower.contains("my name is ") -> mem.content.substringAfter("my name is ", "").trim().take(40)
-                    lower.startsWith("i am ") && mem.category == "person" -> mem.content.removePrefix("i am ").removePrefix("I am ").take(40)
-                    lower.startsWith("call me ") -> mem.content.removePrefix("call me ").removePrefix("Call me ").take(40)
-                    else -> null
+            _state.update { it.copy(loadState = HomeLoadState.Loading) }
+            try {
+                val now = System.currentTimeMillis()
+                val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+                val recentForProfile = memoryStore.recent(50)
+                val recent = recentForProfile.take(5)
+                val tasks = taskDao.allPending().take(5).map { it.title }
+                val calendarResult = runCatching { calendarReadTool.readTodaysEvents() }
+                val reminders = reminderDao.observeUpcoming(now).first().take(3).map { reminder ->
+                    val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
+                        .format(Date(reminder.triggerAt))
+                    "$time · ${reminder.message}"
                 }
-            }.firstOrNull()?.takeIf { it.isNotBlank() && it.length < 40 }
-            // Tasks
-            val tasks = taskDao.allPending().take(5).map { it.title }
-            // Calendar — best effort, ignore exceptions.
-            val events = runCatching { calendarReadTool.readTodaysEvents() }.getOrDefault(emptyList())
-            _state.update {
-                it.copy(
-                    today = events,
+                val hands = handDao.observeAll().first()
+                val latestProactive = proactiveEvents.latest.first()
+                val proactiveHistory = proactiveEvents.history.first()
+                val proactiveUnread = proactiveEvents.unreadCount.first()
+                val toolsCount = toolRegistry.definitions().size
+                val name = extractUserName(recentForProfile)
+
+                val loaded = _state.value.copy(
+                    today = calendarResult.getOrDefault(emptyList()),
                     recentMemories = recent,
                     pendingTasks = tasks,
                     userName = name,
                     hour = hour,
-                    loading = false,
+                    proactiveEvent = latestProactive,
+                    proactiveUnreadCount = proactiveUnread,
+                    upcomingReminders = reminders,
+                    handsCount = hands.size,
+                    toolsCount = toolsCount,
+                    proactiveCount = proactiveHistory.size,
                 )
+                val calendarError = calendarResult.exceptionOrNull()?.let {
+                    "Calendar is unavailable. Other Home information is still available."
+                }
+                _state.value = loaded.copy(
+                    loadState = resolveHomeLoadState(loaded.hasHomeData(), calendarError),
+                )
+                rebuildBriefContext()
+            } catch (error: Exception) {
+                _state.update { current ->
+                    current.copy(
+                        loadState = HomeLoadState.Error(
+                            message = "Home data is unavailable. Check permissions and try again.",
+                            hasPartialContent = current.hasHomeData(),
+                        ),
+                    )
+                }
             }
-            rebuildBriefContext()
         }
     }
 

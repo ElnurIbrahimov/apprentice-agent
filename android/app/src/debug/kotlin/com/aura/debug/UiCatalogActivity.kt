@@ -35,6 +35,9 @@ import com.aura.ui.screens.onboarding.OnboardingContent
 import com.aura.ui.screens.onboarding.OnboardingCredentialStatus
 import com.aura.ui.screens.onboarding.OnboardingStep
 import com.aura.ui.screens.onboarding.OnboardingUiState
+import com.aura.ui.screens.home.HomeContent
+import com.aura.ui.viewmodel.HomeLoadState
+import com.aura.ui.viewmodel.HomeUiState
 import com.aura.ui.theme.AuraSpacing
 import com.aura.ui.theme.AuraTheme
 import com.aura.ui.theme.AuraThemeTokens
@@ -132,6 +135,46 @@ private fun UiCatalog(surface: kotlin.String, state: kotlin.String) {
                 onModelSelected = {},
                 onFinish = {},
             )
+        }
+        return
+    }
+    if (surface == "home") {
+        val homeState = when (state) {
+            "loading" -> HomeUiState(loadState = HomeLoadState.Loading)
+            "empty", "no-provider" -> HomeUiState(loadState = HomeLoadState.Empty, toolsCount = 38)
+            "error" -> HomeUiState(
+                loadState = HomeLoadState.Error(
+                    "Home data is unavailable. Check permissions and try again.",
+                    hasPartialContent = false,
+                ),
+            )
+            "partial-error" -> HomeUiState(
+                loadState = HomeLoadState.Error("Calendar is unavailable", hasPartialContent = true),
+                pendingTasks = listOf("Ship the next Aura build"),
+                toolsCount = 38,
+            )
+            else -> HomeUiState(
+                loadState = HomeLoadState.Content,
+                today = listOf("14:00 · Product review"),
+                pendingTasks = listOf("Ship the next Aura build", "Review release notes"),
+                upcomingReminders = listOf("16:30 · Call Alex"),
+                handsCount = 3,
+                toolsCount = 38,
+                proactiveCount = 2,
+            )
+        }
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.onBackground,
+        ) {
+            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                HomeContent(
+                    state = homeState,
+                    greeting = "Good afternoon, Elnur",
+                    dateLabel = "Tuesday, July 14",
+                )
+            }
         }
         return
     }

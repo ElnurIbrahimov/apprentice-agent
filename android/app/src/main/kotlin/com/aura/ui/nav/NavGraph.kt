@@ -29,7 +29,7 @@ import com.aura.ui.screens.ChatScreen
 import com.aura.ui.screens.DiagnosticsScreen
 import com.aura.ui.screens.HandsScreen
 import com.aura.ui.screens.HistoryScreen
-import com.aura.ui.screens.HomeScreen
+import com.aura.ui.screens.home.HomeRoute
 import com.aura.ui.screens.KnowledgeGraphScreen
 import com.aura.ui.screens.ToolsScreen
 import com.aura.ui.screens.MemoryScreen
@@ -105,7 +105,7 @@ fun NavGraph(
                 .consumeWindowInsets(padding),
         ) {
             composable(TopLevelRoute.Home.route) {
-                HomeScreen(
+                HomeRoute(
                     onOpenChat = { prefill ->
                         // Pre-fill the chat draft via a query param.
                         // Empty string means "just open chat" — no prefill.
