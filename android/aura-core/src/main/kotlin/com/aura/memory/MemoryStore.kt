@@ -1,6 +1,8 @@
 package com.aura.memory
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.math.sqrt
 import java.util.UUID
 import javax.inject.Inject
@@ -14,6 +16,7 @@ class MemoryStore @Inject constructor(
     private val writeGate: WriteGate,
     private val memoryEditDao: MemoryEditDao,
 ) {
+    private val exactInsertMutex = Mutex()
     suspend fun maybeStore(content: String, source: String = "user"): String? {
         val decision = writeGate.evaluate(content, source)
         if (!decision.shouldStore) return null
@@ -72,6 +75,22 @@ class MemoryStore @Inject constructor(
             )
         )
         return id
+    }
+
+    /**
+     * Store a system/user marker at most once by exact content. The mutex
+     * closes the in-process check-then-insert race, while the DAO lookup makes
+     * the decision durable across ViewModel recreation and app restarts.
+     */
+    suspend fun storeIfAbsent(
+        content: String,
+        source: String,
+        category: String,
+        importance: Float,
+        tags: List<String> = emptyList(),
+    ): String? = exactInsertMutex.withLock {
+        if (dao.existsByContent(content) > 0) return@withLock null
+        store(content, source, category, importance, tags)
     }
 
     suspend fun store(content: String, source: String, category: String, importance: Float, tags: List<String> = emptyList()): String {

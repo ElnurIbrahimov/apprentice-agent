@@ -323,25 +323,19 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * After the first conversation, create a memory that this user has
-     * started using Aura, so future conversations can reference it.
-     * Skipped in incognito mode so a private first conversation doesn't
-     * leave a permanent "this user started using Aura" fact.
+     * Persist the onboarding marker exactly once. This callback runs after
+     * every successful reply, so conversation-count timing is not a valid
+     * deduplication boundary; MemoryStore owns the durable exact-content gate.
      */
     private suspend fun onFirstConversationComplete() {
         if (_state.value.incognitoMode) return
-        val count = runCatching {
-            conversationStore.recent(2).size
-        }.getOrDefault(0)
-        if (count <= 1) {
-            runCatching {
-                memoryStore.store(
-                    content = "This user started using Aura. They went through the onboarding.",
-                    source = "system",
-                    category = "episode",
-                    importance = 0.8f,
-                )
-            }
+        runCatching {
+            memoryStore.storeIfAbsent(
+                content = "This user started using Aura. They went through the onboarding.",
+                source = "system",
+                category = "episode",
+                importance = 0.8f,
+            )
         }
     }
 

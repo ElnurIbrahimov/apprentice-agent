@@ -261,6 +261,47 @@ class MemoryStoreTest {
     }
 
     @Test
+    fun `storeIfAbsent inserts an exact marker only once`() = runTest {
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val store = MemoryStore(dao, FakeEmbedder(384), VectorIndex(384), WriteGate(), memoryEditDao)
+        val content = "This user started using Aura. They went through the onboarding."
+        var exists = false
+        coEvery { dao.existsByContent(content) } answers { if (exists) 1 else 0 }
+        coEvery { dao.insert(any()) } answers { exists = true }
+
+        val first = store.storeIfAbsent(
+            content = content,
+            source = "system",
+            category = "episode",
+            importance = 0.8f,
+        )
+        val second = store.storeIfAbsent(
+            content = content,
+            source = "system",
+            category = "episode",
+            importance = 0.8f,
+        )
+
+        assertNotNull(first)
+        assertNull(second)
+        coVerify(exactly = 1) { dao.insert(any()) }
+    }
+
+    @Test
+    fun `storeIfAbsent skips embedding when marker already exists`() = runTest {
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val embedder = mockk<Embedder>(relaxed = true)
+        val store = MemoryStore(dao, embedder, VectorIndex(384), WriteGate(), memoryEditDao)
+        coEvery { dao.existsByContent("marker") } returns 1
+
+        val result = store.storeIfAbsent("marker", "system", "episode", 0.8f)
+
+        assertNull(result)
+        coVerify(exactly = 0) { embedder.embed(any()) }
+        coVerify(exactly = 0) { dao.insert(any()) }
+    }
+
+    @Test
     fun `maybeStore deduplicates identical content`() = runTest {
         val dao = mockk<MemoryDao>(relaxed = true)
         val embedder = FakeEmbedder(384)
