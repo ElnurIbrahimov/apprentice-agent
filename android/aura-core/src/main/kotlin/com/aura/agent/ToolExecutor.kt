@@ -7,12 +7,16 @@ import android.content.Context
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -61,14 +65,19 @@ class ToolExecutor @Inject constructor(
         val call = ToolCall(id = "", name = name, arguments = args)
         val result = try {
             withTimeout(ctx.timeout) {
-                tool.execute(call, ctx)
+                // Tools may bridge suspend APIs and legacy blocking Android/HTTP
+                // calls. The interruptible IO boundary keeps both kinds off Main
+                // and lets cancellation preempt a blocking call promptly.
+                runInterruptible(Dispatchers.IO) {
+                    runBlocking { tool.execute(call, ctx) }
+                }
             }
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+        } catch (e: TimeoutCancellationException) {
             ToolResult.Error(
                 message = "Tool '$name' timed out after ${ctx.timeout / 1000}s",
                 code = "tool_timeout",
             )
-        } catch (e: kotlinx.coroutines.CancellationException) {
+        } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             ToolResult.Error(e.message ?: "tool failed", "exception")

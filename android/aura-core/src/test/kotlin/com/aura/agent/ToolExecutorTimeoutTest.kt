@@ -1,10 +1,15 @@
 package com.aura.agent
 
 import io.mockk.mockk
+import java.util.concurrent.Executors
+import kotlin.system.measureTimeMillis
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -13,10 +18,9 @@ import kotlin.test.assertTrue
  * aborted with a typed `tool_timeout` error instead of hanging the
  * agent loop indefinitely.
  *
- * IMPORTANT: the tool's execute lambda is a `suspend fun`, so a
- * real `delay()` participates in coroutine cancellation. A
- * `runBlocking { delay() }` would block a thread and withTimeout
- * could not interrupt it.
+ * Tool execution crosses an interruptible `Dispatchers.IO` boundary. These
+ * tests therefore use real coroutine time: virtual `runTest` time would
+ * advance the outer timeout independently of the worker thread.
  */
 class ToolExecutorTimeoutTest {
 
@@ -32,7 +36,7 @@ class ToolExecutorTimeoutTest {
     )
 
     @Test
-    fun `slow tool returns tool_timeout error when exceeding ctx timeout`() = runTest {
+    fun `slow tool returns tool_timeout error when exceeding ctx timeout`() = runBlocking {
         val slow = makeSuspendingTool("slow_tool") {
             delay(5_000L)
             ToolResult.Ok("slow_tool ran")
@@ -51,7 +55,7 @@ class ToolExecutorTimeoutTest {
     }
 
     @Test
-    fun `fast tool completes normally within timeout`() = runTest {
+    fun `fast tool completes normally within timeout`() = runBlocking {
         val fast = makeSuspendingTool("fast_tool") {
             delay(10L)
             ToolResult.Ok("fast_tool ran")
@@ -63,5 +67,55 @@ class ToolExecutorTimeoutTest {
             ctx = ToolContext(conversationId = "c1", timeout = 1_000L),
         )
         assertTrue(result is ToolResult.Ok, "expected Ok, got $result")
+    }
+
+    @Test
+    fun `tool execution leaves the caller thread`() = runBlocking {
+        val threadTool = makeSuspendingTool("thread_tool") {
+            ToolResult.Ok(Thread.currentThread().name)
+        }
+        io.mockk.every { registry.get("thread_tool") } returns threadTool
+        val caller = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "ui-caller")
+        }.asCoroutineDispatcher()
+
+        try {
+            val result = withContext(caller) {
+                executor.execute(
+                    name = "thread_tool",
+                    argumentsJson = "{}",
+                    ctx = ToolContext(conversationId = "c1"),
+                )
+            } as ToolResult.Ok
+
+            assertFalse(
+                result.output.contains("ui-caller"),
+                "tool ran on caller thread: ${result.output}",
+            )
+        } finally {
+            caller.close()
+        }
+    }
+
+    @Test
+    fun `blocking tool is interrupted when timeout expires`() = runBlocking {
+        val blocking = makeSuspendingTool("blocking_tool") {
+            Thread.sleep(3_000L)
+            ToolResult.Ok("finished")
+        }
+        io.mockk.every { registry.get("blocking_tool") } returns blocking
+        lateinit var result: ToolResult
+
+        val elapsedMs = measureTimeMillis {
+            result = executor.execute(
+                name = "blocking_tool",
+                argumentsJson = "{}",
+                ctx = ToolContext(conversationId = "c1", timeout = 100L),
+            )
+        }
+
+        assertTrue(result is ToolResult.Error, "expected timeout error, got $result")
+        assertEquals("tool_timeout", (result as ToolResult.Error).code)
+        assertTrue(elapsedMs < 1_000L, "blocking timeout took ${elapsedMs}ms")
     }
 }

@@ -1,7 +1,7 @@
 package com.aura.agent
 
 import io.mockk.mockk
-import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -29,7 +29,7 @@ class ToolExecutorIncognitoTest {
     )
 
     @Test
-    fun `write_local tool is refused when memoryEnabled=false`() = runTest {
+    fun `write_local tool is refused when memoryEnabled=false`() = runBlocking {
         val remember = makeTool("remember", ToolRisk.WRITE_LOCAL)
         io.mockk.every { registry.get("remember") } returns remember
         val result = executor.execute(
@@ -42,7 +42,7 @@ class ToolExecutorIncognitoTest {
     }
 
     @Test
-    fun `write_local tool runs normally when memoryEnabled=true`() = runTest {
+    fun `write_local tool runs normally when memoryEnabled=true`() = runBlocking {
         val remember = makeTool("remember", ToolRisk.WRITE_LOCAL)
         io.mockk.every { registry.get("remember") } returns remember
         val result = executor.execute(
@@ -54,7 +54,7 @@ class ToolExecutorIncognitoTest {
     }
 
     @Test
-    fun `read_only tool runs even when memoryEnabled=false`() = runTest {
+    fun `read_only tool runs even when memoryEnabled=false`() = runBlocking {
         val recall = makeTool("recall", ToolRisk.READ_ONLY)
         io.mockk.every { registry.get("recall") } returns recall
         val result = executor.execute(
@@ -66,7 +66,7 @@ class ToolExecutorIncognitoTest {
     }
 
     @Test
-    fun `privacy tool (PRIVACY risk) is refused when memoryEnabled=false`() = runTest {
+    fun `privacy tool (PRIVACY risk) is refused when memoryEnabled=false`() = runBlocking {
         // PRIVACY is treated as >= WRITE_LOCAL in the ordinal comparison.
         val contacts = makeTool("contacts_search", ToolRisk.PRIVACY)
         io.mockk.every { registry.get("contacts_search") } returns contacts

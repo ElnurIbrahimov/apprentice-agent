@@ -1,12 +1,18 @@
 package com.aura.providers
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -86,13 +92,21 @@ class AnthropicProvider(
             .build()
         val call = httpClient.newCall(request)
         activeCall = call
-        try {
+        coroutineScope {
+            val cancellationGuard = launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    call.cancel()
+                }
+            }
+            try {
             call.execute().use { resp ->
                 if (!resp.isSuccessful) {
                     emit(ProviderChunk(error = ProviderError("http_${resp.code}", resp.message, retryable = resp.code in 500..599)))
-                    return@flow
+                    return@use
                 }
-                val source = resp.body?.source() ?: return@flow
+                val source = resp.body?.source() ?: return@use
                 // SSE stream. readUtf8Line() blocks until a line arrives (or returns
                 // null at EOF). We process each 'data: ...' line. The two terminal
                 // events we care about are 'message_stop' (Anthropic's normal end)
@@ -145,10 +159,12 @@ class AnthropicProvider(
                     }
                 }
             }
-        } finally {
-            activeCall = null
+            } finally {
+                cancellationGuard.cancelAndJoin()
+                if (activeCall === call) activeCall = null
+            }
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     override suspend fun listModels(): List<String> {
         return try {

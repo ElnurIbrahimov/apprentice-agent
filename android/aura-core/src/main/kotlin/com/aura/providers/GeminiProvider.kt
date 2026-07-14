@@ -1,11 +1,18 @@
 package com.aura.providers
 
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -72,7 +79,15 @@ class GeminiProvider(
             .build()
         val call = httpClient.newCall(request)
         activeCall = call
-        try {
+        coroutineScope {
+            val cancellationGuard = launch(start = CoroutineStart.UNDISPATCHED) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    call.cancel()
+                }
+            }
+            try {
             call.execute().use { resp ->
                 if (!resp.isSuccessful) {
                     // Try to read error detail from body
@@ -88,9 +103,9 @@ class GeminiProvider(
                     emit(ProviderChunk(
                         error = ProviderError("http_${resp.code}", errorDetail, retryable = resp.code in 500..599)
                     ))
-                    return@flow
+                    return@use
                 }
-                val source = resp.body?.source() ?: return@flow
+                val source = resp.body?.source() ?: return@use
                 var sawFinish = false
                 while (true) {
                     val line = source.readUtf8Line() ?: break
@@ -125,14 +140,17 @@ class GeminiProvider(
                     emit(ProviderChunk(finishReason = FinishReason.stop))
                 }
             }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            emit(ProviderChunk(error = ProviderError("stream_error", e.message ?: "unknown", retryable = true)))
-        } finally {
-            activeCall = null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                currentCoroutineContext().ensureActive()
+                emit(ProviderChunk(error = ProviderError("stream_error", e.message ?: "unknown", retryable = true)))
+            } finally {
+                cancellationGuard.cancelAndJoin()
+                if (activeCall === call) activeCall = null
+            }
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     override suspend fun listModels(): List<String> {
         return try {

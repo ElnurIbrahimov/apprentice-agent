@@ -3,12 +3,21 @@ package com.aura.providers
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -191,5 +200,33 @@ class AnthropicProviderTest {
     @Test
     fun `cancel does not throw when no active call`() = runBlocking<Unit> {
         provider.cancel()
+    }
+
+    @Test
+    fun `cancelling chat collection cancels the active HTTP call promptly`() = runBlocking<Unit> {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val job = scope.launch {
+            runCatching {
+                provider.chat(
+                    model = "claude-test",
+                    messages = listOf(ProviderMessage(ProviderMessage.Role.user, "hello")),
+                ).collect()
+            }
+        }
+
+        assertTrue(server.takeRequest(2, TimeUnit.SECONDS) != null, "chat request did not start")
+        job.cancel()
+        val stoppedPromptly = withTimeoutOrNull(1_000L) {
+            job.join()
+            true
+        } ?: false
+        if (!stoppedPromptly) {
+            provider.cancel()
+            withTimeout(2_000L) { job.join() }
+        }
+        scope.cancel()
+
+        assertTrue(stoppedPromptly, "cancelling the flow did not cancel the Anthropic call")
     }
 }

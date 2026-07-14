@@ -1,8 +1,10 @@
 package com.aura.providers
 
+import com.aura.usage.UsageTracker
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import com.aura.usage.UsageTracker
+import kotlinx.coroutines.flow.flowOn
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -48,7 +50,7 @@ class ProviderRegistry @Inject constructor(
         // MoA dispatches its reference and aggregator calls back through this
         // registry. Track those concrete calls and skip the synthetic outer
         // flow so a single MoA answer is not double-counted.
-        if (provider.prefix == "moa") return upstream
+        if (provider.prefix == "moa") return upstream.flowOn(Dispatchers.IO)
         return flow {
             var outputChars = 0
             var exactUsage: Usage? = null
@@ -72,7 +74,7 @@ class ProviderRegistry @Inject constructor(
                     )
                 }
             }
-        }
+        }.flowOn(Dispatchers.IO)
     }
 
     fun configured(): List<Provider> = providers.values.filter { it.isConfigured() }
