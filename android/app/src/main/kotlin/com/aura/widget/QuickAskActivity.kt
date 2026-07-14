@@ -8,54 +8,66 @@ import android.view.WindowManager
 import android.widget.RemoteViews
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.lifecycleScope
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.aura.MainActivity
 import com.aura.R
-import com.aura.agent.Conversation
-import com.aura.providers.ChatOptions
-import com.aura.data.UserPreferences
-import com.aura.providers.ProviderRegistry
+import com.aura.agent.Turn
+import com.aura.ui.theme.AuraTheme
+import com.aura.ui.viewmodel.ChatViewModel
+import com.aura.ui.viewmodel.ModelSelectionState
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import javax.inject.Inject
+
+internal fun buildQuickAskSystemPrompt(prefix: String): String = buildString {
+    append(
+        "This is a compact Aura session opened from the home-screen widget. " +
+            "Answer directly and keep ordinary answers brief, but use tools, memory, " +
+            "and deeper reasoning whenever the question needs them.",
+    )
+    if (prefix.isNotBlank()) {
+        append("\n\nWidget instruction:\n")
+        append(prefix.trim())
+    }
+}
+
+internal fun latestQuickAskResponse(turns: List<Turn>): String =
+    turns.asReversed().firstNotNullOfOrNull { it.assistant?.takeIf(String::isNotBlank) }.orEmpty()
 
 /**
- * Lightweight transparent activity opened from the AskAuraWidget.
- * Shows a text field, sends the query to the configured LLM, and
- * displays the response inline. Does NOT open the full app — the
- * user can ask a quick question and dismiss without leaving the
- * home screen.
- *
- * After the response arrives, the widget body is updated with the
- * last Q&A pair so the answer persists on the home screen.
- *
- * State management: [responseFlow] and [loadingFlow] are
- * MutableStateFlows on the Activity, collected by the Compose
- * content via collectAsState(). This bridges the async LLM call
- * (launched in lifecycleScope) to the Compose UI without a shared
- * ViewModel.
+ * Compact transparent surface opened by [AskAuraWidget]. It deliberately uses
+ * [ChatViewModel], the same agentic pipeline as the full chat: memory recall,
+ * tools, specialists, KG/profile extraction, persistence, and provider failover.
  */
 @AndroidEntryPoint
 class QuickAskActivity : ComponentActivity() {
-
-    @Inject lateinit var providerRegistry: ProviderRegistry
-    @Inject lateinit var userPreferences: UserPreferences
-
     private var appWidgetId: Int = AppWidgetManager.INVALID_APPWIDGET_ID
-
-    private val responseFlow = MutableStateFlow<String?>(null)
-    private val loadingFlow = MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,161 +75,180 @@ class QuickAskActivity : ComponentActivity() {
             AppWidgetManager.EXTRA_APPWIDGET_ID,
             AppWidgetManager.INVALID_APPWIDGET_ID,
         ) ?: AppWidgetManager.INVALID_APPWIDGET_ID
+
         window.setDimAmount(0.5f)
         window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-        window.setStatusBarColor(android.graphics.Color.TRANSPARENT)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
 
         setContent {
-            MaterialTheme {
+            AuraTheme {
+                val viewModel: ChatViewModel = hiltViewModel()
                 QuickAskContent(
-                    responseFlow = responseFlow,
-                    loadingFlow = loadingFlow,
-                    onSend = { query -> askQuery(query) },
-                    onDismiss = { finish() },
+                    viewModel = viewModel,
+                    appWidgetId = appWidgetId,
+                    widgetPrefix = WidgetConfig.prefixFor(this, appWidgetId),
+                    configuredWidgetModel = WidgetConfig.modelFor(this, appWidgetId, ""),
+                    onCompleted = ::updateWidgetWithResponse,
+                    onOpenFullChat = {
+                        startActivity(Intent(this, MainActivity::class.java))
+                        finish()
+                    },
+                    onDismiss = ::finish,
                 )
             }
         }
     }
 
-    private fun askQuery(query: String) {
-        loadingFlow.value = true
-        responseFlow.value = null
-        lifecycleScope.launch {
-            val defaultModel = userPreferences.defaultModel.first()
-            // Use widget-specific config if available, else fall back to default.
-            val model = WidgetConfig.modelFor(
-                this@QuickAskActivity,
-                appWidgetId,
-                defaultModel.orEmpty(),
-            ).takeIf { it.isNotBlank() }
-            if (model == null) {
-                responseFlow.value = "Choose and verify a model in Aura Settings first."
-                loadingFlow.value = false
-                return@launch
-            }
-            val prefix = WidgetConfig.prefixFor(this@QuickAskActivity, appWidgetId)
-            val systemPrompt = "You are Aura. Answer concisely in 1-3 sentences. Be direct and helpful." +
-                if (prefix.isNotBlank()) "\n\n$prefix" else ""
-            val response = withContext(Dispatchers.IO) {
-                val conversation = Conversation(
-                    systemPrompt = systemPrompt,
-                ).addUser(query)
-                val text = StringBuilder()
-                try {
-                    providerRegistry.chat(
-                        model,
-                        conversation.toMessages(),
-                        ChatOptions(temperature = 0.5, maxTokens = 200),
-                        emptyList(),
-                    ).collect { chunk ->
-                        chunk.text?.let { text.append(it) }
-                    }
-                } catch (_: Exception) {
-                    return@withContext "Sorry, I couldn't reach the model. Check your API key."
-                }
-                text.toString().trim().ifBlank { "No response." }
-            }
-            responseFlow.value = response
-            loadingFlow.value = false
-            updateWidgetWithResponse(query, response)
-        }
-    }
-
     private fun updateWidgetWithResponse(query: String, response: String) {
-        val mgr = AppWidgetManager.getInstance(this)
-        val component = ComponentName(this, AskAuraWidget::class.java)
-        val ids = mgr.getAppWidgetIds(component)
+        val manager = AppWidgetManager.getInstance(this)
+        val ids = if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            intArrayOf(appWidgetId)
+        } else {
+            manager.getAppWidgetIds(ComponentName(this, AskAuraWidget::class.java))
+        }
         for (id in ids) {
             val views = RemoteViews(packageName, R.layout.widget_ask_aura)
-            val displayText = "Q: ${query.take(100)}\nA: ${response.take(150)}"
-            views.setTextViewText(R.id.widget_memory_text, displayText)
-            mgr.updateAppWidget(id, views)
+            views.setTextViewText(
+                R.id.widget_memory_text,
+                "Q: ${query.take(100)}\nA: ${response.take(150)}",
+            )
+            manager.updateAppWidget(id, views)
         }
     }
 }
 
 @Composable
 private fun QuickAskContent(
-    responseFlow: MutableStateFlow<String?>,
-    loadingFlow: MutableStateFlow<Boolean>,
-    onSend: (String) -> Unit,
+    viewModel: ChatViewModel,
+    appWidgetId: Int,
+    widgetPrefix: String,
+    configuredWidgetModel: String,
+    onCompleted: (String, String) -> Unit,
+    onOpenFullChat: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val state by viewModel.state.collectAsState()
     var query by remember { mutableStateOf("") }
-    val response by responseFlow.collectAsState()
-    val loading by loadingFlow.collectAsState()
+    var submittedQuery by remember { mutableStateOf<String?>(null) }
+    var lastPublishedResponse by remember { mutableStateOf("") }
+    var initialized by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (!initialized) {
+            viewModel.startIsolatedSession(
+                systemPrompt = buildQuickAskSystemPrompt(widgetPrefix),
+                model = configuredWidgetModel.takeIf(String::isNotBlank),
+                title = if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+                    "Quick Ask"
+                } else {
+                    "Quick Ask · Widget $appWidgetId"
+                },
+            )
+            initialized = true
+        }
+    }
+
+    val response = latestQuickAskResponse(state.conversation.turns)
+    LaunchedEffect(state.streaming, response, submittedQuery) {
+        val sent = submittedQuery
+        if (!state.streaming && sent != null && response.isNotBlank() && response != lastPublishedResponse) {
+            lastPublishedResponse = response
+            onCompleted(sent, response)
+        }
+    }
+
+    val sendEnabled = query.isNotBlank() &&
+        !state.streaming &&
+        state.modelSelection is ModelSelectionState.Ready
+    val submit = {
+        if (sendEnabled) {
+            val cleaned = query.trim()
+            submittedQuery = cleaned
+            lastPublishedResponse = ""
+            viewModel.onUserMessage(cleaned)
+        }
+    }
 
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        shape = RoundedCornerShape(20.dp),
-        tonalElevation = 6.dp,
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 8.dp,
     ) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "Ask Aura",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Ask Aura", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Full memory + tools",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 TextButton(onClick = onDismiss) { Text("Close") }
             }
 
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Ask anything...") },
+                placeholder = { Text("Ask anything…") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Send,
-                ),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                    onSend = {
-                        if (query.isNotBlank() && !loading) {
-                            onSend(query.trim())
-                        }
-                    },
-                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { submit() }),
+                enabled = !state.streaming,
             )
 
-            if (loading && response == null) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            when {
+                state.streaming && response.isBlank() -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text("Thinking...", style = MaterialTheme.typography.bodySmall)
+                    Text("Aura is thinking…", style = MaterialTheme.typography.bodySmall)
                 }
-            }
-
-            response?.let { r ->
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(12.dp),
+                state.error != null -> Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = r,
+                        state.error.orEmpty(),
                         modifier = Modifier.padding(12.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                response.isNotBlank() -> Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        response,
+                        modifier = Modifier.padding(14.dp),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
+                state.modelSelection !is ModelSelectionState.Ready -> Text(
+                    "Choose and verify a model in Aura Settings first.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             ) {
-                Button(
-                    onClick = {
-                        if (query.isNotBlank() && !loading) {
-                            onSend(query.trim())
-                        }
-                    },
-                    enabled = query.isNotBlank() && !loading,
-                ) { Text("Send") }
+                if (response.isNotBlank()) {
+                    OutlinedButton(onClick = onOpenFullChat) { Text("Open chat") }
+                }
+                Button(onClick = submit, enabled = sendEnabled) {
+                    Text(if (state.streaming) "Thinking" else "Send")
+                }
             }
         }
     }

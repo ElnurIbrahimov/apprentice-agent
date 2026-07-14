@@ -229,6 +229,7 @@ class ChatViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
+    @Volatile private var isolatedSessionRequested = false
 
     /**
      * Send pipeline controller. Owns the streaming runJob, the
@@ -277,6 +278,7 @@ class ChatViewModel @Inject constructor(
         textToSpeech.initialize()
         viewModelScope.launch {
             val recent = conversationStore.mostRecent()
+            if (isolatedSessionRequested) return@launch
             if (recent != null) {
                 _state.update { it.copy(conversation = recent) }
             } else {
@@ -522,6 +524,45 @@ class ChatViewModel @Inject constructor(
                     _state.update { it.copy(conversation = conv) }
                 }
             }
+        }
+    }
+
+    /**
+     * Start a fresh session owned by a compact surface (widget, share sheet,
+     * future quick actions) without allowing the asynchronous recent-chat load
+     * to overwrite it. Execution still uses the full send controller and agent loop.
+     */
+    fun startIsolatedSession(
+        systemPrompt: String,
+        model: String? = null,
+        title: String = "Quick Ask",
+    ) {
+        isolatedSessionRequested = true
+        cancel()
+        _state.update { old ->
+            val selectedModel = model?.takeIf(String::isNotBlank) ?: old.activeModel
+            old.copy(
+                conversation = com.aura.agent.Conversation(
+                    systemPrompt = systemPrompt,
+                    title = title,
+                ),
+                streaming = false,
+                draft = "",
+                error = null,
+                errorRetryable = false,
+                errorTyped = null,
+                activeModel = selectedModel,
+                sessionModelOverride = model?.takeIf(String::isNotBlank),
+                modelSelection = if (selectedModel.isNotBlank()) {
+                    ModelSelectionState.Ready(selectedModel, old.availableModels)
+                } else {
+                    ModelSelectionState.Missing
+                },
+                ttsEnabled = false,
+                selectedSpecialist = null,
+                suggestedSpecialist = null,
+                inFlightToolCalls = emptyList(),
+            )
         }
     }
 
