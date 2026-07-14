@@ -1,0 +1,748 @@
+package com.aura.ui.screens.chat
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.aura.IncomingShareStore
+import com.aura.agent.Specialist
+import com.aura.ui.components.MarkdownText
+import com.aura.ui.components.MoaThinkingIndicator
+import com.aura.ui.components.ModelPickerSheet
+import com.aura.ui.theme.AuraThemeTokens
+import com.aura.ui.components.SpecialistChips
+import com.aura.ui.viewmodel.ChatViewModel
+import com.aura.ui.voice.VoiceOverlay
+import com.aura.ui.voice.ContinuousVoiceOverlay
+import com.aura.ui.voice.ContinuousVoiceViewModel
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.animateFloat
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface HiltEntryPoint {
+    fun incomingShareStore(): IncomingShareStore
+}
+
+@Composable
+fun ChatRoute(
+    viewModel: ChatViewModel = hiltViewModel(),
+    resumeConversationId: String? = null,
+    morningBriefSummary: String? = null,
+    initialDraft: String? = null,
+    onNavigateHistory: () -> Unit = {},
+) {
+    LaunchedEffect(resumeConversationId) {
+        if (resumeConversationId != null) viewModel.loadConversation(resumeConversationId)
+    }
+    LaunchedEffect(morningBriefSummary) {
+        if (!morningBriefSummary.isNullOrBlank()) viewModel.onUserMessage(morningBriefSummary)
+    }
+    LaunchedEffect(initialDraft) {
+        if (!initialDraft.isNullOrBlank()) viewModel.setDraft(initialDraft)
+    }
+
+    val state by viewModel.state.collectAsState()
+    val listState = rememberLazyListState()
+    // Show the "jump to bottom" pill when the user has scrolled up
+    // by more than 5 messages. The web has this as a small floating
+    // button bottom-right; on Android a small pill above the input
+    // bar is more discoverable.
+    val showJumpToBottom by remember(listState) {
+        derivedStateOf {
+            val total = listState.layoutInfo.totalItemsCount
+            val visible = listState.firstVisibleItemIndex
+            total > 0 && visible > 5
+        }
+    }
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    var showModelPicker by remember { mutableStateOf(false) }
+    var showSources by remember { mutableStateOf(false) }
+    var showVoiceOverlay by remember { mutableStateOf(false) }
+    var showHoldToTalk by remember { mutableStateOf(false) }
+    var showContinuousVoice by remember { mutableStateOf(false) }
+    val continuousVoiceViewModel: ContinuousVoiceViewModel = hiltViewModel()
+    var showStopStreamConfirm by remember { mutableStateOf(false) }
+
+    // Intercept back press during streaming — the user gets a chance to
+    // stop and save the partial response instead of navigating away
+    // while the stream continues in the background.
+    if (state.streaming) {
+        androidx.activity.compose.BackHandler(enabled = true) {
+            showStopStreamConfirm = true
+        }
+    }
+    StopStreamingDialog(
+        visible = showStopStreamConfirm,
+        onStop = {
+            viewModel.cancel()
+            showStopStreamConfirm = false
+        },
+        onKeepStreaming = { showStopStreamConfirm = false },
+    )
+    var showAttachmentSheet by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    val hasMicPermission = rememberMicPermission()
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) showVoiceOverlay = true }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.TakePicturePreview()
+    ) { bitmap -> bitmap?.let { viewModel.onImageCaptured(it) } }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri?.let {
+            val bmp = decodeSharedImage(context, it)
+            bmp?.let(viewModel::onImageCaptured)
+        }
+    }
+
+    val audioLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri -> uri?.let(viewModel::onAudioPicked) }
+
+    val hasCameraPermission = rememberCameraPermission()
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) cameraLauncher.launch(null)
+    }
+
+    ConsumeIncomingShare(context, viewModel)
+
+    // Auto-scroll on:
+    // 1. New turn added (size change)
+    // 2. Streaming token arrives on the last turn (assistant length change)
+    // 3. First message after send
+    val lastTurn = state.conversation.turns.lastOrNull()
+    val assistantLen = lastTurn?.assistant?.length ?: 0
+    LaunchedEffect(state.conversation.turns.size, assistantLen) {
+        if (state.conversation.turns.isNotEmpty()) {
+            val target = state.conversation.turns.size - 1
+            // Only auto-scroll if user is near the bottom. If they've
+            // scrolled up to read old messages, don't yank them back.
+            val visible = listState.layoutInfo.visibleItemsInfo
+            val lastVisible = visible.lastOrNull()?.index ?: 0
+            if (lastVisible >= target - 1) {
+                listState.animateScrollToItem(target)
+            }
+        }
+    }
+
+    // Haptic feedback — when streaming finishes, the phone gives a
+    // short vibration so the user can feel the response arrived.
+    // Uses a counter to avoid firing on every recomposition.
+    val hapticView = androidx.compose.ui.platform.LocalView.current
+    var lastStreamingSnapshot by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(state.streaming) }
+    androidx.compose.runtime.LaunchedEffect(state.streaming) {
+        if (lastStreamingSnapshot && !state.streaming) {
+            com.aura.ui.util.Haptics.receive(hapticView)
+        }
+        lastStreamingSnapshot = state.streaming
+    }
+
+    ChatContent(
+        state = state,
+        listState = listState,
+        showJumpToLatest = showJumpToBottom,
+        onJumpToLatest = {
+            coroutineScope.launch {
+                if (state.conversation.turns.isNotEmpty()) {
+                    listState.animateScrollToItem(state.conversation.turns.size - 1)
+                }
+            }
+        },
+        onShowModelPicker = { showModelPicker = true },
+        onToggleTts = viewModel::toggleTts,
+        onHistory = onNavigateHistory,
+        onNewConversation = viewModel::newConversation,
+        onDeleteConversation = { showDeleteConfirm = true },
+        onToggleDeepMode = viewModel::toggleDeepMode,
+        onToggleIncognito = viewModel::toggleIncognito,
+        onSendSuggestion = { prompt ->
+            viewModel.setDraft(prompt)
+            viewModel.send()
+        },
+        onRetry = viewModel::retryLast,
+        onDismissError = viewModel::dismissError,
+        onDismissSaveWarning = viewModel::dismissSaveWarning,
+        onSelectSpecialist = viewModel::setSpecialist,
+        onRunVisionPrompt = viewModel::runVisionPrompt,
+        onDismissVision = viewModel::dismissPendingVision,
+        onShowSources = { showSources = true },
+        composer = {
+            ChatInputBar(
+                hapticView = hapticView,
+                draft = state.draft,
+                streaming = state.streaming,
+                sendEnabled = state.modelSelection is com.aura.ui.viewmodel.ModelSelectionState.Ready,
+                onDraftChange = viewModel::setDraft,
+                onSend = viewModel::send,
+                onCancel = viewModel::cancel,
+                onMicClick = {
+                    if (hasMicPermission) showVoiceOverlay = true
+                    else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                },
+                onMicLongPress = {
+                    if (hasMicPermission) showHoldToTalk = true
+                    else micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                },
+                onCameraClick = {
+                    if (hasCameraPermission) cameraLauncher.launch(null)
+                    else cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                },
+                onGalleryClick = {
+                    galleryLauncher.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                        ),
+                    )
+                },
+                onAudioClick = { audioLauncher.launch("audio/*") },
+                showAttachmentSheet = showAttachmentSheet,
+                onAttachmentSheetChange = { showAttachmentSheet = it },
+            )
+        },
+    )
+
+    if (showModelPicker) {
+        ModelPickerSheet(
+            currentModel = state.activeModel,
+            models = state.availableModels,
+            isLoading = state.modelsLoading,
+            errorMessage = state.modelsError,
+            staleProviderPrefixes = (state.modelSelection as? com.aura.ui.viewmodel.ModelSelectionState.Ready)
+                ?.staleProviders.orEmpty(),
+            selectionScopeLabel = "Applies to this chat only",
+            onMakeDefault = {
+                viewModel.makeActiveModelDefault()
+                showModelPicker = false
+            },
+            onPick = viewModel::setModel,
+            onRefresh = { viewModel.refreshModels() },
+            onDismiss = { showModelPicker = false },
+        )
+    }
+
+    val sources = state.conversation.turns.lastOrNull()?.citations ?: emptyList()
+    if (showSources && sources.isNotEmpty()) {
+        SourcesSheet(
+            citations = sources,
+            onDismiss = { showSources = false },
+        )
+    }
+
+    if (showVoiceOverlay && hasMicPermission) {
+        // Two voice modes are reachable from the mic button:
+        // - Tap: tap-to-speak (auto-send on first final result)
+        // - Long-press: hold-to-talk (the user controls when to send)
+        // The mode flag is on the overlay state below; for now we
+        // expose a single entry point. Hold-to-talk is wired in
+        // commit 6 — see the holdToTalk flag in VoiceOverlay.
+        VoiceOverlay(
+            onTranscript = { transcript ->
+                viewModel.setDraft(transcript)
+                viewModel.send()
+            },
+            onDismiss = { showVoiceOverlay = false },
+        )
+    } else if (showVoiceOverlay) {
+        LaunchedEffect(Unit) { showVoiceOverlay = false }
+    }
+
+    // Hold-to-talk overlay: the user is in control. STT runs while
+    // the overlay is shown. The user dismisses explicitly via the
+    // stop button; the most recent transcript (final OR partial) is
+    // sent on dismiss. Distinct from continuous voice mode (which
+    // loops LISTENING → THINKING → SPEAKING until explicitly stopped)
+    // and from tap-to-speak (which auto-sends on the first final
+    // result). The hold-to-talk mode is for users who want to
+    // speak, review what was transcribed, then send — not auto-send.
+    if (showHoldToTalk && hasMicPermission) {
+        VoiceOverlay(
+            holdToTalk = true,
+            onTranscript = { transcript ->
+                viewModel.setDraft(transcript)
+                viewModel.send()
+            },
+            onDismiss = { showHoldToTalk = false },
+        )
+    } else if (showHoldToTalk) {
+        LaunchedEffect(Unit) { showHoldToTalk = false }
+    }
+
+    // Continuous voice mode — hands-free conversation loop
+    if (showContinuousVoice && hasMicPermission) {
+        val cvState by continuousVoiceViewModel.state.collectAsState()
+        ContinuousVoiceOverlay(
+            state = cvState,
+            onStop = {
+                continuousVoiceViewModel.stopLoop()
+                showContinuousVoice = false
+            },
+        )
+        LaunchedEffect(Unit) {
+            continuousVoiceViewModel.startLoop(
+                onSend = { text ->
+                    viewModel.setDraft(text)
+                    viewModel.send()
+                },
+                onStreamingDone = { !viewModel.state.value.streaming },
+            )
+        }
+        // Update last response when streaming completes
+        LaunchedEffect(viewModel.state.value.streaming) {
+            if (!viewModel.state.value.streaming && viewModel.state.value.conversation.turns.isNotEmpty()) {
+                continuousVoiceViewModel.setLastResponse(viewModel.lastAssistantText())
+            }
+        }
+    } else if (showContinuousVoice && !hasMicPermission) {
+        LaunchedEffect(Unit) { showContinuousVoice = false }
+        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+    }
+
+    PermissionDialog(
+        permission = state.pendingPermission,
+        rationale = state.permissionRationale,
+        onGrant = viewModel::retryAfterPermission,
+        onDismiss = viewModel::dismissPermission,
+    )
+
+    DeleteConversationDialog(
+        visible = showDeleteConfirm,
+        onDelete = {
+            showDeleteConfirm = false
+            viewModel.deleteCurrentConversation()
+        },
+        onDismiss = { showDeleteConfirm = false },
+    )
+
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatInputBar(
+    hapticView: android.view.View,
+    draft: String,
+    streaming: Boolean,
+    sendEnabled: Boolean,
+    onDraftChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onCancel: () -> Unit,
+    onMicClick: () -> Unit,
+    onMicLongPress: () -> Unit = {},
+    onCameraClick: () -> Unit,
+    onGalleryClick: () -> Unit,
+    onAudioClick: () -> Unit,
+    showAttachmentSheet: Boolean,
+    onAttachmentSheetChange: (Boolean) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // The input bar has no surface of its own — the screen
+    // background bleeds through so the glass text-field looks
+    // like it's floating on the chat, not sitting in a separate
+    // panel. The Web does the same with no border on the bottom
+    // row.
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        IconButton(
+            onClick = { onAttachmentSheetChange(true) },
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(AuraThemeTokens.colors.surface2),
+        ) {
+            Icon(
+                Icons.Filled.AddAPhoto,
+                contentDescription = "Attach",
+                tint = AuraThemeTokens.colors.textSecondary,
+            )
+        }
+        // Glass input — surface-1 + border-subtle + 24dp radius.
+        // The web does the same but with backdrop-blur 24dp; on
+        // Android Compose there's no equivalent for arbitrary
+        // composables (only for whole surfaces), so we use a
+        // slightly-opaque surface-1 instead.
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(AuraThemeTokens.colors.surface1)
+                .border(1.dp, AuraThemeTokens.colors.borderSubtle, RoundedCornerShape(24.dp)),
+        ) {
+            BasicTextField(
+                value = draft,
+                onValueChange = onDraftChange,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = AuraThemeTokens.colors.textPrimary,
+                ),
+                cursorBrush = SolidColor(AuraThemeTokens.colors.actionPrimary),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                decorationBox = { inner ->
+                    if (draft.isEmpty()) {
+                        Text(
+                            text = "Message AURA…",
+                            fontFamily = com.aura.ui.theme.InterDisplay,
+                            fontSize = 16.sp,
+                            // Brighter than textTertiary (0xFF6B6B6B) which
+                            // was barely visible against surface-1
+                            // (0xFF202022) — placeholder now reads.
+                            color = AuraThemeTokens.colors.textSecondary,
+                        )
+                    }
+                    inner()
+                },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Send,
+                ),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    onSend = { if (sendEnabled && draft.isNotBlank()) onSend() },
+                ),
+            )
+        }
+        if (streaming) {
+            // Stop button — square (12dp) red surface.
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(AuraThemeTokens.colors.error.copy(alpha = 0.15f))
+                    .border(1.dp, AuraThemeTokens.colors.error.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                    .clickable { onCancel() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Stop,
+                    contentDescription = "Stop",
+                    tint = Color(0xFFF87171),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        } else {
+            // Mic button — 40dp circle, no background. Long-press
+            // opens push-to-talk. Tap opens the tap-to-speak
+            // overlay.
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .clickable { onMicClick() }
+                    .pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { onMicLongPress() })
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Mic,
+                    contentDescription = "Voice input",
+                    tint = AuraThemeTokens.colors.textSecondary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            // Send button — morphs between square (12dp, empty)
+            // and pill (20dp, ready). The animation is spring-eased
+            // matching the web's
+            // `transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)`.
+            val canSend = sendEnabled && draft.isNotBlank()
+            val targetRadius = if (canSend) 20.dp else 12.dp
+            val targetScale = if (canSend) 1f else 0.9f
+            val animatedRadius by animateDpAsState(
+                targetValue = targetRadius,
+                animationSpec = spring(
+                    dampingRatio = 0.65f,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
+                ),
+                label = "send-radius",
+            )
+            val animatedScale by animateFloatAsState(
+                targetValue = targetScale,
+                animationSpec = spring(
+                    dampingRatio = 0.65f,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
+                ),
+                label = "send-scale",
+            )
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .graphicsLayer { scaleX = animatedScale; scaleY = animatedScale }
+                    .clip(RoundedCornerShape(animatedRadius))
+                    .background(
+                        if (canSend) AuraThemeTokens.colors.actionPrimary
+                        else AuraThemeTokens.colors.surface2,
+                    )
+                    .border(
+                        width = if (canSend) 0.dp else 1.dp,
+                        color = AuraThemeTokens.colors.borderSubtle,
+                        shape = RoundedCornerShape(animatedRadius),
+                    )
+                    .clickable(enabled = canSend) {
+                        com.aura.ui.util.Haptics.send(hapticView)
+                        onSend()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send",
+                    tint = if (canSend) Color.White
+                           else AuraThemeTokens.colors.textTertiary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+
+    if (showAttachmentSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { onAttachmentSheetChange(false) },
+            sheetState = sheetState,
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "Attach",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                AttachmentOption(
+                    icon = Icons.Filled.PhotoLibrary,
+                    label = "Gallery",
+                    onClick = {
+                        onAttachmentSheetChange(false)
+                        onGalleryClick()
+                    }
+                )
+                AttachmentOption(
+                    icon = Icons.Filled.AddAPhoto,
+                    label = "Camera",
+                    onClick = {
+                        onAttachmentSheetChange(false)
+                        onCameraClick()
+                    }
+                )
+                AttachmentOption(
+                    icon = Icons.Filled.AudioFile,
+                    label = "Audio",
+                    onClick = {
+                        onAttachmentSheetChange(false)
+                        onAudioClick()
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttachmentOption(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(text = label, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConsumeIncomingShare(context: android.content.Context, viewModel: ChatViewModel) {
+    val store = remember {
+        EntryPointAccessors.fromApplication<HiltEntryPoint>(context.applicationContext as android.app.Application)
+            .incomingShareStore()
+    }
+    // Collect the pending share as state so repeated shares — including
+    // identical text shared twice while Chat is already visible — are
+    // delivered. The previous LaunchedEffect(Unit) ran exactly once and
+    // silently ignored any subsequent share intents.
+    val pendingShare by store.pending.collectAsState()
+    LaunchedEffect(pendingShare?.seq) {
+        val payload = pendingShare ?: return@LaunchedEffect
+        // Text share → set as draft
+        payload.text?.let(viewModel::setDraft)
+        // Image share → decode Bitmap and route through onImageCaptured
+        // so the vision tool analyzes it instead of dumping base64
+        // text into the chat input.
+        payload.imageUri?.let { uri ->
+            val bitmap = withContext(Dispatchers.IO) { decodeSharedImage(context, uri) }
+            bitmap?.let { viewModel.onImageCaptured(it) }
+        }
+        // Clear the store so the same seq doesn't re-fire on recomposition.
+        store.consume()
+    }
+}
+
+@Composable
+private fun rememberMicPermission(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.RECORD_AUDIO,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+}
+
+@Composable
+private fun rememberCameraPermission(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.CAMERA,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+}
+
+private fun decodeSharedImage(context: android.content.Context, uri: android.net.Uri): android.graphics.Bitmap? {
+    return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+        runCatching {
+            android.graphics.ImageDecoder.decodeBitmap(
+                android.graphics.ImageDecoder.createSource(context.contentResolver, uri),
+            ) { decoder, _, _ ->
+                // Cap at 1024px to avoid OOM on large photos
+                decoder.setTargetSize(1024, 1024)
+            }
+        }.getOrNull()
+    } else {
+        // API 26–27 fallback: decode through the content resolver and downsample.
+        runCatching {
+            @Suppress("DEPRECATION")
+            android.graphics.BitmapFactory.decodeStream(
+                context.contentResolver.openInputStream(uri),
+                null,
+                android.graphics.BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                },
+            )
+            android.graphics.BitmapFactory.Options().apply {
+                val target = 1024
+                var dim = 1.coerceAtLeast(outWidth.coerceAtLeast(outHeight))
+                while (dim > target * 2) { dim /= 2; inSampleSize *= 2 }
+                inJustDecodeBounds = false
+            }.let { opts ->
+                @Suppress("DEPRECATION")
+                android.graphics.BitmapFactory.decodeStream(
+                    context.contentResolver.openInputStream(uri),
+                    null,
+                    opts,
+                )
+            }
+        }.getOrNull()
+    }
+}

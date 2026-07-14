@@ -127,6 +127,7 @@ internal fun resolveModelSelection(
 
 data class ChatUiState(
     val conversation: com.aura.agent.Conversation = com.aura.agent.Conversation(),
+    val conversationLoading: Boolean = false,
     val streaming: Boolean = false,
     val draft: String = "",
     val error: String? = null,
@@ -500,8 +501,13 @@ class ChatViewModel @Inject constructor(
 
     fun loadConversation(id: String) {
         viewModelScope.launch {
-            conversationStore.load(id)?.let { conv ->
-                _state.update { it.copy(conversation = conv) }
+            _state.update { it.copy(conversationLoading = true) }
+            try {
+                conversationStore.load(id)?.let { conv ->
+                    _state.update { it.copy(conversation = conv) }
+                }
+            } finally {
+                _state.update { it.copy(conversationLoading = false) }
             }
         }
     }

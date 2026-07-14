@@ -25,7 +25,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.aura.ui.screens.ChatScreen
+import com.aura.ui.screens.chat.ChatRoute
 import com.aura.ui.screens.DiagnosticsScreen
 import com.aura.ui.screens.HandsScreen
 import com.aura.ui.screens.HistoryScreen
@@ -164,7 +164,7 @@ fun NavGraph(
                 val convId = it.arguments?.getString("convId")
                 val summary = it.arguments?.getString("brief")
                 val draft = it.arguments?.getString("draft")
-                ChatScreen(
+                ChatRoute(
                     resumeConversationId = convId,
                     morningBriefSummary = summary,
                     initialDraft = draft,
