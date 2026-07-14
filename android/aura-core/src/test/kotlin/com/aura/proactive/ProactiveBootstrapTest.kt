@@ -7,6 +7,7 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Before
 import org.junit.Test
@@ -48,6 +49,7 @@ class ProactiveBootstrapTest {
         // override the flow per-case.
         every { userPreferences.morningBriefEnabled } returns flowOf(true)
         every { userPreferences.calendarMonitorEnabled } returns flowOf(true)
+        every { userPreferences.morningBriefHour } returns flowOf(7)
     }
 
     @Test
@@ -103,28 +105,53 @@ class ProactiveBootstrapTest {
         // so the broadcast / FGS calls don't trip AbstractMethodError.
         // The Throwable-catch in start() absorbs any stub blowups,
         // so the gate decision itself is what we verify.
-        //
-        // start() now launches its gate-read+apply on Dispatchers.IO
-        // (previously used runBlocking on the calling thread). We poll
-        // briefly for the scheduler call because the IO dispatcher
-        // runs asynchronously from the test thread.
         val bootstrap = ProactiveBootstrap(context, scheduler, memoryStore, userPreferences)
         bootstrap.start()
-        // Wait for the async gate read + apply to complete. The IO
-        // dispatcher typically resolves this in <50ms; we poll up to
-        // 2s to avoid flakiness on CI.
+        awaitVerification("scheduleMorningBrief was not called within 2s") {
+            verify(exactly = 1) { scheduler.scheduleMorningBrief() }
+        }
+        verify(exactly = 1) { scheduler.scheduleDecay() }
+    }
+
+    @Test
+    fun `start reacts to schedule preference changes without process restart`() {
+        val morningEnabled = MutableStateFlow(true)
+        val calendarEnabled = MutableStateFlow(true)
+        val briefHour = MutableStateFlow(7)
+        every { userPreferences.morningBriefEnabled } returns morningEnabled
+        every { userPreferences.calendarMonitorEnabled } returns calendarEnabled
+        every { userPreferences.morningBriefHour } returns briefHour
+
+        val bootstrap = ProactiveBootstrap(context, scheduler, memoryStore, userPreferences)
+        bootstrap.start()
+        awaitVerification("initial morning brief was not scheduled") {
+            verify(atLeast = 1) { scheduler.scheduleMorningBrief(7) }
+        }
+
+        briefHour.value = 9
+        awaitVerification("updated morning brief hour was not applied") {
+            verify(atLeast = 1) { scheduler.scheduleMorningBrief(9) }
+        }
+
+        morningEnabled.value = false
+        awaitVerification("disabled morning brief was not cancelled") {
+            verify(atLeast = 1) { scheduler.cancelMorningBrief() }
+            verify(atLeast = 1) { scheduler.cancelDecay() }
+        }
+    }
+
+    private fun awaitVerification(message: String, assertion: () -> Unit) {
         val deadline = System.currentTimeMillis() + 2_000L
-        var scheduled = false
+        var lastFailure: AssertionError? = null
         while (System.currentTimeMillis() < deadline) {
             try {
-                verify(exactly = 1) { scheduler.scheduleMorningBrief() }
-                scheduled = true
-                break
-            } catch (_: AssertionError) {
+                assertion()
+                return
+            } catch (failure: AssertionError) {
+                lastFailure = failure
                 Thread.sleep(20)
             }
         }
-        assertTrue(scheduled, "scheduleMorningBrief was not called within 2s — the async gate read may not have completed")
-        verify(exactly = 1) { scheduler.scheduleDecay() }
+        throw AssertionError(message, lastFailure)
     }
 }

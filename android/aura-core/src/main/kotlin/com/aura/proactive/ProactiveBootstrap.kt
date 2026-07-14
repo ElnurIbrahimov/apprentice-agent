@@ -4,7 +4,8 @@ import android.content.Intent
 import com.aura.data.UserPreferences
 import com.aura.memory.MemoryStore
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -45,66 +46,67 @@ class ProactiveBootstrap @Inject constructor(
         kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
     )
 
+    private var preferenceJob: kotlinx.coroutines.Job? = null
+
     fun start() {
-        // Read both gates asynchronously. We do NOT use runBlocking
-        // here because start() is called from AuraApp.onCreate() on
-        // the main thread — a blocking DataStore read on the main
-        // thread risks an ANR on slow devices or first launch when
-        // the DataStore file is being created.
-        //
-        // The defaults (both on) are applied immediately so a fresh
-        // install gets proactive scheduling without waiting for the
-        // DataStore read. If the user has toggled one off, the async
-        // correction path cancels the schedule and stops the FGS.
-        scope.launch {
-            val morningBriefOn = runCatching {
-                userPreferences.morningBriefEnabled.first()
-            }.getOrDefault(true)
-            val calendarMonitorOn = runCatching {
-                userPreferences.calendarMonitorEnabled.first()
-            }.getOrDefault(true)
-            val briefHour = runCatching {
-                userPreferences.morningBriefHour.first()
-            }.getOrDefault(7)
-
-            // Apply the gates. The split method is the testable seam:
-            // it doesn't touch the Android Context, so a pure-JVM test
-            // can verify scheduling/cancellation decisions without
-            // needing Robolectric or a Context mock.
-            val decisions = applyGates(morningBriefOn, calendarMonitorOn, briefHour)
-
-            // One-shot memory decay pass on startup. Best-effort —
-            // failure is logged, the next DecayWorker tick catches up.
-            runCatching { memoryStore.runDecayPass() }
-                .onFailure { e ->
-                    try {
-                        android.util.Log.w("ProactiveBootstrap", "startup decay pass failed: ${e.message}")
-                    } catch (_: RuntimeException) {}
+        // Keep one long-lived reconciliation collector. DataStore flows emit
+        // their persisted defaults immediately and every Settings mutation
+        // thereafter, so schedules and the foreground service converge in
+        // the active process instead of waiting for a restart.
+        if (preferenceJob?.isActive != true) {
+            preferenceJob = scope.launch {
+                combine(
+                    userPreferences.morningBriefEnabled,
+                    userPreferences.calendarMonitorEnabled,
+                    userPreferences.morningBriefHour,
+                ) { morningBriefOn, calendarMonitorOn, briefHour ->
+                    Triple(morningBriefOn, calendarMonitorOn, briefHour)
                 }
-
-            // Side effects that DO need a Context (FGS start/stop,
-            // widget-refresh broadcast). All wrapped in Throwable-catch
-            // because a missing WorkManager or stubbed Context in a test
-            // environment should not crash the process.
-            try {
-                if (decisions.calendarMonitorShouldRun) {
-                    CalendarMonitorService.start(appContext)
-                } else {
-                    appContext.stopService(
-                        Intent(appContext, CalendarMonitorService::class.java),
-                    )
-                }
-                val refresh = Intent(ACTION_REFRESH_WIDGET).apply {
-                    setPackage(appContext.packageName)
-                }
-                appContext.sendBroadcast(refresh)
-            } catch (_: Throwable) {
-                // WorkManager / service bootstrap may fail under Robolectric
-                // or in any environment where the Android framework methods
-                // are partially mocked. Silently swallowing is the right
-                // behavior — proactive scheduling is best-effort and a
-                // missing schedule is recoverable on the next app launch.
+                    .distinctUntilChanged()
+                    .collect { (morningBriefOn, calendarMonitorOn, briefHour) ->
+                        reconcile(morningBriefOn, calendarMonitorOn, briefHour)
+                    }
             }
+        }
+
+        // Startup decay remains one-shot. It must not rerun when the user
+        // merely changes a schedule toggle or time.
+        scope.launch {
+            runCatching { memoryStore.runDecayPass() }
+                .onFailure { error ->
+                    try {
+                        android.util.Log.w(
+                            "ProactiveBootstrap",
+                            "startup decay pass failed: ${error.message}",
+                        )
+                    } catch (_: RuntimeException) {
+                        // android.util.Log is unavailable in pure JVM tests.
+                    }
+                }
+        }
+    }
+
+    private fun reconcile(
+        morningBriefOn: Boolean,
+        calendarMonitorOn: Boolean,
+        briefHour: Int,
+    ) {
+        val decisions = applyGates(morningBriefOn, calendarMonitorOn, briefHour)
+        try {
+            if (decisions.calendarMonitorShouldRun) {
+                CalendarMonitorService.start(appContext)
+            } else {
+                appContext.stopService(
+                    Intent(appContext, CalendarMonitorService::class.java),
+                )
+            }
+            val refresh = Intent(ACTION_REFRESH_WIDGET).apply {
+                setPackage(appContext.packageName)
+            }
+            appContext.sendBroadcast(refresh)
+        } catch (_: Throwable) {
+            // Scheduling is best-effort; the next DataStore emission or
+            // process launch reconciles it again.
         }
     }
 

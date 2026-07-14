@@ -63,14 +63,37 @@ interface MainActivityEntryPoint {
     fun biometricActivityHolder(): BiometricActivityHolder
 }
 
+data class AuraLaunchRequest(
+    val sequence: Int = 0,
+    val openChat: Boolean = false,
+    val openMemory: Boolean = false,
+    val morningBriefSummary: String? = null,
+)
+
+internal fun resolveAuraLaunchRequest(
+    openChat: Boolean,
+    openMemory: Boolean,
+    morningBriefSummary: String?,
+    previousSequence: Int,
+): AuraLaunchRequest? {
+    val brief = morningBriefSummary?.trim()?.takeIf { it.isNotEmpty() }
+    if (!openChat && !openMemory && brief == null) return null
+    return AuraLaunchRequest(
+        sequence = previousSequence + 1,
+        openChat = openChat || brief != null,
+        openMemory = openMemory && brief == null,
+        morningBriefSummary = brief,
+    )
+}
+
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
 
     @Inject lateinit var incomingShareStore: IncomingShareStore
     @Inject lateinit var biometricHolder: BiometricActivityHolder
 
-    private var openChatOnLaunch: Boolean = false
-    private var openMemoryOnLaunch: Boolean = false
+    var launchRequest by mutableStateOf(AuraLaunchRequest())
+        private set
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(Color.Transparent.value.toInt(), Color.Transparent.value.toInt()),
@@ -109,12 +132,13 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun handleDeepLink(intent: Intent) {
-        openChatOnLaunch = intent.getBooleanExtra("openChat", false)
-        openMemoryOnLaunch = intent.getBooleanExtra("openMemory", false)
+        resolveAuraLaunchRequest(
+            openChat = intent.getBooleanExtra("openChat", false),
+            openMemory = intent.getBooleanExtra("openMemory", false),
+            morningBriefSummary = intent.getStringExtra("morningBriefSummary"),
+            previousSequence = launchRequest.sequence,
+        )?.let { launchRequest = it }
     }
-
-    fun consumeOpenChatFlag(): Boolean = openChatOnLaunch.also { openChatOnLaunch = false }
-    fun consumeOpenMemoryFlag(): Boolean = openMemoryOnLaunch.also { openMemoryOnLaunch = false }
 }
 
 @Composable
@@ -198,8 +222,7 @@ fun AuraRoot() {
                 )
 
                 else -> NavGraph(
-                    openChatOnLaunch = mainActivity?.consumeOpenChatFlag() ?: false,
-                    openMemoryOnLaunch = mainActivity?.consumeOpenMemoryFlag() ?: false,
+                    launchRequest = mainActivity?.launchRequest ?: AuraLaunchRequest(),
                 )
             }
         }

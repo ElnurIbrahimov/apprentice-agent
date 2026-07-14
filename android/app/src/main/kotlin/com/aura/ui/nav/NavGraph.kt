@@ -25,6 +25,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.aura.AuraLaunchRequest
 import com.aura.ui.screens.chat.ChatRoute
 import com.aura.ui.screens.DiagnosticsScreen
 import com.aura.ui.screens.HandsScreen
@@ -41,8 +42,7 @@ import com.aura.ui.screens.TasksScreen
 
 @Composable
 fun NavGraph(
-    openChatOnLaunch: Boolean = false,
-    openMemoryOnLaunch: Boolean = false,
+    launchRequest: AuraLaunchRequest = AuraLaunchRequest(),
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -55,22 +55,20 @@ fun NavGraph(
     // persists across all views.
     val showBottomBar = true
 
-    LaunchedEffect(openChatOnLaunch) {
-        if (openChatOnLaunch) {
-            navController.navigate(TopLevelRoute.Chat.route) {
-                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
+    LaunchedEffect(launchRequest.sequence) {
+        if (launchRequest.sequence == 0) return@LaunchedEffect
+        val route = when {
+            !launchRequest.morningBriefSummary.isNullOrBlank() -> {
+                "chat?brief=${android.net.Uri.encode(launchRequest.morningBriefSummary)}"
             }
+            launchRequest.openChat -> TopLevelRoute.Chat.route
+            launchRequest.openMemory -> TopLevelRoute.Memory.route
+            else -> return@LaunchedEffect
         }
-    }
-    LaunchedEffect(openMemoryOnLaunch) {
-        if (openMemoryOnLaunch) {
-            navController.navigate(TopLevelRoute.Memory.route) {
-                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
-            }
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
         }
     }
 
