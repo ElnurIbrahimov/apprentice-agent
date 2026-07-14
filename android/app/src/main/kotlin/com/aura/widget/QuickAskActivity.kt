@@ -201,6 +201,26 @@ private fun QuickAskContent(
                 enabled = !state.streaming,
             )
 
+            state.providerWarning?.let { warning ->
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            warning,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        TextButton(onClick = viewModel::dismissProviderWarning) { Text("Dismiss") }
+                    }
+                }
+            }
+
             when {
                 state.streaming && response.isBlank() -> Row(
                     verticalAlignment = Alignment.CenterVertically,

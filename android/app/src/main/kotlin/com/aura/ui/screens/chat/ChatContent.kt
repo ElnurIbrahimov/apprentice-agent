@@ -55,6 +55,7 @@ fun ChatContent(
     onSendSuggestion: (String) -> Unit,
     onRetry: () -> Unit,
     onDismissError: () -> Unit,
+    onDismissProviderWarning: () -> Unit,
     onDismissSaveWarning: () -> Unit,
     onSelectSpecialist: (Specialist?) -> Unit,
     onRunVisionPrompt: (android.graphics.Bitmap, String) -> Unit,
@@ -121,6 +122,9 @@ fun ChatContent(
                     onSwitchModel = onShowModelPicker,
                     onDismiss = onDismissError,
                 )
+            }
+            state.providerWarning?.let { warning ->
+                SaveWarningBanner(warning, onDismissProviderWarning)
             }
             state.saveWarning?.let { warning ->
                 SaveWarningBanner(warning, onDismissSaveWarning)

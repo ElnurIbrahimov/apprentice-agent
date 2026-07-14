@@ -18,6 +18,23 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+internal fun applyProviderWarning(
+    current: ChatUiState,
+    warning: AgentEvent.Warning,
+): ChatUiState {
+    val fallback = warning.toModel?.takeIf(String::isNotBlank)
+    return current.copy(
+        providerWarning = warning.message,
+        activeModel = fallback ?: current.activeModel,
+        sessionModelOverride = fallback ?: current.sessionModelOverride,
+        modelSelection = if (fallback != null) {
+            ModelSelectionState.Ready(fallback, current.availableModels)
+        } else {
+            current.modelSelection
+        },
+    )
+}
+
 /**
  * Owns the "send a message" pipeline that used to live in
  * [ChatViewModel]. The VM exposes the user-facing methods (send,
@@ -259,6 +276,11 @@ class ChatSendController(
                         }
                         is AgentEvent.ToolExecuting -> {
                             // not used in this collector
+                        }
+                        is AgentEvent.Warning -> {
+                            state.update { currentState ->
+                                applyProviderWarning(currentState, event)
+                            }
                         }
                         is AgentEvent.Error -> {
                             consecutiveFailures++

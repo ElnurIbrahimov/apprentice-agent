@@ -103,9 +103,11 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         var finished = false
         var lastUserMessage = ""
         var currentConversation = conversationCompactor.compactIfNeeded(conversation, model)
+        var effectiveModel = model
 
         // Tracks the most recent recall across all steps. The agentic loop
-        // one with tools, one without); we capture the recall
+        // can perform multiple model steps for one user turn — for example,
+        // one with tools and one without; we capture the recall
         // from the last step that actually performed recall so the
         // chip shows the most relevant memories for the final
         // assistant text. Null when no step recalled anything
@@ -189,7 +191,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             // error (5xx, 429, network timeout), try the next configured
             // provider before giving up. Don't failover on 401 (bad key)
             // or 400 (bad request) — retrying won't help.
-            var currentModel = model
+            var currentModel = effectiveModel
             val triedModels = mutableSetOf<String>()
 
             stream@ while (true) {
@@ -234,8 +236,17 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                                         ?.firstOrNull { it.providerPrefix !in triedPrefixes }
                                         ?.id
                                     if (nextModel != null) {
-                                        emit(AgentEvent.Warning("Provider ${currentModel} failed (${chunk.code}), falling back to $nextModel"))
+                                        val failedModel = currentModel
+                                        emit(
+                                            AgentEvent.Warning(
+                                                message = "Provider $failedModel failed (${chunk.code}); using $nextModel for this chat.",
+                                                fromModel = failedModel,
+                                                toModel = nextModel,
+                                            ),
+                                        )
                                         currentModel = nextModel
+                                        effectiveModel = nextModel
+                                        currentConversation = currentConversation.copy(model = nextModel)
                                         throw kotlinx.coroutines.CancellationException("failover")
                                     }
                                 }
@@ -387,9 +398,10 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
         // turn so the chat UI can render the chip on history
         // replays and so the loop stays the single source of
         // truth for what was recalled.
+        val modeledConversation = currentConversation.copy(model = effectiveModel)
         val finalConv = if (lastRecall != null) {
-            currentConversation.attachRecallToLastTurn(lastRecall)
-        } else currentConversation
+            modeledConversation.attachRecallToLastTurn(lastRecall)
+        } else modeledConversation
         emit(AgentEvent.Result(finalConv, lastRecall))
         emit(AgentEvent.Done)
     }
@@ -435,7 +447,11 @@ sealed class AgentEvent {
     /** Emitted by the UI after a permission was granted. The loop re-executes the named tool with the given args. */
     data class PermissionGranted(val toolName: String, val arguments: String) : AgentEvent()
     data class Error(val code: String, val message: String, val retryable: Boolean, val typedError: com.aura.core.error.AuraError? = null) : AgentEvent()
-    data class Warning(val message: String) : AgentEvent()
+    data class Warning(
+        val message: String,
+        val fromModel: String? = null,
+        val toModel: String? = null,
+    ) : AgentEvent()
     data class Result(
         val conversation: com.aura.agent.Conversation,
         /**

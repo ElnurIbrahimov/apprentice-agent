@@ -322,6 +322,7 @@ fun ChatRoute(
         },
         onRetry = viewModel::retryLast,
         onDismissError = viewModel::dismissError,
+        onDismissProviderWarning = viewModel::dismissProviderWarning,
         onDismissSaveWarning = viewModel::dismissSaveWarning,
         onSelectSpecialist = viewModel::setSpecialist,
         onRunVisionPrompt = viewModel::runVisionPrompt,

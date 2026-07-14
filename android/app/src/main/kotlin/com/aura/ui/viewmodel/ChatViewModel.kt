@@ -189,6 +189,8 @@ data class ChatUiState(
      * Lives in UI state — not persisted.
      */
     val pendingVisionBitmap: Bitmap? = null,
+    /** Visible, dismissible notice when execution moved to another provider/model. */
+    val providerWarning: String? = null,
     /**
      * Non-blocking warning shown when a conversation save fails.
      * De-duplicated: only the first failure per session is shown so
@@ -654,6 +656,10 @@ class ChatViewModel @Inject constructor(
 
     fun dismissError() {
         _state.update { it.copy(error = null, errorRetryable = false, errorTyped = null) }
+    }
+
+    fun dismissProviderWarning() {
+        _state.update { it.copy(providerWarning = null) }
     }
 
     fun dismissSaveWarning() {
