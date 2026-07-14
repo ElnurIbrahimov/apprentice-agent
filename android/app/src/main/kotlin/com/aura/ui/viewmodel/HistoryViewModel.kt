@@ -18,6 +18,19 @@ data class HistoryUiState(
     val loading: Boolean = true,
     val query: String = "",
     val searching: Boolean = false,
+    /**
+     * Multi-select mode is off by default. Toggled on by long-press
+     * on a row, or by the top-bar "Select" action. When true, each
+     * row renders a checkbox and the top bar swaps in bulk actions
+     * (delete N, share N).
+     */
+    val selectMode: Boolean = false,
+    /**
+     * IDs of conversations currently selected. Empty when not in
+     * select mode. Survives within the session so partial selection
+     * is preserved across scroll.
+     */
+    val selectedIds: Set<String> = emptySet(),
 )
 
 /**
@@ -149,6 +162,103 @@ class HistoryViewModel @Inject constructor(
                 _state.update { it.copy(conversations = store.search(q, 50)) }
             }
         }
+    }
+
+    // ── Multi-select ──────────────────────────────────────────────
+    //
+    // Long-press on a row toggles select mode and pre-selects the
+    // tapped row. Tapping another row while in select mode adds it
+    // to the selection. Tapping the top-bar "Select" action enters
+    // select mode with empty selection. Tapping "Cancel" exits and
+    // clears the selection.
+
+    /**
+     * Enter or exit select mode. Entering resets the selection to
+     * the single tapped [id] (when provided) so the long-press
+     * path feels natural. The top-bar "Select" button passes null
+     * to enter with empty selection.
+     */
+    fun toggleSelectMode(id: String? = null) {
+        val current = _state.value
+        if (current.selectMode) {
+            _state.update { it.copy(selectMode = false, selectedIds = emptySet()) }
+        } else {
+            _state.update {
+                it.copy(
+                    selectMode = true,
+                    selectedIds = if (id != null) setOf(id) else emptySet(),
+                )
+            }
+        }
+    }
+
+    /**
+     * Toggle a single row's selection. No-op outside select mode.
+     * Exit select mode automatically when the selection drops to
+     * empty.
+     */
+    fun toggleSelected(id: String) {
+        if (!_state.value.selectMode) return
+        val current = _state.value.selectedIds
+        val next = if (id in current) current - id else current + id
+        if (next.isEmpty()) {
+            _state.update { it.copy(selectMode = false, selectedIds = emptySet()) }
+        } else {
+            _state.update { it.copy(selectedIds = next) }
+        }
+    }
+
+    /**
+     * Select every visible conversation. Used by the "Select all"
+     * top-bar action. Replaces the current selection.
+     */
+    fun selectAll() {
+        _state.update { it.copy(selectedIds = it.conversations.map { c -> c.id }.toSet()) }
+    }
+
+    /**
+     * Delete every selected conversation in a single batch. After
+     * deletion the selection is cleared and select mode exits. The
+     * delete is sequential (not parallel) to keep the DB on one
+     * thread — Room's @Query is single-thread-safe but mixing it
+     * with parallel coroutines can produce P2002/P2003 races.
+     */
+    fun deleteSelected() {
+        val ids = _state.value.selectedIds.toList()
+        if (ids.isEmpty()) return
+        _state.update { it.copy(selectMode = false, selectedIds = emptySet()) }
+        viewModelScope.launch {
+            for (id in ids) {
+                store.delete(id)
+            }
+            refreshList()
+        }
+    }
+
+    /**
+     * Build a single Markdown document containing every selected
+     * conversation. Returns "" if the selection is empty so the
+     * caller can skip the share intent.
+     */
+    fun exportSelectedMarkdown(): String {
+        val ids = _state.value.selectedIds
+        if (ids.isEmpty()) return ""
+        val byId = _state.value.conversations.associateBy { it.id }
+        return buildString {
+            var first = true
+            for (id in ids) {
+                val conv = byId[id] ?: continue
+                if (!first) append("\n\n---\n\n")
+                first = false
+                append(exportMarkdown(conv))
+            }
+        }
+    }
+
+    private suspend fun refreshList() {
+        val q = _state.value.query
+        val convos = if (q.isBlank()) store.recentPinnedFirst(50) else store.search(q, 50)
+        _state.update { it.copy(conversations = convos) }
     }
 
     /**

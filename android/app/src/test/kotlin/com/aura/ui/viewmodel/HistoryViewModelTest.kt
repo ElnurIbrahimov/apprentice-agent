@@ -158,4 +158,119 @@ class HistoryViewModelTest {
         advanceUntilIdle()
         coVerify { store.setPinned("c1", true) }
     }
+
+    @Test
+    fun `toggleSelectMode enters select mode and pre-selects the row`() = runTest {
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.toggleSelectMode("c1")
+        assertTrue(vm.state.value.selectMode)
+        assertEquals(setOf("c1"), vm.state.value.selectedIds)
+    }
+
+    @Test
+    fun `toggleSelectMode with null id enters with empty selection`() = runTest {
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.toggleSelectMode()
+        assertTrue(vm.state.value.selectMode)
+        assertEquals(emptySet(), vm.state.value.selectedIds)
+    }
+
+    @Test
+    fun `toggleSelectMode exits and clears selection when already on`() = runTest {
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.toggleSelectMode("c1")
+        vm.toggleSelectMode()
+        assertFalse(vm.state.value.selectMode)
+        assertEquals(emptySet(), vm.state.value.selectedIds)
+    }
+
+    @Test
+    fun `toggleSelected adds and removes ids from the selection`() = runTest {
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.toggleSelectMode("c1") // c1 selected
+        vm.toggleSelected("c2")    // adds c2
+        assertEquals(setOf("c1", "c2"), vm.state.value.selectedIds)
+        vm.toggleSelected("c1")    // removes c1
+        assertEquals(setOf("c2"), vm.state.value.selectedIds)
+    }
+
+    @Test
+    fun `toggleSelected is a no-op when not in select mode`() = runTest {
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.toggleSelected("c1")
+        assertFalse(vm.state.value.selectMode)
+        assertEquals(emptySet(), vm.state.value.selectedIds)
+    }
+
+    @Test
+    fun `removing the last selected id exits select mode`() = runTest {
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.toggleSelectMode("c1")
+        vm.toggleSelected("c1")
+        assertFalse(vm.state.value.selectMode, "select mode should auto-exit when last row deselected")
+        assertEquals(emptySet(), vm.state.value.selectedIds)
+    }
+
+    @Test
+    fun `selectAll populates selection from visible conversations`() = runTest {
+        val convs = listOf(
+            Conversation(id = "c1", title = "a", createdAt = 1L, updatedAt = 1L),
+            Conversation(id = "c2", title = "b", createdAt = 2L, updatedAt = 2L),
+            Conversation(id = "c3", title = "c", createdAt = 3L, updatedAt = 3L),
+        )
+        coEvery { store.recentPinnedFirst(50) } returns convs
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.load()
+        advanceUntilIdle()
+        vm.toggleSelectMode() // enter with empty selection
+        vm.selectAll()
+        assertEquals(setOf("c1", "c2", "c3"), vm.state.value.selectedIds)
+    }
+
+    @Test
+    fun `deleteSelected deletes every selected id and exits select mode`() = runTest {
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
+        coEvery { store.delete(any()) } returns Unit
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.toggleSelectMode("c1")
+        vm.toggleSelected("c2")
+        vm.deleteSelected()
+        advanceUntilIdle()
+        coVerify { store.delete("c1") }
+        coVerify { store.delete("c2") }
+        assertFalse(vm.state.value.selectMode)
+        assertEquals(emptySet(), vm.state.value.selectedIds)
+    }
+
+    @Test
+    fun `exportSelectedMarkdown concatenates selected conversations with a separator`() = runTest {
+        val convs = listOf(
+            Conversation(id = "c1", title = "First", createdAt = 1L, updatedAt = 1L, turns = listOf(Turn(user = "u1"))),
+            Conversation(id = "c2", title = "Second", createdAt = 2L, updatedAt = 2L, turns = listOf(Turn(user = "u2"))),
+        )
+        coEvery { store.recentPinnedFirst(50) } returns convs
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        vm.load()
+        advanceUntilIdle()
+        vm.toggleSelectMode()
+        vm.toggleSelected("c1")
+        vm.toggleSelected("c2")
+        val md = vm.exportSelectedMarkdown()
+        assertTrue("# First" in md, "should include the first conversation's title")
+        assertTrue("# Second" in md, "should include the second conversation's title")
+        assertTrue("\n\n---\n\n" in md, "should separate the two with a horizontal rule")
+    }
+
+    @Test
+    fun `exportSelectedMarkdown returns empty string for empty selection`() = runTest {
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        assertEquals("", vm.exportSelectedMarkdown())
+    }
 }

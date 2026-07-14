@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -77,23 +78,81 @@ fun HistoryScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    val subtitle = if (state.query.isBlank()) "${state.conversations.size} saved conversations"
+    val subtitle = if (state.selectMode) {
+        val n = state.selectedIds.size
+        "$n selected"
+    } else if (state.query.isBlank()) "${state.conversations.size} saved conversations"
         else "${state.conversations.size} match${if (state.conversations.size == 1) "" else "es"} for \"${state.query}\""
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
+        val headerAction: (@Composable () -> Unit)? = when {
+            // Bulk action bar — replaces the normal "Export all" action
+            // when in select mode. Shows the count and Delete/Share/Cancel.
+            state.selectMode -> ({
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { viewModel.selectAll() }) {
+                        Text("All", color = MaterialTheme.colorScheme.primary)
+                    }
+                    TextButton(
+                        onClick = {
+                            val md = viewModel.exportSelectedMarkdown()
+                            if (md.isNotEmpty()) {
+                                coroutineScope.launch {
+                                    shareMarkdown(
+                                        context,
+                                        md,
+                                        "aura-${state.selectedIds.size}-conversations",
+                                    )
+                                }
+                            }
+                        },
+                        enabled = state.selectedIds.isNotEmpty(),
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Share")
+                    }
+                    TextButton(
+                        onClick = { viewModel.deleteSelected() },
+                        enabled = state.selectedIds.isNotEmpty(),
+                    ) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                    TextButton(onClick = { viewModel.toggleSelectMode() }) {
+                        Text("Cancel")
+                    }
+                }
+            })
+            // Normal mode: "Select" enters select mode; "Export all"
+            // shares the entire list as one Markdown doc.
+            state.conversations.isNotEmpty() && state.query.isBlank() -> ({
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { viewModel.toggleSelectMode() }) {
+                        Text("Select")
+                    }
+                    TextButton(onClick = {
+                        coroutineScope.launch {
+                            shareMarkdown(context, viewModel.exportAllMarkdown(), "aura-conversations")
+                        }
+                    }) {
+                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Export all")
+                    }
+                }
+            })
+            else -> null
+        }
         AuraScreenHeader(
             title = "History",
             subtitle = subtitle,
-            action = if (state.conversations.isNotEmpty() && state.query.isBlank()) ({
-                TextButton(onClick = {
-                    coroutineScope.launch {
-                        shareMarkdown(context, viewModel.exportAllMarkdown(), "aura-conversations")
-                    }
-                }) {
-                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Export all")
-                }
-            }) else null,
+            action = headerAction,
         )
 
         // Search bar.
@@ -155,7 +214,18 @@ fun HistoryScreen(
                     HistoryRow(
                         conv = conv,
                         isPinned = viewModel.isPinned(conv),
-                        onClick = { onSelect(conv.id) },
+                        isSelected = conv.id in state.selectedIds,
+                        selectMode = state.selectMode,
+                        onClick = {
+                            if (state.selectMode) {
+                                viewModel.toggleSelected(conv.id)
+                            } else {
+                                onSelect(conv.id)
+                            }
+                        },
+                        onLongPress = {
+                            if (state.selectMode) viewModel.toggleSelected(conv.id)
+                        },
                         onDelete = { viewModel.delete(conv.id) },
                         onShare = {
                             coroutineScope.launch {
@@ -175,7 +245,10 @@ fun HistoryScreen(
 private fun HistoryRow(
     conv: Conversation,
     isPinned: Boolean,
+    isSelected: Boolean,
+    selectMode: Boolean,
     onClick: () -> Unit,
+    onLongPress: () -> Unit,
     onDelete: () -> Unit,
     onShare: () -> Unit,
     onTogglePin: () -> Unit,
@@ -219,25 +292,42 @@ private fun HistoryRow(
     }
 
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp),
+        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                else MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(10.dp),
         modifier = Modifier
             .fillMaxWidth()
             .pointerInput(conv.id) {
                 detectTapGestures(
                     onTap = { onClick() },
-                    onLongPress = { showRenameDialog = true },
+                    onLongPress = {
+                        // Normal mode: long-press opens the rename
+                        // dialog (preserves the existing UX).
+                        // Select mode: long-press toggles the row's
+                        // selection — no rename dialog, since the
+                        // user is in bulk-action mode.
+                        if (selectMode) onLongPress() else showRenameDialog = true
+                    },
                 )
             },
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = if (isPinned) Icons.Filled.PushPin else Icons.Filled.Chat,
-                contentDescription = if (isPinned) "Pinned" else null,
-                tint = if (isPinned) MaterialTheme.colorScheme.primary
-                       else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.size(24.dp),
-            )
-            Spacer(Modifier.width(12.dp))
+            if (selectMode) {
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = { onClick() },
+                )
+                Spacer(Modifier.width(4.dp))
+            } else {
+                Icon(
+                    imageVector = if (isPinned) Icons.Filled.PushPin else Icons.Filled.Chat,
+                    contentDescription = if (isPinned) "Pinned" else null,
+                    tint = if (isPinned) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(conv.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(2.dp))
