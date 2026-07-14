@@ -7,10 +7,12 @@ import com.aura.agent.AgentEvent
 import com.aura.agent.Conversation
 import com.aura.agent.ConversationStore
 import com.aura.agent.MemoryAugmentedAgenticLoop
+import com.aura.agent.Reaction
 import com.aura.agent.Specialist
 import com.aura.agent.ToolExecutor
 import com.aura.agent.ToolRegistry
 import com.aura.agent.ToolResult
+import com.aura.agent.Turn
 import com.aura.kg.KnowledgeGraphRepository
 import com.aura.memory.MemoryStore
 import com.aura.providers.ProviderKeys
@@ -496,6 +498,94 @@ class ChatViewModelTest {
 
         // After cancel, the in-flight list is cleared.
         assertEquals(0, vm.state.value.inFlightToolCalls.size)
+    }
+
+    @Test
+    fun `reactToTurn sets reaction on matching turn and persists`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        val turnTs = 42L
+        _stateDirectly(
+            vm,
+            ChatUiState(
+                conversation = Conversation(
+                    turns = listOf(
+                        Turn(user = "hi", timestamp = 10L),
+                        Turn(assistant = "hello", timestamp = turnTs),
+                    ),
+                ),
+            ),
+        )
+        coEvery { conversationStore.save(any()) } returns Unit
+
+        vm.reactToTurn(turnTs, Reaction.Up)
+        advanceUntilIdle()
+
+        val updated = vm.state.value.conversation.turns.last()
+        assertEquals(Reaction.Up, updated.reaction)
+        coVerify { conversationStore.save(any()) }
+    }
+
+    @Test
+    fun `reactToTurn toggles existing reaction off`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        val turnTs = 99L
+        _stateDirectly(
+            vm,
+            ChatUiState(
+                conversation = Conversation(
+                    turns = listOf(Turn(assistant = "hello", timestamp = turnTs, reaction = Reaction.Up)),
+                ),
+            ),
+        )
+        coEvery { conversationStore.save(any()) } returns Unit
+
+        vm.reactToTurn(turnTs, Reaction.Up)
+        advanceUntilIdle()
+
+        val updated = vm.state.value.conversation.turns.last()
+        assertEquals(null, updated.reaction)
+    }
+
+    @Test
+    fun `reactToTurn switches Up to Down when opposite is tapped`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        val turnTs = 7L
+        _stateDirectly(
+            vm,
+            ChatUiState(
+                conversation = Conversation(
+                    turns = listOf(Turn(assistant = "hello", timestamp = turnTs, reaction = Reaction.Up)),
+                ),
+            ),
+        )
+        coEvery { conversationStore.save(any()) } returns Unit
+
+        vm.reactToTurn(turnTs, Reaction.Down)
+        advanceUntilIdle()
+
+        assertEquals(Reaction.Down, vm.state.value.conversation.turns.last().reaction)
+    }
+
+    @Test
+    fun `reactToTurn is a no-op when timestamp is unknown`() = runTest(testDispatcher) {
+        val vm = createViewModel()
+        advanceUntilIdle()
+        _stateDirectly(
+            vm,
+            ChatUiState(
+                conversation = Conversation(turns = listOf(Turn(assistant = "hello", timestamp = 1L))),
+            ),
+        )
+
+        vm.reactToTurn(999L, Reaction.Up)
+        advanceUntilIdle()
+
+        // Original turn is unchanged.
+        assertEquals(null, vm.state.value.conversation.turns.last().reaction)
+        coVerify(exactly = 0) { conversationStore.save(any()) }
     }
 }
 

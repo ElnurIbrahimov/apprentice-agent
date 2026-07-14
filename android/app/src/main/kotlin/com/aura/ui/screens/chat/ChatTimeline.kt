@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.aura.agent.Reaction
 import com.aura.ui.components.AuraSkeleton
 import com.aura.ui.components.FollowUpSuggestionChips
 import com.aura.ui.components.FollowUpSuggestions
@@ -37,6 +38,7 @@ fun ChatTimeline(
     listState: LazyListState,
     onSendSuggestion: (String) -> Unit = {},
     onShowSourcesForLastTurn: () -> Unit = {},
+    onReact: (Long, Reaction) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     if (state.conversationLoading) {
@@ -84,7 +86,9 @@ fun ChatTimeline(
                             isStreaming = isStreaming,
                             timestamp = turn.timestamp,
                             modelLabel = state.conversation.model,
+                            reaction = turn.reaction,
                             onShowSources = onShowSourcesForLastTurn,
+                            onReact = { reaction -> onReact(turn.timestamp, reaction) },
                         )
                         if (isLast && !isStreaming) {
                             FollowUpSuggestionChips(

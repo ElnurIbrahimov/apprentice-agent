@@ -307,6 +307,7 @@ fun ChatRoute(
         onRunVisionPrompt = viewModel::runVisionPrompt,
         onDismissVision = viewModel::dismissPendingVision,
         onShowSources = { showSources = true },
+        onReact = { timestamp, reaction -> viewModel.reactToTurn(timestamp, reaction) },
         composer = {
             ChatComposer(
                 draft = state.draft,

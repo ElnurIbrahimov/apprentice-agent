@@ -31,6 +31,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ThumbDown
+import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -55,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.aura.agent.Reaction
 import com.aura.tools.Citation
 import com.aura.ui.theme.AuraThemeTokens
 import com.aura.ui.theme.Fraunces
@@ -263,8 +266,10 @@ fun MessageBubble(
     timestamp: Long = 0L,
     modelLabel: String? = null,
     isProactive: Boolean = false,
+    reaction: Reaction? = null,
     animationIndex: Int = 0,
     onShowSources: () -> Unit = {},
+    onReact: (Reaction) -> Unit = {},
 ) {
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
@@ -284,6 +289,7 @@ fun MessageBubble(
             isProactive = isProactive,
             timestamp = timestamp,
             modelLabel = modelLabel,
+            reaction = reaction,
             animationIndex = animationIndex,
             copied = copied,
             onCopiedChange = { copied = it },
@@ -293,6 +299,7 @@ fun MessageBubble(
                 copied = true
             },
             onShowSources = onShowSources,
+            onReact = onReact,
         )
     }
 }
@@ -357,11 +364,13 @@ private fun AssistantMessage(
     isProactive: Boolean,
     timestamp: Long,
     modelLabel: String?,
+    reaction: Reaction?,
     animationIndex: Int,
     copied: Boolean,
     onCopiedChange: (Boolean) -> Unit,
     onCopy: () -> Unit,
     onShowSources: () -> Unit,
+    onReact: (Reaction) -> Unit,
 ) {
     val springEased = remember { androidx.compose.animation.core.Animatable(0f) }
     LaunchedEffect(Unit) {
@@ -462,6 +471,21 @@ private fun AssistantMessage(
                         )
                     }
                     Spacer(Modifier.weight(1f))
+                    // Reaction buttons: thumbs up / down. Toggle the
+                    // active one off when tapped again. Match Copy's
+                    // 18dp IconButton so the row height is uniform.
+                    BubbleAction(
+                        icon = Icons.Filled.ThumbUp,
+                        label = "Helpful",
+                        isActive = reaction == Reaction.Up,
+                        onClick = { onReact(Reaction.Up) },
+                    )
+                    BubbleAction(
+                        icon = Icons.Filled.ThumbDown,
+                        label = "Not helpful",
+                        isActive = reaction == Reaction.Down,
+                        onClick = { onReact(Reaction.Down) },
+                    )
                     // Copy action
                     BubbleAction(
                         icon = androidx.compose.material.icons.Icons.Filled.ContentCopy,
@@ -556,7 +580,9 @@ private fun BubbleAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit,
+    isActive: Boolean = false,
 ) {
+    val tint = if (isActive) AuraThemeTokens.colors.assistantAccent else AuraThemeTokens.colors.textTertiary
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -568,7 +594,7 @@ private fun BubbleAction(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = AuraThemeTokens.colors.textTertiary,
+            tint = tint,
             modifier = Modifier.size(14.dp),
         )
         if (label.isNotBlank()) {
@@ -576,7 +602,7 @@ private fun BubbleAction(
                 text = label,
                 fontFamily = InterDisplay,
                 fontSize = 10.sp,
-                color = AuraThemeTokens.colors.textTertiary,
+                color = tint,
             )
         }
     }

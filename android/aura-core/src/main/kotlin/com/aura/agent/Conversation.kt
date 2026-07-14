@@ -162,7 +162,23 @@ data class Turn(
      * too.
      */
     val recall: RecallSummary? = null,
+    /**
+     * User feedback on this turn. Null = unrated. Persists with the
+     * conversation (stored in the turns JSON) so reactions are visible
+     * on history replays. No server side — this is a personal-use app
+     * and the rating is only used locally for self-review.
+     */
+    val reaction: Reaction? = null,
 )
+
+/**
+ * Thumbs up / thumbs down on a single assistant turn. Mirrors the
+ * web app's `positive | negative` rating in `useChatStore`. Tapping
+ * the same reaction twice clears it (so `reaction` toggles between
+ * null → Up → null).
+ */
+@Serializable
+enum class Reaction { Up, Down }
 
 @Serializable
 data class ToolTurn(

@@ -11,6 +11,7 @@ import com.aura.data.UserPreferences
 import com.aura.agent.AgentEvent
 import com.aura.agent.ConversationStore
 import com.aura.agent.MemoryAugmentedAgenticLoop
+import com.aura.agent.Reaction
 import com.aura.agent.Specialist
 import com.aura.agent.SpecialistRouter
 import com.aura.agent.ToolCall
@@ -586,6 +587,28 @@ class ChatViewModel @Inject constructor(
 
     fun dismissPermission() {
         _state.update { it.copy(pendingPermission = null, permissionRationale = null) }
+    }
+
+    /**
+     * Set or clear the user's thumbs-up/thumbs-down reaction on a
+     * single assistant turn. Tapping the same reaction a second time
+     * clears it (null → Up → null, or null → Down → null). Tapping the
+     * opposite reaction switches it. No-op if [turnTimestamp] doesn't
+     * match any current turn. The new conversation is persisted to
+     * Room so the reaction survives reloads.
+     */
+    fun reactToTurn(turnTimestamp: Long, reaction: Reaction?) {
+        val current = _state.value.conversation
+        val index = current.turns.indexOfFirst { it.timestamp == turnTimestamp }
+        if (index < 0) return
+        val turn = current.turns[index]
+        // Toggle: tapping the same reaction clears it
+        val newReaction = if (reaction == turn.reaction) null else reaction
+        val newTurns = current.turns.toMutableList().apply {
+            this[index] = turn.copy(reaction = newReaction)
+        }
+        _state.update { it.copy(conversation = current.copy(turns = newTurns)) }
+        saveConversation()
     }
 
     fun dismissError() {

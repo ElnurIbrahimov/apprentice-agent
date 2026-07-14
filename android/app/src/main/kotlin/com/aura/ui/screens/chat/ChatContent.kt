@@ -60,6 +60,7 @@ fun ChatContent(
     onRunVisionPrompt: (android.graphics.Bitmap, String) -> Unit,
     onDismissVision: () -> Unit,
     onShowSources: () -> Unit,
+    onReact: (Long, com.aura.agent.Reaction) -> Unit = { _, _ -> },
     composer: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -106,6 +107,7 @@ fun ChatContent(
                     listState = listState,
                     onShowSourcesForLastTurn = onShowSources,
                     onSendSuggestion = onSendSuggestion,
+                    onReact = onReact,
                     modifier = Modifier.weight(1f),
                 )
             }
