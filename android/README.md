@@ -25,7 +25,7 @@ This is my personal copy. The plan lives at `.hermes/plans/`.
 - User profile (learned from conversations via regex, injected into system prompt)
 - Onboarding wizard (paste API key + verify connectivity)
 - Biometric gate for sensitive tools
-- 515 unit tests passing across `:aura-core` (383) + `:app` (132)
+- 738 unit tests passing across `:aura-core` (544) + `:app` (194), 0 failures
 - 12 connected-device tests passing (10 Room migrations + 2 app smoke tests)
 
 Note: the app uses **cloud providers only** — there is no on-device model.
@@ -179,12 +179,10 @@ Scheduled via WorkManager. Re-scheduled on app start (idempotent, UPDATE policy)
 ```bash
 ./gradlew :app:assembleDebug            # debug APK
 ./gradlew :app:assembleRelease          # release APK (currently signed with debug key — sideload only)
-./gradlew :aura-core:testDebugUnitTest  # unit tests (380)
-./gradlew :app:testDebugUnitTest        # unit tests (132)
+./gradlew :aura-core:testDebugUnitTest  # unit tests (544)
+./gradlew :app:testDebugUnitTest        # unit tests (194)
 ./gradlew :app:assembleDebug connectedAndroidTest  # androidTests (needs device)
 ```
-
-Stats: 512 unit tests passing across `:aura-core` (380) + `:app` (132).
 
 CI (`.github/workflows/ci.yml`) runs `assembleDebug` + unit tests on every push and PR.
 
@@ -229,4 +227,4 @@ android/
 
 ## Source of truth
 
-The build plan lives at `.hermes/plans/2026-07-05-tier-1-polish.md`. Daily commits document what shipped; `git log --oneline` is the changelog.
+The build plan lives at `.hermes/plans/2026-07-14-audit-remediation.md`. All 15 prior plans are complete and archived in git history. Daily commits document what shipped; `git log --oneline` is the changelog.
