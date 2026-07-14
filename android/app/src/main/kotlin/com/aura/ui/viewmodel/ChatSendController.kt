@@ -76,11 +76,14 @@ class ChatSendController(
      * for the user-facing state updates (clearing the draft, marking
      * streaming, etc.) — this method assumes the VM has already
      * updated state with `addUser`, `streaming = true`, and a
-     * non-blank draft before the previous turn was appended.
+     * non-blank draft before the previous turn was appended. When
+     * [retryUserText] is non-null, the caller has already rewound the
+     * existing turn and this method must not append another user row.
      */
-    fun runSend(scope: CoroutineScope) {
+    fun runSend(scope: CoroutineScope, retryUserText: String? = null) {
         val current = state.value
-        val text = current.draft.trim()
+        val text = (retryUserText ?: current.draft).trim()
+        val retryingExistingTurn = retryUserText != null
         if (text.isEmpty() || current.streaming) return
 
         // Adaptive MoA escalation: if the user corrected the last response
@@ -110,13 +113,19 @@ class ChatSendController(
             return
         }
 
-        state.update { it.copy(
-            conversation = it.conversation.addUser(text),
-            draft = "",
-            streaming = true,
-            error = null,
-            deepModeActive = useMoa,
-        ) }
+        state.update { currentState ->
+            currentState.copy(
+                conversation = if (retryingExistingTurn) {
+                    currentState.conversation
+                } else {
+                    currentState.conversation.addUser(text)
+                },
+                draft = "",
+                streaming = true,
+                error = null,
+                deepModeActive = useMoa,
+            )
+        }
 
         // Auto-title: if this is the first user message and the title
         // is still a default placeholder, generate a short title from

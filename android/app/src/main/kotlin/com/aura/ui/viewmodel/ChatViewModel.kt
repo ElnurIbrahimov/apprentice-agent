@@ -681,13 +681,20 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** Retry the last user message by re-running the agent. */
+    /** Retry the last user turn without duplicating it in history. */
     fun retryLast() {
-        val conv = _state.value.conversation
-        val lastUser = conv.turns.lastOrNull { it.user != null } ?: return
-        if (lastUser.user.isNullOrBlank()) return
-        _state.update { it.copy(error = null, errorRetryable = false) }
-        send()
+        if (_state.value.streaming) return
+        val retry = prepareConversationForRetry(_state.value.conversation) ?: return
+        _state.update {
+            it.copy(
+                conversation = retry.conversation,
+                draft = "",
+                error = null,
+                errorRetryable = false,
+                errorTyped = null,
+            )
+        }
+        sendController.runSend(viewModelScope, retryUserText = retry.userText)
     }
 
     fun retryAfterPermission(@Suppress("UNUSED_PARAMETER") permission: String) {
