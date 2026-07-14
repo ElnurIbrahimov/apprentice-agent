@@ -8,12 +8,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -77,6 +80,7 @@ fun AuraBottomNavigation(
     currentRoute: String?,
     onRouteSelected: (TopLevelRoute) -> Unit,
     modifier: Modifier = Modifier,
+    navigationBarInsets: WindowInsets = WindowInsets.navigationBars,
 ) {
     val colors = AuraThemeTokens.colors
     val baseRoute = normalizedBaseRoute(currentRoute)
@@ -86,59 +90,62 @@ fun AuraBottomNavigation(
         shadowElevation = 0.dp,
         border = BorderStroke(1.dp, colors.borderSubtle),
         modifier = modifier
-            .navigationBarsPadding()
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .testTag("bottom-navigation"),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(AuraDimensions.bottomNavigationHeight)
-                .testTag("bottom-navigation-row")
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            topLevelRoutes.forEach { route ->
-                val selected = baseRoute == route.route
-                val containerColor by animateColorAsState(
-                    targetValue = if (selected) colors.selection else Color.Transparent,
-                    animationSpec = tween(durationMillis = AuraDimensions.motionStandardMs),
-                    label = "bar-item-bg",
-                )
-                val contentColor = if (selected) colors.textPrimary else colors.textTertiary
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = AuraDimensions.minimumTouchTarget)
-                        .clip(RoundedCornerShape(AuraDimensions.controlRadius))
-                        .background(containerColor)
-                        .selectable(
-                            selected = selected,
-                            role = Role.Tab,
-                            onClick = { if (!selected) onRouteSelected(route) },
-                        )
-                        .semantics { contentDescription = route.label },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(AuraDimensions.bottomNavigationHeight)
+                    .testTag("bottom-navigation-row")
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                topLevelRoutes.forEach { route ->
+                    val selected = baseRoute == route.route
+                    val containerColor by animateColorAsState(
+                        targetValue = if (selected) colors.selection else Color.Transparent,
+                        animationSpec = tween(durationMillis = AuraDimensions.motionStandardMs),
+                        label = "bar-item-bg",
+                    )
+                    val contentColor = if (selected) colors.textPrimary else colors.textTertiary
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = AuraDimensions.minimumTouchTarget)
+                            .clip(RoundedCornerShape(AuraDimensions.controlRadius))
+                            .background(containerColor)
+                            .selectable(
+                                selected = selected,
+                                role = Role.Tab,
+                                onClick = { if (!selected) onRouteSelected(route) },
+                            )
+                            .semantics { contentDescription = route.label },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            imageVector = if (selected) route.selectedIcon else route.unselectedIcon,
-                            contentDescription = null,
-                            tint = contentColor,
-                            modifier = Modifier.size(21.dp),
-                        )
-                        Text(
-                            text = route.label,
-                            fontSize = 11.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = contentColor,
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Icon(
+                                imageVector = if (selected) route.selectedIcon else route.unselectedIcon,
+                                contentDescription = null,
+                                tint = contentColor,
+                                modifier = Modifier.size(21.dp),
+                            )
+                            Text(
+                                text = route.label,
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = contentColor,
+                            )
+                        }
                     }
                 }
             }
+            Spacer(Modifier.windowInsetsBottomHeight(navigationBarInsets))
         }
     }
 }
