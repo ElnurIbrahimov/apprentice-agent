@@ -135,7 +135,7 @@ class ProactiveEventsTest {
             ProactiveEventBus.Event.CalendarEventSoon("B", 5, timestamp = 2_000L),
         )
         bus.tryEmit(
-            ProactiveEventBus.Event.LocationArrived("Office", emptyList(), timestamp = 3_000L),
+            ProactiveEventBus.Event.MemoryDecayWarning("m1", "fading", timestamp = 3_000L),
         )
         advanceUntilIdle()
         assertEquals(3, events.unreadCount.value)
@@ -151,6 +151,23 @@ class ProactiveEventsTest {
         )
         advanceUntilIdle()
         assertEquals(2, events.unreadCount.value)
+    }
+
+    @Test
+    fun `legacy location rows are ignored instead of reviving a phantom feature`() = runTest(testDispatcher) {
+        dao.insert(
+            ProactiveEventEntity(
+                eventType = "LocationArrived",
+                title = "Office",
+                body = "",
+                timestamp = 3_000L,
+            ),
+        )
+
+        val events = newProactiveEvents()
+        advanceUntilIdle()
+
+        assertTrue(events.history.value.isEmpty())
     }
 
     @Test

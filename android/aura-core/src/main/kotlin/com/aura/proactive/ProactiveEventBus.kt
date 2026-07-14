@@ -33,7 +33,6 @@ class ProactiveEventBus @Inject constructor() {
             override val timestamp: Long = System.currentTimeMillis(),
         ) : Event()
         data class CalendarEventSoon(val title: String, val minutesUntil: Int, override val timestamp: Long = System.currentTimeMillis()) : Event()
-        data class LocationArrived(val placeName: String, val recalledMemories: List<String>, override val timestamp: Long = System.currentTimeMillis()) : Event()
         data class MemoryDecayWarning(val memoryId: String, val preview: String, override val timestamp: Long = System.currentTimeMillis()) : Event()
     }
 

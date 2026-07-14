@@ -150,7 +150,9 @@ class ProactiveEvents(
                 val minutes = body.toIntOrNull() ?: return null
                 ProactiveEventBus.Event.CalendarEventSoon(title, minutes, timestamp)
             }
-            "LocationArrived" -> ProactiveEventBus.Event.LocationArrived(title, emptyList(), timestamp)
+            // Legacy placeholder rows are deliberately ignored. Aura never had
+            // a producer or geofence implementation for this advertised event.
+            "LocationArrived" -> null
             "MemoryDecayWarning" -> ProactiveEventBus.Event.MemoryDecayWarning(body, title, timestamp)
             else -> null
         }
@@ -172,13 +174,6 @@ class ProactiveEvents(
             eventType = "CalendarEventSoon",
             title = title,
             body = minutesUntil.toString(),
-            timestamp = timestamp,
-            payload = "",
-        )
-        is ProactiveEventBus.Event.LocationArrived -> ProactiveEventEntity(
-            eventType = "LocationArrived",
-            title = placeName,
-            body = "",
             timestamp = timestamp,
             payload = "",
         )

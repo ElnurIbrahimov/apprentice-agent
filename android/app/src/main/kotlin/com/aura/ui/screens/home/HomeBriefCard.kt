@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.TaskAlt
@@ -154,9 +153,6 @@ private fun HomePriority.presentation(): PriorityPresentation = when (this) {
             item.title,
             if (item.minutesUntil < 60) "Starts in ${item.minutesUntil} minutes" else "Starts in ${item.minutesUntil / 60} hours",
             "Open calendar",
-        )
-        is ProactiveEventBus.Event.LocationArrived -> PriorityPresentation(
-            Icons.Filled.LocationOn, item.placeName, "Ask Aura what it remembers about this place", "Ask Aura",
         )
         is ProactiveEventBus.Event.MemoryDecayWarning -> PriorityPresentation(
             Icons.Filled.Psychology, "Memory needs attention", item.preview, "Review memory",

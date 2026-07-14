@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.HistoryToggleOff
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.PinDrop
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
@@ -62,7 +61,7 @@ import java.util.Locale
  * Category tag used by [HistoryCard] to pick the right accent colours
  * for the icon container — no colour values live in the model itself.
  */
-enum class HistoryCardKind { MorningBrief, CalendarEvent, Location, MemoryDecay }
+enum class HistoryCardKind { MorningBrief, CalendarEvent, MemoryDecay }
 
 /**
  * Polished icon + data model for a single proactive-history card.
@@ -228,16 +227,6 @@ private fun ProactiveEventBus.Event.toCardModel(context: android.content.Context
             },
         )
     }
-    is ProactiveEventBus.Event.LocationArrived -> HistoryCardModel(
-        icon = Icons.Filled.PinDrop,
-        kind = HistoryCardKind.Location,
-        title = "Arrived at $placeName",
-        body = "Recalled memories",
-        badge = Pair("recalled", recalledMemories.size),
-        tapHint = null,
-        timestamp = timestamp,
-        onClick = null,
-    )
     is ProactiveEventBus.Event.MemoryDecayWarning -> HistoryCardModel(
         icon = Icons.Filled.Psychology,
         kind = HistoryCardKind.MemoryDecay,
@@ -271,8 +260,6 @@ private fun HistoryCard(
             MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
         HistoryCardKind.CalendarEvent ->
             MaterialTheme.colorScheme.secondary to MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
-        HistoryCardKind.Location ->
-            MaterialTheme.colorScheme.tertiary to MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
     }
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,

@@ -200,8 +200,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.homeResolvedItems(
                             onOpenChatWithBrief(event.context.toSummary())
                         is ProactiveEventBus.Event.CalendarEventSoon -> onOpenCalendar()
                         is ProactiveEventBus.Event.MemoryDecayWarning -> onOpenMemory()
-                        is ProactiveEventBus.Event.LocationArrived ->
-                            onAskAura("Where am I? What do you remember about this place?")
                     }
                     is HomePriority.Calendar -> onOpenCalendar()
                     is HomePriority.Task -> onOpenTasks()
