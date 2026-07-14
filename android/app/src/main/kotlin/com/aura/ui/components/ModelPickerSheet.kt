@@ -113,6 +113,41 @@ fun ModelPickerSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        ModelPickerContent(
+            currentModel = currentModel,
+            models = models,
+            isLoading = isLoading,
+            errorMessage = errorMessage,
+            staleProviderPrefixes = staleProviderPrefixes,
+            selectionScopeLabel = selectionScopeLabel,
+            onMakeDefault = onMakeDefault,
+            onPick = onPick,
+            onRefresh = onRefresh,
+            onDismiss = onDismiss,
+        )
+    }
+}
+
+/** Picker body without the focus-owning modal window, for deterministic UI tests. */
+@Composable
+fun ModelPickerContent(
+    currentModel: String,
+    models: List<String>,
+    isLoading: Boolean = false,
+    errorMessage: String? = null,
+    staleProviderPrefixes: Set<String> = emptySet(),
+    selectionScopeLabel: String? = null,
+    onMakeDefault: (() -> Unit)? = null,
+    onPick: (String) -> Unit,
+    onRefresh: () -> Unit = {},
+    onDismiss: () -> Unit,
+) {
     var query by remember { mutableStateOf("") }
 
     // Group by provider, filter by search query
@@ -130,12 +165,7 @@ fun ModelPickerSheet(
     val totalCount = grouped.values.sumOf { it.size }
     val currentUnavailable = currentModel.isNotBlank() && currentModel !in models
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(
+    Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 320.dp)
@@ -344,7 +374,6 @@ fun ModelPickerSheet(
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-        }
     }
 }
 

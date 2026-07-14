@@ -9,7 +9,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
-import com.aura.ui.components.ModelPickerSheet
+import com.aura.ui.components.ModelPickerContent
 import com.aura.ui.theme.AuraTheme
 import org.junit.Rule
 import org.junit.Test
@@ -88,7 +88,7 @@ class ModelPickerSheetTest {
     ) {
         composeRule.setContent {
             AuraTheme {
-                ModelPickerSheet(
+                ModelPickerContent(
                     currentModel = current,
                     models = models,
                     isLoading = loading,
