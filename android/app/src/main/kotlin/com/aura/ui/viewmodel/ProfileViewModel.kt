@@ -6,9 +6,11 @@ import androidx.lifecycle.viewModelScope
 import com.aura.profile.UserProfile
 import com.aura.profile.UserProfileStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -18,6 +20,18 @@ data class ProfileUiState(
     val facts: List<String> = emptyList(),
 )
 
+/**
+ * One-shot feedback events surfaced to the screen as snackbars. Each
+ * mutating action emits exactly one event so the user sees confirmation
+ * (or a duplicate-guard message) instead of a silent UI update.
+ */
+sealed interface ProfileEvent {
+    data class Saved(val message: String) : ProfileEvent
+    data class Removed(val message: String) : ProfileEvent
+    data object Cleared : ProfileEvent
+    data object Duplicate : ProfileEvent
+}
+
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
     app: Application,
@@ -25,6 +39,9 @@ class ProfileViewModel @Inject constructor(
 ) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(ProfileUiState())
     val state: StateFlow<ProfileUiState> = _state.asStateFlow()
+
+    private val _events = Channel<ProfileEvent>(capacity = Channel.BUFFERED)
+    val events = _events.receiveAsFlow()
 
     init {
         viewModelScope.launch {
@@ -35,7 +52,13 @@ class ProfileViewModel @Inject constructor(
     }
 
     fun setName(name: String) {
-        viewModelScope.launch { store.update(name = name.trim().takeIf { it.isNotBlank() }) }
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            val current = store.profile.value
+            store.update(name = trimmed)
+            _events.send(ProfileEvent.Saved("Name updated"))
+        }
     }
 
     fun addTrait(trait: String) {
@@ -43,9 +66,12 @@ class ProfileViewModel @Inject constructor(
         if (trimmed.isBlank()) return
         viewModelScope.launch {
             val current = store.profile.value
-            if (trimmed !in current.traits) {
-                store.update(traits = current.traits + trimmed)
+            if (trimmed in current.traits) {
+                _events.send(ProfileEvent.Duplicate)
+                return@launch
             }
+            store.update(traits = current.traits + trimmed)
+            _events.send(ProfileEvent.Saved("Trait added"))
         }
     }
 
@@ -53,6 +79,7 @@ class ProfileViewModel @Inject constructor(
         viewModelScope.launch {
             val current = store.profile.value
             store.update(traits = current.traits.filter { it != trait })
+            _events.send(ProfileEvent.Removed("Trait removed"))
         }
     }
 
@@ -61,9 +88,12 @@ class ProfileViewModel @Inject constructor(
         if (trimmed.isBlank()) return
         viewModelScope.launch {
             val current = store.profile.value
-            if (trimmed !in current.facts) {
-                store.update(facts = current.facts + trimmed)
+            if (trimmed in current.facts) {
+                _events.send(ProfileEvent.Duplicate)
+                return@launch
             }
+            store.update(facts = current.facts + trimmed)
+            _events.send(ProfileEvent.Saved("Fact added"))
         }
     }
 
@@ -71,6 +101,7 @@ class ProfileViewModel @Inject constructor(
         viewModelScope.launch {
             val current = store.profile.value
             store.update(facts = current.facts.filter { it != fact })
+            _events.send(ProfileEvent.Removed("Fact removed"))
         }
     }
 
@@ -81,6 +112,7 @@ class ProfileViewModel @Inject constructor(
                 traits = emptyList(),
                 facts = emptyList(),
             )
+            _events.send(ProfileEvent.Cleared)
         }
     }
 }

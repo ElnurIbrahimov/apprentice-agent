@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aura.ui.viewmodel.ProfileEvent
 import com.aura.ui.viewmodel.ProfileViewModel
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -24,14 +26,30 @@ fun ProfileScreen(
     viewModel: ProfileViewModel = hiltViewModel(),
     onBack: () -> Unit,
 ) {
-    val state by viewModel.state.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     var name by remember(state.name) { mutableStateOf(state.name) }
     var traitInput by remember { mutableStateOf("") }
     var factInput by remember { mutableStateOf("") }
     var showClearDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // One-shot feedback events from the VM. The Channel-backed flow
+    // delivers each event exactly once, even across config changes.
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            val message = when (event) {
+                is ProfileEvent.Saved -> event.message
+                is ProfileEvent.Removed -> event.message
+                ProfileEvent.Cleared -> "Profile cleared"
+                ProfileEvent.Duplicate -> "Already in your list"
+            }
+            snackbarHostState.showSnackbar(message)
+        }
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Profile") },

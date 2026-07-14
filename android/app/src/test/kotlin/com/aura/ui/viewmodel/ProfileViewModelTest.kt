@@ -10,6 +10,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -18,6 +19,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 
 /**
  * Tests for [ProfileViewModel] name/traits/facts state machine.
@@ -57,11 +59,11 @@ class ProfileViewModelTest {
     }
 
     @Test
-    fun `setName clears name when blank`() = runTest {
+    fun `setName ignores blank input`() = runTest {
         coEvery { store.update(name = any()) } returns Unit
         val vm = ProfileViewModel(mockk(relaxed = true), store)
         vm.setName("   ")
-        coVerify(exactly = 1) { store.update(name = null) }
+        coVerify(exactly = 0) { store.update(name = any()) }
     }
 
     @Test
@@ -116,5 +118,25 @@ class ProfileViewModelTest {
         val vm = ProfileViewModel(mockk(relaxed = true), store)
         vm.clear()
         coVerify { store.update(name = "", traits = emptyList<String>(), facts = emptyList<String>()) }
+    }
+
+    @Test
+    fun `setName emits Saved event`() = runTest {
+        coEvery { store.update(name = any()) } returns Unit
+        val vm = ProfileViewModel(mockk(relaxed = true), store)
+        vm.setName("Elnur")
+        val event = vm.events.first()
+        assertIs<ProfileEvent.Saved>(event)
+        assertEquals("Name updated", event.message)
+    }
+
+    @Test
+    fun `addTrait duplicate emits Duplicate event without store update`() = runTest {
+        profileFlow.value = UserProfile(traits = listOf("technical"))
+        val vm = ProfileViewModel(mockk(relaxed = true), store)
+        vm.addTrait("technical")
+        coVerify(exactly = 0) { store.update(traits = any()) }
+        val event = vm.events.first()
+        assertIs<ProfileEvent.Duplicate>(event)
     }
 }
