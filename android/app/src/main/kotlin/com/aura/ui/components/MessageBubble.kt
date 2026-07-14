@@ -434,9 +434,15 @@ private fun AssistantMessage(
                 }
             }
             Spacer(Modifier.height(6.dp))
+            val renderedText = remember(text, citations, isStreaming) {
+                if (isStreaming) text else renderCitationMarkers(
+                    text,
+                    citations.mapTo(mutableSetOf()) { it.index },
+                )
+            }
             // Content — streaming text (with the cursor + tok/s from StreamingText)
             StreamingText(
-                text = text.ifBlank { "…" },
+                text = renderedText.ifBlank { "…" },
                 isStreaming = isStreaming,
                 style = MaterialTheme.typography.bodyLarge.copy(
                     color = AuraThemeTokens.colors.textPrimary,

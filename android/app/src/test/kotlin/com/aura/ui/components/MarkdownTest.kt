@@ -118,4 +118,31 @@ class MarkdownTest {
         val out = parse("Just plain text, nothing fancy.")
         assertEquals("Just plain text, nothing fancy.", out)
     }
+
+    @Test
+    fun `standalone citation markers render as compact superscripts`() {
+        assertEquals(
+            "Claim⁽¹⁾ and another⁽²⁾.",
+            renderCitationMarkers("Claim[1] and another[2].", setOf(1, 2)),
+        )
+    }
+
+    @Test
+    fun `citation transform leaves markdown links and unknown markers intact`() {
+        assertEquals(
+            "Read [1](https://example.com) and check [9].",
+            renderCitationMarkers("Read [1](https://example.com) and check [9].", setOf(1)),
+        )
+    }
+
+    @Test
+    fun `adjacent citation markers remain distinct`() {
+        assertEquals("Fact⁽¹⁾⁽²⁾", renderCitationMarkers("Fact[1][2]", setOf(1, 2)))
+    }
+
+    @Test
+    fun `citation-looking text inside fenced code remains literal`() {
+        val source = "```text\nvalue[1]\n```"
+        assertEquals(source, renderCitationMarkers(source, setOf(1)))
+    }
 }

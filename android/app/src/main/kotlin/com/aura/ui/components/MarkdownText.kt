@@ -83,6 +83,37 @@ private val italicStarRegex = Regex("(?<!\\*)\\*(?!\\s)(?!\\*)([^*]+?)(?<!\\s)(?
 private val italicUnderscoreRegex = Regex("(?<![A-Za-z0-9*])_(?!\\s)([^_\\n]+?)(?<!\\s)_(?![A-Za-z0-9*])")
 private val inlineCodeRegex = Regex("`([^`\\n]+)`")
 private val linkRegex = Regex("\\[([^\\]]+)\\]\\(([^)]+)\\)")
+private val citationMarkerRegex = Regex("\\[(\\d{1,3})](?!\\()")
+private val superscriptDigits = mapOf(
+    '0' to '⁰', '1' to '¹', '2' to '²', '3' to '³', '4' to '⁴',
+    '5' to '⁵', '6' to '⁶', '7' to '⁷', '8' to '⁸', '9' to '⁹',
+)
+
+/**
+ * Convert only known, standalone citation markers to compact superscripts.
+ * Markdown links and fenced code are deliberately left untouched.
+ */
+internal fun renderCitationMarkers(text: String, validIndices: Set<Int>): String {
+    if (text.isBlank() || validIndices.isEmpty()) return text
+    fun transform(segment: String): String = citationMarkerRegex.replace(segment) { match ->
+        val index = match.groupValues[1].toIntOrNull()
+        if (index !in validIndices) {
+            match.value
+        } else {
+            "⁽" + match.groupValues[1].map { superscriptDigits[it] ?: it }.joinToString("") + "⁾"
+        }
+    }
+
+    val output = StringBuilder(text.length)
+    var cursor = 0
+    for (codeBlock in codeBlockRegex.findAll(text)) {
+        output.append(transform(text.substring(cursor, codeBlock.range.first)))
+        output.append(codeBlock.value)
+        cursor = codeBlock.range.last + 1
+    }
+    output.append(transform(text.substring(cursor)))
+    return output.toString()
+}
 
 /** Only web links from untrusted model output may reach the system URI handler. */
 internal fun isSafeMarkdownUrl(url: String): Boolean = runCatching {
