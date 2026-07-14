@@ -1,5 +1,7 @@
 package com.aura.ui.viewmodel
 
+import com.aura.memory.MemoryEditEntity
+import com.aura.memory.MemoryEntity
 import com.aura.memory.MemoryStore
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -155,13 +157,64 @@ class MemoryViewModelTest {
 
     @Test
     fun `update calls store and triggers a refresh`() = runTest {
-        // The VM's update() delegates to the store; the store does the
-        // DAO round-trip internally. From the VM's perspective, all we
-        // need to confirm is that the call goes through with the
-        // right arguments.
         coEvery { memoryStore.update(any(), any(), any(), any(), any()) } returns Unit
         val vm = MemoryViewModel(memoryStore)
         vm.update("m1", "new content", "preference", 0.8f, "work,urgent")
         coVerify { memoryStore.update("m1", "new content", "preference", 0.8f, "work,urgent") }
+    }
+
+    @Test
+    fun `undo restores exact deleted memory with its edit history`() = runTest {
+        val memory = MemoryEntity(
+            id = "m-original",
+            content = "Remember this",
+            source = "user",
+            category = "fact",
+            createdAt = 10L,
+        )
+        val edits = listOf(
+            MemoryEditEntity(
+                id = 3,
+                memoryId = memory.id,
+                oldContent = "Remember",
+                newContent = memory.content,
+                oldCategory = "fact",
+                newCategory = "fact",
+            ),
+        )
+        coEvery { memoryStore.recent(200) } returns listOf(memory)
+        coEvery { memoryStore.getEditHistory(memory.id) } returns edits
+        val vm = MemoryViewModel(memoryStore)
+
+        vm.forget(memory.id)
+        assertEquals("Memory deleted", vm.state.value.undoMessage)
+        coVerify(exactly = 1) { memoryStore.forget(memory.id) }
+
+        vm.undoDelete()
+        coVerify(exactly = 1) { memoryStore.restore(memory, edits) }
+        assertNull(vm.state.value.undoMessage)
+    }
+
+    @Test
+    fun `loadEditHistory exposes newest-first audit entries`() = runTest {
+        val entries = listOf(
+            MemoryEditEntity(
+                id = 5,
+                memoryId = "m1",
+                oldContent = "old",
+                newContent = "new",
+                oldCategory = "fact",
+                newCategory = "preference",
+                editedAt = 123L,
+            ),
+        )
+        coEvery { memoryStore.getEditHistory("m1") } returns entries
+        val vm = MemoryViewModel(memoryStore)
+
+        vm.loadEditHistory("m1")
+
+        assertEquals("m1", vm.state.value.editHistoryMemoryId)
+        assertEquals(entries, vm.state.value.editHistory)
+        assertFalse(vm.state.value.editHistoryLoading)
     }
 }

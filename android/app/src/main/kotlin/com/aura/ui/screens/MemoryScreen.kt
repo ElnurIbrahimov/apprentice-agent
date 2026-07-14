@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -46,10 +47,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,12 +88,29 @@ fun MemoryScreen(
     var showClearAllConfirm by remember { mutableStateOf(false) }
     var showClearCategoryConfirm by remember { mutableStateOf(false) }
     var showAddNote by remember { mutableStateOf(false) }
+    var historyMemory by remember { mutableStateOf<MemoryEntity?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp)
-    ) {
+    LaunchedEffect(state.undoMessage) {
+        val message = state.undoMessage ?: return@LaunchedEffect
+        when (
+            snackbarHostState.showSnackbar(
+                message = message,
+                actionLabel = "Undo",
+                withDismissAction = true,
+            )
+        ) {
+            SnackbarResult.ActionPerformed -> viewModel.undoDelete()
+            SnackbarResult.Dismissed -> viewModel.clearUndo()
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp)
+        ) {
         val filterText = state.categoryFilter?.let { " · $it" } ?: ""
         val subtitle = when {
             state.memories.isEmpty() && state.query.isBlank() -> "No memories yet$filterText"
@@ -297,6 +319,10 @@ fun MemoryScreen(
                     MemoryRow(
                         mem = mem,
                         onEdit = { editingMemory = mem },
+                        onShowHistory = {
+                            historyMemory = mem
+                            viewModel.loadEditHistory(mem.id)
+                        },
                         onForget = { viewModel.forget(mem.id) },
                         onOpenSource = {
                             if (mem.sourceConversationId.isNotBlank()) {
@@ -310,9 +336,16 @@ fun MemoryScreen(
                 }
             }
         }
+        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(16.dp),
+        )
     }
 
-    // Edit dialog (rendered outside the main Column so it overlays everything)
+    // Edit dialog (rendered outside the main Box so it overlays everything)
     editingMemory?.let { mem ->
         EditMemoryDialog(
             memory = mem,
@@ -320,6 +353,18 @@ fun MemoryScreen(
             onSave = { newContent, newCategory, newImportance, newTags ->
                 viewModel.update(mem.id, newContent, newCategory, newImportance, newTags)
                 editingMemory = null
+            },
+        )
+    }
+
+    historyMemory?.let { memory ->
+        MemoryHistoryDialog(
+            memory = memory,
+            entries = state.editHistory,
+            loading = state.editHistoryLoading,
+            onDismiss = {
+                historyMemory = null
+                viewModel.clearEditHistory()
             },
         )
     }
@@ -414,6 +459,7 @@ fun MemoryScreen(
 private fun MemoryRow(
     mem: MemoryEntity,
     onEdit: () -> Unit,
+    onShowHistory: () -> Unit,
     onForget: () -> Unit,
     onOpenSource: () -> Unit,
 ) {
@@ -494,6 +540,13 @@ private fun MemoryRow(
                 TextButton(onClick = onOpenSource) {
                     Text("Source")
                 }
+            }
+            IconButton(onClick = onShowHistory) {
+                Icon(
+                    imageVector = Icons.Filled.History,
+                    contentDescription = "Edit history",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                )
             }
             IconButton(onClick = onEdit) {
                 Icon(

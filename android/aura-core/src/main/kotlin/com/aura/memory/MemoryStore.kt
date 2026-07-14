@@ -362,6 +362,12 @@ class MemoryStore @Inject constructor(
         return runCatching { memoryEditDao.getForMemory(memoryId) }.getOrDefault(emptyList())
     }
 
+    /** Reinsert the exact deleted row and its CASCADE-deleted audit trail. */
+    suspend fun restore(memory: MemoryEntity, edits: List<MemoryEditEntity> = emptyList()) {
+        dao.insert(memory)
+        if (edits.isNotEmpty()) memoryEditDao.insertAll(edits)
+    }
+
     fun observeCount(): Flow<Int> = dao.count()
     suspend fun count(): Int = dao.countOnce()
 

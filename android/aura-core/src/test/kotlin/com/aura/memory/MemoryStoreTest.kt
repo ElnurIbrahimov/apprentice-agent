@@ -342,4 +342,38 @@ class MemoryStoreTest {
         assertEquals("conv-42", captured.captured.sourceConversationId)
         assertEquals(1_700_000_123L, captured.captured.sourceTurnTimestamp)
     }
+
+    @Test
+    fun `restore reinserts exact memory and its audit trail`() = runTest {
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val editDao = mockk<MemoryEditDao>(relaxed = true)
+        val store = MemoryStore(dao, FakeEmbedder(384), VectorIndex(384), WriteGate(), editDao)
+        val memory = MemoryEntity(
+            id = "memory-original",
+            content = "Original fact",
+            source = "user",
+            category = "fact",
+            createdAt = 123L,
+            accessedAt = 456L,
+            accessCount = 7,
+            sourceConversationId = "conv-1",
+            sourceTurnTimestamp = 789L,
+        )
+        val edits = listOf(
+            MemoryEditEntity(
+                id = 41,
+                memoryId = memory.id,
+                oldContent = "Old fact",
+                newContent = memory.content,
+                oldCategory = "fact",
+                newCategory = "fact",
+                editedAt = 700L,
+            ),
+        )
+
+        store.restore(memory, edits)
+
+        coVerify(exactly = 1) { dao.insert(memory) }
+        coVerify(exactly = 1) { editDao.insertAll(edits) }
+    }
 }

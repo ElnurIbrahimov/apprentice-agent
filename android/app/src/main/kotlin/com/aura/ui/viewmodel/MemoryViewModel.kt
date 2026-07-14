@@ -2,7 +2,7 @@ package com.aura.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.aura.provenance.ConversationProvenance
+import com.aura.memory.MemoryEditEntity
 import com.aura.memory.MemoryEntity
 import com.aura.memory.MemoryStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -33,6 +33,9 @@ data class MemoryUiState(
      */
     val rebuildResult: String? = null,
     val undoMessage: String? = null,
+    val editHistoryMemoryId: String? = null,
+    val editHistory: List<MemoryEditEntity> = emptyList(),
+    val editHistoryLoading: Boolean = false,
 )
 
 @HiltViewModel
@@ -43,8 +46,13 @@ class MemoryViewModel @Inject constructor(
     private val _state = MutableStateFlow(MemoryUiState())
     val state: StateFlow<MemoryUiState> = _state.asStateFlow()
 
+    private data class DeletedMemory(
+        val memory: MemoryEntity,
+        val edits: List<MemoryEditEntity>,
+    )
+
     private var searchJob: kotlinx.coroutines.Job? = null
-    private var lastDeleted: MemoryEntity? = null
+    private var lastDeleted: DeletedMemory? = null
 
     init {
         refresh()
@@ -117,8 +125,9 @@ class MemoryViewModel @Inject constructor(
 
     fun forget(id: String) {
         viewModelScope.launch {
-            val mem = memoryStore.recent(200).find { it.id == id }
-            lastDeleted = mem
+            val memory = memoryStore.recent(200).find { it.id == id } ?: return@launch
+            val edits = memoryStore.getEditHistory(id)
+            lastDeleted = DeletedMemory(memory, edits)
             memoryStore.forget(id)
             _state.update { it.copy(undoMessage = "Memory deleted") }
             refresh()
@@ -126,19 +135,9 @@ class MemoryViewModel @Inject constructor(
     }
 
     fun undoDelete() {
-        val mem = lastDeleted ?: return
+        val deleted = lastDeleted ?: return
         viewModelScope.launch {
-            memoryStore.store(
-                content = mem.content,
-                source = mem.source,
-                category = mem.category,
-                importance = mem.importance,
-                tags = if (mem.tags.isBlank()) emptyList() else mem.tags.split(",").map { it.trim() },
-                provenance = ConversationProvenance(
-                    mem.sourceConversationId,
-                    mem.sourceTurnTimestamp,
-                ),
-            )
+            memoryStore.restore(deleted.memory, deleted.edits)
             lastDeleted = null
             _state.update { it.copy(undoMessage = null) }
             refresh()
@@ -181,6 +180,33 @@ class MemoryViewModel @Inject constructor(
         viewModelScope.launch {
             memoryStore.update(id, content, category, importance, tags)
             refresh()
+        }
+    }
+
+    fun loadEditHistory(memoryId: String) {
+        _state.update {
+            it.copy(
+                editHistoryMemoryId = memoryId,
+                editHistory = emptyList(),
+                editHistoryLoading = true,
+            )
+        }
+        viewModelScope.launch {
+            val entries = memoryStore.getEditHistory(memoryId)
+            _state.update { current ->
+                if (current.editHistoryMemoryId != memoryId) current
+                else current.copy(editHistory = entries, editHistoryLoading = false)
+            }
+        }
+    }
+
+    fun clearEditHistory() {
+        _state.update {
+            it.copy(
+                editHistoryMemoryId = null,
+                editHistory = emptyList(),
+                editHistoryLoading = false,
+            )
         }
     }
 
