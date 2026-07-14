@@ -8,7 +8,9 @@ import com.aura.hands.Hand
 import com.aura.hands.HandRepository
 import com.aura.hands.HandRun
 import com.aura.hands.HandRunStatus
+import com.aura.hands.HandRunTrigger
 import com.aura.hands.HandScheduler
+import com.aura.hands.HandStep
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -130,6 +132,60 @@ class HandsViewModelTest {
 
         assertNull(vm.state.value.running)
         assertEquals("done", vm.state.value.lastResult)
+    }
+
+    @Test
+    fun `approval resume authorizes only the stopped tool and starts at failed step`() = runTest {
+        val hand = Hand(
+            id = "h1",
+            name = "Illustrate",
+            steps = """[{"tool":"prepare","args":{}},{"tool":"image_gen","args":{"prompt":"{{prompt}}"}}]""",
+            updatedAt = 100L,
+        )
+        val run = HandRun(
+            id = "r1",
+            handId = hand.id,
+            handName = hand.name,
+            trigger = HandRunTrigger.SCHEDULE.value,
+            status = HandRunStatus.NEEDS_APPROVAL.value,
+            startedAt = 200L,
+            failedStep = 2,
+            variablesJson = """{"prompt":"castle"}""",
+        )
+        coEvery { repository.getById("h1") } returns hand
+        every { repository.parseVariables(run.variablesJson) } returns mapOf("prompt" to "castle")
+        every { repository.parseSteps(hand.steps) } returns listOf(
+            HandStep("prepare", emptyMap()),
+            HandStep("image_gen", mapOf("prompt" to "{{prompt}}")),
+        )
+        coEvery {
+            repository.run(
+                hand,
+                executor,
+                match<ToolContext> {
+                    it.conversationId == "hand:h1:resume:r1" &&
+                        it.approvedRemoteCostTools == setOf("image_gen")
+                },
+                mapOf("prompt" to "castle"),
+                HandRunTrigger.RESUME.value,
+                1,
+            )
+        } returns ToolResult.Ok("resumed")
+        val vm = viewModel()
+
+        vm.resumeRun(run)
+
+        assertEquals("resumed", vm.state.value.lastResult)
+        coVerify {
+            repository.run(
+                hand,
+                executor,
+                any<ToolContext>(),
+                mapOf("prompt" to "castle"),
+                HandRunTrigger.RESUME.value,
+                1,
+            )
+        }
     }
 
     @Test

@@ -326,4 +326,42 @@ class HandRepositoryTest {
         assertNotNull(ok)
         assertEquals("No steps defined for hand 'BadStep'", ok?.output)
     }
+
+    @Test
+    fun `resumed run starts at the stopped step and preserves step numbering`() = runTest {
+        val hand = Hand(
+            id = "resume",
+            name = "Resume me",
+            steps = """[
+                {"tool":"first","args":{}},
+                {"tool":"paid","args":{"prompt":"continue"}},
+                {"tool":"last","args":{}}
+            ]""",
+        )
+        val resumeContext = ToolContext(
+            conversationId = "hand:resume:retry:r1",
+            approvedRemoteCostTools = setOf("paid"),
+        )
+        coEvery { dao.insertRun(any()) } returns Unit
+        coEvery { dao.updateRun(any()) } returns Unit
+        coEvery { executor.execute("paid", """{"prompt":"continue"}""", resumeContext) } returns ToolResult.Ok("paid done")
+        coEvery { executor.execute("last", "{}", resumeContext) } returns ToolResult.Ok("last done")
+
+        val result = repository.run(
+            hand = hand,
+            executor = executor,
+            ctx = resumeContext,
+            startStepIndex = 1,
+            trigger = HandRunTrigger.RESUME.value,
+        )
+
+        val ok = result as ToolResult.Ok
+        assertEquals(
+            "Hand 'Resume me' completed.\nStep 2 (paid): paid done\nStep 3 (last): last done",
+            ok.output,
+        )
+        coVerify(exactly = 0) { executor.execute("first", any(), any()) }
+        coVerify { executor.execute("paid", """{"prompt":"continue"}""", resumeContext) }
+        coVerify { executor.execute("last", "{}", resumeContext) }
+    }
 }

@@ -1,5 +1,7 @@
 package com.aura.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -92,7 +94,15 @@ fun HandsScreen(
     var runHand by remember { mutableStateOf<Hand?>(null) }
     var deleteHand by remember { mutableStateOf<Hand?>(null) }
     var confirmClearHistory by remember { mutableStateOf(false) }
+    var permissionRun by remember { mutableStateOf<HandRun?>(null) }
     val snackbar = remember { SnackbarHostState() }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val run = permissionRun
+        permissionRun = null
+        if (granted && run != null) viewModel.resumeRun(run)
+    }
 
     LaunchedEffect(state.error) {
         state.error?.let {
@@ -160,6 +170,16 @@ fun HandsScreen(
                 RunHistory(
                     runs = state.runs,
                     onClear = { confirmClearHistory = true },
+                    onApprove = viewModel::resumeRun,
+                    onGrantPermission = { run ->
+                        val permission = viewModel.pendingPermission(run)
+                        if (permission == null) {
+                            viewModel.resumeRun(run)
+                        } else {
+                            permissionRun = run
+                            permissionLauncher.launch(permission)
+                        }
+                    },
                 )
             }
         }
@@ -311,7 +331,12 @@ private fun MetadataPill(icon: androidx.compose.ui.graphics.vector.ImageVector?,
 }
 
 @Composable
-private fun RunHistory(runs: List<HandRun>, onClear: () -> Unit) {
+private fun RunHistory(
+    runs: List<HandRun>,
+    onClear: () -> Unit,
+    onApprove: (HandRun) -> Unit,
+    onGrantPermission: (HandRun) -> Unit,
+) {
     if (runs.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -353,14 +378,24 @@ private fun RunHistory(runs: List<HandRun>, onClear: () -> Unit) {
             }
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(filteredRuns, key = { it.id }) { run -> RunHistoryCard(run) }
+                items(filteredRuns, key = { it.id }) { run ->
+                    RunHistoryCard(
+                        run = run,
+                        onApprove = { onApprove(run) },
+                        onGrantPermission = { onGrantPermission(run) },
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun RunHistoryCard(run: HandRun) {
+private fun RunHistoryCard(
+    run: HandRun,
+    onApprove: () -> Unit,
+    onGrantPermission: () -> Unit,
+) {
     var expanded by remember(run.id) { mutableStateOf(false) }
     val color = statusColor(run.status)
     Surface(
@@ -387,6 +422,20 @@ private fun RunHistoryCard(run: HandRun) {
                     Text(run.output.ifBlank { "No output recorded" }, style = MaterialTheme.typography.bodySmall)
                     if (run.variablesJson != "{}") {
                         Text("Inputs: ${run.variablesJson}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    when (run.status) {
+                        HandRunStatus.NEEDS_APPROVAL.value -> Button(
+                            onClick = onApprove,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Approve & resume")
+                        }
+                        HandRunStatus.NEEDS_PERMISSION.value -> Button(
+                            onClick = onGrantPermission,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Grant permission & resume")
+                        }
                     }
                 }
             }

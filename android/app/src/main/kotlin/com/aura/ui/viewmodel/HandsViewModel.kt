@@ -139,14 +139,71 @@ class HandsViewModel @Inject constructor(
                     trigger = HandRunTrigger.MANUAL.value,
                 )
             }.getOrElse { ToolResult.Error(it.message ?: "Hand failed", "hand_runtime_error") }
-            val message = when (result) {
-                is ToolResult.Ok -> result.output
-                is ToolResult.Error -> "Error: ${result.message}"
-                is ToolResult.NeedsPermission -> "Permission needed: ${result.permission}"
-                is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
-            }
-            _state.value = _state.value.copy(running = null, lastResult = message)
+            _state.value = _state.value.copy(running = null, lastResult = resultMessage(result))
         }
+    }
+
+    /** Permission needed by the stopped step, used by the ActivityResult launcher. */
+    fun pendingPermission(run: HandRun): String? {
+        val hand = _state.value.hands.firstOrNull { it.id == run.handId } ?: return null
+        val stepIndex = run.failedStep?.minus(1) ?: return null
+        val step = repository.parseSteps(hand.steps).getOrNull(stepIndex) ?: return null
+        return toolRegistry.get(step.tool)?.requiredPermissions?.firstOrNull()
+    }
+
+    /**
+     * Resume exactly at the stopped step. Approval is scoped to that step's
+     * tool name; edited automations and redacted runtime secrets fail closed.
+     */
+    fun resumeRun(run: HandRun) {
+        _state.value = _state.value.copy(running = run.handName, lastResult = null)
+        viewModelScope.launch {
+            val result = runCatching {
+                val hand = repository.getById(run.handId)
+                    ?: return@runCatching ToolResult.Error("This hand no longer exists", "hand_missing")
+                if (hand.updatedAt > run.startedAt) {
+                    return@runCatching ToolResult.Error(
+                        "This hand changed after the stopped run. Start a fresh run to review the new steps.",
+                        "hand_changed_since_run",
+                    )
+                }
+                val stepIndex = run.failedStep?.minus(1)
+                    ?: return@runCatching ToolResult.Error("No stopped step was recorded", "resume_step_missing")
+                val step = repository.parseSteps(hand.steps).getOrNull(stepIndex)
+                    ?: return@runCatching ToolResult.Error("The stopped step no longer exists", "resume_step_missing")
+                val variables = repository.parseVariables(run.variablesJson)
+                if (variables.values.any { it == "[redacted]" }) {
+                    return@runCatching ToolResult.Error(
+                        "This run used a secret input that was not stored. Start a fresh run and enter it again.",
+                        "resume_secret_required",
+                    )
+                }
+                val approvedTools = if (run.status == com.aura.hands.HandRunStatus.NEEDS_APPROVAL.value) {
+                    setOf(step.tool)
+                } else {
+                    emptySet()
+                }
+                repository.run(
+                    hand = hand,
+                    executor = toolExecutor,
+                    ctx = ToolContext(
+                        conversationId = "hand:${hand.id}:resume:${run.id}",
+                        approvedRemoteCostTools = approvedTools,
+                    ),
+                    variables = variables,
+                    trigger = HandRunTrigger.RESUME.value,
+                    startStepIndex = stepIndex,
+                )
+            }.getOrElse { ToolResult.Error(it.message ?: "Hand resume failed", "hand_resume_error") }
+            _state.value = _state.value.copy(running = null, lastResult = resultMessage(result))
+        }
+    }
+
+    private fun resultMessage(result: ToolResult): String = when (result) {
+        is ToolResult.Ok -> result.output
+        is ToolResult.Error -> "Error: ${result.message}"
+        is ToolResult.NeedsPermission -> "Permission needed: ${result.permission}"
+        is ToolResult.NeedsApproval -> "Approval needed: ${result.rationale}"
     }
 
     fun clearHistory() {

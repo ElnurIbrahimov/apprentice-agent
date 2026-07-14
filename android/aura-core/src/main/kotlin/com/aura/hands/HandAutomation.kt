@@ -65,6 +65,7 @@ enum class HandRunTrigger(val value: String) {
     AGENT("agent"),
     PHRASE("phrase"),
     SCHEDULE("schedule"),
+    RESUME("resume"),
 }
 
 enum class HandRunStatus(val value: String) {

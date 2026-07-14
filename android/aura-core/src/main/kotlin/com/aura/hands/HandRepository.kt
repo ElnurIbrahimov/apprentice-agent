@@ -48,6 +48,7 @@ class HandRepository @Inject constructor(
         ctx: ToolContext,
         variables: Map<String, String> = emptyMap(),
         trigger: String = HandRunTrigger.MANUAL.value,
+        startStepIndex: Int = 0,
     ): ToolResult {
         val startedAt = System.currentTimeMillis()
         var runRecord = HandRun(
@@ -134,9 +135,18 @@ class HandRepository @Inject constructor(
             val message = "No steps defined for hand '${hand.name}'"
             return finish(ToolResult.Ok(message), HandRunStatus.SUCCESS, message)
         }
+        if (startStepIndex !in steps.indices) {
+            val message = "Cannot resume hand '${hand.name}': step ${startStepIndex + 1} no longer exists"
+            return finish(
+                ToolResult.Error(message, "invalid_resume_step"),
+                HandRunStatus.FAILED,
+                message,
+                startStepIndex + 1,
+            )
+        }
 
         val outputs = mutableListOf<String>()
-        for ((index, step) in steps.withIndex()) {
+        for ((index, step) in steps.withIndex().drop(startStepIndex)) {
             val substitution = substitute(step.args, resolvedVariables)
             if (substitution.missingVariables.isNotEmpty()) {
                 val message = "Step ${index + 1} (${step.tool}) is missing variables: " +

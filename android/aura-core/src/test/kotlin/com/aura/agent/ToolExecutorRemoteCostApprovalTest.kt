@@ -108,4 +108,30 @@ class ToolExecutorRemoteCostApprovalTest {
         assertIs<ToolResult.NeedsApproval>(result)
         assertEquals(0, executions.get())
     }
+
+    @Test
+    fun `explicit UI approval authorizes only the named remote cost tool`() = runBlocking {
+        registerCostTool()
+        every { registry.get("other_cost") } returns Tool(
+            name = "other_cost",
+            description = "Another metered call",
+            risk = ToolRisk.REMOTE_COST,
+            execute = { _, _ -> ToolResult.Ok("other") },
+        )
+        val context = ToolContext(
+            conversationId = "hand:h1:resume:r1",
+            approvedRemoteCostTools = setOf("image_generate"),
+        )
+
+        val approved = executor.execute(
+            "image_generate",
+            """{"prompt":"a lighthouse"}""",
+            context,
+        )
+        val unrelated = executor.execute("other_cost", "{}", context)
+
+        assertIs<ToolResult.Ok>(approved)
+        assertIs<ToolResult.NeedsApproval>(unrelated)
+        assertEquals(1, executions.get())
+    }
 }

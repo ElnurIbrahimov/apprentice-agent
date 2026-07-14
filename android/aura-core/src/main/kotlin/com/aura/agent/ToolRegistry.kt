@@ -53,6 +53,12 @@ data class ToolContext(
     val permissions: Set<String> = emptySet(),
     val timeout: Long = 30_000L,
     /**
+     * Tool names explicitly approved by a first-party UI action. This is
+     * narrower than a boolean: approval for one metered tool cannot authorize
+     * another tool in the same resumed automation.
+     */
+    val approvedRemoteCostTools: Set<String> = emptySet(),
+    /**
      * Session-level write flag. When false, the tool executor refuses to
      * run tools whose risk >= WRITE_LOCAL — this is the privacy boundary
      * used by the incognito toggle. READ_ONLY tools (e.g. recall, web_search)

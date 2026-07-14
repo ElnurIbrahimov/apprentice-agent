@@ -64,7 +64,7 @@ class ToolExecutor @Inject constructor(
             return ToolResult.Error("Bad arguments: ${e.message}", "bad_args")
         }
 
-        if (tool.risk == ToolRisk.REMOTE_COST) {
+        if (tool.risk == ToolRisk.REMOTE_COST && name !in ctx.approvedRemoteCostTools) {
             remoteCostApprovalGate.authorize(name, args, ctx)?.let { rationale ->
                 return ToolResult.NeedsApproval(rationale)
             }
