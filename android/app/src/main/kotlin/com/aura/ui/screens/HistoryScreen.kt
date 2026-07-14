@@ -159,7 +159,7 @@ fun HistoryScreen(
         OutlinedTextField(
             value = state.query,
             onValueChange = viewModel::onQueryChanged,
-            placeholder = { Text("Search title and messages") },
+            placeholder = { Text("Search by meaning, title, or message") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             trailingIcon = {
                 if (state.query.isNotEmpty()) {
@@ -201,7 +201,7 @@ fun HistoryScreen(
                     if (state.query.isNotBlank()) {
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Search looks at conversation titles and message text.",
+                            "Aura searches exact words and related meaning across titles and messages.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                         )
@@ -213,6 +213,7 @@ fun HistoryScreen(
                 items(state.conversations, key = { it.id }) { conv ->
                     HistoryRow(
                         conv = conv,
+                        stats = viewModel.getStats(conv),
                         isPinned = viewModel.isPinned(conv),
                         isSelected = conv.id in state.selectedIds,
                         selectMode = state.selectMode,
@@ -244,6 +245,7 @@ fun HistoryScreen(
 @Composable
 private fun HistoryRow(
     conv: Conversation,
+    stats: HistoryViewModel.ConversationStats,
     isPinned: Boolean,
     isSelected: Boolean,
     selectMode: Boolean,
@@ -332,6 +334,12 @@ private fun HistoryRow(
                 Text(conv.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(2.dp))
                 Text(preview.take(80), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = formatConversationStats(stats),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.82f),
+                )
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = conv.model?.let { com.aura.ui.util.modelDisplayName(it) } ?: "Unknown model",
@@ -368,6 +376,24 @@ private fun HistoryRow(
             }
         }
     }
+}
+
+internal fun formatConversationStats(stats: HistoryViewModel.ConversationStats): String {
+    val parts = mutableListOf(
+        "${stats.turns} ${if (stats.turns == 1) "turn" else "turns"}",
+    )
+    if (stats.toolCalls > 0) {
+        parts += "${stats.toolCalls} ${if (stats.toolCalls == 1) "tool" else "tools"}"
+    }
+    if (stats.durationMs >= 60_000L) {
+        val minutes = stats.durationMs / 60_000L
+        parts += when {
+            minutes >= 1_440L -> "${minutes / 1_440L}d span"
+            minutes >= 60L -> "${minutes / 60L}h span"
+            else -> "${minutes}m span"
+        }
+    }
+    return parts.joinToString(" · ")
 }
 
 // ── Skeleton Loading ─────────────────────────────────────────────────────────

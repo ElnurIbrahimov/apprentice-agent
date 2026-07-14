@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.aura.agent.Conversation
 import com.aura.agent.ConversationStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -147,7 +149,7 @@ class HistoryViewModel @Inject constructor(
         searchJob = viewModelScope.launch {
             _state.update { it.copy(searching = true) }
             kotlinx.coroutines.delay(250)
-            val results = store.search(trimmed, 50)
+            val results = searchConversations(trimmed, 50)
             _state.update { it.copy(conversations = results, searching = false) }
         }
     }
@@ -156,11 +158,12 @@ class HistoryViewModel @Inject constructor(
         viewModelScope.launch {
             store.delete(id)
             val q = _state.value.query
-            if (q.isBlank()) {
-                _state.update { it.copy(conversations = store.recentPinnedFirst(50)) }
+            val conversations = if (q.isBlank()) {
+                store.recentPinnedFirst(50)
             } else {
-                _state.update { it.copy(conversations = store.search(q, 50)) }
+                searchConversations(q, 50)
             }
+            _state.update { it.copy(conversations = conversations) }
         }
     }
 
@@ -257,9 +260,23 @@ class HistoryViewModel @Inject constructor(
 
     private suspend fun refreshList() {
         val q = _state.value.query
-        val convos = if (q.isBlank()) store.recentPinnedFirst(50) else store.search(q, 50)
+        val convos = if (q.isBlank()) store.recentPinnedFirst(50) else searchConversations(q, 50)
         _state.update { it.copy(conversations = convos) }
     }
+
+    /**
+     * Exact title/message matches remain first; semantic matches fill
+     * the remaining slots. Both queries run concurrently because the
+     * lexical path is local SQLite while semantic search may embed.
+     */
+    private suspend fun searchConversations(query: String, limit: Int): List<Conversation> =
+        coroutineScope {
+            val lexical = async { store.search(query, limit) }
+            val semantic = async { store.semanticSearch(query, limit) }
+            (lexical.await() + semantic.await())
+                .distinctBy { it.id }
+                .take(limit)
+        }
 
     /**
      * Render [conversation] as a Markdown document. Used by the

@@ -268,6 +268,50 @@ class HistoryViewModelTest {
     }
 
     @Test
+    fun `hybrid search keeps lexical matches first and adds semantic matches`() = runTest {
+        val exact = Conversation(id = "exact", title = "Kotlin file bug", createdAt = 1L, updatedAt = 1L)
+        val shared = Conversation(id = "shared", title = "Coroutines", createdAt = 2L, updatedAt = 2L)
+        val semantic = Conversation(id = "semantic", title = "Structured concurrency", createdAt = 3L, updatedAt = 3L)
+        coEvery { store.recentPinnedFirst(50) } returns emptyList()
+        coEvery { store.search("concurrency issue", 50) } returns listOf(exact, shared)
+        coEvery { store.semanticSearch("concurrency issue", 50) } returns listOf(shared, semantic)
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+
+        vm.onQueryChanged("concurrency issue")
+        advanceUntilIdle()
+
+        assertEquals(listOf("exact", "shared", "semantic"), vm.state.value.conversations.map { it.id })
+        coVerify(exactly = 1) { store.search("concurrency issue", 50) }
+        coVerify(exactly = 1) { store.semanticSearch("concurrency issue", 50) }
+    }
+
+    @Test
+    fun `conversation stats count turns tools and duration`() {
+        val vm = HistoryViewModel(mockk(relaxed = true), store)
+        val conversation = Conversation(
+            id = "stats",
+            title = "Stats",
+            createdAt = 1_000L,
+            updatedAt = 61_000L,
+            turns = listOf(
+                Turn(user = "one", assistant = "answer"),
+                Turn(
+                    assistant = "tool answer",
+                    toolTurns = listOf(
+                        com.aura.agent.ToolTurn("t1", "search", "{}", "result"),
+                        com.aura.agent.ToolTurn("t2", "read", "{}", "result"),
+                    ),
+                ),
+            ),
+        )
+
+        val stats = vm.getStats(conversation)
+        assertEquals(2, stats.turns)
+        assertEquals(2, stats.toolCalls)
+        assertEquals(60_000L, stats.durationMs)
+    }
+
+    @Test
     fun `exportSelectedMarkdown returns empty string for empty selection`() = runTest {
         coEvery { store.recentPinnedFirst(50) } returns emptyList()
         val vm = HistoryViewModel(mockk(relaxed = true), store)
