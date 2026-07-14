@@ -54,6 +54,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.settings.BackupViewModel
 import com.aura.ui.settings.ProviderKeyField
+import com.aura.ui.settings.SETTINGS_CREDENTIAL_SPECS
 import com.aura.ui.settings.SettingsViewModel
 import com.aura.ui.settings.UsageViewModel
 import com.aura.ui.util.modelDisplayName
@@ -249,72 +250,28 @@ fun SettingsScreen(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Stored locally. Changes take effect only after Save & Test succeeds.",
+                text = "Stored locally. Model providers use Save & Test; tool services use Save.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
             )
             Spacer(modifier = Modifier.height(4.dp))
 
-            ProviderKeyField(
-                label = "Ollama Cloud",
-                value = state.ollamaKey,
-                onValueChange = viewModel::saveOllamaKey,
-                helperText = "Get a key at ollama.com/settings/keys",
-                onVerify = { viewModel.verifyKey("ollama") },
-                verifyResult = state.verifyResults["ollama"],
-                verifying = state.verifying == "ollama",
-                credentialState = state.credentialStates["ollama"],
-            )
-            ProviderKeyField(
-                label = "Anthropic",
-                value = state.anthropicKey,
-                onValueChange = viewModel::saveAnthropicKey,
-                helperText = "Get a key at console.anthropic.com/settings/keys",
-                onVerify = { viewModel.verifyKey("anthropic") },
-                verifyResult = state.verifyResults["anthropic"],
-                verifying = state.verifying == "anthropic",
-                credentialState = state.credentialStates["anthropic"],
-            )
-            ProviderKeyField(
-                label = "OpenAI",
-                value = state.openaiKey,
-                onValueChange = viewModel::saveOpenaiKey,
-                helperText = "Get a key at platform.openai.com/api-keys",
-                onVerify = { viewModel.verifyKey("openai") },
-                verifyResult = state.verifyResults["openai"],
-                verifying = state.verifying == "openai",
-                credentialState = state.credentialStates["openai"],
-            )
-            ProviderKeyField(
-                label = "DeepSeek",
-                value = state.deepseekKey,
-                onValueChange = viewModel::saveDeepseekKey,
-                helperText = "Get a key at platform.deepseek.com/api_keys",
-                onVerify = { viewModel.verifyKey("deepseek") },
-                verifyResult = state.verifyResults["deepseek"],
-                verifying = state.verifying == "deepseek",
-                credentialState = state.credentialStates["deepseek"],
-            )
-            ProviderKeyField(
-                label = "Groq",
-                value = state.groqKey,
-                onValueChange = viewModel::saveGroqKey,
-                helperText = "Get a key at console.groq.com/keys",
-                onVerify = { viewModel.verifyKey("groq") },
-                verifyResult = state.verifyResults["groq"],
-                verifying = state.verifying == "groq",
-                credentialState = state.credentialStates["groq"],
-            )
-            ProviderKeyField(
-                label = "OpenRouter",
-                value = state.openrouterKey,
-                onValueChange = viewModel::saveOpenrouterKey,
-                helperText = "Get key at openrouter.ai/keys",
-                onVerify = { viewModel.verifyKey("openrouter") },
-                verifyResult = state.verifyResults["openrouter"],
-                verifying = state.verifying == "openrouter",
-                credentialState = state.credentialStates["openrouter"],
-            )
+            SETTINGS_CREDENTIAL_SPECS.forEach { credential ->
+                ProviderKeyField(
+                    label = credential.label,
+                    value = state.keyDrafts[credential.prefix].orEmpty(),
+                    onValueChange = { value ->
+                        viewModel.updateCredentialDraft(credential.prefix, value)
+                    },
+                    helperText = credential.helperText,
+                    onVerify = { viewModel.verifyKey(credential.prefix) },
+                    verifyResult = state.verifyResults[credential.prefix],
+                    verifying = state.verifying == credential.prefix,
+                    credentialState = state.credentialStates[credential.prefix],
+                    actionLabel = if (credential.testsModelCatalog) "Save & Test" else "Save",
+                    requiresTest = credential.testsModelCatalog,
+                )
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 

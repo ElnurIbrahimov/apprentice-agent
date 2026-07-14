@@ -20,13 +20,32 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+data class SettingsCredentialSpec(
+    val prefix: String,
+    val label: String,
+    val helperText: String,
+    val testsModelCatalog: Boolean,
+)
+
+val SETTINGS_CREDENTIAL_SPECS: List<SettingsCredentialSpec> = listOf(
+    SettingsCredentialSpec("ollama", "Ollama Cloud", "Get a key at ollama.com/settings/keys", true),
+    SettingsCredentialSpec("anthropic", "Anthropic", "Get a key at console.anthropic.com/settings/keys", true),
+    SettingsCredentialSpec("openai", "OpenAI", "Get a key at platform.openai.com/api-keys", true),
+    SettingsCredentialSpec("deepseek", "DeepSeek", "Get a key at platform.deepseek.com/api_keys", true),
+    SettingsCredentialSpec("gemini", "Gemini", "Get a key at aistudio.google.com/apikey", true),
+    SettingsCredentialSpec("groq", "Groq", "Get a key at console.groq.com/keys", true),
+    SettingsCredentialSpec("openrouter", "OpenRouter", "Get a key at openrouter.ai/keys", true),
+    SettingsCredentialSpec("brave", "Brave Search", "Used by Brave web search tools", false),
+    SettingsCredentialSpec("tavily", "Tavily Search", "Used by Tavily research tools", false),
+    SettingsCredentialSpec("firecrawl", "Firecrawl", "Used by Firecrawl page extraction", false),
+)
+
+private val TOOL_CREDENTIAL_PREFIXES: Set<String> = SETTINGS_CREDENTIAL_SPECS
+    .filterNot { it.testsModelCatalog }
+    .mapTo(mutableSetOf()) { it.prefix }
+
 data class SettingsUiState(
-    val ollamaKey: String = "",
-    val anthropicKey: String = "",
-    val openaiKey: String = "",
-    val deepseekKey: String = "",
-    val groqKey: String = "",
-    val openrouterKey: String = "",
+    val keyDrafts: Map<String, String> = ProviderKeys.PREFIXES.associateWith { "" },
     val defaultModel: String = "",
     val visionModel: String = "",
     val backgroundModel: String = "",
@@ -125,12 +144,9 @@ class SettingsViewModel @Inject constructor(
             val specialistOverrides = userPreferences.specialistOverrides.first()
             val morningBriefHour = userPreferences.morningBriefHour.first()
             _state.value = SettingsUiState(
-                ollamaKey = providerKeys.keyFor("ollama") ?: "",
-                anthropicKey = providerKeys.keyFor("anthropic") ?: "",
-                openaiKey = providerKeys.keyFor("openai") ?: "",
-                deepseekKey = providerKeys.keyFor("deepseek") ?: "",
-                groqKey = providerKeys.keyFor("groq") ?: "",
-                openrouterKey = providerKeys.keyFor("openrouter") ?: "",
+                keyDrafts = ProviderKeys.PREFIXES.associateWith { prefix ->
+                    providerKeys.keyFor(prefix).orEmpty()
+                },
                 defaultModel = defaultModel.orEmpty(),
                 visionModel = visionModel.orEmpty(),
                 backgroundModel = backgroundModel.orEmpty(),
@@ -151,13 +167,6 @@ class SettingsViewModel @Inject constructor(
             )
         }
     }
-
-    fun saveOllamaKey(k: String) = updateKeyDraft("ollama", k)
-    fun saveAnthropicKey(k: String) = updateKeyDraft("anthropic", k)
-    fun saveOpenaiKey(k: String) = updateKeyDraft("openai", k)
-    fun saveDeepseekKey(k: String) = updateKeyDraft("deepseek", k)
-    fun saveGroqKey(k: String) = updateKeyDraft("groq", k)
-    fun saveOpenrouterKey(k: String) = updateKeyDraft("openrouter", k)
 
     fun setDefaultModel(model: String) {
         viewModelScope.launch {
@@ -312,33 +321,18 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun updateKeyDraft(prefix: String, value: String) {
+    fun updateCredentialDraft(prefix: String, value: String) {
+        require(prefix in ProviderKeys.PREFIXES) { "Unknown credential prefix: $prefix" }
         _state.update { current ->
-            val updated = when (prefix) {
-                "ollama" -> current.copy(ollamaKey = value)
-                "anthropic" -> current.copy(anthropicKey = value)
-                "openai" -> current.copy(openaiKey = value)
-                "deepseek" -> current.copy(deepseekKey = value)
-                "groq" -> current.copy(groqKey = value)
-                "openrouter" -> current.copy(openrouterKey = value)
-                else -> current
-            }
-            updated.copy(
-                providerTests = updated.providerTests - prefix,
-                verifyResults = updated.verifyResults - prefix,
+            current.copy(
+                keyDrafts = current.keyDrafts + (prefix to value),
+                providerTests = current.providerTests - prefix,
+                verifyResults = current.verifyResults - prefix,
             )
         }
     }
 
-    private fun keyDraft(prefix: String): String = when (prefix) {
-        "ollama" -> _state.value.ollamaKey
-        "anthropic" -> _state.value.anthropicKey
-        "openai" -> _state.value.openaiKey
-        "deepseek" -> _state.value.deepseekKey
-        "groq" -> _state.value.groqKey
-        "openrouter" -> _state.value.openrouterKey
-        else -> ""
-    }
+    private fun keyDraft(prefix: String): String = _state.value.keyDrafts[prefix].orEmpty()
 
     fun saveAndTestProvider(prefix: String) {
         if (_state.value.verifying != null) return
@@ -349,6 +343,14 @@ class SettingsViewModel @Inject constructor(
                 providerKeys.set(prefix, value)
                 if (providerKeys.credentialStates.value[prefix] == ProviderCredentialState.StorageError) {
                     updateProviderTest(prefix, ProviderTestPhase.Failed, "Secure storage failed")
+                    return@launch
+                }
+                if (prefix in TOOL_CREDENTIAL_PREFIXES) {
+                    updateProviderTest(
+                        prefix,
+                        ProviderTestPhase.Idle,
+                        if (value.isBlank()) "Credential removed" else "Saved securely",
+                    )
                     return@launch
                 }
                 if (value.isBlank()) {

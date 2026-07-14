@@ -138,9 +138,9 @@ class SettingsViewModelAppLockTest {
     fun `typing provider draft does not persist credential`() = runTest {
         val vm = newViewModel()
 
-        vm.saveOllamaKey("draft-key")
+        vm.updateCredentialDraft("ollama", "draft-key")
 
-        assertEquals("draft-key", vm.state.value.ollamaKey)
+        assertEquals("draft-key", vm.state.value.keyDrafts["ollama"])
         coVerify(exactly = 0) { providerKeys.set(any(), any()) }
     }
 
@@ -168,7 +168,7 @@ class SettingsViewModelAppLockTest {
             )
         }
         val vm = newViewModel()
-        vm.saveOllamaKey("draft-key")
+        vm.updateCredentialDraft("ollama", "draft-key")
 
         vm.saveAndTestProvider("ollama")
 
@@ -201,12 +201,38 @@ class SettingsViewModelAppLockTest {
             )
         }
         val vm = newViewModel()
-        vm.saveOllamaKey("bad-key")
+        vm.updateCredentialDraft("ollama", "bad-key")
 
         vm.saveAndTestProvider("ollama")
 
         assertEquals(ProviderTestPhase.Failed, vm.state.value.providerTests["ollama"]?.phase)
         assertEquals(ProviderCredentialState.Invalid, vm.state.value.credentialStates["ollama"])
+    }
+
+    @Test
+    fun `settings credential specs cover every provider and tool prefix`() {
+        assertEquals(
+            ProviderKeys.PREFIXES.toSet(),
+            SETTINGS_CREDENTIAL_SPECS.map { it.prefix }.toSet(),
+        )
+        assertEquals(ProviderKeys.PREFIXES.size, SETTINGS_CREDENTIAL_SPECS.size)
+    }
+
+    @Test
+    fun `tool-only credential saves without pretending to verify a model catalog`() = runTest {
+        coEvery { providerKeys.set("brave", "tool-key") } answers {
+            credentialFlow.value = credentialFlow.value +
+                ("brave" to ProviderCredentialState.Saved)
+        }
+        val vm = newViewModel()
+        vm.updateCredentialDraft("brave", "tool-key")
+
+        vm.saveAndTestProvider("brave")
+
+        assertEquals("Saved securely", vm.state.value.verifyResults["brave"])
+        coVerify(exactly = 1) { providerKeys.set("brave", "tool-key") }
+        coVerify(exactly = 0) { modelCatalogRepository.refreshProvider("brave", any()) }
+        coVerify(exactly = 0) { providerKeys.markValidation("brave", any()) }
     }
 
     @Test

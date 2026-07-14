@@ -43,6 +43,8 @@ fun ProviderKeyField(
     verifyResult: String? = null,
     verifying: Boolean = false,
     credentialState: ProviderCredentialState? = null,
+    actionLabel: String = "Save & Test",
+    requiresTest: Boolean = true,
 ) {
     var visible by remember { mutableStateOf(false) }
     val testId = label.lowercase().replace(' ', '-')
@@ -55,11 +57,13 @@ fun ProviderKeyField(
                 modifier = Modifier.weight(1f),
             )
             val statusLabel = when {
-                verifying -> "Testing"
+                verifying -> if (requiresTest) "Testing" else "Saving"
                 verifyResult?.startsWith("✓") == true || credentialState == ProviderCredentialState.Valid -> "Verified"
                 credentialState == ProviderCredentialState.Invalid -> "Invalid"
                 credentialState == ProviderCredentialState.StorageError -> "Storage error"
-                credentialState == ProviderCredentialState.Saved -> "Saved · test required"
+                credentialState == ProviderCredentialState.Saved -> {
+                    if (requiresTest) "Saved · test required" else "Saved"
+                }
                 value.isNotEmpty() -> "Unsaved draft"
                 else -> null
             }
@@ -115,17 +119,18 @@ fun ProviderKeyField(
                     if (verifying) {
                         CircularProgressIndicator(modifier = Modifier.height(16.dp), strokeWidth = 2.dp)
                     } else {
-                        Text("Save & Test")
+                        Text(actionLabel)
                     }
                 }
                 if (verifyResult != null) {
                     Text(
                         text = verifyResult,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (verifyResult.startsWith("✓"))
-                            MaterialTheme.colorScheme.primary
-                        else
-                            MaterialTheme.colorScheme.error,
+                        color = when {
+                            verifyResult.startsWith("✓") -> MaterialTheme.colorScheme.primary
+                            verifyResult.startsWith("✗") -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
                 }
             }
