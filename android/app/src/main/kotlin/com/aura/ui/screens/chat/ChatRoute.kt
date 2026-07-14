@@ -118,7 +118,24 @@ interface HiltEntryPoint {
     fun incomingShareStore(): IncomingShareStore
 }
 
-private enum class ChatVoiceMode { Tap, Hold, Continuous }
+internal enum class ChatVoiceMode { Tap, Hold, Continuous }
+
+internal data class MicPermissionState(
+    val granted: Boolean,
+    val pendingMode: ChatVoiceMode? = null,
+) {
+    fun request(mode: ChatVoiceMode): MicPermissionState = copy(pendingMode = mode)
+
+    fun resolve(granted: Boolean): MicPermissionOutcome = MicPermissionOutcome(
+        state = copy(granted = granted, pendingMode = null),
+        launchMode = pendingMode?.takeIf { granted },
+    )
+}
+
+internal data class MicPermissionOutcome(
+    val state: MicPermissionState,
+    val launchMode: ChatVoiceMode?,
+)
 
 @Composable
 fun ChatRoute(
@@ -189,20 +206,21 @@ fun ChatRoute(
     )
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
-    val hasMicPermission = rememberMicPermission()
-    var pendingVoiceMode by remember { mutableStateOf<ChatVoiceMode?>(null) }
+    var micPermissionState by remember(context) {
+        mutableStateOf(MicPermissionState(granted = checkMicPermission(context)))
+    }
+    val hasMicPermission = micPermissionState.granted
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            when (pendingVoiceMode) {
-                ChatVoiceMode.Tap -> showVoiceOverlay = true
-                ChatVoiceMode.Hold -> showHoldToTalk = true
-                ChatVoiceMode.Continuous -> showContinuousVoice = true
-                null -> Unit
-            }
+        val outcome = micPermissionState.resolve(granted)
+        micPermissionState = outcome.state
+        when (outcome.launchMode) {
+            ChatVoiceMode.Tap -> showVoiceOverlay = true
+            ChatVoiceMode.Hold -> showHoldToTalk = true
+            ChatVoiceMode.Continuous -> showContinuousVoice = true
+            null -> Unit
         }
-        pendingVoiceMode = null
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -222,10 +240,13 @@ fun ChatRoute(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri -> uri?.let(viewModel::onAudioPicked) }
 
-    val hasCameraPermission = rememberCameraPermission()
+    var hasCameraPermission by remember(context) {
+        mutableStateOf(checkCameraPermission(context))
+    }
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
+        hasCameraPermission = granted
         if (granted) cameraLauncher.launch(null)
     }
 
@@ -299,21 +320,21 @@ fun ChatRoute(
                 onTapToSpeak = {
                     if (hasMicPermission) showVoiceOverlay = true
                     else {
-                        pendingVoiceMode = ChatVoiceMode.Tap
+                        micPermissionState = micPermissionState.request(ChatVoiceMode.Tap)
                         micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                     }
                 },
                 onHoldToTalk = {
                     if (hasMicPermission) showHoldToTalk = true
                     else {
-                        pendingVoiceMode = ChatVoiceMode.Hold
+                        micPermissionState = micPermissionState.request(ChatVoiceMode.Hold)
                         micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                     }
                 },
                 onContinuousVoice = {
                     if (hasMicPermission) showContinuousVoice = true
                     else {
-                        pendingVoiceMode = ChatVoiceMode.Continuous
+                        micPermissionState = micPermissionState.request(ChatVoiceMode.Continuous)
                         micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                     }
                 },
@@ -474,27 +495,17 @@ private fun ConsumeIncomingShare(context: android.content.Context, viewModel: Ch
     }
 }
 
-@Composable
-private fun rememberMicPermission(): Boolean {
-    val context = LocalContext.current
-    return remember {
-        androidx.core.content.ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.RECORD_AUDIO,
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-    }
-}
+private fun checkMicPermission(context: android.content.Context): Boolean =
+    androidx.core.content.ContextCompat.checkSelfPermission(
+        context,
+        android.Manifest.permission.RECORD_AUDIO,
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
-@Composable
-private fun rememberCameraPermission(): Boolean {
-    val context = LocalContext.current
-    return remember {
-        androidx.core.content.ContextCompat.checkSelfPermission(
-            context,
-            android.Manifest.permission.CAMERA,
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-    }
-}
+private fun checkCameraPermission(context: android.content.Context): Boolean =
+    androidx.core.content.ContextCompat.checkSelfPermission(
+        context,
+        android.Manifest.permission.CAMERA,
+    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
 private fun decodeSharedImage(context: android.content.Context, uri: android.net.Uri): android.graphics.Bitmap? {
     return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
