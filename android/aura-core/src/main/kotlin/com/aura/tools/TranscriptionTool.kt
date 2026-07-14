@@ -58,7 +58,7 @@ class TranscriptionTool @Inject constructor(
         description = "Transcribe audio to text using a cloud Whisper API. " +
             "Provide audio as base64-encoded data and an optional language code. " +
             "Audio must be 25 MB or smaller.",
-        risk = ToolRisk.READ_ONLY,
+        risk = ToolRisk.REMOTE_COST,
         parameters = definition(),
         execute = { call, _ ->
             val audioBase64 = call.arguments["audio_base64"] as? String

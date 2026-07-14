@@ -49,7 +49,7 @@ class BraveSearchTool @Inject constructor(
     val tool = Tool(
         name = "brave_search",
         description = definition().description,
-        risk = ToolRisk.READ_ONLY,
+        risk = ToolRisk.REMOTE_COST,
         parameters = definition().parameters,
         execute = { call, ctx ->
             val query = call.arguments["query"] as? String

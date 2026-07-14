@@ -81,7 +81,7 @@ class DeepResearchTool @Inject constructor(
     val tool = Tool(
         name = "deep_research",
         description = "Perform deep research: search the web, fetch content from top sources, and synthesize an answer with numbered citations.",
-        risk = ToolRisk.READ_ONLY,
+        risk = ToolRisk.REMOTE_COST,
         parameters = definition(),
         execute = { call, _ ->
             val query = call.arguments["query"] as? String

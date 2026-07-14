@@ -23,6 +23,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,6 +37,7 @@ class ToolExecutor @Inject constructor(
     @ApplicationContext private val context: Context,
     private val usageTracker: UsageTracker = UsageTracker(),
 ) {
+    private val remoteCostApprovalGate = RemoteCostApprovalGate()
     suspend fun execute(name: String, argumentsJson: String, ctx: ToolContext): ToolResult {
         val tool = registry.get(name) ?: return ToolResult.Error("Unknown tool: $name", "unknown_tool")
 
@@ -60,6 +62,12 @@ class ToolExecutor @Inject constructor(
 
         val args = try { parseArgs(argumentsJson, tool.parameters) } catch (e: Exception) {
             return ToolResult.Error("Bad arguments: ${e.message}", "bad_args")
+        }
+
+        if (tool.risk == ToolRisk.REMOTE_COST) {
+            remoteCostApprovalGate.authorize(name, args, ctx)?.let { rationale ->
+                return ToolResult.NeedsApproval(rationale)
+            }
         }
 
         val call = ToolCall(id = "", name = name, arguments = args)
@@ -120,5 +128,62 @@ class ToolExecutor @Inject constructor(
         v is JsonObject && prop.type == "object" -> v.mapValues { coerce(it.value, ToolProperty(type = "any")) }
         v is JsonPrimitive -> v.contentOrNull
         else -> v.toString()
+    }
+}
+
+/**
+ * One-shot approval gate for metered API calls. The model cannot approve its
+ * own call by repeating it in the same turn: the exact parsed arguments must
+ * be requested again after a later, explicitly affirmative user message.
+ */
+internal class RemoteCostApprovalGate {
+    private data class Key(val conversationId: String, val toolName: String)
+    private data class Pending(
+        val arguments: Map<String, Any?>,
+        val requestingMessage: String,
+    )
+
+    private val pending = mutableMapOf<Key, Pending>()
+
+    @Synchronized
+    fun authorize(
+        toolName: String,
+        arguments: Map<String, Any?>,
+        context: ToolContext,
+    ): String? {
+        val key = Key(context.conversationId, toolName)
+        val existing = pending[key]
+        if (existing == null || existing.arguments != arguments) {
+            pending[key] = Pending(arguments.toMap(), context.userMessage)
+            return rationale(toolName)
+        }
+
+        val isLaterTurn = context.userMessage.isNotBlank() &&
+            context.userMessage != existing.requestingMessage
+        if (!isLaterTurn || !isExplicitApproval(context.userMessage)) {
+            return rationale(toolName)
+        }
+
+        pending.remove(key)
+        return null
+    }
+
+    private fun rationale(toolName: String): String =
+        "Running '$toolName' may consume paid API credits. Reply with an explicit confirmation to continue."
+
+    private fun isExplicitApproval(message: String): Boolean {
+        val normalized = message
+            .lowercase(Locale.US)
+            .replace(Regex("[^a-z0-9\\s]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        return normalized in CONFIRMATIONS
+    }
+
+    private companion object {
+        val CONFIRMATIONS = setOf(
+            "yes", "yes please", "yes confirm", "confirm", "confirmed",
+            "go ahead", "do it", "continue", "approve", "approved",
+        )
     }
 }

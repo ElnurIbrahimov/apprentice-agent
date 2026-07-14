@@ -8,13 +8,14 @@ import javax.inject.Singleton
 
 /**
  * Risk level a tool carries. Drives permission gating and confirmation UX.
- * - READ_ONLY: never destructive. Examples: web_search, calendar_read.
- * - WRITE_LOCAL: changes local state. Examples: calendar_write, app_launcher.
- * - WRITE_REMOTE: makes a network call that mutates remote state. Currently unused by any tool.
- * - PRIVACY: touches personal data. Examples: contacts_get, location_now.
- * - DESTRUCTIVE: irreversible. Examples: permanent deletion, factory_reset (don't add this).
+ * - READ_ONLY: no state mutation and no paid remote execution.
+ * - REMOTE_COST: invokes a metered remote API but does not mutate state.
+ * - WRITE_LOCAL: changes local state. Examples: reminders, app settings.
+ * - WRITE_REMOTE: mutates state outside the device.
+ * - PRIVACY: reads or transmits personal data.
+ * - DESTRUCTIVE: irreversible.
  */
-enum class ToolRisk { READ_ONLY, WRITE_LOCAL, WRITE_REMOTE, PRIVACY, DESTRUCTIVE }
+enum class ToolRisk { READ_ONLY, REMOTE_COST, WRITE_LOCAL, WRITE_REMOTE, PRIVACY, DESTRUCTIVE }
 
 data class Tool(
     val name: String,

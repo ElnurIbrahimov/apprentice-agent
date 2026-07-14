@@ -45,7 +45,7 @@ class FirecrawlFetchTool @Inject constructor(
     val tool = Tool(
         name = "fetch_url",
         description = "Fetch a URL and return its content as markdown (truncated to ~8000 chars).",
-        risk = ToolRisk.READ_ONLY,
+        risk = ToolRisk.REMOTE_COST,
         parameters = definition(),
         execute = { call, _ ->
             val url = call.arguments["url"] as? String

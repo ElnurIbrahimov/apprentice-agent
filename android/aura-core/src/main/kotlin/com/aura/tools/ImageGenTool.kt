@@ -61,7 +61,7 @@ class ImageGenTool @Inject constructor(
     val tool = Tool(
         name = "image_gen",
         description = "Generate an image from a text prompt using AI. Supports OpenAI DALL-E 3 and Pollinations.ai.",
-        risk = ToolRisk.READ_ONLY,
+        risk = ToolRisk.REMOTE_COST,
         parameters = definition(),
         execute = { call, _ ->
             val prompt = call.arguments["prompt"] as? String
