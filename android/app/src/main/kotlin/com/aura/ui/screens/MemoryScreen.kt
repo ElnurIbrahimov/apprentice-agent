@@ -1,5 +1,9 @@
 package com.aura.ui.screens
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -30,6 +34,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
@@ -62,12 +67,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.memory.MemoryEntity
 import com.aura.ui.components.AuraScreenHeader
+import com.aura.ui.viewmodel.DocumentImportViewModel
 import com.aura.ui.viewmodel.MemoryViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -81,15 +88,29 @@ fun MemoryScreen(
     onOpenKnowledgeGraph: () -> Unit = {},
     onOpenSourceConversation: (String, Long) -> Unit = { _, _ -> },
     viewModel: MemoryViewModel = hiltViewModel(),
+    documentViewModel: DocumentImportViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    val documentState by documentViewModel.state.collectAsState()
+    val context = LocalContext.current
     var editingMemory by remember { mutableStateOf<MemoryEntity?>(null) }
     var showRebuildConfirm by remember { mutableStateOf(false) }
     var showClearAllConfirm by remember { mutableStateOf(false) }
     var showClearCategoryConfirm by remember { mutableStateOf(false) }
     var showAddNote by remember { mutableStateOf(false) }
+    var showDocuments by remember { mutableStateOf(false) }
     var historyMemory by remember { mutableStateOf<MemoryEntity?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+        documentViewModel.import(uri)
+    }
 
     LaunchedEffect(state.undoMessage) {
         val message = state.undoMessage ?: return@LaunchedEffect
@@ -103,6 +124,12 @@ fun MemoryScreen(
             SnackbarResult.ActionPerformed -> viewModel.undoDelete()
             SnackbarResult.Dismissed -> viewModel.clearUndo()
         }
+    }
+
+    LaunchedEffect(documentState.message, documentState.error) {
+        val notice = documentState.error ?: documentState.message ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(notice, withDismissAction = true)
+        documentViewModel.clearNotice()
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -202,6 +229,19 @@ fun MemoryScreen(
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text("Add note")
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = { showDocuments = true },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+        ) {
+            Icon(Icons.Filled.Description, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                if (documentState.documents.isEmpty()) "Import documents"
+                else "Documents · ${documentState.documents.size}",
+            )
         }
         Spacer(modifier = Modifier.height(8.dp))
         OutlinedButton(
@@ -366,6 +406,32 @@ fun MemoryScreen(
                 historyMemory = null
                 viewModel.clearEditHistory()
             },
+        )
+    }
+
+    if (showDocuments) {
+        DocumentLibraryDialog(
+            state = documentState,
+            onImport = {
+                documentPicker.launch(arrayOf(
+                    "application/pdf",
+                    com.aura.documents.DocumentTextExtractor.DOCX_MIME,
+                    "text/*",
+                    "application/json",
+                ))
+            },
+            onOpen = { document ->
+                runCatching {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(android.net.Uri.parse(document.sourceUri), document.mimeType)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        },
+                    )
+                }
+            },
+            onDelete = documentViewModel::delete,
+            onDismiss = { showDocuments = false },
         )
     }
 

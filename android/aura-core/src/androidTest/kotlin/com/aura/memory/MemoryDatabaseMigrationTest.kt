@@ -158,6 +158,30 @@ class MemoryDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate4To5_createsDocumentLibrary() {
+        val db = helper.createDatabase("test-aura-memory-v4.db", 4)
+        db.close()
+
+        val migrated = helper.runMigrationsAndValidate(
+            "test-aura-memory-v4.db",
+            5,
+            true,
+            MemoryModule.MIGRATION_4_5,
+        )
+
+        migrated.query("PRAGMA table_info(documents)").use { cursor ->
+            val columns = mutableSetOf<String>()
+            while (cursor.moveToNext()) {
+                columns += cursor.getString(cursor.getColumnIndexOrThrow("name"))
+            }
+            assert(columns == setOf(
+                "id", "name", "mimeType", "sourceUri", "importedAt", "characterCount", "chunkCount",
+            )) { "Unexpected document columns: $columns" }
+        }
+        migrated.close()
+    }
+
+    @Test
     fun migrate1To3_chained_preservesData() {
         val db = helper.createDatabase("test-aura-memory-chained.db", 1)
         db.close()

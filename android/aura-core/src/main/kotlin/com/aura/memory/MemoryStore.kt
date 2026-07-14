@@ -241,6 +241,8 @@ class MemoryStore @Inject constructor(
     suspend fun get(id: String): MemoryEntity? = dao.getById(id)
     suspend fun forget(id: String) = dao.delete(id)
 
+    suspend fun deleteBySource(source: String) = dao.deleteBySource(source)
+
     /**
      * Delete all memories. Irreversible. Used by the "Clear all"
      * action in the Memory screen.

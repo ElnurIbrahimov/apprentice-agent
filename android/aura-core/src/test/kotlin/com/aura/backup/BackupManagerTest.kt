@@ -22,6 +22,7 @@ class BackupManagerTest {
 
     private val memoryDao = mockk<com.aura.memory.MemoryDao>(relaxed = true)
     private val memoryEditDao = mockk<com.aura.memory.MemoryEditDao>(relaxed = true)
+    private val documentDao = mockk<com.aura.documents.DocumentDao>(relaxed = true)
     private val conversationDao = mockk<com.aura.agent.ConversationDao>(relaxed = true)
     private val kgDao = mockk<com.aura.kg.KnowledgeGraphDao>(relaxed = true)
     private val handDao = mockk<com.aura.hands.HandDao>(relaxed = true)
@@ -40,6 +41,7 @@ class BackupManagerTest {
         context = context,
         memoryDao = memoryDao,
         memoryEditDao = memoryEditDao,
+        documentDao = documentDao,
         conversationDao = conversationDao,
         kgDao = kgDao,
         handDao = handDao,
@@ -60,6 +62,7 @@ class BackupManagerTest {
         // valid AuraBackup with the metadata fields populated.
         coEvery { memoryDao.allForExport() } returns emptyList()
         coEvery { memoryEditDao.allForBackup() } returns emptyList()
+        coEvery { documentDao.allForBackup() } returns emptyList()
         coEvery { conversationDao.allForExport() } returns emptyList()
         coEvery { kgDao.allNodes() } returns emptyList()
         coEvery { kgDao.allEdges() } returns emptyList()
@@ -119,6 +122,17 @@ class BackupManagerTest {
                     decayScore = 0.5f, tags = "ui,theme", metadata = "{}",
                 ),
             ),
+            documents = listOf(
+                DocumentBackup(
+                    id = "hash-1",
+                    name = "world-bible.pdf",
+                    mimeType = "application/pdf",
+                    sourceUri = "content://docs/world-bible",
+                    importedAt = 4L,
+                    characterCount = 12_000,
+                    chunkCount = 8,
+                ),
+            ),
             conversations = listOf(
                 ConversationBackup(
                     id = "c1", title = "Onboarding help", createdAt = 1L, updatedAt = 2L,
@@ -135,6 +149,8 @@ class BackupManagerTest {
         assertEquals(original.exportedAt, parsed.exportedAt)
         assertEquals(original.memories.size, parsed.memories.size)
         assertEquals("prefers dark mode", parsed.memories[0].content)
+        assertEquals("world-bible.pdf", parsed.documents.single().name)
+        assertEquals(8, parsed.documents.single().chunkCount)
         assertEquals("Onboarding help", parsed.conversations[0].title)
         assertEquals("User chose dark mode.", parsed.conversations[0].contextSummary)
         assertEquals(12, parsed.conversations[0].summaryThroughTurn)
@@ -173,6 +189,7 @@ class BackupManagerTest {
         // Edges must go before nodes (foreign-key relationship).
         coVerify { kgDao.deleteAllEdges() }
         coVerify { kgDao.deleteAllNodes() }
+        coVerify { documentDao.deleteAll() }
         coVerify { memoryDao.deleteAll() }
         coVerify { conversationDao.deleteAll() }
         coVerify { handDao.deleteRunHistory() }
@@ -201,6 +218,9 @@ class BackupManagerTest {
                 appVersionName = "0.1.0",
                 memories = listOf(
                     MemoryBackup("m1", "c", "user", "preference", 0.5f, 1L, 1L, 0, 1f, "", "{}")
+                ),
+                documents = listOf(
+                    DocumentBackup("hash", "notes.md", "text/markdown", "content://notes", 1L, 100, 1),
                 ),
                 conversations = listOf(
                     ConversationBackup(
@@ -241,6 +261,7 @@ class BackupManagerTest {
         )
 
         assertEquals(1, counts.memories)
+        assertEquals(1, counts.documents)
         assertEquals(1, counts.conversations)
         assertEquals(1, counts.nodes)
         assertEquals(1, counts.edges)
@@ -248,7 +269,8 @@ class BackupManagerTest {
         assertEquals(1, counts.handRuns)
         assertEquals(1, counts.tasks)
         assertEquals(1, counts.profile)
-        assertEquals(8, counts.total)
+        assertEquals(9, counts.total)
+        coVerify { documentDao.insertAll(match { it.single().name == "notes.md" }) }
         coVerify { handScheduler.schedule(match { it.id == "h1" && it.scheduleType == "daily" }, any()) }
         coVerify { handDao.insertAllRuns(match { it.single().id == "run-1" }) }
         coVerify {

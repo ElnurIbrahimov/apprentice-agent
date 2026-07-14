@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.aura.data.RoomConfig
+import com.aura.documents.DocumentDao
 import com.aura.providers.ProviderKeys
 import dagger.Module
 import dagger.Provides
@@ -95,6 +96,24 @@ object MemoryModule {
         }
     }
 
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS documents (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    mimeType TEXT NOT NULL,
+                    sourceUri TEXT NOT NULL,
+                    importedAt INTEGER NOT NULL,
+                    characterCount INTEGER NOT NULL,
+                    chunkCount INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_documents_name ON documents(name)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_documents_importedAt ON documents(importedAt)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MemoryDatabase =
@@ -102,7 +121,7 @@ object MemoryModule {
             context,
             MemoryDatabase::class.java,
             "aura-memory.db",
-            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5),
         ).build()
 
     @Provides
@@ -110,6 +129,9 @@ object MemoryModule {
 
     @Provides
     fun provideMemoryEditDao(db: MemoryDatabase): MemoryEditDao = db.memoryEditDao()
+
+    @Provides
+    fun provideDocumentDao(db: MemoryDatabase): DocumentDao = db.documentDao()
 
     @Provides
     @Singleton
