@@ -90,7 +90,7 @@ class ModelSelectionFlowTest {
         composeRule.onNodeWithContentDescription("Chat").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("chat-model-pill").assertTextContains("Model A", substring = true)
-        composeRule.onNodeWithText("Message AURA…").performTextReplacement("hello")
+        composeRule.onNodeWithTag("chat-composer-input").performTextReplacement("hello")
         composeRule.onNodeWithContentDescription("Send").assertIsEnabled()
 
         composeRule.onNodeWithTag("chat-model-pill").performClick()

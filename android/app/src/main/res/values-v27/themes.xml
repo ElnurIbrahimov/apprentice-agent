@@ -5,6 +5,7 @@
         <item name="android:statusBarColor">#F7F8FA</item>
         <item name="android:navigationBarColor">#F7F8FA</item>
         <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
         <item name="android:enforceNavigationBarContrast" tools:targetApi="q">false</item>
     </style>
 </resources>
