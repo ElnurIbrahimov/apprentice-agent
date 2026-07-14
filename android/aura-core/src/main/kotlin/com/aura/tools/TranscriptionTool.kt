@@ -18,6 +18,9 @@ import java.util.Base64
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** Maximum decoded audio accepted by transcription providers: 25 MB. */
+const val MAX_TRANSCRIPTION_AUDIO_BYTES: Int = 25 * 1024 * 1024
+
 /**
  * Transcription tool: sends base64-encoded audio to a cloud Whisper API
  * and returns the transcribed text.
@@ -35,11 +38,6 @@ class TranscriptionTool @Inject constructor(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val mediaTypeOctet = "application/octet-stream".toMediaType()
-
-    companion object {
-        /** Maximum allowed decoded audio size: 25 MB. */
-        private const val MAX_AUDIO_BYTES = 25 * 1024 * 1024
-    }
 
     fun definition() = ToolParameters(
         properties = mapOf(
@@ -70,7 +68,7 @@ class TranscriptionTool @Inject constructor(
             // Size check: estimate decoded bytes from base64 length
             // base64 encodes 3 bytes into 4 chars, so length * 3/4 ≈ decoded size
             val estimatedBytes = (audioBase64.length * 3L) / 4
-            if (estimatedBytes > MAX_AUDIO_BYTES) {
+            if (estimatedBytes > MAX_TRANSCRIPTION_AUDIO_BYTES) {
                 return@Tool ToolResult.Error(
                     "Audio too large (${estimatedBytes / (1024 * 1024)} MB). Maximum is 25 MB.",
                     "audio_too_large",
@@ -145,17 +143,18 @@ class TranscriptionTool @Inject constructor(
             .post(requestBody)
             .build()
 
-        val response = httpClient.newCall(req).execute()
-        if (!response.isSuccessful) {
-            val errorBody = response.body?.string() ?: ""
-            throw RuntimeException("OpenAI Whisper API HTTP ${response.code}: $errorBody")
-        }
-        val respBody = response.body?.string()
-            ?: throw RuntimeException("Empty response from OpenAI Whisper")
+        return httpClient.newCall(req).execute().use { response ->
+            if (!response.isSuccessful) {
+                val errorBody = response.body?.string() ?: ""
+                throw RuntimeException("OpenAI Whisper API HTTP ${response.code}: $errorBody")
+            }
+            val respBody = response.body?.string()
+                ?: throw RuntimeException("Empty response from OpenAI Whisper")
 
-        val root = json.parseToJsonElement(respBody).jsonObject
-        return root["text"]?.jsonPrimitive?.content
-            ?: throw RuntimeException("OpenAI Whisper response missing 'text' field")
+            val root = json.parseToJsonElement(respBody).jsonObject
+            root["text"]?.jsonPrimitive?.content
+                ?: throw RuntimeException("OpenAI Whisper response missing 'text' field")
+        }
     }
 
     // ------------------------------------------------------------------
@@ -186,16 +185,17 @@ class TranscriptionTool @Inject constructor(
             .post(requestBody)
             .build()
 
-        val response = httpClient.newCall(req).execute()
-        if (!response.isSuccessful) {
-            val errorBody = response.body?.string() ?: ""
-            throw RuntimeException("Groq Whisper API HTTP ${response.code}: $errorBody")
-        }
-        val respBody = response.body?.string()
-            ?: throw RuntimeException("Empty response from Groq Whisper")
+        return httpClient.newCall(req).execute().use { response ->
+            if (!response.isSuccessful) {
+                val errorBody = response.body?.string() ?: ""
+                throw RuntimeException("Groq Whisper API HTTP ${response.code}: $errorBody")
+            }
+            val respBody = response.body?.string()
+                ?: throw RuntimeException("Empty response from Groq Whisper")
 
-        val root = json.parseToJsonElement(respBody).jsonObject
-        return root["text"]?.jsonPrimitive?.content
-            ?: throw RuntimeException("Groq Whisper response missing 'text' field")
+            val root = json.parseToJsonElement(respBody).jsonObject
+            root["text"]?.jsonPrimitive?.content
+                ?: throw RuntimeException("Groq Whisper response missing 'text' field")
+        }
     }
 }

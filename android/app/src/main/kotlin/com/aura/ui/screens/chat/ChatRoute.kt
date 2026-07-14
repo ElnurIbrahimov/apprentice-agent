@@ -86,6 +86,7 @@ import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.theme.AuraThemeTokens
 import com.aura.ui.components.SpecialistChips
 import com.aura.ui.viewmodel.ChatViewModel
+import com.aura.ui.viewmodel.calculateImageSampleSize
 import com.aura.ui.voice.VoiceOverlay
 import com.aura.ui.voice.ContinuousVoiceOverlay
 import com.aura.ui.voice.ContinuousVoiceViewModel
@@ -520,26 +521,27 @@ private fun decodeSharedImage(context: android.content.Context, uri: android.net
     } else {
         // API 26–27 fallback: decode through the content resolver and downsample.
         runCatching {
-            @Suppress("DEPRECATION")
-            android.graphics.BitmapFactory.decodeStream(
-                context.contentResolver.openInputStream(uri),
-                null,
-                android.graphics.BitmapFactory.Options().apply {
-                    inJustDecodeBounds = true
-                },
-            )
-            android.graphics.BitmapFactory.Options().apply {
-                val target = 1024
-                var dim = 1.coerceAtLeast(outWidth.coerceAtLeast(outHeight))
-                while (dim > target * 2) { dim /= 2; inSampleSize *= 2 }
-                inJustDecodeBounds = false
-            }.let { opts ->
+            val resolver = context.contentResolver
+            val bounds = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            resolver.openInputStream(uri)?.use { stream ->
                 @Suppress("DEPRECATION")
-                android.graphics.BitmapFactory.decodeStream(
-                    context.contentResolver.openInputStream(uri),
-                    null,
-                    opts,
+                android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
+            }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                return@runCatching null
+            }
+            val opts = android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = calculateImageSampleSize(
+                    width = bounds.outWidth,
+                    height = bounds.outHeight,
+                    target = 1024,
                 )
+            }
+            resolver.openInputStream(uri)?.use { stream ->
+                @Suppress("DEPRECATION")
+                android.graphics.BitmapFactory.decodeStream(stream, null, opts)
             }
         }.getOrNull()
     }

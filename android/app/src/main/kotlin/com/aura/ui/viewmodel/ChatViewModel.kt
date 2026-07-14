@@ -27,6 +27,7 @@ import com.aura.providers.ModelCatalog
 import com.aura.providers.ModelCatalogRepository
 import com.aura.providers.ProviderStatus
 import com.aura.tools.Citation
+import com.aura.tools.MAX_TRANSCRIPTION_AUDIO_BYTES
 import com.aura.voice.TextToSpeech
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -797,9 +798,10 @@ class ChatViewModel @Inject constructor(
                     streaming = true,
                 )
             }
+            val toolCallId = UUID.randomUUID().toString()
             val result = tool.execute(
                 ToolCall(
-                    id = UUID.randomUUID().toString(),
+                    id = toolCallId,
                     name = "vision",
                     arguments = mapOf("image_base64" to base64, "prompt" to question),
                 ),
@@ -820,8 +822,7 @@ class ChatViewModel @Inject constructor(
             // write gate) runs via saveConversation + the next send().
             _state.update { old ->
                 val conv = old.conversation
-                    .addToolCall(UUID.randomUUID().toString(), "vision", "{}")
-                    .setToolResult(UUID.randomUUID().toString(), text)
+                    .attachCompletedToolTurn(toolCallId, "vision", "{}", text)
                     .addAssistant(text)
                 old.copy(
                     conversation = conv,
@@ -847,11 +848,35 @@ class ChatViewModel @Inject constructor(
      */
     fun onAudioPicked(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
+            val resolver = getApplication<Application>().contentResolver
+            val knownSize = runCatching {
+                resolver.query(
+                    uri,
+                    arrayOf(android.provider.OpenableColumns.SIZE),
+                    null,
+                    null,
+                    null,
+                )?.use { cursor ->
+                    if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+                }
+            }.getOrNull()
+            if (knownSize != null && knownSize > MAX_TRANSCRIPTION_AUDIO_BYTES) {
+                _state.update { it.copy(error = "Audio is larger than the 25 MB limit.") }
+                return@launch
+            }
+
             val bytes = try {
-                getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: return@launch
+                val stream = resolver.openInputStream(uri) ?: run {
+                    _state.update { it.copy(error = "failed to open audio") }
+                    return@launch
+                }
+                stream.use { readStreamWithinLimit(it, MAX_TRANSCRIPTION_AUDIO_BYTES) }
             } catch (e: Exception) {
                 _state.update { it.copy(error = "failed to read audio: ${e.message}") }
+                return@launch
+            }
+            if (bytes == null) {
+                _state.update { it.copy(error = "Audio is larger than the 25 MB limit.") }
                 return@launch
             }
             val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
