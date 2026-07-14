@@ -7,6 +7,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private val convJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+private const val EMBEDDING_BACKFILL_BATCH_SIZE = 24
 
 @Singleton
 class ConversationStore @Inject constructor(
@@ -14,6 +15,16 @@ class ConversationStore @Inject constructor(
     private val embedder: com.aura.memory.Embedder,
 ) {
     suspend fun save(conversation: Conversation) {
+        val previous = runCatching { dao.getById(conversation.id) }.getOrNull()
+        val searchText = conversationSearchText(conversation)
+        val previousSearchText = previous?.let(::entitySearchText)
+        val embedding = when {
+            searchText.isBlank() -> null
+            previous?.embedding != null && previousSearchText == searchText -> previous.embedding
+            else -> runCatching {
+                com.aura.memory.Embedder.toBytes(embedder.embed(searchText))
+            }.getOrNull()
+        }
         val entity = ConversationEntity(
             id = conversation.id,
             title = conversation.title,
@@ -23,10 +34,10 @@ class ConversationStore @Inject constructor(
             model = conversation.model,
             metadataJson = convJson.encodeToString(conversation.metadata),
             turnsJson = convJson.encodeToString(conversation.turns),
+            embedding = embedding,
             contextSummary = conversation.contextSummary,
             summaryThroughTurn = conversation.summaryThroughTurn.coerceIn(0, conversation.turns.size),
         )
-        // Use insert (REPLACE strategy) for upsert
         dao.insert(entity)
     }
 
@@ -127,6 +138,7 @@ class ConversationStore @Inject constructor(
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return emptyList()
 
+        backfillMissingEmbeddings()
         val existing = runCatching { dao.allWithEmbeddings() }.getOrDefault(emptyList())
         if (existing.isEmpty()) {
             // No embeddings yet — fall back to LIKE search.
@@ -167,6 +179,11 @@ class ConversationStore @Inject constructor(
         val forkId = java.util.UUID.randomUUID().toString()
         val forkTitle = "${original.title} (fork)"
         val forkTurnCount = fromTurnIndex + 1
+        val forkEmbedding = searchText(forkedTurns, forkTitle).takeIf { it.isNotBlank() }?.let { text ->
+            runCatching {
+                com.aura.memory.Embedder.toBytes(embedder.embed(text))
+            }.getOrNull()
+        }
         val canReuseSummary = original.contextSummary.isNotBlank() &&
             original.summaryThroughTurn in 1..forkTurnCount
         dao.insert(ConversationEntity(
@@ -178,11 +195,43 @@ class ConversationStore @Inject constructor(
             model = original.model,
             metadataJson = convJson.encodeToString(metadata),
             turnsJson = convJson.encodeToString(forkedTurns),
+            embedding = forkEmbedding,
             contextSummary = if (canReuseSummary) original.contextSummary else "",
             summaryThroughTurn = if (canReuseSummary) original.summaryThroughTurn else 0,
         ))
         return forkId
     }
+
+    private suspend fun backfillMissingEmbeddings(limit: Int = EMBEDDING_BACKFILL_BATCH_SIZE): Int {
+        val pending = runCatching { dao.missingEmbeddings(limit) }.getOrDefault(emptyList())
+        var rebuilt = 0
+        for (entity in pending) {
+            val text = entitySearchText(entity)
+            if (text.isBlank()) continue
+            val bytes = runCatching {
+                com.aura.memory.Embedder.toBytes(embedder.embed(text))
+            }.getOrNull() ?: continue
+            if (runCatching { dao.updateEmbedding(entity.id, bytes) }.isSuccess) {
+                rebuilt += 1
+            }
+        }
+        return rebuilt
+    }
+
+    private fun conversationSearchText(conversation: Conversation): String =
+        searchText(conversation.turns, conversation.title)
+
+    private fun entitySearchText(entity: ConversationEntity): String {
+        val turns = runCatching {
+            convJson.decodeFromString<List<Turn>>(entity.turnsJson)
+        }.getOrDefault(emptyList())
+        return searchText(turns, entity.title)
+    }
+
+    private fun searchText(turns: List<Turn>, title: String): String =
+        turns.asReversed().firstNotNullOfOrNull { turn ->
+            turn.user?.trim()?.takeIf { it.isNotEmpty() }
+        } ?: title.trim()
 
     private fun entityToConversation(e: ConversationEntity): Conversation {
         // runCatching here is a guard against a corrupted row. The

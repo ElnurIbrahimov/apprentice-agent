@@ -19,9 +19,9 @@ data class ConversationEntity(
     /** The full turn list serialized as JSON via kotlinx.serialization. */
     val turnsJson: String = "[]",
     /**
-     * Embedding of the conversation's last user message, used for
-     * semantic search. Null until the first semantic search is
-     * performed — lazy population to avoid embedding every save.
+     * Embedding of the conversation's latest user turn (or title when empty).
+     * New saves populate it; semantic search backfills legacy null rows in
+     * bounded batches.
      */
     val embedding: ByteArray? = null,
     /** Durable compression of turns before [summaryThroughTurn]. */

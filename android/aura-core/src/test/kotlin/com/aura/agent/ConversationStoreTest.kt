@@ -7,6 +7,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -109,5 +110,58 @@ class ConversationStoreTest {
         assertEquals(2, result.size)
         assertEquals("First", result[0].title)
         assertEquals("Second", result[1].title)
+    }
+
+    @Test
+    fun `save persists an embedding for the latest user turn`() = runTest {
+        val store = ConversationStore(dao, embedder)
+        val expected = floatArrayOf(1f, 2f)
+        val saved = slot<ConversationEntity>()
+        coEvery { dao.getById("embedded") } returns null
+        coEvery { embedder.embed("latest question") } returns expected
+        coEvery { dao.insert(capture(saved)) } returns Unit
+
+        store.save(
+            Conversation(
+                id = "embedded",
+                title = "Searchable chat",
+                turns = listOf(
+                    Turn(user = "old question"),
+                    Turn(assistant = "old answer"),
+                    Turn(user = "latest question"),
+                ),
+            ),
+        )
+
+        assertContentEquals(Embedder.toBytes(expected), saved.captured.embedding)
+        coVerify(exactly = 1) { embedder.embed("latest question") }
+    }
+
+    @Test
+    fun `semantic search backfills missing conversation embeddings before ranking`() = runTest {
+        val store = ConversationStore(dao, embedder)
+        val vector = floatArrayOf(1f, 0f)
+        val missing = ConversationEntity(
+            id = "legacy",
+            title = "Legacy chat",
+            createdAt = 1L,
+            updatedAt = 2L,
+            systemPrompt = null,
+            model = "test:model",
+            turnsJson = """[{"user":"Kotlin coroutines"}]""",
+        )
+        coEvery { dao.missingEmbeddings(24) } returns listOf(missing)
+        coEvery { embedder.embed("Kotlin coroutines") } returns vector
+        coEvery { embedder.embed("structured concurrency") } returns vector
+        coEvery { dao.allWithEmbeddings() } returns listOf(
+            missing.copy(embedding = Embedder.toBytes(vector)),
+        )
+
+        val results = store.semanticSearch("structured concurrency")
+
+        coVerify(exactly = 1) {
+            dao.updateEmbedding("legacy", match { it.contentEquals(Embedder.toBytes(vector)) })
+        }
+        assertEquals(listOf("legacy"), results.map { it.id })
     }
 }

@@ -71,9 +71,13 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations WHERE embedding IS NOT NULL ORDER BY updatedAt DESC")
     suspend fun allWithEmbeddings(): List<ConversationEntity>
 
+    /** Bounded legacy-row source for semantic-search backfill. */
+    @Query("SELECT * FROM conversations WHERE embedding IS NULL ORDER BY updatedAt DESC LIMIT :limit")
+    suspend fun missingEmbeddings(limit: Int): List<ConversationEntity>
+
     /**
      * Update just the embedding column for a conversation. Used by
-     * the lazy embedding population path in semantic search.
+     * save-time refresh and bounded legacy backfill.
      */
     @Query("UPDATE conversations SET embedding = :embedding WHERE id = :id")
     suspend fun updateEmbedding(id: String, embedding: ByteArray)
