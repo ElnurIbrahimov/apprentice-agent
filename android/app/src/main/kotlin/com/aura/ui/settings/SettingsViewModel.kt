@@ -45,14 +45,9 @@ data class SettingsUiState(
      */
     val embeddingModel: String = "",
     val themeMode: String = "system",
-    val customIdentity: String = "",
-    /**
-     * Full identity text (the SOUL.md file the user can edit).
-     * Defaults to the bundled asset until the user opens
-     * Settings → Persona → Identity for the first time.
-     */
+    /** Full identity text resolved from DataStore override or bundled asset. */
     val identityText: String = "",
-    /** True when the user has a non-empty override file saved. */
+    /** True when the user has a non-blank DataStore identity override. */
     val identityCustomized: Boolean = false,
     val specialistOverrides: String = "{}",
     /**
@@ -125,7 +120,6 @@ class SettingsViewModel @Inject constructor(
             val calendarMonitorEnabled = userPreferences.calendarMonitorEnabled.first()
             val embeddingModel = providerKeys.embeddingModel
             val themeMode = userPreferences.themeMode.first()
-            val customIdentity = userPreferences.customIdentity.first()
             val identityText = identityStore.readCurrent()
             val identityCustomized = identityStore.hasOverride()
             val specialistOverrides = userPreferences.specialistOverrides.first()
@@ -150,7 +144,6 @@ class SettingsViewModel @Inject constructor(
                 calendarMonitorEnabled = calendarMonitorEnabled,
                 embeddingModel = embeddingModel,
                 themeMode = themeMode,
-                customIdentity = customIdentity,
                 identityText = identityText,
                 identityCustomized = identityCustomized,
                 specialistOverrides = specialistOverrides,
@@ -282,21 +275,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setCustomIdentity(identity: String) {
-        viewModelScope.launch {
-            userPreferences.setCustomIdentity(identity)
-            _state.update { it.copy(customIdentity = identity) }
-        }
-    }
-
-    /**
-     * Persist the user's edited identity (SOUL.md) to
-     * `filesDir/identity.md`. On next chat send, [com.aura.agent.Brain]
-     * reads this file instead of the bundled asset.
-     *
-     * Pass an empty string to fall back to the asset (same as
-     * [resetIdentity]).
-     */
+    /** Persist the DataStore-backed identity used by the next chat send. */
     fun saveIdentity(text: String) {
         viewModelScope.launch {
             if (text.isBlank()) {
@@ -313,10 +292,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Delete the user override file, falling back to the bundled
-     * asset. Idempotent.
-     */
+    /** Clear the custom identity and fall back to the bundled asset. */
     fun resetIdentity() {
         viewModelScope.launch {
             identityStore.resetToDefault()

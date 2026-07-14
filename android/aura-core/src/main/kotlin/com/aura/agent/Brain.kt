@@ -1,16 +1,11 @@
 package com.aura.agent
 
-import android.content.Context
-import com.aura.data.UserPreferences
 import com.aura.providers.ChatOptions
 import com.aura.providers.ProviderMessage
 import com.aura.providers.ProviderRegistry
 import com.aura.providers.ToolDefinition
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
-import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,73 +15,29 @@ import javax.inject.Singleton
  *
  * ## Identity resolution
  *
- * The system prompt comes from one of three sources, checked in order:
- *
- *   1. **User override** at `filesDir/identity.md` (editable in
- *      Settings → Persona → Identity). Most recent change wins.
- *   2. **Bundled asset** at `assets/SOUL.md` (this repo ships with the
- *      Michaela Osbourne persona as the default).
- *   3. **Hardcoded fallback** — the historical `IDENTITY` constant, in
- *      case both files are missing. Never used in practice; exists so
- *      the brain always has *something* to send.
- *
- * `resolvedIdentity()` is called once per chat send (not on every
- * token), so reading a 5KB markdown file from disk is negligible.
+ * The user override is stored in DataStore through [IdentityStore], which is
+ * also what Settings and backup/restore use. When no custom text exists,
+ * [IdentityStore] reads the bundled `assets/SOUL.md`; the hardcoded fallback
+ * is only used if the asset is missing.
  */
 @Singleton
 class Brain @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val providerRegistry: ProviderRegistry,
-    private val userPreferences: UserPreferences,
+    private val identityStore: IdentityStore,
 ) {
-    /**
-     * Identity as a `Flow<String>` so the chat loop and Settings
-     * can both observe changes. Re-emits when the user edits the
-     * file in Settings (the file's lastModified is the source of
-     * truth — DataStore doesn't need to know).
-     */
+    /** Current identity as a cold flow; each subscription resolves DataStore anew. */
     val identity: Flow<String> = flow {
-        // Emit once on subscribe. We don't poll the file for changes
-        // because the only writer is the same process (Settings), and
-        // the chat loop calls resolvedIdentity() on every send — the
-        // file is read fresh there, not from this flow.
-        emit(loadIdentity())
+        emit(identityStore.readCurrent())
     }
 
     /**
-     * Resolved system prompt. Reads the user override file →
-     * the bundled asset → the hardcoded fallback, and returns
-     * the first one that exists. This is the "persona" layer
-     * only — the "about the user" layer (name, traits, facts)
+     * Resolved system prompt. Reads the DataStore override, then bundled
+     * asset, then hardcoded fallback through [IdentityStore]. This is the
+     * "persona" layer only — the "about the user" layer (name, traits, facts)
      * is handled separately by [com.aura.profile.UserProfileStore]
      * and concatenated at the call site.
      */
-    suspend fun resolvedIdentity(): String = loadIdentity()
-
-    /**
-     * Read the identity file in priority order: user override →
-     * bundled asset → hardcoded fallback. Synchronous on purpose —
-     * it's called once per chat send, not on a hot path.
-     */
-    private fun loadIdentity(): String {
-        // 1. User override
-        val override = File(context.filesDir, IDENTITY_OVERRIDE_FILENAME)
-        if (override.exists() && override.length() > 0) {
-            return override.readText().trim()
-        }
-        // 2. Bundled asset
-        return try {
-            context.assets.open(IDENTITY_ASSET_FILENAME)
-                .bufferedReader()
-                .use { it.readText() }
-                .trim()
-        } catch (e: Exception) {
-            // 3. Hardcoded fallback — should never trigger in shipped
-            // builds because the asset is bundled, but if someone
-            // strips the asset we still want the brain to work.
-            IDENTITY_FALLBACK.trim()
-        }
-    }
+    suspend fun resolvedIdentity(): String = identityStore.readCurrent()
 
     /**
      * Stream chat tokens from the configured provider. The function is
@@ -113,7 +64,7 @@ class Brain @Inject constructor(
     }
 
     companion object {
-        /** Path of the user-editable identity file in app-private storage. */
+        /** Legacy override filename retained for one-time migration. */
         const val IDENTITY_OVERRIDE_FILENAME = "identity.md"
 
         /** Path of the bundled identity asset (shipped with the APK). */
@@ -126,9 +77,8 @@ class Brain @Inject constructor(
          * missing (e.g. someone manually deleted SOUL.md from the
          * assets folder at build time).
          *
-         * Not user-facing. Settings → Persona → Identity → "Reset
-         * to default" restores from the bundled asset, not from
-         * this constant.
+         * Not user-facing. Resetting identity clears the DataStore override
+         * and resolves this only if the bundled asset is unavailable.
          */
         val IDENTITY_FALLBACK = """
             You are Aura, a personal AI assistant.

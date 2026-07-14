@@ -1,95 +1,112 @@
 package com.aura.agent
 
 import android.content.Context
+import com.aura.data.UserPreferences
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import java.io.ByteArrayInputStream
+import java.io.File
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
-import java.io.ByteArrayInputStream
-import java.io.File
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/**
- * Lock the [Brain.identity] file-resolution rules. The brain
- * reads identity from one of three sources in priority order:
- *
- *   1. User override at `filesDir/identity.md` (if present)
- *   2. Bundled asset at `assets/SOUL.md` (if present)
- *   3. Hardcoded fallback [Brain.IDENTITY_FALLBACK]
- *
- * Tests use a real TemporaryFolder (not a mock) for filesDir so
- * Java's [File] ctor doesn't NPE on a null parent path. The
- * `Context.assets` stream is mocked with mockk.
- */
+/** Locks the single-source-of-truth identity contract. */
 class BrainIdentityResolutionTest {
     @get:Rule val tmp = TemporaryFolder()
 
-    private fun brainWith(
-        overrideFile: File? = null,
+    private data class Fixture(
+        val brain: Brain,
+        val store: IdentityStore,
+        val preferences: UserPreferences,
+        val legacyFile: File,
+    )
+
+    private fun fixture(
+        storedIdentity: String = "",
+        legacyIdentity: String? = null,
         assetText: String? = "BUNDLED SOUL.md",
-    ): Brain {
-        val ctx = mockk<Context>(relaxed = true)
-        every { ctx.filesDir } returns tmp.root
+    ): Fixture {
+        val context = mockk<Context>(relaxed = true)
+        every { context.filesDir } returns tmp.root
         if (assetText != null) {
-            every { ctx.assets.open(Brain.IDENTITY_ASSET_FILENAME) } returns
+            every { context.assets.open(Brain.IDENTITY_ASSET_FILENAME) } returns
                 ByteArrayInputStream(assetText.toByteArray())
         } else {
-            every { ctx.assets.open(Brain.IDENTITY_ASSET_FILENAME) } throws
+            every { context.assets.open(Brain.IDENTITY_ASSET_FILENAME) } throws
                 java.io.FileNotFoundException("SOUL.md not in assets")
         }
-        // Pre-create the override file if requested
-        if (overrideFile != null) {
-            val real = File(tmp.root, Brain.IDENTITY_OVERRIDE_FILENAME)
-            real.writeText(overrideFile.readText())
-        }
-        return Brain(
-            context = ctx,
-            providerRegistry = mockk(relaxed = true),
-            userPreferences = mockk(relaxed = true),
+        val preferences = mockk<UserPreferences>(relaxed = true)
+        every { preferences.customIdentity } returns flowOf(storedIdentity)
+        coEvery { preferences.setCustomIdentity(any()) } returns Unit
+        val legacyFile = File(tmp.root, Brain.IDENTITY_OVERRIDE_FILENAME)
+        legacyIdentity?.let(legacyFile::writeText)
+        val store = IdentityStore(context, preferences)
+        return Fixture(
+            brain = Brain(
+                providerRegistry = mockk(relaxed = true),
+                identityStore = store,
+            ),
+            store = store,
+            preferences = preferences,
+            legacyFile = legacyFile,
         )
     }
 
     @Test
-    fun `prefers user override over bundled asset`() = runTest {
-        val override = File(tmp.root, "staging-override.txt")
-        override.writeText("USER OVERRIDE TEXT")
-        val brain = brainWith(overrideFile = override)
-        val text = brain.identity.first()
-        assertEquals("USER OVERRIDE TEXT", text)
+    fun `stored custom identity is the live brain prompt`() = runTest {
+        val fixture = fixture(storedIdentity = "USER OVERRIDE TEXT")
+
+        assertEquals("USER OVERRIDE TEXT", fixture.brain.resolvedIdentity())
+        assertEquals("USER OVERRIDE TEXT", fixture.brain.identity.first())
     }
 
     @Test
-    fun `falls back to bundled asset when no override`() = runTest {
-        val brain = brainWith(overrideFile = null, assetText = "BUNDLED SOUL.md")
-        val text = brain.identity.first()
-        assertEquals("BUNDLED SOUL.md", text)
+    fun `legacy identity file migrates once into DataStore`() = runTest {
+        val fixture = fixture(legacyIdentity = "LEGACY FILE IDENTITY")
+
+        assertEquals("LEGACY FILE IDENTITY", fixture.brain.resolvedIdentity())
+        coVerify(exactly = 1) {
+            fixture.preferences.setCustomIdentity("LEGACY FILE IDENTITY")
+        }
+        assertFalse(fixture.legacyFile.exists())
     }
 
     @Test
-    fun `falls back to hardcoded constant when both files missing`() = runTest {
-        val brain = brainWith(overrideFile = null, assetText = null)
-        val text = brain.identity.first()
-        assertEquals(Brain.IDENTITY_FALLBACK.trim(), text)
+    fun `falls back to bundled asset when no custom identity exists`() = runTest {
+        val fixture = fixture(assetText = "BUNDLED SOUL.md")
+
+        assertEquals("BUNDLED SOUL.md", fixture.brain.resolvedIdentity())
+        assertFalse(fixture.store.hasOverride())
     }
 
     @Test
-    fun `empty override file falls through to bundled asset`() = runTest {
-        val override = File(tmp.root, "staging-override.txt")
-        override.writeText("")
-        val brain = brainWith(overrideFile = override, assetText = "BUNDLED SOUL.md")
-        val text = brain.identity.first()
-        // A 0-byte override is treated as "no override" — use the asset.
-        assertEquals("BUNDLED SOUL.md", text)
+    fun `falls back to hardcoded constant when bundled asset is missing`() = runTest {
+        val fixture = fixture(assetText = null)
+
+        assertEquals(Brain.IDENTITY_FALLBACK.trim(), fixture.brain.resolvedIdentity())
     }
 
     @Test
-    fun `asset filename is SOUL_md and override filename is identity_md`() {
-        // Lock the filenames so a refactor can't accidentally
-        // rename the user file (would silently lose user edits).
+    fun `save and reset use the backed up custom identity preference`() = runTest {
+        val fixture = fixture()
+
+        assertTrue(fixture.store.save("  CUSTOM PERSONA  "))
+        coVerify(exactly = 1) { fixture.preferences.setCustomIdentity("CUSTOM PERSONA") }
+
+        assertTrue(fixture.store.resetToDefault())
+        coVerify(exactly = 1) { fixture.preferences.setCustomIdentity("") }
+    }
+
+    @Test
+    fun `identity filenames and fallback remain stable`() {
         assertEquals("SOUL.md", Brain.IDENTITY_ASSET_FILENAME)
         assertEquals("identity.md", Brain.IDENTITY_OVERRIDE_FILENAME)
         assertTrue(Brain.IDENTITY_FALLBACK.isNotBlank())

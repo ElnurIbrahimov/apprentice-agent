@@ -164,6 +164,7 @@ private fun RoleModelRow(
 @Composable
 fun SettingsScreen(
     onNavigateProfile: () -> Unit,
+    onNavigateIdentity: () -> Unit = {},
     onNavigateDiagnostics: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
     backupViewModel: BackupViewModel = hiltViewModel(),
@@ -562,41 +563,39 @@ fun SettingsScreen(
         SettingsSection(
             emoji = "\uD83E\uDDD8",
             title = "Persona",
-            subtitle = "Custom system prompt and specialist overrides",
+            subtitle = "Aura identity and specialist overrides",
             initialExpanded = false,
         ) {
-            Text(
-                text = "Custom identity prompt",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "Prepended to Aura's built-in identity. Use this for language, tone, or persona. Leave blank for default.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-
-            var identityText by remember(state.customIdentity) { mutableStateOf(state.customIdentity) }
-            OutlinedTextField(
-                value = identityText,
-                onValueChange = { identityText = it },
-                label = { Text("Identity prompt") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
-                maxLines = 8,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onNavigateIdentity),
             ) {
-                TextButton(onClick = { identityText = ""; viewModel.setCustomIdentity("") }) {
-                    Text("Reset")
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Button(onClick = { viewModel.setCustomIdentity(identityText.trim()) }) {
-                    Text("Save")
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Aura identity",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = if (state.identityCustomized) {
+                                "Customized · backed up with your settings"
+                            } else {
+                                "Using the bundled default persona"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    OutlinedButton(onClick = onNavigateIdentity) {
+                        Text(if (state.identityCustomized) "Edit" else "Customize")
+                    }
                 }
             }
 

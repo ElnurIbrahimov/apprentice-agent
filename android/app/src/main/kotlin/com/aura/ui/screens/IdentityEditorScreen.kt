@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
@@ -30,7 +30,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,10 +47,9 @@ import com.aura.ui.settings.SettingsViewModel
 /**
  * Full-screen identity (SOUL.md) editor.
  *
- * Lets the user edit the entire persona file that Aura uses
- * as its system prompt. The file lives at `filesDir/identity.md`
- * — when present, it takes precedence over the bundled
- * `assets/SOUL.md` asset.
+ * Lets the user edit the persona Aura sends as its system prompt. The custom
+ * text is stored in DataStore, so the brain, this editor, and backup/restore
+ * all use one source of truth. Blank text falls back to bundled `SOUL.md`.
  *
  * Why a separate composable? The persona is long-form markdown
  * (5-10KB) and a small `OutlinedTextField` in the Settings
@@ -92,7 +90,7 @@ fun IdentityEditorScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
@@ -119,7 +117,7 @@ fun IdentityEditorScreen(
             Text(
                 text = "This is Aura's system prompt. Edit it to change how Aura " +
                     "speaks, what it knows about itself, and the rules it follows. " +
-                    "Markdown is fine. Leave blank to use the bundled default.",
+                    "It is included in settings backups. Leave blank for the bundled default.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -201,8 +199,8 @@ fun IdentityEditorScreen(
             title = { Text("Reset to default?") },
             text = {
                 Text(
-                    "Your edits to identity.md will be deleted. The bundled " +
-                        "Aura persona will be used on next chat send.",
+                    "Your custom identity will be cleared. The bundled " +
+                        "Aura persona will be used on the next chat send.",
                 )
             },
             confirmButton = {
