@@ -3,6 +3,7 @@ package com.aura.kg
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlinx.serialization.json.JsonPrimitive
@@ -18,14 +19,21 @@ class KnowledgeGraphRepositoryTest {
     private val repo = KnowledgeGraphRepository(dao)
 
     @Test
-    fun `saveGraph inserts nodes and edges`() = runTest {
+    fun `saveGraph inserts nodes and edges with exact provenance`() = runTest {
         val node = KgNode(id = "", label = "Kotlin", type = NodeType.SKILL)
         val edge = KgEdge(id = "", type = EdgeType.LEARNED_FROM, sourceId = "a", targetId = "b")
-        coEvery { dao.insertNode(any()) } returns Unit
-        coEvery { dao.insertEdge(any()) } returns Unit
-        repo.saveGraph(listOf(node), listOf(edge), "turn-1")
-        coVerify(exactly = 1) { dao.insertNode(any()) }
-        coVerify(exactly = 1) { dao.insertEdge(any()) }
+        val capturedNode = slot<NodeEntity>()
+        val capturedEdge = slot<EdgeEntity>()
+        coEvery { dao.insertNode(capture(capturedNode)) } returns Unit
+        coEvery { dao.insertEdge(capture(capturedEdge)) } returns Unit
+        val provenance = com.aura.provenance.ConversationProvenance("conv-1", 123L)
+
+        repo.saveGraph(listOf(node), listOf(edge), provenance)
+
+        assertEquals("conv-1", capturedNode.captured.sourceConversationId)
+        assertEquals(123L, capturedNode.captured.sourceTurnTimestamp)
+        assertEquals("conv-1", capturedEdge.captured.sourceConversationId)
+        assertEquals(123L, capturedEdge.captured.sourceTurnTimestamp)
     }
 
     @Test

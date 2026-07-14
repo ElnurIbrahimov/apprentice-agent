@@ -1,5 +1,6 @@
 package com.aura.kg
 
+import com.aura.provenance.ConversationProvenance
 import com.aura.memory.escapeLikeWildcards
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -18,15 +19,22 @@ class KnowledgeGraphRepository @Inject constructor(
     suspend fun saveGraph(
         nodes: List<KgNode>,
         edges: List<KgEdge>,
-        sourceTurnId: String,
+        provenance: ConversationProvenance,
     ) = mutex.withLock {
         val now = System.currentTimeMillis()
+        val stableTurnId = if (provenance.isPresent) {
+            "${provenance.conversationId}:${provenance.turnTimestamp}"
+        } else {
+            ""
+        }
         for (node in nodes) {
             val id = node.id.ifBlank { KgId.node(node.type, node.label) }
             dao.insertNode(
                 node.copy(
                     id = id,
-                    sourceTurnId = sourceTurnId,
+                    sourceTurnId = stableTurnId,
+                    sourceConversationId = provenance.conversationId,
+                    sourceTurnTimestamp = provenance.turnTimestamp,
                     updatedAt = now,
                 ).toEntity()
             )
@@ -36,7 +44,9 @@ class KnowledgeGraphRepository @Inject constructor(
             dao.insertEdge(
                 edge.copy(
                     id = id,
-                    sourceTurnId = sourceTurnId,
+                    sourceTurnId = stableTurnId,
+                    sourceConversationId = provenance.conversationId,
+                    sourceTurnTimestamp = provenance.turnTimestamp,
                     lastReinforced = now,
                 ).toEntity()
             )

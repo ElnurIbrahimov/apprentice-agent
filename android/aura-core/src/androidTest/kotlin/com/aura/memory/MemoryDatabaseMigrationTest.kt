@@ -129,6 +129,35 @@ class MemoryDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate3To4_preservesRows_andAddsConversationProvenance() {
+        val db = helper.createDatabase("test-aura-memory-v3.db", 3)
+        db.execSQL(
+            """
+            INSERT INTO memories (id, content, source, category, importance, embedding, createdAt, accessedAt, accessCount, decayScore, tags, metadata)
+            VALUES ('mem-1', 'User likes coffee', 'user', 'preference', 0.8, NULL, 1700000000, 1700000000, 0, 1.0, '', '{}')
+            """.trimIndent(),
+        )
+        db.close()
+
+        val migrated = helper.runMigrationsAndValidate(
+            "test-aura-memory-v3.db",
+            4,
+            true,
+            MemoryModule.MIGRATION_3_4,
+        )
+
+        migrated.query(
+            "SELECT content, sourceConversationId, sourceTurnTimestamp FROM memories WHERE id = 'mem-1'",
+        ).use {
+            assert(it.moveToFirst())
+            assert(it.getString(0) == "User likes coffee")
+            assert(it.getString(1).isEmpty())
+            assert(it.getLong(2) == 0L)
+        }
+        migrated.close()
+    }
+
+    @Test
     fun migrate1To3_chained_preservesData() {
         val db = helper.createDatabase("test-aura-memory-chained.db", 1)
         db.close()

@@ -1,5 +1,6 @@
 package com.aura.memory
 
+import com.aura.provenance.ConversationProvenance
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -17,7 +18,11 @@ class MemoryStore @Inject constructor(
     private val memoryEditDao: MemoryEditDao,
 ) {
     private val exactInsertMutex = Mutex()
-    suspend fun maybeStore(content: String, source: String = "user"): String? {
+    suspend fun maybeStore(
+        content: String,
+        source: String = "user",
+        provenance: ConversationProvenance = ConversationProvenance(),
+    ): String? {
         val decision = writeGate.evaluate(content, source)
         if (!decision.shouldStore) return null
         // Dedup: skip if an identical memory already exists. This
@@ -72,6 +77,8 @@ class MemoryStore @Inject constructor(
                 createdAt = now,
                 accessedAt = now,
                 decayScore = 1.0f,
+                sourceConversationId = provenance.conversationId,
+                sourceTurnTimestamp = provenance.turnTimestamp,
             )
         )
         return id
@@ -93,7 +100,14 @@ class MemoryStore @Inject constructor(
         store(content, source, category, importance, tags)
     }
 
-    suspend fun store(content: String, source: String, category: String, importance: Float, tags: List<String> = emptyList()): String {
+    suspend fun store(
+        content: String,
+        source: String,
+        category: String,
+        importance: Float,
+        tags: List<String> = emptyList(),
+        provenance: ConversationProvenance = ConversationProvenance(),
+    ): String {
         val id = UUID.randomUUID().toString()
         val embedding = embedder.embed(content)
         val now = System.currentTimeMillis()
@@ -109,6 +123,8 @@ class MemoryStore @Inject constructor(
                 accessedAt = now,
                 decayScore = 1.0f,
                 tags = tags.joinToString(","),
+                sourceConversationId = provenance.conversationId,
+                sourceTurnTimestamp = provenance.turnTimestamp,
             )
         )
         return id

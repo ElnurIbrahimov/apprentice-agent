@@ -59,11 +59,12 @@ class ConversationKgExtractorTest {
             coEvery { saveGraph(any(), any(), any()) } just Runs
         }
         val extractor = ConversationKgExtractor(tool, repo, dispatcher, Unit)
+        val provenance = com.aura.provenance.ConversationProvenance("conv-7", 77L)
 
-        extractor.extract("Kotlin is a language")
+        extractor.extract("Kotlin is a language", provenance)
         advanceTimeBy(6_000L)
 
-        coVerify(exactly = 1) { repo.saveGraph(any(), any(), any()) }
+        coVerify(exactly = 1) { repo.saveGraph(any(), any(), provenance) }
 
         extractor.shutdown()
     }

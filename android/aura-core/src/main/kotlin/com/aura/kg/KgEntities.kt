@@ -12,6 +12,7 @@ import androidx.room.PrimaryKey
         Index("label"),
         Index("type"),
         Index("label", "type", unique = true),
+        Index("sourceConversationId"),
     ]
 )
 data class NodeEntity(
@@ -25,6 +26,8 @@ data class NodeEntity(
     @ColumnInfo(name = "updatedAt") val updatedAt: Long = System.currentTimeMillis(),
     @ColumnInfo(name = "accessCount") val accessCount: Int = 0,
     @ColumnInfo(name = "lastAccessed") val lastAccessed: Long = System.currentTimeMillis(),
+    val sourceConversationId: String = "",
+    val sourceTurnTimestamp: Long = 0L,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -44,6 +47,7 @@ data class NodeEntity(
         Index("sourceId"),
         Index("targetId"),
         Index("sourceId", "targetId", "type", unique = true),
+        Index("sourceConversationId"),
     ]
 )
 data class EdgeEntity(
@@ -57,6 +61,8 @@ data class EdgeEntity(
     @ColumnInfo(name = "sourceTurnId") val sourceTurnId: String = "",
     @ColumnInfo(name = "createdAt") val createdAt: Long = System.currentTimeMillis(),
     @ColumnInfo(name = "lastReinforced") val lastReinforced: Long = System.currentTimeMillis(),
+    val sourceConversationId: String = "",
+    val sourceTurnTimestamp: Long = 0L,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

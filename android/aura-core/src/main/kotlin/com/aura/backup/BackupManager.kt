@@ -320,6 +320,8 @@ private fun MemoryEntity.toBackup() = MemoryBackup(
     decayScore = decayScore,
     tags = tags,
     metadata = metadata,
+    sourceConversationId = sourceConversationId,
+    sourceTurnTimestamp = sourceTurnTimestamp,
 )
 
 private fun MemoryBackup.toEntity() = MemoryEntity(
@@ -336,6 +338,8 @@ private fun MemoryBackup.toEntity() = MemoryEntity(
     decayScore = decayScore,
     tags = tags,
     metadata = metadata,
+    sourceConversationId = sourceConversationId,
+    sourceTurnTimestamp = sourceTurnTimestamp,
 )
 
 private fun MemoryEditEntity.toBackup() = MemoryEditBackup(
@@ -379,6 +383,8 @@ private fun NodeEntity.toBackup() = NodeBackup(
     properties = properties,
     confidence = confidence,
     sourceTurnId = sourceTurnId,
+    sourceConversationId = sourceConversationId,
+    sourceTurnTimestamp = sourceTurnTimestamp,
     createdAt = createdAt,
     updatedAt = updatedAt,
     accessCount = accessCount,
@@ -392,6 +398,8 @@ private fun NodeBackup.toEntity() = NodeEntity(
     properties = properties,
     confidence = confidence,
     sourceTurnId = sourceTurnId,
+    sourceConversationId = sourceConversationId,
+    sourceTurnTimestamp = sourceTurnTimestamp,
     createdAt = createdAt,
     updatedAt = updatedAt,
     accessCount = accessCount,
@@ -407,6 +415,8 @@ private fun EdgeEntity.toBackup() = EdgeBackup(
     properties = properties,
     confidence = confidence,
     sourceTurnId = sourceTurnId,
+    sourceConversationId = sourceConversationId,
+    sourceTurnTimestamp = sourceTurnTimestamp,
     createdAt = createdAt,
     lastReinforced = lastReinforced,
 )
@@ -420,6 +430,8 @@ private fun EdgeBackup.toEntity() = EdgeEntity(
     properties = properties,
     confidence = confidence,
     sourceTurnId = sourceTurnId,
+    sourceConversationId = sourceConversationId,
+    sourceTurnTimestamp = sourceTurnTimestamp,
     createdAt = createdAt,
     lastReinforced = lastReinforced,
 )

@@ -38,6 +38,8 @@ data class KgNode(
     val updatedAt: Long = System.currentTimeMillis(),
     val accessCount: Int = 0,
     val lastAccessed: Long = System.currentTimeMillis(),
+    val sourceConversationId: String = "",
+    val sourceTurnTimestamp: Long = 0L,
 ) {
     fun toEntity() = NodeEntity(
         id = id,
@@ -46,6 +48,8 @@ data class KgNode(
         properties = Json.encodeToString(JsonObject.serializer(), properties),
         confidence = confidence,
         sourceTurnId = sourceTurnId,
+        sourceConversationId = sourceConversationId,
+        sourceTurnTimestamp = sourceTurnTimestamp,
         createdAt = createdAt,
         updatedAt = updatedAt,
         accessCount = accessCount,
@@ -68,6 +72,8 @@ data class KgNode(
                 properties = props,
                 confidence = e.confidence,
                 sourceTurnId = e.sourceTurnId,
+                sourceConversationId = e.sourceConversationId,
+                sourceTurnTimestamp = e.sourceTurnTimestamp,
                 createdAt = e.createdAt,
                 updatedAt = e.updatedAt,
                 accessCount = e.accessCount,
@@ -88,6 +94,8 @@ data class KgEdge(
     val sourceTurnId: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val lastReinforced: Long = System.currentTimeMillis(),
+    val sourceConversationId: String = "",
+    val sourceTurnTimestamp: Long = 0L,
 ) {
     fun toEntity() = EdgeEntity(
         id = id,
@@ -98,6 +106,8 @@ data class KgEdge(
         properties = Json.encodeToString(JsonObject.serializer(), properties),
         confidence = confidence,
         sourceTurnId = sourceTurnId,
+        sourceConversationId = sourceConversationId,
+        sourceTurnTimestamp = sourceTurnTimestamp,
         createdAt = createdAt,
         lastReinforced = lastReinforced,
     )
@@ -120,6 +130,8 @@ data class KgEdge(
                 properties = props,
                 confidence = e.confidence,
                 sourceTurnId = e.sourceTurnId,
+                sourceConversationId = e.sourceConversationId,
+                sourceTurnTimestamp = e.sourceTurnTimestamp,
                 createdAt = e.createdAt,
                 lastReinforced = e.lastReinforced,
             )

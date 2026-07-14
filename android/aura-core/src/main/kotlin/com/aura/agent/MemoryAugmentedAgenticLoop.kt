@@ -1,5 +1,7 @@
 package com.aura.agent
 
+import com.aura.provenance.ConversationProvenance
+import com.aura.hands.HandRepository
 import com.aura.kg.ConversationKgExtractor
 import com.aura.memory.LlmWriteGate
 import com.aura.memory.MemoryStore
@@ -262,17 +264,6 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
 
             if (accumulatedText.isNotEmpty()) {
                 currentConversation = currentConversation.addAssistant(accumulatedText.toString())
-                // KG extraction is gated by memoryEnabled: in incognito mode
-                // we must not learn entities / relations from this turn.
-                // Extract from BOTH the user's message and the assistant's
-                // response — the user shares facts ("I work at Google"),
-                // the assistant synthesizes and confirms them.
-                if (memoryEnabled) {
-                    if (lastUserMessage.isNotBlank()) {
-                        kgExtractor.extract(lastUserMessage)
-                    }
-                    kgExtractor.extract(accumulatedText.toString())
-                }
             }
             for ((id, args) in toolCalls) {
                 val name = toolCallStarts[id] ?: ""
@@ -320,6 +311,19 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
             }
         }
 
+        val sourceTurnTimestamp = currentConversation.turns.lastOrNull()?.timestamp ?: 0L
+        val provenance = ConversationProvenance(currentConversation.id, sourceTurnTimestamp)
+
+        // Extract one complete labeled turn. Calling the debounced extractor once
+        // avoids the previous user-then-assistant overwrite race.
+        val completedAssistant = currentConversation.turns.lastOrNull()?.assistant.orEmpty()
+        if (memoryEnabled && lastUserMessage.isNotBlank() && completedAssistant.isNotBlank()) {
+            kgExtractor.extract(
+                "USER:\n$lastUserMessage\n\nASSISTANT:\n$completedAssistant",
+                provenance,
+            )
+        }
+
         // 4) Auto-store the user's last message via LLM write gate (best-effort, non-blocking)
         //    Skipped when memoryEnabled is false (incognito mode).
         //    The LLM gate wraps the heuristic gate: heuristic runs first
@@ -357,6 +361,7 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                         source = "user",
                         category = decision.category,
                         importance = decision.importance,
+                        provenance = provenance,
                     )
                 }
             }

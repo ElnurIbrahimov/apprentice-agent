@@ -138,12 +138,16 @@ internal data class MicPermissionOutcome(
     val launchMode: ChatVoiceMode?,
 )
 
+internal fun findSourceTurnIndex(turnTimestamps: List<Long>, targetTimestamp: Long): Int =
+    turnTimestamps.indexOf(targetTimestamp)
+
 @Composable
 fun ChatRoute(
     viewModel: ChatViewModel = hiltViewModel(),
     resumeConversationId: String? = null,
     morningBriefSummary: String? = null,
     initialDraft: String? = null,
+    focusTurnTimestamp: Long? = null,
     onNavigateHistory: () -> Unit = {},
 ) {
     LaunchedEffect(resumeConversationId) {
@@ -175,7 +179,23 @@ fun ChatRoute(
         }
     }
     LaunchedEffect(state.conversation.id) {
-        followLiveEdge = true
+        followLiveEdge = focusTurnTimestamp == null
+    }
+    LaunchedEffect(
+        state.conversation.id,
+        state.conversation.turns.size,
+        focusTurnTimestamp,
+    ) {
+        val targetTimestamp = focusTurnTimestamp ?: return@LaunchedEffect
+        if (state.conversation.id != resumeConversationId) return@LaunchedEffect
+        val targetIndex = findSourceTurnIndex(
+            state.conversation.turns.map { it.timestamp },
+            targetTimestamp,
+        )
+        if (targetIndex >= 0) {
+            followLiveEdge = false
+            listState.scrollToItem(targetIndex)
+        }
     }
     val showJumpToBottom = shouldShowJumpToLatest(state.conversation.turns.size, followLiveEdge)
     val coroutineScope = rememberCoroutineScope()

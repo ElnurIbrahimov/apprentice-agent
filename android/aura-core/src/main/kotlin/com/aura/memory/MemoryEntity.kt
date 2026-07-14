@@ -9,7 +9,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 @Entity(
     tableName = "memories",
-    indices = [Index("createdAt"), Index("source"), Index("category")]
+    indices = [Index("createdAt"), Index("source"), Index("category"), Index("sourceConversationId")]
 )
 data class MemoryEntity(
     @PrimaryKey val id: String,
@@ -24,6 +24,8 @@ data class MemoryEntity(
     @ColumnInfo(name = "decayScore") val decayScore: Float = 1.0f, // 0.0 = forgotten, 1.0 = fresh
     val tags: String = "",       // comma-separated
     val metadata: String = "",   // JSON
+    val sourceConversationId: String = "",
+    val sourceTurnTimestamp: Long = 0L,
 ) {
     // Room requires equals/hashCode; ByteArray needs special handling
     override fun equals(other: Any?): Boolean {

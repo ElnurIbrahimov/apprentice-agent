@@ -8,7 +8,7 @@ import com.aura.kg.NodeEntity
 
 @Database(
     entities = [MemoryEntity::class, NodeEntity::class, EdgeEntity::class, MemoryEditEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class MemoryDatabase : RoomDatabase() {

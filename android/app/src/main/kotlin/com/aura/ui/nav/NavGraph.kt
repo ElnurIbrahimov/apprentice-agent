@@ -154,25 +154,37 @@ fun NavGraph(
                 )
             }
             composable(
-                route = "chat?convId={convId}&draft={draft}&brief={brief}",
+                route = "chat?convId={convId}&draft={draft}&brief={brief}&focusTurn={focusTurn}",
                 arguments = listOf(
                     navArgument("convId") { type = NavType.StringType; nullable = true; defaultValue = null },
                     navArgument("draft") { type = NavType.StringType; nullable = true; defaultValue = null },
                     navArgument("brief") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("focusTurn") { type = NavType.StringType; nullable = true; defaultValue = null },
                 ),
             ) {
                 val convId = it.arguments?.getString("convId")
                 val summary = it.arguments?.getString("brief")
                 val draft = it.arguments?.getString("draft")
+                val focusTurn = it.arguments?.getString("focusTurn")?.toLongOrNull()
                 ChatRoute(
                     resumeConversationId = convId,
                     morningBriefSummary = summary,
                     initialDraft = draft,
+                    focusTurnTimestamp = focusTurn,
                     onNavigateHistory = { navController.navigate("history") },
                 )
             }
             composable(TopLevelRoute.Memory.route) {
-                MemoryScreen(onOpenKnowledgeGraph = { navController.navigate("knowledge_graph") })
+                MemoryScreen(
+                    onOpenKnowledgeGraph = { navController.navigate("knowledge_graph") },
+                    onOpenSourceConversation = { convId, turnTimestamp ->
+                        navController.navigate(
+                            "chat?convId=${android.net.Uri.encode(convId)}&focusTurn=$turnTimestamp"
+                        ) {
+                            launchSingleTop = true
+                        }
+                    },
+                )
             }
             composable(TopLevelRoute.Settings.route) {
                 SettingsScreen(
@@ -190,7 +202,14 @@ fun NavGraph(
                 )
             }
             composable("knowledge_graph") {
-                KnowledgeGraphScreen(onBack = { navController.popBackStack() })
+                KnowledgeGraphScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenSourceConversation = { convId, turnTimestamp ->
+                        navController.navigate(
+                            "chat?convId=${android.net.Uri.encode(convId)}&focusTurn=$turnTimestamp"
+                        )
+                    },
+                )
             }
             composable("history") {
                 HistoryScreen(onSelect = { convId ->

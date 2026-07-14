@@ -74,6 +74,7 @@ private val MEMORY_CATEGORIES = listOf("fact", "preference", "episode", "person"
 @Composable
 fun MemoryScreen(
     onOpenKnowledgeGraph: () -> Unit = {},
+    onOpenSourceConversation: (String, Long) -> Unit = { _, _ -> },
     viewModel: MemoryViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -297,6 +298,14 @@ fun MemoryScreen(
                         mem = mem,
                         onEdit = { editingMemory = mem },
                         onForget = { viewModel.forget(mem.id) },
+                        onOpenSource = {
+                            if (mem.sourceConversationId.isNotBlank()) {
+                                onOpenSourceConversation(
+                                    mem.sourceConversationId,
+                                    mem.sourceTurnTimestamp,
+                                )
+                            }
+                        },
                     )
                 }
             }
@@ -406,6 +415,7 @@ private fun MemoryRow(
     mem: MemoryEntity,
     onEdit: () -> Unit,
     onForget: () -> Unit,
+    onOpenSource: () -> Unit,
 ) {
     val age = (System.currentTimeMillis() - mem.createdAt) / 1000
     val ageDisplay = when {
@@ -478,6 +488,11 @@ private fun MemoryRow(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     )
+                }
+            }
+            if (mem.sourceConversationId.isNotBlank()) {
+                TextButton(onClick = onOpenSource) {
+                    Text("Source")
                 }
             }
             IconButton(onClick = onEdit) {

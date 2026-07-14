@@ -1,6 +1,7 @@
 package com.aura.ui.screens.chat
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -24,5 +25,15 @@ class ChatScrollPolicyTest {
         assertTrue(shouldAutoFollow(turnCount = 1, followLiveEdge = true))
         assertFalse(shouldAutoFollow(turnCount = 1, followLiveEdge = false))
         assertFalse(shouldAutoFollow(turnCount = 0, followLiveEdge = true))
+    }
+
+    @Test
+    fun `source provenance resolves the exact turn`() {
+        assertEquals(1, findSourceTurnIndex(listOf(100L, 200L, 300L), 200L))
+    }
+
+    @Test
+    fun `missing source provenance does not jump to a different turn`() {
+        assertEquals(-1, findSourceTurnIndex(listOf(100L, 300L), 200L))
     }
 }

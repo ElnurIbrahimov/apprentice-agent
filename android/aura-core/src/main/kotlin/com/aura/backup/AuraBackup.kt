@@ -41,7 +41,7 @@ data class AuraBackup(
     val usage: UsageSnapshot = UsageSnapshot(),
 ) {
     companion object {
-        const val SCHEMA_VERSION = 3
+        const val SCHEMA_VERSION = 4
     }
 }
 
@@ -58,6 +58,8 @@ data class MemoryBackup(
     val decayScore: Float,
     val tags: String,
     val metadata: String,
+    val sourceConversationId: String = "",
+    val sourceTurnTimestamp: Long = 0L,
 )
 
 @Serializable
@@ -104,6 +106,8 @@ data class NodeBackup(
     val updatedAt: Long,
     val accessCount: Int,
     val lastAccessed: Long,
+    val sourceConversationId: String = "",
+    val sourceTurnTimestamp: Long = 0L,
 )
 
 @Serializable
@@ -118,6 +122,8 @@ data class EdgeBackup(
     val sourceTurnId: String,
     val createdAt: Long,
     val lastReinforced: Long,
+    val sourceConversationId: String = "",
+    val sourceTurnTimestamp: Long = 0L,
 )
 
 @Serializable

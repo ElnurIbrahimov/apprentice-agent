@@ -1,5 +1,6 @@
 package com.aura.kg
 
+import com.aura.provenance.ConversationProvenance
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -52,7 +53,12 @@ class ConversationKgExtractor private constructor(
      */
     private val scope = CoroutineScope(dispatcher + SupervisorJob())
 
-    @Volatile private var pendingText: String? = null
+    private data class PendingExtraction(
+        val text: String,
+        val provenance: ConversationProvenance,
+    )
+
+    @Volatile private var pendingExtraction: PendingExtraction? = null
     @Volatile private var debounceJob: Job? = null
     @Volatile private var running: Boolean = false
 
@@ -63,21 +69,24 @@ class ConversationKgExtractor private constructor(
         debounceJob = null
     }
 
-    fun extract(turnText: String) {
+    fun extract(
+        turnText: String,
+        provenance: ConversationProvenance = ConversationProvenance(),
+    ) {
         if (turnText.isBlank()) return
-        pendingText = turnText
+        pendingExtraction = PendingExtraction(turnText, provenance)
         // Cancel any pending debounce, start a new one
         debounceJob?.cancel()
         debounceJob = scope.launch {
             delay(DEBOUNCE_MS)
-            val text = pendingText ?: return@launch
-            pendingText = null
+            val request = pendingExtraction ?: return@launch
+            pendingExtraction = null
             if (running) return@launch
             running = true
             try {
-                val (nodes, edges) = knowledgeGraphTool.extract(text)
+                val (nodes, edges) = knowledgeGraphTool.extract(request.text)
                 if (nodes.isNotEmpty() || edges.isNotEmpty()) {
-                    repository.saveGraph(nodes, edges, "turn-${System.currentTimeMillis()}")
+                    repository.saveGraph(nodes, edges, request.provenance)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

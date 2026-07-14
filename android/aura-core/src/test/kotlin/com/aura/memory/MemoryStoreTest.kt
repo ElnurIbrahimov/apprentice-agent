@@ -322,4 +322,24 @@ class MemoryStoreTest {
         assertNotNull(result)
         coVerify(exactly = 1) { dao.insert(any()) }
     }
+
+    @Test
+    fun `store persists exact conversation and turn provenance`() = runTest {
+        val dao = mockk<MemoryDao>(relaxed = true)
+        val captured = slot<MemoryEntity>()
+        coEvery { dao.insert(capture(captured)) } answers { Unit }
+        val store = MemoryStore(dao, FakeEmbedder(384), VectorIndex(384), WriteGate(), memoryEditDao)
+        val provenance = com.aura.provenance.ConversationProvenance("conv-42", 1_700_000_123L)
+
+        store.store(
+            content = "The user is writing a solar-punk novel",
+            source = "user",
+            category = "project",
+            importance = 0.9f,
+            provenance = provenance,
+        )
+
+        assertEquals("conv-42", captured.captured.sourceConversationId)
+        assertEquals(1_700_000_123L, captured.captured.sourceTurnTimestamp)
+    }
 }

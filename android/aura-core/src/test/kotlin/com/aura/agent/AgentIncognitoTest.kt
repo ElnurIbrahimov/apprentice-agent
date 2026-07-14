@@ -66,7 +66,7 @@ class AgentIncognitoTest {
         // Recall returns nothing.
         coEvery { memoryStore.query(any(), any()) } returns emptyList()
         coEvery { userProfileStore.update(any(), any(), any(), any()) } returns Unit
-        coEvery { kgExtractor.extract(any()) } returns Unit
+        coEvery { kgExtractor.extract(any(), any()) } returns Unit
         coEvery { handRepository.getEnabled() } returns emptyList()
 
         val loop = makeLoop()
@@ -82,9 +82,19 @@ class AgentIncognitoTest {
         // The LLM gate falls back to heuristic (providerRegistry is a
         // relaxed mock returning empty flow), which says shouldStore=true
         // for content >= 4 chars. So store() should be called.
-        coVerify { memoryStore.store(any<String>(), any<String>(), any<String>(), any<Float>(), any<List<String>>()) }
-        // KG extraction runs by default.
-        coVerify { kgExtractor.extract("hello back") }
+        coVerify {
+            memoryStore.store(
+                any<String>(), any<String>(), any<String>(), any<Float>(), any<List<String>>(),
+                any<com.aura.provenance.ConversationProvenance>(),
+            )
+        }
+        // KG extraction receives one labeled, provenance-linked turn.
+        coVerify {
+            kgExtractor.extract(
+                match { it.contains("USER:\nhi there") && it.contains("ASSISTANT:\nhello back") },
+                match { it.conversationId == "c1" },
+            )
+        }
     }
 
     @Test
@@ -94,7 +104,7 @@ class AgentIncognitoTest {
             emit(BrainChunk.Finished("stop"))
         }
         coEvery { memoryStore.query(any(), any()) } returns emptyList()
-        coEvery { kgExtractor.extract(any()) } returns Unit
+        coEvery { kgExtractor.extract(any(), any()) } returns Unit
         coEvery { handRepository.getEnabled() } returns emptyList()
 
         val loop = makeLoop()
@@ -108,11 +118,16 @@ class AgentIncognitoTest {
         ).toList()
 
         coVerify { brain.stream(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { memoryStore.store(any<String>(), any<String>(), any<String>(), any<Float>(), any<List<String>>()) }
+        coVerify(exactly = 0) {
+            memoryStore.store(
+                any<String>(), any<String>(), any<String>(), any<Float>(), any<List<String>>(),
+                any<com.aura.provenance.ConversationProvenance>(),
+            )
+        }
         coVerify(exactly = 0) { userProfileStore.update(name = any(), traits = any(), preferences = any(), facts = any()) }
         coVerify(exactly = 0) { userProfileStore.mergeFacts(any()) }
         // KG extraction is gated by the same flag.
-        coVerify(exactly = 0) { kgExtractor.extract(any()) }
+        coVerify(exactly = 0) { kgExtractor.extract(any(), any()) }
     }
 
     @Test
@@ -122,7 +137,7 @@ class AgentIncognitoTest {
             emit(BrainChunk.Finished("stop"))
         }
         coEvery { memoryStore.query(any(), any()) } returns emptyList()
-        coEvery { kgExtractor.extract(any()) } returns Unit
+        coEvery { kgExtractor.extract(any(), any()) } returns Unit
         coEvery { handRepository.getEnabled() } returns emptyList()
 
         val loop = makeLoop()
@@ -159,7 +174,7 @@ class AgentIncognitoTest {
             emit(BrainChunk.Finished("stop"))
         }
         coEvery { memoryStore.query(any(), any()) } returns emptyList()
-        coEvery { kgExtractor.extract(any()) } returns Unit
+        coEvery { kgExtractor.extract(any(), any()) } returns Unit
 
         val loop = makeLoop()
         val events = loop.run(

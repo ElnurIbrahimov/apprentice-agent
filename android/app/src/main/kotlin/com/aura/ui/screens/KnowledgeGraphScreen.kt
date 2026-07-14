@@ -69,6 +69,7 @@ private val graphJson = Json { prettyPrint = true }
 @Composable
 fun KnowledgeGraphScreen(
     onBack: () -> Unit,
+    onOpenSourceConversation: (String, Long) -> Unit = { _, _ -> },
     viewModel: KnowledgeGraphViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -227,6 +228,20 @@ fun KnowledgeGraphScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                }
+                if (selected.node.sourceConversationId.isNotBlank()) {
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.dismissNode()
+                            onOpenSourceConversation(
+                                selected.node.sourceConversationId,
+                                selected.node.sourceTurnTimestamp,
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Open source conversation")
                     }
                 }
                 RelationSection("Incoming", selected.incoming)

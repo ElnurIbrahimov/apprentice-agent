@@ -179,6 +179,11 @@ class EndToEndTest {
 
         // The LLM write gate should have called store (via the LLM decision)
         // for the user message containing "Elnur".
-        io.mockk.coVerify { memoryStore.store(match { it.contains("Elnur") }, any<String>(), any<String>(), any<Float>(), any<List<String>>()) }
+        io.mockk.coVerify {
+            memoryStore.store(
+                match { it.contains("Elnur") }, any<String>(), any<String>(), any<Float>(), any<List<String>>(),
+                match<com.aura.provenance.ConversationProvenance> { it.conversationId == conv.id },
+            )
+        }
     }
 }

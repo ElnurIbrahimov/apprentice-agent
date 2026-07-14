@@ -2,6 +2,7 @@ package com.aura.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aura.provenance.ConversationProvenance
 import com.aura.memory.MemoryEntity
 import com.aura.memory.MemoryStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -128,8 +129,15 @@ class MemoryViewModel @Inject constructor(
         val mem = lastDeleted ?: return
         viewModelScope.launch {
             memoryStore.store(
-                mem.content, mem.source, mem.category, mem.importance,
-                if (mem.tags.isBlank()) emptyList() else mem.tags.split(",").map { it.trim() },
+                content = mem.content,
+                source = mem.source,
+                category = mem.category,
+                importance = mem.importance,
+                tags = if (mem.tags.isBlank()) emptyList() else mem.tags.split(",").map { it.trim() },
+                provenance = ConversationProvenance(
+                    mem.sourceConversationId,
+                    mem.sourceTurnTimestamp,
+                ),
             )
             lastDeleted = null
             _state.update { it.copy(undoMessage = null) }
