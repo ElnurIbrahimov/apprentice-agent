@@ -144,6 +144,23 @@ open class OpenAiCompatProvider(
                 buildJsonObject {
                     put("role", msg.role.name)
                     put("content", msg.content)
+                    // Tool-result messages must reference the call they answer.
+                    msg.toolCallId?.let { put("tool_call_id", it) }
+                    // Assistant messages that requested tools must replay the
+                    // tool_calls array, or the provider rejects the following
+                    // tool-role messages with a 400.
+                    msg.toolCalls?.takeIf { it.isNotEmpty() }?.let { calls ->
+                        put("tool_calls", JsonArray(calls.map { tc ->
+                            buildJsonObject {
+                                put("id", tc.id)
+                                put("type", "function")
+                                put("function", buildJsonObject {
+                                    put("name", tc.name)
+                                    put("arguments", tc.arguments)
+                                })
+                            }
+                        }))
+                    }
                 }
             }))
             if (tools.isNotEmpty()) {

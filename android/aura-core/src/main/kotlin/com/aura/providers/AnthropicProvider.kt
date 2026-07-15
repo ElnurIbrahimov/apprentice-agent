@@ -43,15 +43,7 @@ class AnthropicProvider(
             put("max_tokens", options.maxTokens ?: 4096)
             put("temperature", options.temperature)
             systemPrompt?.let { put("system", it) }
-            put("messages", kotlinx.serialization.json.JsonArray(anthropicMessages.map { msg ->
-                buildJsonObject {
-                    put("role", msg.role.name)
-                    put("content", kotlinx.serialization.json.JsonArray(listOf(buildJsonObject {
-                        put("type", "text")
-                        put("text", msg.content)
-                    })))
-                }
-            }))
+            put("messages", buildAnthropicMessages(anthropicMessages))
             if (tools.isNotEmpty()) {
                 put("tools", kotlinx.serialization.json.JsonArray(tools.map { tool ->
                     buildJsonObject {
@@ -149,4 +141,83 @@ class AnthropicProvider(
         val rest = messages.filter { it.role != ProviderMessage.Role.system }
         return sys.ifBlank { null } to rest
     }
+
+    /**
+     * Convert the flat [ProviderMessage] list into Anthropic's native message
+     * shape. Anthropic only accepts `user`/`assistant` roles: tool results must
+     * be `tool_result` content blocks inside a *user* message (consecutive
+     * results merged into one), and an assistant's tool requests must be
+     * `tool_use` blocks. Empty text blocks are omitted (the API rejects them),
+     * as are assistant messages that would carry no content at all.
+     */
+    private fun buildAnthropicMessages(messages: List<ProviderMessage>): kotlinx.serialization.json.JsonArray {
+        val out = mutableListOf<JsonObject>()
+        var i = 0
+        while (i < messages.size) {
+            val msg = messages[i]
+            when (msg.role) {
+                ProviderMessage.Role.tool -> {
+                    // Merge consecutive tool results into a single user message.
+                    val blocks = mutableListOf<JsonObject>()
+                    while (i < messages.size && messages[i].role == ProviderMessage.Role.tool) {
+                        val t = messages[i]
+                        blocks += buildJsonObject {
+                            put("type", "tool_result")
+                            put("tool_use_id", t.toolCallId ?: "")
+                            put("content", t.content)
+                        }
+                        i++
+                    }
+                    out += buildJsonObject {
+                        put("role", "user")
+                        put("content", kotlinx.serialization.json.JsonArray(blocks))
+                    }
+                }
+                ProviderMessage.Role.assistant -> {
+                    val blocks = mutableListOf<JsonObject>()
+                    if (msg.content.isNotBlank()) {
+                        blocks += buildJsonObject {
+                            put("type", "text")
+                            put("text", msg.content)
+                        }
+                    }
+                    msg.toolCalls?.forEach { tc ->
+                        blocks += buildJsonObject {
+                            put("type", "tool_use")
+                            put("id", tc.id)
+                            put("name", tc.name)
+                            put("input", parseArguments(tc.arguments))
+                        }
+                    }
+                    if (blocks.isNotEmpty()) {
+                        out += buildJsonObject {
+                            put("role", "assistant")
+                            put("content", kotlinx.serialization.json.JsonArray(blocks))
+                        }
+                    }
+                    i++
+                }
+                else -> {
+                    // user (system messages are split out upstream)
+                    out += buildJsonObject {
+                        put("role", "user")
+                        put("content", kotlinx.serialization.json.JsonArray(listOf(buildJsonObject {
+                            put("type", "text")
+                            put("text", msg.content)
+                        })))
+                    }
+                    i++
+                }
+            }
+        }
+        return kotlinx.serialization.json.JsonArray(out)
+    }
+
+    /** Parse a tool-call arguments JSON string into a JSON element (object on failure). */
+    private fun parseArguments(args: String): kotlinx.serialization.json.JsonElement =
+        try {
+            if (args.isBlank()) JsonObject(emptyMap()) else Json.parseToJsonElement(args)
+        } catch (_: Exception) {
+            JsonObject(emptyMap())
+        }
 }

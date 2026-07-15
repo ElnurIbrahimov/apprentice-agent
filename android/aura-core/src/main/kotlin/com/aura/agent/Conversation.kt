@@ -34,9 +34,31 @@ data class Conversation(
         }
         for (turn in turns) {
             turn.user?.let { out += ProviderMessage(role = ProviderMessage.Role.user, content = it) }
-            turn.assistant?.let { out += ProviderMessage(role = ProviderMessage.Role.assistant, content = it) }
-            for (toolTurn in turn.toolTurns) {
-                out += ProviderMessage(role = ProviderMessage.Role.tool, content = toolTurn.result, toolCallId = toolTurn.id)
+            if (turn.toolTurns.isNotEmpty()) {
+                // A turn that requested tools must be replayed as an assistant
+                // message carrying the tool_calls, followed by one tool-result
+                // message per call. Without the tool_calls on the assistant
+                // message, OpenAI-compatible providers reject the following
+                // tool-role messages (400: "must be a response to a preceding
+                // message with 'tool_calls'"), and Anthropic can't pair the
+                // tool_result blocks to their tool_use. Assistant text (if any)
+                // rides along on the same message.
+                out += ProviderMessage(
+                    role = ProviderMessage.Role.assistant,
+                    content = turn.assistant ?: "",
+                    toolCalls = turn.toolTurns.map {
+                        com.aura.providers.ToolCall(id = it.id, name = it.name, arguments = it.args)
+                    },
+                )
+                for (toolTurn in turn.toolTurns) {
+                    out += ProviderMessage(
+                        role = ProviderMessage.Role.tool,
+                        content = toolTurn.result,
+                        toolCallId = toolTurn.id,
+                    )
+                }
+            } else {
+                turn.assistant?.let { out += ProviderMessage(role = ProviderMessage.Role.assistant, content = it) }
             }
         }
         return out

@@ -133,7 +133,15 @@ class MemoryAugmentedAgenticLoop @Inject constructor(
                 currentConversation = currentConversation.addToolCall(id, name, args)
             }
 
-            if (toolCalls.isEmpty() || finishReason == "stop" || finishReason == "length") {
+            // Terminate only when the model finished a turn WITHOUT requesting
+            // tools. Providers emit a terminal "stop"/"length" chunk *after* the
+            // tool-call finish (OpenAI's [DONE], Anthropic's message_stop), so
+            // gating on finishReason here skipped tool dispatch entirely — the
+            // loop recorded the calls and exited before executing them. Any
+            // pending tool calls must be executed and their results fed back;
+            // the maxSteps guard bounds the loop. finishReason is retained for
+            // observability but no longer decides termination.
+            if (toolCalls.isEmpty()) {
                 finished = true
                 break
             }
