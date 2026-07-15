@@ -83,18 +83,7 @@ fun formatModelName(id: String): String {
     return "$displayName · $providerLabel"
 }
 
-private fun providerLabel(prefix: String): String = when (prefix) {
-    "ollama" -> "Ollama"
-    "anthropic" -> "Anthropic"
-    "openai" -> "OpenAI"
-    "deepseek" -> "DeepSeek"
-    "gemini" -> "Gemini"
-    "groq" -> "Groq"
-    "openrouter" -> "OpenRouter"
-    "nvidia" -> "NVIDIA"
-    "moa" -> "MoA"
-    else -> prefix.replaceFirstChar { it.uppercase() }
-}
+private fun providerLabel(prefix: String): String = com.aura.providers.providerLabel(prefix)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

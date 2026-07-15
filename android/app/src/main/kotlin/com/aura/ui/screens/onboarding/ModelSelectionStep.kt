@@ -164,16 +164,7 @@ private fun ModelChoiceRow(
     }
 }
 
-private fun providerName(prefix: String): String = when (prefix) {
-    "ollama" -> "Ollama Cloud"
-    "anthropic" -> "Anthropic"
-    "openai" -> "OpenAI"
-    "gemini" -> "Gemini"
-    "deepseek" -> "DeepSeek"
-    "groq" -> "Groq"
-    "openrouter" -> "OpenRouter"
-    else -> prefix.replaceFirstChar { it.uppercase() }
-}
+private fun providerName(prefix: String): String = com.aura.providers.providerLabel(prefix)
 
 private fun statusLabel(status: ProviderStatus): String = when (status) {
     ProviderStatus.Ready -> "Ready"

@@ -30,18 +30,7 @@ fun modelDisplayName(id: String): String {
             else word.replaceFirstChar { it.uppercase() }
         }
 
-    val providerLabel = when (provider) {
-        "ollama" -> "Ollama"
-        "anthropic" -> "Anthropic"
-        "openai" -> "OpenAI"
-        "deepseek" -> "DeepSeek"
-        "gemini" -> "Gemini"
-        "groq" -> "Groq"
-        "openrouter" -> "OpenRouter"
-        "nvidia" -> "NVIDIA"
-        "moa" -> "MoA"
-        else -> provider.replaceFirstChar { it.uppercase() }
-    }
+    val providerLabel = com.aura.providers.providerLabel(provider)
 
     return "$displayName · $providerLabel"
 }
