@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.TaskAlt
@@ -88,7 +89,7 @@ fun HomeSecondaryActions(
         HomeDestination(
             "Skills",
             if (skillsCount == 0) "Add skill" else "$skillsCount active",
-            Icons.Filled.AutoStories,
+            Icons.Filled.MenuBook,
             onOpenSkills,
         ),
         HomeDestination(
