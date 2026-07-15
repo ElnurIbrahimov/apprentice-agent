@@ -1,10 +1,17 @@
 package com.aura.providers
 
+import com.aura.security.SecureDataStore
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -25,26 +32,91 @@ import javax.inject.Singleton
 
 /**
  * Per-process mutable state for the user's "Custom Endpoint" provider.
- * Distinct from [ProviderKeys] because we need to store two coupled
- * values (base URL + API key) and a list of static models, and we want
- * the user to set them as one operation.
+ *
+ * Holds the base URL, API key, and optional static-model override.
+ * Distinct from [ProviderKeys] because (a) we need three coupled values
+ * and (b) the user sets them as one operation in the Settings UI.
+ *
+ * Persisted to [SecureDataStore] under three keys (`custom_base_url`,
+ * `custom_api_key`, `custom_model_override`) so the choice survives
+ * process death. The [CustomOpenAiCompatProvider] reads from this
+ * singleton on every chat call, so updates take effect on the next
+ * request — no app restart required.
  */
 @Singleton
-class CustomEndpointState @Inject constructor() {
-    @Volatile var baseUrl: String = ""
-    @Volatile var apiKey: String = ""
-    @Volatile var modelOverride: List<String> = emptyList()
+class CustomEndpointState @Inject constructor(
+    private val secureDataStore: SecureDataStore,
+) {
+    @Volatile private var _baseUrl: kotlin.String = ""
+    @Volatile private var _apiKey: kotlin.String = ""
+    @Volatile private var _modelOverride: List<kotlin.String> = emptyList()
 
-    fun setEndpoint(baseUrl: String, apiKey: String, modelOverride: List<String> = emptyList()) {
-        this.baseUrl = baseUrl.trim().trimEnd('/')
-        this.apiKey = apiKey.trim()
-        this.modelOverride = modelOverride
+    /** Reactive view of (baseUrl, apiKey, modelOverride) — emits on every set. */
+    private val _state = MutableStateFlow(Triple("", "", emptyList<kotlin.String>()))
+    val state: StateFlow<Triple<kotlin.String, kotlin.String, List<kotlin.String>>> = _state.asStateFlow()
+
+    /** Reactive view of just the base URL, for UI binding. */
+    val baseUrlFlow: StateFlow<kotlin.String> get() = baseUrlInternal
+    private val baseUrlInternal = MutableStateFlow("")
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Async initial load. Sets fields once the DataStore read completes. */
+    init {
+        scope.launch { reload() }
     }
 
-    fun isConfigured(): Boolean = baseUrl.isNotBlank() && apiKey.isNotBlank()
+    /** Re-read from DataStore. Called on init and after the user saves. */
+    suspend fun reload() {
+        val url = secureDataStore.getString(KEY_BASE_URL).orEmpty()
+        val key = secureDataStore.getString(KEY_API_KEY).orEmpty()
+        val overrideRaw = secureDataStore.getString(KEY_MODEL_OVERRIDE).orEmpty()
+        val override = overrideRaw.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
+        _baseUrl = url
+        _apiKey = key
+        _modelOverride = override
+        baseUrlInternal.value = url
+        _state.value = Triple(url, key, override)
+    }
+
+    val baseUrl: kotlin.String get() = _baseUrl
+    val apiKey: kotlin.String get() = _apiKey
+    val modelOverride: List<kotlin.String> get() = _modelOverride
+
+    fun setEndpoint(
+        baseUrl: kotlin.String,
+        apiKey: kotlin.String,
+        modelOverride: List<kotlin.String> = emptyList(),
+    ) {
+        val cleanUrl = baseUrl.trim().trimEnd('/')
+        val cleanKey = apiKey.trim()
+        _baseUrl = cleanUrl
+        _apiKey = cleanKey
+        _modelOverride = modelOverride
+        baseUrlInternal.value = cleanUrl
+        _state.value = Triple(cleanUrl, cleanKey, modelOverride)
+        scope.launch {
+            if (cleanUrl.isBlank()) secureDataStore.removeString(KEY_BASE_URL)
+            else secureDataStore.putString(KEY_BASE_URL, cleanUrl)
+            if (cleanKey.isBlank()) secureDataStore.removeString(KEY_API_KEY)
+            else secureDataStore.putString(KEY_API_KEY, cleanKey)
+            val overrideSerialized = modelOverride.joinToString("\n")
+            if (overrideSerialized.isBlank()) secureDataStore.removeString(KEY_MODEL_OVERRIDE)
+            else secureDataStore.putString(KEY_MODEL_OVERRIDE, overrideSerialized)
+        }
+    }
+
+    fun isConfigured(): Boolean = _baseUrl.isNotBlank() && _apiKey.isNotBlank()
 
     /** Read the current values atomically. */
-    fun snapshot(): Triple<String, String, List<String>> = Triple(baseUrl, apiKey, modelOverride)
+    fun snapshot(): Triple<kotlin.String, kotlin.String, List<kotlin.String>> =
+        Triple(_baseUrl, _apiKey, _modelOverride)
+
+    companion object {
+        const val KEY_BASE_URL = "custom_base_url"
+        const val KEY_API_KEY = "custom_api_key"
+        const val KEY_MODEL_OVERRIDE = "custom_model_override"
+    }
 }
 
 /**
@@ -62,17 +134,17 @@ class CustomEndpointState @Inject constructor() {
  */
 class CustomOpenAiCompatProvider(
     private val state: CustomEndpointState,
-    private val httpClient: OkHttpClient,
+    private val httpClient: okhttp3.OkHttpClient,
 ) : Provider {
     override val prefix = "custom"
     override val displayName = "Custom Endpoint"
 
-    @Volatile private var activeEventSource: EventSource? = null
+    @Volatile private var activeEventSource: okhttp3.sse.EventSource? = null
 
     override fun isConfigured(): Boolean = state.isConfigured()
 
     override fun chat(
-        model: String,
+        model: kotlin.String,
         messages: List<ProviderMessage>,
         options: ChatOptions,
         tools: List<ToolDefinition>,
@@ -82,7 +154,7 @@ class CustomOpenAiCompatProvider(
             emit(ProviderChunk(error = ProviderError("not_configured", "Custom endpoint not configured.", retryable = false)))
             return@flow
         }
-        val body = buildJsonObject {
+        val body = kotlinx.serialization.json.buildJsonObject {
             put("model", model)
             put("stream", true)
             put("temperature", options.temperature)
@@ -107,15 +179,15 @@ class CustomOpenAiCompatProvider(
                 }))
             }
         }
-        val request = Request.Builder()
+        val request = okhttp3.Request.Builder()
             .url("$baseUrl/chat/completions")
             .header("Authorization", "Bearer $apiKey")
             .header("Content-Type", "application/json")
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        val channel = Channel<ProviderChunk>(capacity = Channel.BUFFERED)
-        val src = EventSources.createFactory(httpClient).newEventSource(request, object : EventSourceListener() {
-            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+        val channel = kotlinx.coroutines.channels.Channel<ProviderChunk>(capacity = Channel.BUFFERED)
+        val src = okhttp3.sse.EventSources.createFactory(httpClient).newEventSource(request, object : okhttp3.sse.EventSourceListener() {
+            override fun onEvent(eventSource: okhttp3.sse.EventSource, id: kotlin.String?, type: kotlin.String?, data: kotlin.String) {
                 if (data == "[DONE]") { channel.trySend(ProviderChunk(finishReason = FinishReason.stop)); channel.close(); return }
                 val obj = try { Json.parseToJsonElement(data).jsonObject } catch (e: Exception) { return }
                 val choice = (obj["choices"] as? JsonArray)?.firstOrNull()?.jsonObject ?: return
@@ -139,11 +211,11 @@ class CustomOpenAiCompatProvider(
                     channel.trySend(ProviderChunk(finishReason = reason))
                 }
             }
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: okhttp3.Response?) {
+            override fun onFailure(eventSource: okhttp3.sse.EventSource, t: Throwable?, response: okhttp3.Response?) {
                 channel.trySend(ProviderChunk(error = ProviderError("http_error", t?.message ?: "unknown", retryable = true)))
                 channel.close()
             }
-            override fun onClosed(eventSource: EventSource) { channel.close() }
+            override fun onClosed(eventSource: okhttp3.sse.EventSource) { channel.close() }
         })
         activeEventSource = src
         try {
@@ -153,11 +225,11 @@ class CustomOpenAiCompatProvider(
         }
     }.flowOn(Dispatchers.IO)
 
-    override suspend fun listModels(): List<String> = withContext(Dispatchers.IO) {
+    override suspend fun listModels(): List<kotlin.String> = withContext(Dispatchers.IO) {
         val (baseUrl, apiKey, modelOverride) = state.snapshot()
         if (baseUrl.isBlank() || apiKey.isBlank()) return@withContext emptyList()
         if (modelOverride.isNotEmpty()) return@withContext modelOverride
-        val request = Request.Builder()
+        val request = okhttp3.Request.Builder()
             .url("$baseUrl/models")
             .header("Authorization", "Bearer $apiKey")
             .build()
@@ -183,7 +255,7 @@ class CustomOpenAiCompatProvider(
             )
         } ?: return@withContext emptyList()
         parsed.mapNotNull { (it as? JsonObject)?.get("id")?.let { it as? JsonPrimitive }?.content }
-            .filter(String::isNotBlank)
+            .filter(kotlin.String::isNotBlank)
             .ifEmpty { throw ProviderCatalogException.EmptyCatalogException() }
     }
 

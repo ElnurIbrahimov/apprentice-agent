@@ -95,13 +95,23 @@ class SettingsViewModelAppLockTest {
         }
     }
 
-    private fun newViewModel() = SettingsViewModel(
-        providerRegistry,
-        providerKeys,
-        userPreferences,
-        identityStore,
-        modelCatalogRepository,
-    )
+    private fun newViewModel(): SettingsViewModel {
+        val customState = io.mockk.mockk<com.aura.providers.CustomEndpointState>(relaxed = true)
+        io.mockk.every { customState.state } returns kotlinx.coroutines.flow.MutableStateFlow(
+            Triple("", "", emptyList<String>()),
+        )
+        io.mockk.every { customState.baseUrlFlow } returns kotlinx.coroutines.flow.MutableStateFlow("")
+        io.mockk.coEvery { customState.reload() } returns Unit
+        io.mockk.coEvery { customState.setEndpoint(any(), any(), any()) } returns Unit
+        return SettingsViewModel(
+            providerRegistry,
+            providerKeys,
+            userPreferences,
+            identityStore,
+            modelCatalogRepository,
+            customState,
+        )
+    }
 
     @After
     fun tearDown() {
@@ -210,12 +220,13 @@ class SettingsViewModelAppLockTest {
     }
 
     @Test
-    fun `settings credential specs cover every provider and tool prefix`() {
-        assertEquals(
-            ProviderKeys.PREFIXES.toSet(),
-            SETTINGS_CREDENTIAL_SPECS.map { it.prefix }.toSet(),
-        )
-        assertEquals(ProviderKeys.PREFIXES.size, SETTINGS_CREDENTIAL_SPECS.size)
+    fun `settings credential specs cover every provider and tool prefix except custom`() {
+        // "custom" is a dedicated card (CustomEndpointCard) — it needs both
+        // base URL and API key, so it can't be a single ProviderKeyField row.
+        val specsPrefixes = SETTINGS_CREDENTIAL_SPECS.map { it.prefix }.toSet()
+        val coveredPrefixes = ProviderKeys.PREFIXES.toSet() - "custom"
+        assertEquals(coveredPrefixes, specsPrefixes)
+        assertEquals(ProviderKeys.PREFIXES.size - 1, SETTINGS_CREDENTIAL_SPECS.size)
     }
 
     @Test

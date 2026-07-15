@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.ui.components.ModelPickerSheet
 import com.aura.ui.settings.BackupViewModel
+import com.aura.ui.settings.CustomEndpointCard
 import com.aura.ui.settings.ProviderKeyField
 import com.aura.ui.settings.SETTINGS_CREDENTIAL_SPECS
 import com.aura.ui.settings.SettingsViewModel
@@ -242,6 +243,19 @@ fun SettingsScreen(
             }
 
             Spacer(modifier = Modifier.height(12.dp))
+
+            // ── Custom endpoint card (URL + key + test) ──
+            CustomEndpointCard(
+                baseUrl = state.customBaseUrl,
+                apiKey = state.customApiKey,
+                isConfigured = state.customIsConfigured,
+                testing = state.customTesting,
+                result = state.customResult,
+                onBaseUrlChange = viewModel::updateCustomBaseUrl,
+                onApiKeyChange = viewModel::updateCustomApiKey,
+                onTest = viewModel::saveAndTestCustomEndpoint,
+                onClear = viewModel::clearCustomEndpoint,
+            )
 
             // ── API Keys section header ──
             Text(

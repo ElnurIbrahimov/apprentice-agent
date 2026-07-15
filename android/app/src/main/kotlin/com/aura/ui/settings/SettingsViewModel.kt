@@ -10,6 +10,7 @@ import com.aura.providers.ProviderCredentialState
 import com.aura.providers.ModelCatalog
 import com.aura.providers.ModelCatalogRepository
 import com.aura.providers.ProviderStatus
+import com.aura.providers.CustomEndpointState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,9 +36,27 @@ val SETTINGS_CREDENTIAL_SPECS: List<SettingsCredentialSpec> = listOf(
     SettingsCredentialSpec("gemini", "Gemini", "Get a key at aistudio.google.com/apikey", true),
     SettingsCredentialSpec("groq", "Groq", "Get a key at console.groq.com/keys", true),
     SettingsCredentialSpec("openrouter", "OpenRouter", "Get a key at openrouter.ai/keys", true),
+    SettingsCredentialSpec("mistral", "Mistral AI", "Get a key at console.mistral.ai/api-keys", true),
+    SettingsCredentialSpec("xai", "xAI Grok", "Get a key at console.x.ai", true),
+    SettingsCredentialSpec("together", "Together AI", "Get a key at api.together.xyz/settings/api-keys", true),
+    SettingsCredentialSpec("cerebras", "Cerebras", "Get a key at cloud.cerebras.ai", true),
+    SettingsCredentialSpec("nvidia", "NVIDIA NIM", "Get a key at build.nvidia.com/explore/discover", true),
+    SettingsCredentialSpec("llama", "Meta Llama", "Get a key at llama.developer.meta.com", true),
+    SettingsCredentialSpec("chatgpt", "ChatGPT Subscription", "Paste a token from `codex login` (OpenAI subscription auth)", true),
+    SettingsCredentialSpec("agnes", "Agnes AI", "Get a key at agnes-ai.com/dashboard", true),
+    // "Custom Endpoint" is now a dedicated card (CustomEndpointCard) — it
+    // needs both a base URL and an API key, so it can't be a single
+    // ProviderKeyField row. Don't add it back to this list.
+    SettingsCredentialSpec("moa", "Mixture-of-Agents", "Configure MoA presets in code; no API key", true),
     SettingsCredentialSpec("brave", "Brave Search", "Used by Brave web search tools", false),
     SettingsCredentialSpec("tavily", "Tavily Search", "Used by Tavily research tools", false),
     SettingsCredentialSpec("firecrawl", "Firecrawl", "Used by Firecrawl page extraction", false),
+    SettingsCredentialSpec("exa", "Exa Search", "Neural search — get a key at exa.ai/dashboard", false),
+    SettingsCredentialSpec("jina", "Jina Reader", "URL-to-text search — get a key at jina.ai/reader", false),
+    SettingsCredentialSpec("elevenlabs", "ElevenLabs", "TTS — get a key at elevenlabs.io/app/settings/api-keys", false),
+    SettingsCredentialSpec("stability", "Stability AI", "Image generation — platform.stability.ai/account/keys", false),
+    SettingsCredentialSpec("kling", "Kling AI", "Video generation — klingai.com/dev", false),
+    SettingsCredentialSpec("worldlabs", "World Labs", "3D world generation — worldlabs.ai", false),
 )
 
 private val TOOL_CREDENTIAL_PREFIXES: Set<String> = SETTINGS_CREDENTIAL_SPECS
@@ -81,6 +100,14 @@ data class SettingsUiState(
     val modelsError: String? = null,
     val providerTests: Map<String, ProviderTestResult> = emptyMap(),
     val credentialStates: Map<String, ProviderCredentialState> = emptyMap(),
+    // Custom endpoint card state.
+    val customBaseUrl: String = "",
+    val customApiKey: String = "",
+    val customIsConfigured: Boolean = false,
+    val customTesting: Boolean = false,
+    val customResult: String? = null,
+    /** Distinct from credentialStates["custom"]: the URL/key are stored
+     *  outside ProviderKeys, so this is a separate UI state. */
 )
 
 enum class ProviderTestPhase { Idle, Saving, Testing, Verified, Failed }
@@ -98,6 +125,7 @@ class SettingsViewModel @Inject constructor(
     private val userPreferences: UserPreferences,
     private val identityStore: IdentityStore,
     private val modelCatalogRepository: ModelCatalogRepository,
+    private val customEndpointState: CustomEndpointState,
 ) : ViewModel() {
 
     private fun configuredProviderLabels(): List<String> =
@@ -117,6 +145,18 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch {
             modelCatalogRepository.catalog.collectLatest(::applyCatalog)
+        }
+        viewModelScope.launch {
+            // Reactive read so the card flips from "Unsaved" → "Configured"
+            // the moment the user taps Save & Test.
+            customEndpointState.state.collectLatest { (url, key, _) ->
+                _state.update {
+                    it.copy(
+                        customBaseUrl = url,
+                        customIsConfigured = url.isNotBlank() && key.isNotBlank(),
+                    )
+                }
+            }
         }
     }
 
@@ -432,6 +472,95 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun verifyKey(prefix: String) = saveAndTestProvider(prefix)
+
+    /**
+     * Persist the user's drafts for the custom endpoint and verify the
+     * connection by hitting the live `/models` endpoint. The state is
+     * written to [CustomEndpointState] (which is what the provider reads
+     * from at chat time) and persisted to DataStore by the singleton.
+     */
+    fun saveAndTestCustomEndpoint() {
+        if (_state.value.customTesting) return
+        val url = _state.value.customBaseUrl.trim().trimEnd('/')
+        val key = _state.value.customApiKey.trim()
+        if (url.isBlank() || key.isBlank()) {
+            _state.update { it.copy(customResult = "✗ Base URL and API key are required") }
+            return
+        }
+        _state.update { it.copy(customTesting = true, customResult = "Testing…") }
+        viewModelScope.launch {
+            customEndpointState.setEndpoint(url, key)
+            try {
+                modelCatalogRepository.refreshProvider("custom", force = true)
+                val providerState = modelCatalogRepository.catalog.value.providers["custom"]
+                val valid = providerState?.status == ProviderStatus.Ready &&
+                    providerState.errorMessage == null &&
+                    providerState.models.isNotEmpty()
+                if (valid) {
+                    _state.update {
+                        it.copy(
+                            customTesting = false,
+                            customResult = "✓ Verified — ${providerState!!.models.size} models",
+                            customIsConfigured = true,
+                        )
+                    }
+                } else {
+                    val message = providerState?.errorMessage
+                        ?: providerState?.status?.name
+                        ?: "Provider unavailable"
+                    _state.update {
+                        it.copy(
+                            customTesting = false,
+                            customResult = "✗ $message",
+                        )
+                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _state.update {
+                    it.copy(
+                        customTesting = false,
+                        customResult = "✗ ${error.message?.take(80) ?: "Connection failed"}",
+                    )
+                }
+            }
+        }
+    }
+
+    fun updateCustomBaseUrl(value: String) {
+        _state.update {
+            it.copy(
+                customBaseUrl = value,
+                customResult = null,
+                customIsConfigured = it.customIsConfigured && value.isNotBlank(),
+            )
+        }
+    }
+
+    fun updateCustomApiKey(value: String) {
+        _state.update {
+            it.copy(
+                customApiKey = value,
+                customResult = null,
+                customIsConfigured = it.customIsConfigured && value.isNotBlank(),
+            )
+        }
+    }
+
+    fun clearCustomEndpoint() {
+        viewModelScope.launch {
+            customEndpointState.setEndpoint("", "", emptyList())
+            _state.update {
+                it.copy(
+                    customBaseUrl = "",
+                    customApiKey = "",
+                    customIsConfigured = false,
+                    customResult = null,
+                )
+            }
+        }
+    }
 
     private fun applyCatalog(catalog: ModelCatalog) {
         val failures = catalog.providers.values
