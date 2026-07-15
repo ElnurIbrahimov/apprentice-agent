@@ -55,6 +55,9 @@ jobs:
       - name: Build and run tests
         run: ./gradlew --no-daemon --no-configuration-cache :aura-core:assembleDebug :aura-core:testDebugUnitTest :app:assembleDebug :app:testDebugUnitTest
 
+      - name: Run lint
+        run: ./gradlew --no-daemon --no-configuration-cache :app:lintDebug :aura-core:lintDebug
+
       - name: Upload debug APK
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:

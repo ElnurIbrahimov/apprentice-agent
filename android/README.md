@@ -8,23 +8,26 @@ This is my personal copy. The plan lives at `.hermes/plans/`.
 
 ## Status
 
-**v0.10.2** (versionCode 3).
+**v0.15.2** (versionCode 18).
 
-- 36 tools (web search x3, vision, image gen, deep research, firecrawl fetch, knowledge graph, weather, translate, timer, SMS, email, biometric prompt, and phone-native tools)
+- 37 tools (web search x3, vision, image gen, deep research, firecrawl fetch, knowledge graph, weather, translate, timer, SMS, email, biometric prompt, phone-native tools, reminders, skills, and creative studio)
+- Creative Studio (Room-backed projects, world bible, simulations, drafts, continuity)
+- Skills (installable skill cards, skill-backed tool dispatch)
 - Memory stack (Room + 384-dim cloud embeddings + 6-signal RRF retrieval + 14-day FadeMem with access-frequency decay + heuristic WriteGate)
 - Knowledge graph (Room-backed, 11 node types, 18 edge types, LLM-extracted per turn)
 - Hands (user-defined automation macros, persisted, triggerable by phrase)
-- Tasks (Room-backed, manageable in-app and via tool)
-- Agentic loop (ReAct-style, 10 steps max, streams text + tool calls, abort-safe)
-- 8 LLM providers (Ollama Cloud, Anthropic, OpenAI, DeepSeek, Gemini, Groq, OpenRouter, plus Mixture-of-Agents virtual provider with default preset `glm-5.2` + `kimi-k2.7-code` → `deepseek-v4-pro`)
-- 6 specialists (general, coder, researcher, creative, executive, phone-native) with keyword router + tool-allowlist enforcement
-- 5-tab UI (Home greeting, Chat with voice+text, Memory browser, Knowledge Graph, Settings) + 4 secondary routes (History, Hands, Tasks, Proactive history)
-- Voice I/O (push-to-talk STT via Android SpeechRecognizer, auto-TTS via Android TextToSpeech)
-- Proactive: WorkManager daily morning brief (7am local) + 6h memory decay + 5-min calendar monitor (foreground service)
+- Tasks + Reminders (Room-backed, manageable in-app and via tool)
+- Agentic loop (ReAct-style, 10 steps max, streams text + tool calls, abort-safe, parallel tool execution)
+- 8 LLM providers (Ollama Cloud, Anthropic, OpenAI, DeepSeek, Gemini, Groq, OpenRouter, plus Mixture-of-Agents virtual provider)
+- 7 specialists (general, coder, researcher, creative, executive, phone-native, writer) with keyword router + tool-allowlist enforcement
+- 4-tab bottom nav (Home, Chat, Memory, Settings) + secondary routes (History, Hands, Tasks, Reminders, Proactive, Skills, Creative)
+- Voice I/O (push-to-talk STT via Android SpeechRecognizer, auto-TTS via Android TextToSpeech, continuous voice mode)
+- Proactive: WorkManager daily morning brief (customizable time) + 6h memory decay + 5-min calendar monitor (foreground service)
 - Share receiver (`text/plain` + `image/*` from Android share sheet)
-- User profile (learned from conversations via regex, injected into system prompt)
+- User profile (learned from conversations via regex, editable in Settings)
+- Specialist and persona identity customization (Settings)
 - Onboarding wizard (paste API key + verify connectivity)
-- Biometric gate for sensitive tools
+- Biometric gate for sensitive tools and app lock
 - 738 unit tests passing across `:aura-core` (544) + `:app` (194), 0 failures
 - 12 connected-device tests passing (10 Room migrations + 2 app smoke tests)
 
@@ -87,9 +90,22 @@ Or transfer the APK to the phone and tap it (enable "Install from unknown source
 │   Providers: 7 cloud + MoA virtual                  │
 │   SecureDataStore for API keys                      │
 └────────────────────────────────────────────────────┘
-```
-
 The `:aura-core` module has no Compose dependencies. If you ever port to iOS via KMP, this is the layer you'd reuse.
+
+### Bottom nav
+- **Home** — greeting, quick actions, model status, and cards for Skills, Creative, Tasks, and Hands.
+- **Chat** — streaming assistant with text/voice input, model picker, specialist chips, tool-call badges, citation chips, and follow-up suggestions.
+- **Memory** — browse, search, edit, merge, and clear memories.
+- **Settings** — providers, model defaults, appearance, persona, app lock, proactive toggles, diagnostics, and profile.
+
+### Secondary routes
+- **History** — long-press a conversation to rename/pin; tap to resume.
+- **Hands** — create, edit, run, and delete user-defined automation macros.
+- **Tasks** — create, edit, complete, and delete tasks.
+- **Reminders** — schedule and cancel notification reminders.
+- **Proactive history** — review morning briefs, calendar events, and memory decay warnings.
+- **Skills** — browse installed skills and dispatch skill-backed tool calls.
+- **Creative** — manage creative writing projects, world bibles, and simulations.
 
 ## Tool catalog (37)
 
