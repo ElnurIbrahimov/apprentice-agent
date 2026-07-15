@@ -32,6 +32,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+import com.aura.ui.theme.AuraThemeTokens
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ReminderEditorDialog(
@@ -135,7 +136,7 @@ internal fun ReminderEditorDialog(
                                         modifier = Modifier.weight(1f),
                                         colors = if (recurrence == option) {
                                             AssistChipDefaults.assistChipColors(
-                                                containerColor = androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer,
+                                                containerColor = AuraThemeTokens.colors.actionPrimary,
                                             )
                                         } else AssistChipDefaults.assistChipColors(),
                                     )

@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.aura.documents.DocumentEntity
 import com.aura.ui.viewmodel.DocumentImportUiState
 
+import com.aura.ui.theme.AuraThemeTokens
 @Composable
 internal fun DocumentLibraryDialog(
     state: DocumentImportUiState,
@@ -56,7 +57,7 @@ internal fun DocumentLibraryDialog(
                 Text(
                     "Import local documents into Aura's searchable memory. Text stays on-device except embeddings sent through your configured embedding provider.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AuraThemeTokens.colors.textPrimary,
                 )
                 Button(
                     onClick = onImport,
@@ -88,7 +89,7 @@ internal fun DocumentLibraryDialog(
                         items(state.documents, key = { it.id }) { document ->
                             Surface(
                                 shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                color = AuraThemeTokens.colors.surface1.copy(alpha = 0.45f),
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -99,7 +100,7 @@ internal fun DocumentLibraryDialog(
                                     Icon(
                                         Icons.Filled.Description,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
+                                        tint = AuraThemeTokens.colors.actionPrimary,
                                     )
                                     Column(
                                         modifier = Modifier
@@ -116,7 +117,7 @@ internal fun DocumentLibraryDialog(
                                         Text(
                                             "${document.chunkCount} chunks · ${formatCharacterCount(document.characterCount)}",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = AuraThemeTokens.colors.textPrimary,
                                         )
                                     }
                                     IconButton(onClick = { onOpen(document) }) {
@@ -126,7 +127,7 @@ internal fun DocumentLibraryDialog(
                                         Icon(
                                             Icons.Filled.Delete,
                                             contentDescription = "Delete document memory",
-                                            tint = MaterialTheme.colorScheme.error,
+                                            tint = AuraThemeTokens.colors.error,
                                         )
                                     }
                                 }
@@ -150,7 +151,7 @@ internal fun DocumentLibraryDialog(
                 TextButton(onClick = {
                     onDelete(document.id)
                     pendingDelete = null
-                }) { Text("Forget", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Forget", color = AuraThemeTokens.colors.error) }
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }

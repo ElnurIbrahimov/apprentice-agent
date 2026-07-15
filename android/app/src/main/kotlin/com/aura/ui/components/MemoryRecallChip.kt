@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aura.agent.RecallSummary
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * A small chip rendered below an assistant turn that summarizes
  * what Aura recalled from its long-term stores for that turn.
@@ -63,14 +64,14 @@ fun MemoryRecallChip(
     val summary = recall.summary()
     val isEmpty = recall.memoryIds.isEmpty() && recall.handIds.isEmpty()
     val container = if (isEmpty) {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        AuraThemeTokens.colors.surface1.copy(alpha = 0.5f)
     } else {
-        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+        AuraThemeTokens.colors.surface2.copy(alpha = 0.6f)
     }
     val content = if (isEmpty) {
-        MaterialTheme.colorScheme.onSurfaceVariant
+        AuraThemeTokens.colors.textPrimary
     } else {
-        MaterialTheme.colorScheme.onTertiaryContainer
+        AuraThemeTokens.colors.textSecondary
     }
     Surface(
         color = container,
@@ -132,7 +133,7 @@ private fun MemoryRecallSheet(
                 Text(
                     text = "Aura looked at its memories for this turn but found nothing relevant.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AuraThemeTokens.colors.textPrimary,
                 )
             }
             if (memories.isNotEmpty()) {
@@ -140,7 +141,7 @@ private fun MemoryRecallSheet(
                     text = "Memories (${memories.size})",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = AuraThemeTokens.colors.actionPrimary,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 LazyColumn {
@@ -159,7 +160,7 @@ private fun MemoryRecallSheet(
                     text = "Hands (${hands.size})",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = AuraThemeTokens.colors.actionPrimary,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 LazyColumn {
@@ -192,7 +193,7 @@ private fun RecallRow(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = AuraThemeTokens.colors.textPrimary,
             modifier = Modifier.size(16.dp).padding(top = 2.dp),
         )
         Spacer(modifier = Modifier.width(12.dp))
@@ -206,7 +207,7 @@ private fun RecallRow(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AuraThemeTokens.colors.textPrimary,
                 )
             }
         }

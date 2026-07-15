@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Visual indicator shown during MoA turns.
  *
@@ -49,7 +50,7 @@ fun MoaThinkingIndicator(
     Row(
         modifier = modifier
             .background(
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                AuraThemeTokens.colors.surface1.copy(alpha = 0.6f),
                 MaterialTheme.shapes.small,
             )
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -59,7 +60,7 @@ fun MoaThinkingIndicator(
         Text(
             text = "Consulting 3 models",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = AuraThemeTokens.colors.textPrimary,
         )
         Spacer(modifier = Modifier.width(4.dp))
         // Animated dots representing reference models + aggregator
@@ -69,7 +70,7 @@ fun MoaThinkingIndicator(
                     .size(22.dp)
                     .alpha(pulseAlpha)
                     .background(
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.7f),
                         CircleShape,
                     ),
                 contentAlignment = Alignment.Center,
@@ -77,7 +78,7 @@ fun MoaThinkingIndicator(
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimary,
+                    color = AuraThemeTokens.colors.onActionPrimary,
                 )
             }
         }

@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.voice.SpeechToText
 
+import com.aura.ui.theme.AuraThemeTokens
 @Composable
 fun VoiceOverlay(
     viewModel: VoiceViewModel = hiltViewModel(),
@@ -83,7 +84,7 @@ fun VoiceOverlay(
     }
 
     Surface(
-        color = MaterialTheme.colorScheme.background,
+        color = AuraThemeTokens.colors.background,
         modifier = Modifier.fillMaxSize(),
     ) {
         Column(
@@ -102,13 +103,13 @@ fun VoiceOverlay(
                 modifier = Modifier
                     .size(120.dp)
                     .scale(scale)
-                    .background(MaterialTheme.colorScheme.error, CircleShape),
+                    .background(AuraThemeTokens.colors.error, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = Icons.Filled.Mic,
                     contentDescription = if (holdToTalk) "Hold to talk" else "Listening",
-                    tint = MaterialTheme.colorScheme.onError,
+                    tint = AuraThemeTokens.colors.textPrimary,
                     modifier = Modifier.size(56.dp),
                 )
             }
@@ -117,13 +118,13 @@ fun VoiceOverlay(
                 text = if (holdToTalk) "Hold to talk" else statusText(state),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = AuraThemeTokens.colors.textPrimary,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = partial.ifBlank { "Speak now…" },
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = if (partial.isBlank()) 0.5f else 0.9f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = if (partial.isBlank()) 0.5f else 0.9f),
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             )
@@ -145,12 +146,12 @@ fun VoiceOverlay(
                 },
                 modifier = Modifier
                     .size(72.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
+                    .background(AuraThemeTokens.colors.surface1, CircleShape),
             ) {
                 Icon(
                     imageVector = Icons.Filled.Stop,
                     contentDescription = if (holdToTalk) "Send" else "Stop",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = AuraThemeTokens.colors.textPrimary,
                     modifier = Modifier.size(32.dp),
                 )
             }
@@ -159,7 +160,7 @@ fun VoiceOverlay(
                 Text(
                     text = "Tap to send what you said",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
                 )
             }
         }

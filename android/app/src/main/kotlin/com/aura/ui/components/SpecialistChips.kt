@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.aura.agent.Specialist
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Horizontal scrollable row of chips for each specialist.
  *
@@ -53,14 +54,14 @@ fun SpecialistChips(
                     )
                 },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    selectedContainerColor = AuraThemeTokens.colors.actionPrimary,
+                    selectedLabelColor = AuraThemeTokens.colors.onActionPrimary,
                 ),
                 border = if (isSuggested && !isSelected) {
                     FilterChipDefaults.filterChipBorder(
                         enabled = true,
                         selected = false,
-                        borderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        borderColor = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.5f),
                     )
                 } else {
                     FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected)

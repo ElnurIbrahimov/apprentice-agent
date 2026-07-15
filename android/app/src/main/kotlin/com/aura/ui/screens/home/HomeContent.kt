@@ -54,6 +54,7 @@ fun HomeContent(
     onOpenReminders: () -> Unit = {},
     onOpenHands: () -> Unit = {},
     onOpenTools: () -> Unit = {},
+    onOpenSkills: () -> Unit = {},
     onOpenCreative: () -> Unit = {},
     onOpenProactive: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -131,6 +132,7 @@ fun HomeContent(
                             onOpenReminders = onOpenReminders,
                             onOpenHands = onOpenHands,
                             onOpenTools = onOpenTools,
+                            onOpenSkills = onOpenSkills,
                             onOpenCreative = onOpenCreative,
                             onOpenProactive = onOpenProactive,
                         )
@@ -185,6 +187,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.homeResolvedItems(
     onOpenReminders: () -> Unit,
     onOpenHands: () -> Unit = {},
     onOpenTools: () -> Unit = {},
+    onOpenSkills: () -> Unit = {},
     onOpenCreative: () -> Unit = {},
     onOpenProactive: () -> Unit = {},
 ) {
@@ -224,11 +227,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.homeResolvedItems(
             handsCount = state.handsCount,
             toolsCount = state.toolsCount,
             proactiveCount = maxOf(state.proactiveCount, state.proactiveUnreadCount),
+            skillsCount = state.skillsCount,
             onOpenMemory = onOpenMemory,
             onOpenTasks = onOpenTasks,
             onOpenCalendar = onOpenCalendar,
             onOpenHands = onOpenHands,
             onOpenTools = onOpenTools,
+            onOpenSkills = onOpenSkills,
             onOpenCreative = onOpenCreative,
             onOpenProactive = onOpenProactive,
         )

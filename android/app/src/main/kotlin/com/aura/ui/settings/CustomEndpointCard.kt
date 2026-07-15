@@ -34,6 +34,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Card for the "Custom Endpoint" provider. The user supplies a base URL
  * (e.g. https://api.example.com/v1) and an API key; the card persists
@@ -58,7 +59,7 @@ fun CustomEndpointCard(
 ) {
     var visible by remember { mutableStateOf(false) }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        color = AuraThemeTokens.colors.surface1.copy(alpha = 0.4f),
         shape = RoundedCornerShape(14.dp),
         modifier = modifier
             .fillMaxWidth()
@@ -84,9 +85,9 @@ fun CustomEndpointCard(
                         text = status,
                         style = MaterialTheme.typography.labelSmall,
                         color = when (status) {
-                            "Configured" -> MaterialTheme.colorScheme.primary
-                            "Testing" -> MaterialTheme.colorScheme.onSurfaceVariant
-                            else -> MaterialTheme.colorScheme.error
+                            "Configured" -> AuraThemeTokens.colors.actionPrimary
+                            "Testing" -> AuraThemeTokens.colors.textPrimary
+                            else -> AuraThemeTokens.colors.error
                         },
                     )
                 }
@@ -96,7 +97,7 @@ fun CustomEndpointCard(
                 text = "Any OpenAI-compatible chat-completions URL. " +
                     "Models are pulled from <URL>/models unless you provide a static list.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
             )
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
@@ -149,7 +150,7 @@ fun CustomEndpointCard(
                 }
                 if (isConfigured) {
                     TextButton(onClick = onClear) {
-                        Text("Clear", color = MaterialTheme.colorScheme.error)
+                        Text("Clear", color = AuraThemeTokens.colors.error)
                     }
                 }
                 result?.let { msg ->
@@ -157,9 +158,9 @@ fun CustomEndpointCard(
                         text = msg,
                         style = MaterialTheme.typography.labelSmall,
                         color = when {
-                            msg.startsWith("✓") -> MaterialTheme.colorScheme.primary
-                            msg.startsWith("✗") -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            msg.startsWith("✓") -> AuraThemeTokens.colors.actionPrimary
+                            msg.startsWith("✗") -> AuraThemeTokens.colors.error
+                            else -> AuraThemeTokens.colors.textPrimary
                         },
                     )
                 }

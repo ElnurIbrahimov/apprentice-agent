@@ -65,7 +65,7 @@ fun DeleteConversationDialog(
         text = { Text("This conversation will be permanently deleted. This cannot be undone.") },
         confirmButton = {
             TextButton(onClick = onDelete) {
-                Text("Delete", color = MaterialTheme.colorScheme.error)
+                Text("Delete", color = AuraThemeTokens.colors.error)
             }
         },
         dismissButton = {

@@ -45,6 +45,7 @@ import com.aura.ui.components.InlineStatusTone
 import com.aura.ui.theme.AuraSpacing
 import com.aura.ui.util.modelDisplayName
 
+import com.aura.ui.theme.AuraThemeTokens
 @Composable
 fun OnboardingContent(
     state: OnboardingUiState,
@@ -155,7 +156,7 @@ private fun OnboardingHeader(
             Text(
                 text = "Step ${step.ordinal + 1} of ${OnboardingStep.entries.size}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AuraThemeTokens.colors.textPrimary,
             )
         }
         if (step != OnboardingStep.Complete) {
@@ -208,7 +209,7 @@ private fun IntroStep(modifier: Modifier = Modifier) {
         Icon(
             imageVector = Icons.Filled.AutoAwesome,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = AuraThemeTokens.colors.actionPrimary,
             modifier = Modifier.size(56.dp),
         )
         Text(
@@ -220,7 +221,7 @@ private fun IntroStep(modifier: Modifier = Modifier) {
         Text(
             text = "Connect one provider, verify it, and choose the model Aura should use for new chats.",
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = AuraThemeTokens.colors.textPrimary,
             textAlign = TextAlign.Center,
         )
         FeatureLine(Icons.Filled.Memory, "Remembers what matters")
@@ -240,7 +241,7 @@ private fun FeatureLine(
         horizontalArrangement = Arrangement.spacedBy(AuraSpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Icon(icon, contentDescription = null, tint = AuraThemeTokens.colors.actionPrimary)
         Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
@@ -255,7 +256,7 @@ private fun CompleteStep(state: OnboardingUiState, modifier: Modifier = Modifier
         Icon(
             imageVector = Icons.Filled.CheckCircle,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = AuraThemeTokens.colors.actionPrimary,
             modifier = Modifier.size(56.dp),
         )
         Text(
@@ -266,7 +267,7 @@ private fun CompleteStep(state: OnboardingUiState, modifier: Modifier = Modifier
         Text(
             text = "Default chat model",
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = AuraThemeTokens.colors.textPrimary,
         )
         Text(
             text = state.selectedDefaultModel?.let(::modelDisplayName) ?: "Local-only mode",
@@ -281,7 +282,7 @@ private fun CompleteStep(state: OnboardingUiState, modifier: Modifier = Modifier
         Text(
             text = "$verified verified provider${if (verified == 1) "" else "s"}",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = AuraThemeTokens.colors.textPrimary,
         )
     }
 }

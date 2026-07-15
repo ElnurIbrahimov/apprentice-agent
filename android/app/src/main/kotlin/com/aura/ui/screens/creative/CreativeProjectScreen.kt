@@ -106,7 +106,7 @@ fun CreativeProjectScreen(
             }
             if (state.error != null || state.message != null) {
                 Surface(
-                    color = if (state.error != null) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                    color = if (state.error != null) AuraThemeTokens.colors.error else AuraThemeTokens.colors.actionPrimary,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Row(Modifier.padding(AuraSpacing.sm), verticalAlignment = Alignment.CenterVertically) {

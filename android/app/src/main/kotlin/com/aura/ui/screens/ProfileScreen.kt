@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -20,6 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aura.ui.viewmodel.ProfileEvent
 import com.aura.ui.viewmodel.ProfileViewModel
 
+import com.aura.ui.theme.AuraThemeTokens
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ProfileScreen(
@@ -60,7 +62,7 @@ fun ProfileScreen(
                 },
                 actions = {
                     TextButton(onClick = { showClearDialog = true }) {
-                        Text("Clear", color = MaterialTheme.colorScheme.error)
+                        Text("Clear", color = AuraThemeTokens.colors.error)
                     }
                 }
             )
@@ -105,7 +107,7 @@ fun ProfileScreen(
                 Text(
                     text = "Short labels that shape Aura's tone (e.g. concise, technical, playful).",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
                 )
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -158,12 +160,12 @@ fun ProfileScreen(
                 Text(
                     text = "Things Aura has learned about you. Edit or remove anything inaccurate.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     state.facts.forEach { fact ->
                         Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            color = AuraThemeTokens.colors.surface1,
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
@@ -225,7 +227,7 @@ fun ProfileScreen(
                         showClearDialog = false
                     }
                 ) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                    Text("Clear", color = AuraThemeTokens.colors.error)
                 }
             },
             dismissButton = {

@@ -95,6 +95,7 @@ data class HomeUiState(
     val handsCount: Int = 0,
     val toolsCount: Int = 0,
     val proactiveCount: Int = 0,
+    val skillsCount: Int = 0,
 ) {
     val isEmptyResolved: Boolean get() = loadState is HomeLoadState.Empty
 
@@ -119,6 +120,7 @@ class HomeViewModel @Inject constructor(
     private val reminderDao: ReminderDao,
     private val handDao: com.aura.hands.HandDao,
     private val toolRegistry: com.aura.agent.ToolRegistry,
+    private val skillsStore: com.aura.skills.SkillsStore,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(HomeUiState())
@@ -145,6 +147,7 @@ class HomeViewModel @Inject constructor(
         observeMemories()
         observeReminders()
         observeHands()
+        observeSkills()
         loadToolsCount()
     }
 
@@ -206,6 +209,15 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             handDao.observeAll().collect { hands ->
                 updateObserved { it.copy(handsCount = hands.size) }
+            }
+        }
+    }
+
+    private fun observeSkills() {
+        viewModelScope.launch {
+            skillsStore.awaitLoaded()
+            skillsStore.skills.collect { skills ->
+                updateObserved { it.copy(skillsCount = skills.size) }
             }
         }
     }

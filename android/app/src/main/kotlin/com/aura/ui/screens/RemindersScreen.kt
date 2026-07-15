@@ -50,6 +50,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import com.aura.ui.theme.AuraThemeTokens
 @Composable
 fun RemindersScreen(
     onBack: () -> Unit = {},
@@ -99,14 +100,14 @@ fun RemindersScreen(
                     onClick = { showHistory = false },
                     label = { Text("Upcoming") },
                     colors = if (!showHistory) AssistChipDefaults.assistChipColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        containerColor = AuraThemeTokens.colors.actionPrimary,
                     ) else AssistChipDefaults.assistChipColors(),
                 )
                 AssistChip(
                     onClick = { showHistory = true },
                     label = { Text("History") },
                     colors = if (showHistory) AssistChipDefaults.assistChipColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        containerColor = AuraThemeTokens.colors.actionPrimary,
                     ) else AssistChipDefaults.assistChipColors(),
                 )
             }
@@ -140,7 +141,7 @@ fun RemindersScreen(
                             else -> "Nothing scheduled"
                         },
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.65f),
                     )
                     if (!showHistory) {
                         TextButton(onClick = { showAdd = true }) { Text("Add a reminder") }
@@ -199,7 +200,7 @@ fun RemindersScreen(
                 TextButton(onClick = {
                     viewModel.cancel(reminder.id)
                     cancelling = null
-                }) { Text("Cancel reminder", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Cancel reminder", color = AuraThemeTokens.colors.error) }
             },
             dismissButton = { TextButton(onClick = { cancelling = null }) { Text("Keep") } },
         )
@@ -213,7 +214,7 @@ fun RemindersScreen(
                 TextButton(onClick = {
                     viewModel.clearHistory()
                     confirmClearHistory = false
-                }) { Text("Clear", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Clear", color = AuraThemeTokens.colors.error) }
             },
             dismissButton = { TextButton(onClick = { confirmClearHistory = false }) { Text("Keep") } },
         )
@@ -230,7 +231,7 @@ private fun ReminderLifecycleRow(
 ) {
     val format = SimpleDateFormat("MMM d, yyyy · HH:mm", Locale.US)
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -253,7 +254,7 @@ private fun ReminderLifecycleRow(
                         if (reminder.recurrence != "none") append(" · ${reminder.recurrence}")
                     },
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.65f),
                 )
             }
             if (isHistory) {

@@ -235,7 +235,7 @@ private fun ChatMenuItem(
     destructive: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val tint = if (destructive) MaterialTheme.colorScheme.error else AuraThemeTokens.colors.textPrimary
+    val tint = if (destructive) AuraThemeTokens.colors.error else AuraThemeTokens.colors.textPrimary
     DropdownMenuItem(
         text = {
             Row(verticalAlignment = Alignment.CenterVertically) {

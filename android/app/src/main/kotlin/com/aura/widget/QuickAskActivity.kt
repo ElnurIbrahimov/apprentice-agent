@@ -45,6 +45,7 @@ import com.aura.ui.viewmodel.ChatViewModel
 import com.aura.ui.viewmodel.ModelSelectionState
 import dagger.hilt.android.AndroidEntryPoint
 
+import com.aura.ui.theme.AuraThemeTokens
 internal fun buildQuickAskSystemPrompt(prefix: String): String = buildString {
     append(
         "This is a compact Aura session opened from the home-screen widget. " +
@@ -184,7 +185,7 @@ private fun QuickAskContent(
                     Text(
                         "Full memory + tools",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = AuraThemeTokens.colors.actionPrimary,
                     )
                 }
                 TextButton(onClick = onDismiss) { Text("Close") }
@@ -203,7 +204,7 @@ private fun QuickAskContent(
 
             state.providerWarning?.let { warning ->
                 Surface(
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    color = AuraThemeTokens.colors.surface2,
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -230,19 +231,19 @@ private fun QuickAskContent(
                     Text("Aura is thinking…", style = MaterialTheme.typography.bodySmall)
                 }
                 state.error != null -> Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
+                    color = AuraThemeTokens.colors.error,
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
                         state.error.orEmpty(),
                         modifier = Modifier.padding(12.dp),
-                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        color = AuraThemeTokens.colors.textPrimary,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 response.isNotBlank() -> Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    color = AuraThemeTokens.colors.surface1,
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -255,7 +256,7 @@ private fun QuickAskContent(
                 state.modelSelection !is ModelSelectionState.Ready -> Text(
                     "Choose and verify a model in Aura Settings first.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AuraThemeTokens.colors.textPrimary,
                 )
             }
 

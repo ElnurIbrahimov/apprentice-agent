@@ -25,6 +25,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import com.aura.ui.theme.AuraThemeTokens
 internal fun memoryEditHeadline(edit: MemoryEditEntity): String = when {
     edit.oldCategory != edit.newCategory -> "${edit.oldCategory} → ${edit.newCategory}"
     edit.oldContent != edit.newContent -> "Content updated"
@@ -46,7 +47,7 @@ internal fun MemoryHistoryDialog(
                 Text(
                     text = memory.content,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AuraThemeTokens.colors.textPrimary,
                     maxLines = 3,
                 )
                 when {
@@ -66,7 +67,7 @@ internal fun MemoryHistoryDialog(
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                color = AuraThemeTokens.colors.surface1.copy(alpha = 0.45f),
                             ) {
                                 Column(
                                     modifier = Modifier.padding(12.dp),
@@ -81,13 +82,13 @@ internal fun MemoryHistoryDialog(
                                         SimpleDateFormat("MMM d, yyyy · HH:mm", Locale.getDefault())
                                             .format(Date(edit.editedAt)),
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = AuraThemeTokens.colors.textPrimary,
                                     )
                                     if (edit.oldContent != edit.newContent) {
                                         Text(
                                             "Before: ${edit.oldContent}",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = AuraThemeTokens.colors.textPrimary,
                                         )
                                         Text(
                                             "After: ${edit.newContent}",

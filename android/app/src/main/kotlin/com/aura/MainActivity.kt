@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+import com.aura.ui.theme.AuraThemeTokens
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface FirstRunGateEntryPoint {
@@ -207,8 +208,8 @@ fun AuraRoot() {
 
     AuraTheme(themeMode = themeMode) {
         Surface(
-            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
-            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier.fillMaxSize().background(AuraThemeTokens.colors.background),
+            color = AuraThemeTokens.colors.background,
         ) {
             when {
                 firstRunComplete == null -> AuraStartupState()

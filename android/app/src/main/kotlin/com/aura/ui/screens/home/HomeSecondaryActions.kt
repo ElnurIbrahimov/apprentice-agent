@@ -54,6 +54,8 @@ fun HomeSecondaryActions(
     onOpenCalendar: () -> Unit,
     onOpenHands: () -> Unit,
     onOpenTools: () -> Unit,
+    skillsCount: Int = 0,
+    onOpenSkills: () -> Unit = {},
     onOpenCreative: () -> Unit = {},
     onOpenProactive: () -> Unit,
     modifier: Modifier = Modifier,
@@ -82,6 +84,12 @@ fun HomeSecondaryActions(
             if (handsCount == 0) "Create hand" else "$handsCount active",
             Icons.Filled.Build,
             onOpenHands,
+        ),
+        HomeDestination(
+            "Skills",
+            if (skillsCount == 0) "Add skill" else "$skillsCount active",
+            Icons.Filled.AutoStories,
+            onOpenSkills,
         ),
         HomeDestination(
             "Creative",

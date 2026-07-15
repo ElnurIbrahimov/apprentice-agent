@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.ui.settings.SettingsViewModel
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Full-screen identity (SOUL.md) editor.
  *
@@ -83,8 +84,8 @@ fun IdentityEditorScreen(
                             text = if (state.identityCustomized) "Customized" else "Default persona",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (state.identityCustomized)
-                                MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                AuraThemeTokens.colors.actionPrimary
+                            else AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                         )
                     }
                 },
@@ -102,7 +103,7 @@ fun IdentityEditorScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
+                    containerColor = AuraThemeTokens.colors.surface1,
                 ),
             )
         },
@@ -119,7 +120,7 @@ fun IdentityEditorScreen(
                     "speaks, what it knows about itself, and the rules it follows. " +
                     "It is included in settings backups. Leave blank for the bundled default.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
             HorizontalDivider()
@@ -139,7 +140,7 @@ fun IdentityEditorScreen(
             )
             // Footer
             Surface(
-                color = MaterialTheme.colorScheme.surface,
+                color = AuraThemeTokens.colors.surface1,
                 tonalElevation = 2.dp,
             ) {
                 Row(
@@ -152,7 +153,7 @@ fun IdentityEditorScreen(
                     Text(
                         text = "${text.length} chars · ${text.split("\\s+".toRegex()).size} words",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     )
                     Row {
                         TextButton(onClick = { showResetConfirm = true }) {

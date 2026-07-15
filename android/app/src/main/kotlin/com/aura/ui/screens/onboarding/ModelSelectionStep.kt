@@ -30,6 +30,7 @@ import com.aura.ui.theme.AuraDimensions
 import com.aura.ui.theme.AuraSpacing
 import com.aura.ui.util.modelDisplayName
 
+import com.aura.ui.theme.AuraThemeTokens
 @Composable
 fun ModelSelectionStep(
     catalog: ModelCatalog,
@@ -66,7 +67,7 @@ fun ModelSelectionStep(
             Text(
                 text = "This model will be selected when a new chat starts. You can change it anytime.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AuraThemeTokens.colors.textPrimary,
                 modifier = Modifier.padding(top = AuraSpacing.xs, bottom = AuraSpacing.sm),
             )
             error?.let {
@@ -115,7 +116,7 @@ private fun ProviderHeader(prefix: String, count: Int, status: ProviderStatus) {
         Text(
             text = "$count · ${statusLabel(status)}",
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = AuraThemeTokens.colors.textPrimary,
         )
     }
 }
@@ -127,8 +128,8 @@ private fun ModelChoiceRow(
     onClick: () -> Unit,
 ) {
     Surface(
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceContainerLow,
+        color = if (selected) AuraThemeTokens.colors.actionPrimary
+        else AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(AuraDimensions.controlRadius),
         modifier = Modifier
             .fillMaxWidth()
@@ -149,7 +150,7 @@ private fun ModelChoiceRow(
                 Text(
                     text = model.id,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AuraThemeTokens.colors.textPrimary,
                     maxLines = 1,
                 )
             }
@@ -157,7 +158,7 @@ private fun ModelChoiceRow(
                 Text(
                     text = "Default",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = AuraThemeTokens.colors.actionPrimary,
                 )
             }
         }

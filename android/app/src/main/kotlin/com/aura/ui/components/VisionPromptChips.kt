@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Quick-prompt chips for a captured image. Shown above the input
  * bar right after the user captures or picks a photo. The chips
@@ -55,14 +56,14 @@ fun VisionPromptChips(
     ) {
         for ((label, prompt) in prompts) {
             Surface(
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                color = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.7f),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.clickable { onPick(prompt) },
             ) {
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = AuraThemeTokens.colors.onActionPrimary,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                 )
@@ -75,7 +76,7 @@ fun VisionPromptChips(
             Icon(
                 imageVector = Icons.Filled.Close,
                 contentDescription = "Dismiss staged image",
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                tint = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
                 modifier = Modifier.size(18.dp),
             )
         }

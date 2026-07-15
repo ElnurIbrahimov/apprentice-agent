@@ -69,7 +69,7 @@ fun ChatContent(
         modifier = modifier
             .fillMaxSize()
             .imePadding()
-            .background(MaterialTheme.colorScheme.background),
+            .background(AuraThemeTokens.colors.background),
     ) {
         Column(Modifier.fillMaxSize()) {
             ChatHeader(
@@ -233,7 +233,7 @@ private fun ErrorBanner(
 ) {
     val display = typedError?.formatUserMessage() ?: error
     Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
+        color = AuraThemeTokens.colors.error,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         shape = RoundedCornerShape(8.dp),
     ) {
@@ -244,7 +244,7 @@ private fun ErrorBanner(
             Text(
                 text = display,
                 modifier = Modifier.weight(1f),
-                color = MaterialTheme.colorScheme.onErrorContainer,
+                color = AuraThemeTokens.colors.textPrimary,
                 style = MaterialTheme.typography.bodySmall,
             )
             if (retryable || typedError?.retryable == true) {
@@ -281,7 +281,7 @@ private fun SaveWarningBanner(warning: String, onDismiss: () -> Unit) {
 @Composable
 private fun ModelSelectionBanner(message: String, onChooseModel: () -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
+        color = AuraThemeTokens.colors.error,
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
@@ -293,7 +293,7 @@ private fun ModelSelectionBanner(message: String, onChooseModel: () -> Unit) {
                 text = message,
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
+                color = AuraThemeTokens.colors.textPrimary,
             )
             TextButton(onClick = onChooseModel) { Text("Choose model") }
         }

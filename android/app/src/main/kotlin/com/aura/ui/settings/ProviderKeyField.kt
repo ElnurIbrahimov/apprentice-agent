@@ -32,6 +32,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.unit.dp
 import com.aura.providers.ProviderCredentialState
 
+import com.aura.ui.theme.AuraThemeTokens
 @Composable
 fun ProviderKeyField(
     label: String,
@@ -79,9 +80,9 @@ fun ProviderKeyField(
                     text = statusLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = when (statusLabel) {
-                        "Verified" -> MaterialTheme.colorScheme.primary
-                        "Invalid", "Storage error" -> MaterialTheme.colorScheme.error
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        "Verified" -> AuraThemeTokens.colors.actionPrimary
+                        "Invalid", "Storage error" -> AuraThemeTokens.colors.error
+                        else -> AuraThemeTokens.colors.textPrimary
                     },
                 )
             }
@@ -110,7 +111,7 @@ fun ProviderKeyField(
             Text(
                 text = "Coming soon — this key isn't consumed by any tool yet.",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.tertiary,
+                color = AuraThemeTokens.colors.assistantAccent,
             )
         }
         if (helperText != null) {
@@ -118,7 +119,7 @@ fun ProviderKeyField(
             Text(
                 text = helperText,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
             )
         }
         if (onVerify != null && enabled) {
@@ -143,9 +144,9 @@ fun ProviderKeyField(
                         text = verifyResult,
                         style = MaterialTheme.typography.labelSmall,
                         color = when {
-                            verifyResult.startsWith("✓") -> MaterialTheme.colorScheme.primary
-                            verifyResult.startsWith("✗") -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            verifyResult.startsWith("✓") -> AuraThemeTokens.colors.actionPrimary
+                            verifyResult.startsWith("✗") -> AuraThemeTokens.colors.error
+                            else -> AuraThemeTokens.colors.textPrimary
                         },
                     )
                 }

@@ -15,6 +15,7 @@ import com.aura.providers.ProviderCredentialState
 import com.aura.ui.settings.ProviderKeyField
 import com.aura.ui.theme.AuraSpacing
 
+import com.aura.ui.theme.AuraThemeTokens
 @Composable
 fun ProviderSetupStep(
     state: OnboardingUiState,
@@ -29,7 +30,7 @@ fun ProviderSetupStep(
         Icon(
             imageVector = Icons.Filled.Cloud,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = AuraThemeTokens.colors.actionPrimary,
         )
         Text(
             text = "Connect a provider",
@@ -39,7 +40,7 @@ fun ProviderSetupStep(
         Text(
             text = "Start with one provider. Your key is stored on this device and tested only when you tap Save & Test.",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = AuraThemeTokens.colors.textPrimary,
         )
 
         ProviderField(
@@ -69,8 +70,8 @@ fun ProviderSetupStep(
                 "$verifiedCount provider${if (verifiedCount == 1) "" else "s"} verified"
             },
             style = MaterialTheme.typography.labelMedium,
-            color = if (verifiedCount > 0) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (verifiedCount > 0) AuraThemeTokens.colors.actionPrimary
+            else AuraThemeTokens.colors.textPrimary,
         )
     }
 }

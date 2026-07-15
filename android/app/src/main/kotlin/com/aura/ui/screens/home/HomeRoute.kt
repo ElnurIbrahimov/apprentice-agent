@@ -22,6 +22,7 @@ fun HomeRoute(
     onOpenReminders: () -> Unit = {},
     onOpenTools: () -> Unit = {},
     onOpenHands: () -> Unit = {},
+    onOpenSkills: () -> Unit = {},
     onOpenCreative: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
@@ -52,6 +53,7 @@ fun HomeRoute(
         onOpenReminders = onOpenReminders,
         onOpenHands = onOpenHands,
         onOpenTools = onOpenTools,
+        onOpenSkills = onOpenSkills,
         onOpenCreative = onOpenCreative,
         onOpenProactive = {
             viewModel.onProactiveHistoryOpened()
