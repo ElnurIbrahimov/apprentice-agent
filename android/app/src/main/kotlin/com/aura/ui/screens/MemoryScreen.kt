@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.aura.memory.MemoryEntity
 import com.aura.ui.components.AuraScreenHeader
+import com.aura.ui.theme.AuraThemeTokens
 import com.aura.ui.viewmodel.DocumentImportViewModel
 import com.aura.ui.viewmodel.MemoryViewModel
 import java.text.SimpleDateFormat
@@ -152,7 +153,7 @@ fun MemoryScreen(
         // success / no-op / failure cases all render the same way.
         state.rebuildResult?.let { result ->
             Surface(
-                color = MaterialTheme.colorScheme.tertiaryContainer,
+                color = AuraThemeTokens.colors.surface2,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             ) {
@@ -163,7 +164,7 @@ fun MemoryScreen(
                     Text(
                         text = result,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        color = AuraThemeTokens.colors.textSecondary,
                         modifier = Modifier.weight(1f),
                     )
                     IconButton(
@@ -173,7 +174,7 @@ fun MemoryScreen(
                         Icon(
                             imageVector = Icons.Filled.Close,
                             contentDescription = "Dismiss",
-                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            tint = AuraThemeTokens.colors.textSecondary,
                             modifier = Modifier.size(18.dp),
                         )
                     }
@@ -203,7 +204,7 @@ fun MemoryScreen(
                 onClick = { viewModel.setCategory(null) },
                 label = { Text("All") },
                 colors = if (state.categoryFilter == null)
-                    AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.primary, labelColor = MaterialTheme.colorScheme.onPrimary)
+                    AssistChipDefaults.assistChipColors(containerColor = AuraThemeTokens.colors.actionPrimary, labelColor = AuraThemeTokens.colors.onActionPrimary)
                 else AssistChipDefaults.assistChipColors(),
             )
             for (cat in MEMORY_CATEGORIES) {
@@ -211,7 +212,7 @@ fun MemoryScreen(
                     onClick = { viewModel.setCategory(cat) },
                     label = { Text(cat) },
                     colors = if (state.categoryFilter == cat)
-                        AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.primary, labelColor = MaterialTheme.colorScheme.onPrimary)
+                        AssistChipDefaults.assistChipColors(containerColor = AuraThemeTokens.colors.actionPrimary, labelColor = AuraThemeTokens.colors.onActionPrimary)
                     else AssistChipDefaults.assistChipColors(),
                 )
             }
@@ -268,7 +269,7 @@ fun MemoryScreen(
                     CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = AuraThemeTokens.colors.actionPrimary,
                     )
                     Spacer(modifier = Modifier.size(8.dp))
                     Text("Rebuilding…")
@@ -295,10 +296,10 @@ fun MemoryScreen(
                         imageVector = Icons.Filled.Delete,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.error,
+                        tint = AuraThemeTokens.colors.error,
                     )
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("Clear ${state.categoryFilter} memories", color = MaterialTheme.colorScheme.error)
+                    Text("Clear ${state.categoryFilter} memories", color = AuraThemeTokens.colors.error)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -310,10 +311,10 @@ fun MemoryScreen(
                     imageVector = Icons.Filled.Delete,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.error,
+                    tint = AuraThemeTokens.colors.error,
                 )
                 Spacer(modifier = Modifier.size(8.dp))
-                Text("Clear all memories", color = MaterialTheme.colorScheme.error)
+                Text("Clear all memories", color = AuraThemeTokens.colors.error)
             }
             Spacer(modifier = Modifier.height(8.dp))
         }
@@ -328,7 +329,7 @@ fun MemoryScreen(
                     .fillMaxWidth()
                     .padding(top = 12.dp),
                 shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                color = AuraThemeTokens.colors.surface1.copy(alpha = 0.28f),
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
@@ -346,7 +347,7 @@ fun MemoryScreen(
                             "Try a different keyword or clear the category filter."
                         },
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = AuraThemeTokens.colors.textPrimary,
                     )
                 }
             }
@@ -477,7 +478,7 @@ fun MemoryScreen(
                 TextButton(onClick = {
                     showClearAllConfirm = false
                     viewModel.forgetAll()
-                }) { Text("Delete all", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Delete all", color = AuraThemeTokens.colors.error) }
             },
             dismissButton = {
                 TextButton(onClick = { showClearAllConfirm = false }) { Text("Cancel") }
@@ -502,7 +503,7 @@ fun MemoryScreen(
                 TextButton(onClick = {
                     showClearCategoryConfirm = false
                     viewModel.forgetByCategory(cat)
-                }) { Text("Delete $count", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Delete $count", color = AuraThemeTokens.colors.error) }
             },
             dismissButton = {
                 TextButton(onClick = { showClearCategoryConfirm = false }) { Text("Cancel") }
@@ -538,7 +539,7 @@ private fun MemoryRow(
     }
 
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -552,30 +553,30 @@ private fun MemoryRow(
                 Text(
                     text = mem.content,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AuraThemeTokens.colors.textPrimary,
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = mem.category,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
                     )
                     Text(
                         text = "  \u00B7  ${mem.source}",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.4f),
                     )
                     Text(
                         text = "  \u00B7  $ageDisplay",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
                     )
                     if (mem.decayScore < 0.5f) {
                         Text(
                             text = "  \u00B7  fading",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                            color = AuraThemeTokens.colors.error.copy(alpha = 0.7f),
                             fontWeight = FontWeight.Medium,
                         )
                     }
@@ -598,7 +599,7 @@ private fun MemoryRow(
                     Text(
                         text = metaParts.joinToString("  \u00B7  "),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
                     )
                 }
             }
@@ -611,21 +612,21 @@ private fun MemoryRow(
                 Icon(
                     imageVector = Icons.Filled.History,
                     contentDescription = "Edit history",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    tint = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                 )
             }
             IconButton(onClick = onEdit) {
                 Icon(
                     imageVector = Icons.Filled.Edit,
                     contentDescription = "Edit",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    tint = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                 )
             }
             IconButton(onClick = onForget) {
                 Icon(
                     imageVector = Icons.Filled.Delete,
                     contentDescription = "Forget",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    tint = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                 )
             }
         }
@@ -698,7 +699,7 @@ private fun EditMemoryDialog(
                 Text(
                     text = "Importance: ${"%.0f".format(importance * 100)}%",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
                 )
                 Slider(
                     value = importance,
@@ -710,7 +711,7 @@ private fun EditMemoryDialog(
                 Text(
                     text = "Higher importance = ranks higher in recall. Embedding is re-computed on next recall.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                 )
             }
         },
@@ -736,11 +737,11 @@ private fun EditMemoryDialog(
 @Composable
 private fun CategoryDot(category: String) {
     val color = when (category) {
-        "preference" -> MaterialTheme.colorScheme.primary
-        "person" -> MaterialTheme.colorScheme.secondary
-        "task" -> MaterialTheme.colorScheme.tertiary
-        "idea" -> MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-        else -> MaterialTheme.colorScheme.outline
+        "preference" -> AuraThemeTokens.colors.actionPrimary
+        "person" -> AuraThemeTokens.colors.assistantAccent
+        "task" -> AuraThemeTokens.colors.assistantAccent
+        "idea" -> AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.6f)
+        else -> AuraThemeTokens.colors.borderDefault
     }
     Box(
         modifier = Modifier
@@ -781,7 +782,7 @@ private fun MemorySkeletonLoading() {
 @Composable
 private fun SkeletonMemoryCard(alpha: Float) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -794,7 +795,7 @@ private fun SkeletonMemoryCard(alpha: Float) {
                 modifier = Modifier
                     .size(10.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.4f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.4f),
                         shape = CircleShape,
                     ),
             )
@@ -806,7 +807,7 @@ private fun SkeletonMemoryCard(alpha: Float) {
                         .fillMaxWidth(0.8f)
                         .height(14.dp)
                         .background(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.35f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.35f),
                             shape = RoundedCornerShape(4.dp),
                         ),
                 )
@@ -818,7 +819,7 @@ private fun SkeletonMemoryCard(alpha: Float) {
                             .width(40.dp)
                             .height(10.dp)
                             .background(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                                 shape = RoundedCornerShape(4.dp),
                             ),
                     )
@@ -828,7 +829,7 @@ private fun SkeletonMemoryCard(alpha: Float) {
                             .width(60.dp)
                             .height(10.dp)
                             .background(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                                 shape = RoundedCornerShape(4.dp),
                             ),
                     )
@@ -838,7 +839,7 @@ private fun SkeletonMemoryCard(alpha: Float) {
                             .width(36.dp)
                             .height(10.dp)
                             .background(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                                 shape = RoundedCornerShape(4.dp),
                             ),
                     )
@@ -851,7 +852,7 @@ private fun SkeletonMemoryCard(alpha: Float) {
                             .width(72.dp)
                             .height(10.dp)
                             .background(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.15f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.15f),
                                 shape = RoundedCornerShape(4.dp),
                             ),
                     )
@@ -861,7 +862,7 @@ private fun SkeletonMemoryCard(alpha: Float) {
                             .width(52.dp)
                             .height(10.dp)
                             .background(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.15f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.15f),
                                 shape = RoundedCornerShape(4.dp),
                             ),
                     )
@@ -872,7 +873,7 @@ private fun SkeletonMemoryCard(alpha: Float) {
                 modifier = Modifier
                     .size(24.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.15f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.15f),
                         shape = CircleShape,
                     ),
             )
@@ -882,7 +883,7 @@ private fun SkeletonMemoryCard(alpha: Float) {
                 modifier = Modifier
                     .size(24.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.15f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.15f),
                         shape = CircleShape,
                     ),
             )
@@ -925,7 +926,7 @@ private fun AddNoteDialog(
                                 AssistChipDefaults.assistChipColors()
                             else
                                 AssistChipDefaults.assistChipColors(
-                                    containerColor = MaterialTheme.colorScheme.surface,
+                                    containerColor = AuraThemeTokens.colors.surface1,
                                 ),
                         )
                     }

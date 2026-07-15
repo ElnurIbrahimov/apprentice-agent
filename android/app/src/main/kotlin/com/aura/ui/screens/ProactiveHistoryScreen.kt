@@ -57,6 +57,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Category tag used by [HistoryCard] to pick the right accent colours
  * for the icon container — no colour values live in the model itself.
@@ -96,7 +97,7 @@ fun ProactiveHistoryScreen(
                         Icon(
                             imageVector = Icons.Filled.HistoryToggleOff,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = AuraThemeTokens.colors.actionPrimary,
                             modifier = Modifier.size(22.dp),
                         )
                         Spacer(modifier = Modifier.width(10.dp))
@@ -151,7 +152,7 @@ private fun EmptyState() {
         Icon(
             imageVector = Icons.Filled.HistoryToggleOff,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+            tint = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.25f),
             modifier = Modifier.size(56.dp),
         )
         Spacer(modifier = Modifier.height(12.dp))
@@ -159,13 +160,13 @@ private fun EmptyState() {
             text = "No proactive events yet",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = "Morning briefs, calendar reminders, and memory insights will appear here.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.38f),
             modifier = Modifier.padding(horizontal = 40.dp),
         )
     }
@@ -257,12 +258,12 @@ private fun HistoryCard(
     // Resolve accent colours by event kind
     val (iconTint, iconBackground) = when (model.kind) {
         HistoryCardKind.MorningBrief, HistoryCardKind.MemoryDecay ->
-            MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+            AuraThemeTokens.colors.actionPrimary to AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.12f)
         HistoryCardKind.CalendarEvent ->
-            MaterialTheme.colorScheme.secondary to MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
+            AuraThemeTokens.colors.assistantAccent to AuraThemeTokens.colors.assistantAccent.copy(alpha = 0.12f)
     }
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(14.dp),
         tonalElevation = 0.dp,
         modifier = modifier.fillMaxWidth(),
@@ -293,7 +294,7 @@ private fun HistoryCard(
                         text = model.title,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = AuraThemeTokens.colors.textPrimary,
                         modifier = Modifier.weight(1f),
                     )
                     model.badge?.let { (label, count) ->
@@ -316,7 +317,7 @@ private fun HistoryCard(
                 Text(
                     text = model.body,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.85f),
                 )
                 // ── Footer row: tap hint + timestamp ─────────────────
                 Spacer(modifier = Modifier.height(6.dp))
@@ -329,7 +330,7 @@ private fun HistoryCard(
                             Icon(
                                 imageVector = Icons.Filled.PlayArrow,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                tint = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.7f),
                                 modifier = Modifier.size(12.dp),
                             )
                             Spacer(modifier = Modifier.width(4.dp))
@@ -337,7 +338,7 @@ private fun HistoryCard(
                                 text = hint,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                color = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.8f),
                             )
                         }
                     }
@@ -346,14 +347,14 @@ private fun HistoryCard(
                         Icon(
                             imageVector = Icons.Filled.Schedule,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                            tint = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.38f),
                             modifier = Modifier.size(12.dp),
                         )
                         Spacer(modifier = Modifier.width(3.dp))
                         Text(
                             text = fmt.format(Date(model.timestamp)),
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.45f),
                         )
                     }
                 }
@@ -377,7 +378,7 @@ private fun DebugSection(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         HorizontalDivider(
-            color = MaterialTheme.colorScheme.outlineVariant,
+            color = AuraThemeTokens.colors.borderDefault,
         )
         Spacer(modifier = Modifier.height(4.dp))
 
@@ -386,7 +387,7 @@ private fun DebugSection(
             Icon(
                 imageVector = Icons.Filled.Refresh,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = AuraThemeTokens.colors.actionPrimary,
                 modifier = Modifier.size(18.dp),
             )
             Spacer(modifier = Modifier.width(8.dp))
@@ -394,22 +395,22 @@ private fun DebugSection(
                 text = "Debug · fire now",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary,
+                color = AuraThemeTokens.colors.actionPrimary,
             )
         }
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = "Run each loop on demand without waiting for its scheduled interval.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.55f),
         )
         Spacer(modifier = Modifier.height(4.dp))
 
         // ── Action: Morning brief ───────────────────────────────────────
         DebugActionRow(
             icon = Icons.Filled.WbSunny,
-            iconTint = MaterialTheme.colorScheme.primary,
-            iconBackground = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+            iconTint = AuraThemeTokens.colors.actionPrimary,
+            iconBackground = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.12f),
             label = "Morning brief",
             description = "Generate and deliver the daily morning summary",
             onClick = onFireBrief,
@@ -417,8 +418,8 @@ private fun DebugSection(
         // ── Action: Memory decay ────────────────────────────────────────
         DebugActionRow(
             icon = Icons.Filled.DeleteSweep,
-            iconTint = MaterialTheme.colorScheme.primary,
-            iconBackground = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+            iconTint = AuraThemeTokens.colors.actionPrimary,
+            iconBackground = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.12f),
             label = "Memory decay pass",
             description = "Prune and consolidate aged memories",
             onClick = onFireDecay,
@@ -426,8 +427,8 @@ private fun DebugSection(
         // ── Action: Calendar check ──────────────────────────────────────
         DebugActionRow(
             icon = Icons.Filled.Notifications,
-            iconTint = MaterialTheme.colorScheme.secondary,
-            iconBackground = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f),
+            iconTint = AuraThemeTokens.colors.assistantAccent,
+            iconBackground = AuraThemeTokens.colors.assistantAccent.copy(alpha = 0.12f),
             label = "Calendar check",
             description = "Scan for upcoming calendar events",
             onClick = onFireCalendar,
@@ -438,9 +439,9 @@ private fun DebugSection(
             Spacer(modifier = Modifier.height(4.dp))
             Surface(
                 color = if (msg.contains("Error", ignoreCase = true))
-                    MaterialTheme.colorScheme.errorContainer
+                    AuraThemeTokens.colors.error
                 else
-                    MaterialTheme.colorScheme.tertiaryContainer,
+                    AuraThemeTokens.colors.surface2,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -455,9 +456,9 @@ private fun DebugSection(
                             Icons.Filled.CheckCircle,
                         contentDescription = null,
                         tint = if (msg.contains("Error", ignoreCase = true))
-                            MaterialTheme.colorScheme.error
+                            AuraThemeTokens.colors.error
                         else
-                            MaterialTheme.colorScheme.tertiary,
+                            AuraThemeTokens.colors.assistantAccent,
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(modifier = Modifier.width(10.dp))
@@ -465,14 +466,14 @@ private fun DebugSection(
                         text = msg,
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = AuraThemeTokens.colors.textPrimary,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
                         text = "Dismiss",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = AuraThemeTokens.colors.actionPrimary,
                         modifier = Modifier.clickable { onClearStatus() },
                     )
                 }
@@ -495,7 +496,7 @@ private fun DebugActionRow(
     onClick: () -> Unit,
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surface,
+        color = AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(12.dp),
         tonalElevation = 0.dp,
         modifier = Modifier.fillMaxWidth(),
@@ -524,12 +525,12 @@ private fun DebugActionRow(
                     text = label,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = AuraThemeTokens.colors.textPrimary,
                 )
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.55f),
                 )
             }
             Button(

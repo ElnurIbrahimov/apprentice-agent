@@ -61,6 +61,7 @@ import com.aura.ui.settings.UsageViewModel
 import com.aura.ui.util.modelDisplayName
 import kotlinx.coroutines.launch
 
+import com.aura.ui.theme.AuraThemeTokens
 // ────────────────────────────────────────────────────────────
 // Reusable collapsible section card
 // ────────────────────────────────────────────────────────────
@@ -76,7 +77,7 @@ private fun SettingsSection(
     var expanded by remember { mutableStateOf(initialExpanded) }
 
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f),
+        color = AuraThemeTokens.colors.surface1.copy(alpha = 0.40f),
         shape = RoundedCornerShape(14.dp),
         tonalElevation = 0.dp,
         modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
@@ -97,20 +98,20 @@ private fun SettingsSection(
                         text = title,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = AuraThemeTokens.colors.textPrimary,
                     )
                     if (subtitle.isNotEmpty()) {
                         Text(
                             text = subtitle,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.55f),
                         )
                     }
                 }
                 Icon(
                     imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                     contentDescription = if (expanded) "Collapse" else "Expand",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    tint = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
                     modifier = Modifier.padding(start = 4.dp),
                 )
             }
@@ -125,7 +126,7 @@ private fun SettingsSection(
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
                 ) {
                     HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        color = AuraThemeTokens.colors.borderDefault.copy(alpha = 0.5f),
                         modifier = Modifier.padding(bottom = 10.dp),
                     )
                     content()
@@ -151,7 +152,7 @@ private fun RoleModelRow(
             Text(
                 text = if (value.isBlank()) "Not selected" else modelDisplayName(value),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AuraThemeTokens.colors.textPrimary,
             )
         }
         OutlinedButton(onClick = onChoose) { Text("Choose") }
@@ -188,13 +189,13 @@ fun SettingsScreen(
                 text = "Settings",
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = AuraThemeTokens.colors.textPrimary,
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "Connect providers, manage memory, customize Aura",
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
             )
         }
 
@@ -211,7 +212,7 @@ fun SettingsScreen(
         ) {
             // ── Provider status banner ──
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
+                color = AuraThemeTokens.colors.surface1,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -232,8 +233,8 @@ fun SettingsScreen(
                                     onClick = {},
                                     label = { Text(name) },
                                     colors = AssistChipDefaults.assistChipColors(
-                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                        labelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        containerColor = AuraThemeTokens.colors.actionPrimary,
+                                        labelColor = AuraThemeTokens.colors.onActionPrimary,
                                     ),
                                 )
                             }
@@ -266,7 +267,7 @@ fun SettingsScreen(
             Text(
                 text = "Stored locally. Model providers use Save & Test; tool services use Save.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
             )
             Spacer(modifier = Modifier.height(4.dp))
 
@@ -299,7 +300,7 @@ fun SettingsScreen(
             Text(
                 text = "Every role is selected from verified provider catalogs. Unset roles never invent a fallback model.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AuraThemeTokens.colors.textPrimary,
             )
             Spacer(modifier = Modifier.height(6.dp))
 
@@ -328,7 +329,7 @@ fun SettingsScreen(
             Text(
                 text = "Choose at least two reference models and one aggregator. Aura then exposes the virtual MoA custom model.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AuraThemeTokens.colors.textPrimary,
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 state.moaReferenceModels.forEach { model ->
@@ -372,9 +373,9 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (state.modelsError == null) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        AuraThemeTokens.colors.textPrimary
                     } else {
-                        MaterialTheme.colorScheme.error
+                        AuraThemeTokens.colors.error
                     },
                 )
             }
@@ -440,14 +441,14 @@ fun SettingsScreen(
             Text(
                 text = "Tool results processed: ${"%.1f".format(usage.toolResultChars / 1000.0)} KB",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.65f),
             )
             Spacer(modifier = Modifier.height(8.dp))
             if (usage.models.isEmpty()) {
                 Text(
                     "No model calls recorded yet.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.65f),
                 )
             } else {
                 usage.models.take(8).forEach { model ->
@@ -463,7 +464,7 @@ fun SettingsScreen(
                         Text(
                             text = "${model.promptTokens + model.completionTokens} · ${model.calls} calls${if (model.estimated) " ~" else ""}",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.65f),
                         )
                     }
                 }
@@ -472,7 +473,7 @@ fun SettingsScreen(
             Text(
                 text = "~ marks estimated tokens. Cost is not guessed: provider APIs do not return reliable live pricing.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.55f),
             )
             var confirmUsageReset by remember { mutableStateOf(false) }
             TextButton(onClick = { confirmUsageReset = true }) { Text("Reset usage") }
@@ -515,13 +516,13 @@ fun SettingsScreen(
                         label = { Text(label) },
                         colors = AssistChipDefaults.assistChipColors(
                             containerColor = if (state.themeMode == id)
-                                MaterialTheme.colorScheme.primary
+                                AuraThemeTokens.colors.actionPrimary
                             else
-                                MaterialTheme.colorScheme.surfaceVariant,
+                                AuraThemeTokens.colors.surface1,
                             labelColor = if (state.themeMode == id)
-                                MaterialTheme.colorScheme.onPrimary
+                                AuraThemeTokens.colors.onActionPrimary
                             else
-                                MaterialTheme.colorScheme.onSurfaceVariant,
+                                AuraThemeTokens.colors.textPrimary,
                         ),
                     )
                 }
@@ -539,7 +540,7 @@ fun SettingsScreen(
             initialExpanded = false,
         ) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
+                color = AuraThemeTokens.colors.surface1,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -562,7 +563,7 @@ fun SettingsScreen(
                                 "Using the bundled default persona"
                             },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = AuraThemeTokens.colors.textPrimary,
                         )
                     }
                     OutlinedButton(onClick = onNavigateIdentity) {
@@ -581,7 +582,7 @@ fun SettingsScreen(
             Text(
                 text = "Override the built-in system prompt for each specialist. Tap a specialist to edit its prompt.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
             )
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -606,7 +607,7 @@ fun SettingsScreen(
                         Text(
                             "✏️",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = AuraThemeTokens.colors.actionPrimary,
                         )
                     }
                     TextButton(onClick = { editingSpecialist = specialist }) {
@@ -670,7 +671,7 @@ fun SettingsScreen(
             Text(
                 text = "Require biometric authentication to open Aura. Toggle the proactive workers off if you don't want the 7am brief or the calendar monitor.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
             )
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -704,7 +705,7 @@ fun SettingsScreen(
                         else
                             "Off — enable to summarize device notifications",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     )
                 }
                 OutlinedButton(
@@ -731,7 +732,7 @@ fun SettingsScreen(
                         else
                             "Off — Aura opens straight to chat",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     )
                 }
                 Switch(
@@ -751,7 +752,7 @@ fun SettingsScreen(
                     Text(
                         text = "Name, traits, and facts Aura has learned",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     )
                 }
                 TextButton(onClick = onNavigateProfile) { Text("Edit") }
@@ -771,7 +772,7 @@ fun SettingsScreen(
                         else
                             "Off — no morning notification",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     )
                 }
                 Switch(
@@ -828,7 +829,7 @@ fun SettingsScreen(
                         else
                             "Off — stops the persistent foreground service",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     )
                 }
                 Switch(
@@ -865,7 +866,7 @@ fun SettingsScreen(
                     Text(
                         "Local crash and error history",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     )
                 }
                 TextButton(onClick = onNavigateDiagnostics) { Text("Open") }
@@ -915,7 +916,7 @@ fun SettingsScreen(
             backupState.lastResult?.let { result ->
                 Spacer(Modifier.height(8.dp))
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    color = AuraThemeTokens.colors.surface1,
                     shape = RoundedCornerShape(8.dp),
                 ) {
                     Row(
@@ -971,13 +972,13 @@ fun SettingsScreen(
                 .padding(bottom = 24.dp, top = 8.dp),
         ) {
             Surface(
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                color = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.12f),
                 shape = RoundedCornerShape(24.dp),
             ) {
                 Text(
                     text = "\u2726",
                     style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = AuraThemeTokens.colors.actionPrimary,
                     modifier = Modifier.padding(12.dp),
                 )
             }
@@ -986,12 +987,12 @@ fun SettingsScreen(
                 text = "Aura",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
             )
             Text(
                 text = "v" + com.aura.BuildConfig.VERSION_NAME,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.4f),
             )
         }
         Spacer(modifier = Modifier.height(16.dp))

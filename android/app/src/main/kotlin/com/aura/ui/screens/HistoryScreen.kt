@@ -59,6 +59,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.core.content.FileProvider
 import com.aura.agent.Conversation
 import com.aura.ui.components.AuraScreenHeader
+import com.aura.ui.theme.AuraThemeTokens
 import com.aura.ui.viewmodel.HistoryViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -90,7 +91,7 @@ fun HistoryScreen(
             state.selectMode -> ({
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { viewModel.selectAll() }) {
-                        Text("All", color = MaterialTheme.colorScheme.primary)
+                        Text("All", color = AuraThemeTokens.colors.actionPrimary)
                     }
                     TextButton(
                         onClick = {
@@ -118,11 +119,11 @@ fun HistoryScreen(
                         Icon(
                             Icons.Filled.Delete,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
+                            tint = AuraThemeTokens.colors.error,
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(Modifier.width(4.dp))
-                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                        Text("Delete", color = AuraThemeTokens.colors.error)
                     }
                     TextButton(onClick = { viewModel.toggleSelectMode() }) {
                         Text("Cancel")
@@ -194,7 +195,7 @@ fun HistoryScreen(
                         imageVector = if (state.query.isBlank()) Icons.Filled.Chat else Icons.Filled.Search,
                         contentDescription = null,
                         modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.25f),
+                        tint = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.25f),
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(emptyMessage, style = MaterialTheme.typography.titleMedium)
@@ -203,7 +204,7 @@ fun HistoryScreen(
                         Text(
                             "Aura searches exact words and related meaning across titles and messages.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                         )
                     }
                 }
@@ -294,8 +295,8 @@ private fun HistoryRow(
     }
 
     Surface(
-        color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                else MaterialTheme.colorScheme.surfaceVariant,
+        color = if (isSelected) AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.12f)
+                else AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -324,8 +325,8 @@ private fun HistoryRow(
                 Icon(
                     imageVector = if (isPinned) Icons.Filled.PushPin else Icons.Filled.Chat,
                     contentDescription = if (isPinned) "Pinned" else null,
-                    tint = if (isPinned) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    tint = if (isPinned) AuraThemeTokens.colors.actionPrimary
+                           else AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
                     modifier = Modifier.size(24.dp),
                 )
                 Spacer(Modifier.width(12.dp))
@@ -333,23 +334,23 @@ private fun HistoryRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(conv.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(2.dp))
-                Text(preview.take(80), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(preview.take(80), style = MaterialTheme.typography.bodySmall, color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(3.dp))
                 Text(
                     text = formatConversationStats(stats),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.82f),
+                    color = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.82f),
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = conv.model?.let { com.aura.ui.util.modelDisplayName(it) } ?: "Unknown model",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(2.dp))
-                Text(fmt.format(Date(conv.updatedAt)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                Text(fmt.format(Date(conv.updatedAt)), style = MaterialTheme.typography.labelSmall, color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.4f))
             }
             IconButton(
                 onClick = onTogglePin,
@@ -358,8 +359,8 @@ private fun HistoryRow(
                 Icon(
                     imageVector = Icons.Filled.PushPin,
                     contentDescription = if (isPinned) "Unpin" else "Pin",
-                    tint = if (isPinned) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    tint = if (isPinned) AuraThemeTokens.colors.actionPrimary
+                           else AuraThemeTokens.colors.textPrimary.copy(alpha = 0.4f),
                     modifier = Modifier.size(18.dp),
                 )
             }
@@ -367,12 +368,12 @@ private fun HistoryRow(
                 Icon(
                     imageVector = Icons.Filled.Share,
                     contentDescription = "Share as Markdown",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    tint = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     modifier = Modifier.size(18.dp),
                 )
             }
             IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Delete, "Delete", tint = AuraThemeTokens.colors.error.copy(alpha = 0.6f), modifier = Modifier.size(18.dp))
             }
         }
     }
@@ -427,7 +428,7 @@ private fun HistorySkeletonLoading() {
 @Composable
 private fun SkeletonHistoryCard(alpha: Float) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -441,7 +442,7 @@ private fun SkeletonHistoryCard(alpha: Float) {
                     .size(24.dp)
                     .alpha(alpha * 0.5f)
                     .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.3f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.3f),
                         shape = CircleShape,
                     ),
             )
@@ -453,7 +454,7 @@ private fun SkeletonHistoryCard(alpha: Float) {
                         .fillMaxWidth(0.55f)
                         .height(16.dp)
                         .background(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.4f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.4f),
                             shape = RoundedCornerShape(4.dp),
                         ),
                 )
@@ -464,7 +465,7 @@ private fun SkeletonHistoryCard(alpha: Float) {
                         .fillMaxWidth(0.85f)
                         .height(12.dp)
                         .background(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.25f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.25f),
                             shape = RoundedCornerShape(4.dp),
                         ),
                 )
@@ -476,7 +477,7 @@ private fun SkeletonHistoryCard(alpha: Float) {
                             .width(120.dp)
                             .height(10.dp)
                             .background(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                                 shape = RoundedCornerShape(4.dp),
                             ),
                     )
@@ -486,7 +487,7 @@ private fun SkeletonHistoryCard(alpha: Float) {
                             .width(80.dp)
                             .height(10.dp)
                             .background(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                                 shape = RoundedCornerShape(4.dp),
                             ),
                     )
@@ -498,7 +499,7 @@ private fun SkeletonHistoryCard(alpha: Float) {
                 modifier = Modifier
                     .size(32.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                         shape = RoundedCornerShape(6.dp),
                     ),
             )
@@ -507,7 +508,7 @@ private fun SkeletonHistoryCard(alpha: Float) {
                 modifier = Modifier
                     .size(32.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                         shape = RoundedCornerShape(6.dp),
                     ),
             )
@@ -516,7 +517,7 @@ private fun SkeletonHistoryCard(alpha: Float) {
                 modifier = Modifier
                     .size(32.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                         shape = RoundedCornerShape(6.dp),
                     ),
             )
