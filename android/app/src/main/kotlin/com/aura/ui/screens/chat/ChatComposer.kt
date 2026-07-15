@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -70,6 +71,7 @@ fun ChatComposer(
     onCameraClick: () -> Unit = {},
     onGalleryClick: () -> Unit = {},
     onAudioClick: () -> Unit = {},
+    onDocumentClick: () -> Unit = {},
     skills: List<Skill> = emptyList(),
     onUseSkill: (Skill) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -252,6 +254,10 @@ fun ChatComposer(
                 AttachmentOption(Icons.Filled.AudioFile, "Audio") {
                     attachmentOpen = false
                     onAudioClick()
+                }
+                AttachmentOption(Icons.Filled.Description, "Document") {
+                    attachmentOpen = false
+                    onDocumentClick()
                 }
                 if (skills.isNotEmpty()) {
                     Text(

@@ -21,6 +21,7 @@ import com.aura.agent.ToolRegistry
 import com.aura.agent.ToolResult
 import com.aura.agent.toAuraError
 import com.aura.core.error.AuraError
+import com.aura.documents.DocumentTextExtractor
 import com.aura.kg.KnowledgeGraphRepository
 import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
@@ -228,6 +229,7 @@ class ChatViewModel @Inject constructor(
     private val conversationStore: ConversationStore,
     private val knowledgeGraphRepository: KnowledgeGraphRepository,
     private val crashLogger: com.aura.core.error.CrashLogger,
+    private val documentTextExtractor: DocumentTextExtractor? = null,
     private val modelCatalogRepository: ModelCatalogRepository? = null,
     private val skillsStore: SkillsStore? = null,
 ) : AndroidViewModel(application) {
@@ -979,6 +981,43 @@ class ChatViewModel @Inject constructor(
                 )
             }
             saveConversation()
+        }
+    }
+
+    /**
+     * Extract text from a picked document (PDF, DOCX, TXT, MD, CSV, JSON,
+     * YAML, XML, HTML, source code) and insert it as a user message so the
+     * agent can act on it. The message is prefixed with the file name so
+     * the model knows where the content came from. Errors surface as a
+     * non-blocking chat error.
+     */
+    fun onDocumentPicked(uri: Uri) {
+        val extractor = documentTextExtractor ?: run {
+            _state.update { it.copy(error = "Document extraction is not available.") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(streaming = true) }
+            val result = runCatching { extractor.extract(uri) }
+            result.onFailure { e ->
+                crashLogger.log(code = "document_extract", message = e.message ?: e.javaClass.simpleName)
+                _state.update { it.copy(streaming = false, error = "Could not read document: ${e.message ?: "unknown error"}") }
+            }
+            result.onSuccess { doc ->
+                val prefix = "Attached document: ${doc.name}"
+                val body = doc.text.take(12000)
+                val suffix = if (doc.text.length > 12000) {
+                    "\n\n[${doc.text.length - 12000} more characters truncated]"
+                } else ""
+                val message = "$prefix\n\n$body$suffix"
+                _state.update { old ->
+                    old.copy(
+                        conversation = old.conversation.addUser(message),
+                        streaming = false,
+                    )
+                }
+                saveConversation()
+            }
         }
     }
 

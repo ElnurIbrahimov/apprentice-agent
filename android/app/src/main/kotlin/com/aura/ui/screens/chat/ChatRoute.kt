@@ -93,11 +93,6 @@ import com.aura.ui.voice.ContinuousVoiceViewModel
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
@@ -112,6 +107,25 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.animateFloat
+import dagger.hilt.components.SingletonComponent
+
+/**
+ * MIME types passed to the document picker in the chat composer.
+ * Covers the formats supported by [com.aura.documents.DocumentTextExtractor].
+ */
+private val DOCUMENT_MIME_TYPES = arrayOf(
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+    "text/yaml",
+    "application/x-yaml",
+    "text/xml",
+    "text/html",
+    "application/octet-stream",
+)
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -262,6 +276,10 @@ fun ChatRoute(
         contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
     ) { uri -> uri?.let(viewModel::onAudioPicked) }
 
+    val documentLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let(viewModel::onDocumentPicked) }
+
     var hasCameraPermission by remember(context) {
         mutableStateOf(checkCameraPermission(context))
     }
@@ -374,6 +392,7 @@ fun ChatRoute(
                     )
                 },
                 onAudioClick = { audioLauncher.launch("audio/*") },
+                onDocumentClick = { documentLauncher.launch(DOCUMENT_MIME_TYPES) },
                 skills = skills,
                 onUseSkill = { skill ->
                     val directive = "/use_skill ${skill.name}\n"
