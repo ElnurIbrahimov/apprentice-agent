@@ -33,6 +33,7 @@ import com.aura.ui.screens.HistoryScreen
 import com.aura.ui.screens.creative.CreativeProjectScreen
 import com.aura.ui.screens.creative.CreativeStudioScreen
 import com.aura.ui.screens.home.HomeRoute
+import com.aura.ui.screens.skills.SkillsScreen
 import com.aura.ui.screens.KnowledgeGraphScreen
 import com.aura.ui.screens.ToolsScreen
 import com.aura.ui.screens.MemoryScreen
@@ -143,6 +144,7 @@ fun NavGraph(
                     onOpenReminders = { navController.navigate("reminders") },
                     onOpenHands = { navController.navigate("hands") },
                     onOpenTools = { navController.navigate("tools") },
+                    onOpenSkills = { navController.navigate("skills") },
                     onOpenCreative = { navController.navigate("creative") },
                     onOpenProactive = { navController.navigate("proactive") },
                     onOpenCalendar = {
@@ -247,6 +249,9 @@ fun NavGraph(
                     projectId = projectId,
                     onBack = { navController.popBackStack() },
                 )
+            }
+            composable("skills") {
+                SkillsScreen(onBack = { navController.popBackStack() })
             }
         }
     }
