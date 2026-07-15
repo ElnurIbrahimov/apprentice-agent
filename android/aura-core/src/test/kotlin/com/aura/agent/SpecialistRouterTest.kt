@@ -40,10 +40,11 @@ class SpecialistRouterTest {
 
     @Test
     fun `all predefined specialists are available`() {
-        assertEquals(6, Specialist.ALL.size)
+        assertEquals(7, Specialist.ALL.size)
         assertTrue(Specialist.ALL.any { it.name == "general" })
         assertTrue(Specialist.ALL.any { it.name == "coder" })
         assertTrue(Specialist.ALL.any { it.name == "researcher" })
+        assertTrue(Specialist.ALL.any { it.name == "writer" })
         assertTrue(Specialist.ALL.any { it.name == "creative" })
         assertTrue(Specialist.ALL.any { it.name == "executive" })
         assertTrue(Specialist.ALL.any { it.name == "phone_native" })
@@ -257,6 +258,25 @@ class SpecialistRouterTest {
     @Test
     fun `research query not overridden by general keywords`() {
         assertEquals("researcher", SpecialistRouter.pickSpecialist("tell me about the history of photography")?.name)
+    }
+
+    // ------------------------------------------------------------------
+    // Router – Writer
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `writer has expected tools`() {
+        assertTrue(Specialist.Writer.toolsAllowed.contains("creative_read_project"))
+        assertTrue(Specialist.Writer.toolsAllowed.contains("creative_add_world_item"))
+    }
+
+    @Test
+    fun `writer routing for writing keywords`() {
+        assertEquals("writer", SpecialistRouter.pickSpecialist("write me a novel opening")?.name)
+        assertEquals("writer", SpecialistRouter.pickSpecialist("draft a story chapter")?.name)
+        assertEquals("writer", SpecialistRouter.pickSpecialist("outline a screenplay act")?.name)
+        assertEquals("writer", SpecialistRouter.pickSpecialist("help me with a magic system")?.name)
+        assertEquals("writer", SpecialistRouter.pickSpecialist("build a world bible together")?.name)
     }
 
     @Test

@@ -19,12 +19,13 @@ object ToolCategories {
     const val VISION = "vision"
     const val AUTOMATION = "automation"
     const val KNOWLEDGE = "knowledge"
+    const val CREATIVE = "creative"
     const val DEVICE = "device"
     const val OTHER = "other"
 
     val ALL: List<String> = listOf(
         MEMORY, WEB, PRODUCTIVITY, SYSTEM, COMMUNICATION,
-        MEDIA, VISION, AUTOMATION, KNOWLEDGE, DEVICE, OTHER,
+        MEDIA, VISION, AUTOMATION, KNOWLEDGE, CREATIVE, DEVICE, OTHER,
     )
 
     fun displayName(category: String): String = when (category) {
@@ -37,6 +38,7 @@ object ToolCategories {
         VISION -> "Vision"
         AUTOMATION -> "Automation"
         KNOWLEDGE -> "Knowledge"
+        CREATIVE -> "Creative Studio"
         DEVICE -> "Device"
         else -> "Other"
     }
@@ -51,6 +53,7 @@ object ToolCategories {
         VISION -> "👁️"
         AUTOMATION -> "🪄"
         KNOWLEDGE -> "🔗"
+        CREATIVE -> "✍️"
         DEVICE -> "📱"
         else -> "🔧"
     }

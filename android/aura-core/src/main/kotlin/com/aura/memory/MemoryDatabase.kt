@@ -2,6 +2,8 @@ package com.aura.memory
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import com.aura.creative.CreativeProjectDao
+import com.aura.creative.CreativeProjectEntity
 import com.aura.documents.DocumentDao
 import com.aura.documents.DocumentEntity
 import com.aura.kg.EdgeEntity
@@ -15,8 +17,9 @@ import com.aura.kg.NodeEntity
         EdgeEntity::class,
         MemoryEditEntity::class,
         DocumentEntity::class,
+        CreativeProjectEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class MemoryDatabase : RoomDatabase() {
@@ -24,4 +27,5 @@ abstract class MemoryDatabase : RoomDatabase() {
     abstract fun knowledgeGraphDao(): KnowledgeGraphDao
     abstract fun memoryEditDao(): MemoryEditDao
     abstract fun documentDao(): DocumentDao
+    abstract fun creativeProjectDao(): CreativeProjectDao
 }

@@ -23,6 +23,7 @@ class BackupManagerTest {
     private val memoryDao = mockk<com.aura.memory.MemoryDao>(relaxed = true)
     private val memoryEditDao = mockk<com.aura.memory.MemoryEditDao>(relaxed = true)
     private val documentDao = mockk<com.aura.documents.DocumentDao>(relaxed = true)
+    private val creativeProjectDao = mockk<com.aura.creative.CreativeProjectDao>(relaxed = true)
     private val conversationDao = mockk<com.aura.agent.ConversationDao>(relaxed = true)
     private val kgDao = mockk<com.aura.kg.KnowledgeGraphDao>(relaxed = true)
     private val handDao = mockk<com.aura.hands.HandDao>(relaxed = true)
@@ -42,6 +43,7 @@ class BackupManagerTest {
         memoryDao = memoryDao,
         memoryEditDao = memoryEditDao,
         documentDao = documentDao,
+        creativeProjectDao = creativeProjectDao,
         conversationDao = conversationDao,
         kgDao = kgDao,
         handDao = handDao,
@@ -63,6 +65,7 @@ class BackupManagerTest {
         coEvery { memoryDao.allForExport() } returns emptyList()
         coEvery { memoryEditDao.allForBackup() } returns emptyList()
         coEvery { documentDao.allForBackup() } returns emptyList()
+        coEvery { creativeProjectDao.allForBackup() } returns emptyList()
         coEvery { conversationDao.allForExport() } returns emptyList()
         coEvery { kgDao.allNodes() } returns emptyList()
         coEvery { kgDao.allEdges() } returns emptyList()
@@ -133,6 +136,14 @@ class BackupManagerTest {
                     chunkCount = 8,
                 ),
             ),
+            creativeProjects = listOf(
+                CreativeProjectBackup(
+                    id = "p1", name = "Glass City", description = "A memory city",
+                    genre = "speculative", tone = "luminous", worldJson = "{\"overview\":\"A city remembers\"}",
+                    templateId = "novel", metadataJson = "{}", turnCount = 4,
+                    lastSessionEnded = 9L, createdAt = 1L, updatedAt = 9L,
+                ),
+            ),
             conversations = listOf(
                 ConversationBackup(
                     id = "c1", title = "Onboarding help", createdAt = 1L, updatedAt = 2L,
@@ -151,6 +162,8 @@ class BackupManagerTest {
         assertEquals("prefers dark mode", parsed.memories[0].content)
         assertEquals("world-bible.pdf", parsed.documents.single().name)
         assertEquals(8, parsed.documents.single().chunkCount)
+        assertEquals("Glass City", parsed.creativeProjects.single().name)
+        assertEquals("novel", parsed.creativeProjects.single().templateId)
         assertEquals("Onboarding help", parsed.conversations[0].title)
         assertEquals("User chose dark mode.", parsed.conversations[0].contextSummary)
         assertEquals(12, parsed.conversations[0].summaryThroughTurn)
@@ -190,6 +203,7 @@ class BackupManagerTest {
         coVerify { kgDao.deleteAllEdges() }
         coVerify { kgDao.deleteAllNodes() }
         coVerify { documentDao.deleteAll() }
+        coVerify { creativeProjectDao.deleteAll() }
         coVerify { memoryDao.deleteAll() }
         coVerify { conversationDao.deleteAll() }
         coVerify { handDao.deleteRunHistory() }
@@ -221,6 +235,11 @@ class BackupManagerTest {
                 ),
                 documents = listOf(
                     DocumentBackup("hash", "notes.md", "text/markdown", "content://notes", 1L, 100, 1),
+                ),
+                creativeProjects = listOf(
+                    CreativeProjectBackup(
+                        "p1", "World", "", "fantasy", "mythic", "{}", "novel", "{}", 0, 0L, 1L, 1L,
+                    ),
                 ),
                 conversations = listOf(
                     ConversationBackup(
@@ -262,6 +281,7 @@ class BackupManagerTest {
 
         assertEquals(1, counts.memories)
         assertEquals(1, counts.documents)
+        assertEquals(1, counts.creativeProjects)
         assertEquals(1, counts.conversations)
         assertEquals(1, counts.nodes)
         assertEquals(1, counts.edges)
@@ -269,8 +289,9 @@ class BackupManagerTest {
         assertEquals(1, counts.handRuns)
         assertEquals(1, counts.tasks)
         assertEquals(1, counts.profile)
-        assertEquals(9, counts.total)
+        assertEquals(10, counts.total)
         coVerify { documentDao.insertAll(match { it.single().name == "notes.md" }) }
+        coVerify { creativeProjectDao.insertAll(match { it.single().name == "World" }) }
         coVerify { handScheduler.schedule(match { it.id == "h1" && it.scheduleType == "daily" }, any()) }
         coVerify { handDao.insertAllRuns(match { it.single().id == "run-1" }) }
         coVerify {

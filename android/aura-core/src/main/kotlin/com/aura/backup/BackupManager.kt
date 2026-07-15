@@ -4,6 +4,8 @@ import android.content.Context
 import com.aura.agent.ConversationDao
 import com.aura.agent.ConversationEntity
 import com.aura.data.UserPreferences
+import com.aura.creative.CreativeProjectDao
+import com.aura.creative.CreativeProjectEntity
 import com.aura.documents.DocumentDao
 import com.aura.documents.DocumentEntity
 import com.aura.hands.Hand
@@ -65,6 +67,7 @@ class BackupManager @Inject constructor(
     private val memoryDao: MemoryDao,
     private val memoryEditDao: MemoryEditDao,
     private val documentDao: DocumentDao,
+    private val creativeProjectDao: CreativeProjectDao,
     private val conversationDao: ConversationDao,
     private val kgDao: KnowledgeGraphDao,
     private val handDao: HandDao,
@@ -103,6 +106,7 @@ class BackupManager @Inject constructor(
             memories = memoryDao.allForExport().map { it.toBackup() },
             memoryEdits = memoryEditDao.allForBackup().map { it.toBackup() },
             documents = documentDao.allForBackup().map { it.toBackup() },
+            creativeProjects = creativeProjectDao.allForBackup().map { it.toBackup() },
             conversations = conversationDao.allForExport().map { it.toBackup() },
             knowledgeGraph = KnowledgeGraphBackup(
                 nodes = kgDao.allNodes().map { it.toBackup() },
@@ -172,6 +176,7 @@ class BackupManager @Inject constructor(
         val memRows = backup.memories.map { it.toEntity() }
         val editRows = backup.memoryEdits.map { it.toEntity() }
         val documentRows = backup.documents.map { it.toEntity() }
+        val creativeRows = backup.creativeProjects.map { it.toEntity() }
         val convRows = backup.conversations.map { it.toEntity() }
         val nodeRows = backup.knowledgeGraph.nodes.map { it.toEntity() }
         val edgeRows = backup.knowledgeGraph.edges.map { it.toEntity() }
@@ -185,6 +190,7 @@ class BackupManager @Inject constructor(
         if (memRows.isNotEmpty()) memoryDao.insertAll(memRows)
         if (editRows.isNotEmpty()) memoryEditDao.insertAll(editRows)
         if (documentRows.isNotEmpty()) documentDao.insertAll(documentRows)
+        if (creativeRows.isNotEmpty()) creativeProjectDao.insertAll(creativeRows)
         if (convRows.isNotEmpty()) conversationDao.insertAll(convRows)
         if (nodeRows.isNotEmpty()) kgDao.insertAllNodes(nodeRows)
         if (edgeRows.isNotEmpty()) kgDao.insertAllEdges(edgeRows)
@@ -230,6 +236,7 @@ class BackupManager @Inject constructor(
             tasks = taskRows.size,
             memoryEdits = editRows.size,
             documents = documentRows.size,
+            creativeProjects = creativeRows.size,
             reminders = reminderRows.size,
             proactiveEvents = proactiveRows.size,
             profile = if (profileRow != null) 1 else 0,
@@ -272,6 +279,7 @@ class BackupManager @Inject constructor(
         // Query to avoid N round-trips.
         memoryEditDao.deleteAll()
         documentDao.deleteAll()
+        creativeProjectDao.deleteAll()
         memoryDao.deleteAll()
         conversationDao.deleteAll()
         kgDao.deleteAllEdges()
@@ -301,6 +309,7 @@ class BackupManager @Inject constructor(
         val memories: Int,
         val memoryEdits: Int,
         val documents: Int,
+        val creativeProjects: Int,
         val conversations: Int,
         val nodes: Int,
         val edges: Int,
@@ -311,7 +320,7 @@ class BackupManager @Inject constructor(
         val proactiveEvents: Int,
         val profile: Int,
     ) {
-        val total: Int get() = memories + memoryEdits + documents + conversations + nodes + edges + hands + handRuns + tasks + reminders + proactiveEvents + profile
+        val total: Int get() = memories + memoryEdits + documents + creativeProjects + conversations + nodes + edges + hands + handRuns + tasks + reminders + proactiveEvents + profile
     }
 }
 
@@ -365,6 +374,36 @@ private fun DocumentEntity.toBackup() = DocumentBackup(
 
 private fun DocumentBackup.toEntity() = DocumentEntity(
     id, name, mimeType, sourceUri, importedAt, characterCount, chunkCount,
+)
+
+private fun CreativeProjectEntity.toBackup() = CreativeProjectBackup(
+    id = id,
+    name = name,
+    description = description,
+    genre = genre,
+    tone = tone,
+    worldJson = worldJson,
+    templateId = templateId,
+    metadataJson = metadataJson,
+    turnCount = turnCount,
+    lastSessionEnded = lastSessionEnded,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
+)
+
+private fun CreativeProjectBackup.toEntity() = CreativeProjectEntity(
+    id = id,
+    name = name,
+    description = description,
+    genre = genre,
+    tone = tone,
+    worldJson = worldJson,
+    templateId = templateId,
+    metadataJson = metadataJson,
+    turnCount = turnCount,
+    lastSessionEnded = lastSessionEnded,
+    createdAt = createdAt,
+    updatedAt = updatedAt,
 )
 
 private fun ConversationEntity.toBackup() = ConversationBackup(

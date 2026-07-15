@@ -49,6 +49,23 @@ object SpecialistRouter {
             return Specialist.PhoneNative
         }
 
+        // ---- Writer (fiction, worldbuilding, narrative simulation) ----
+        if (matchesAnyKeyword(lower, setOf(
+                "write", "writing", "story", "novel", "chapter", "scene",
+                "dialogue", "dialog", "character", "worldbuild", "worldbuilding",
+                "world bible", "plot", "outline", "fiction", "prose", "narrative",
+                "magic system", "lore", "screenplay", "what-if", "what if",
+                "simulation", "continuity", "retcon",
+            ))
+            && !isQueryAbout(
+                lower,
+                "code", "program", "debug", "kotlin", "python", "research",
+                "image", "photo", "art", "artwork", "design", "logo", "poster", "banner",
+            )
+        ) {
+            return Specialist.Writer
+        }
+
         // ---- Creative (image generation, art, vision) ----
         if (matchesAnyKeyword(lower, setOf(
                 "image", "draw", "photo of", "picture of", "create art",

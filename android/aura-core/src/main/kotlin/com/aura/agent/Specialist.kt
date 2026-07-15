@@ -50,7 +50,23 @@ data class Specialist(
             toolsAllowed = setOf("deep_research", "brave_search", "tavily_search"),
         )
 
-        /** Creative & image-generation specialist. */
+        /** Creative writing, storytelling, and simulation specialist. */
+        val Writer = Specialist(
+            name = "writer",
+            icon = "✍️",
+            systemPrompt = """
+                You are Aura's creative writing and world-simulation specialist. Help the user
+                develop fiction, scripts, characters, settings, lore, plots, and prose while
+                preserving their voice. Use creative_read_project before making continuity claims.
+                Treat established world rules as constraints, not decoration. Distinguish canon
+                from exploratory simulations. Offer concrete scenes, beats, alternatives, and
+                consequences rather than generic writing advice. Never overwrite project canon
+                unless the user explicitly asks you to add or change it.
+            """.trimIndent(),
+            toolsAllowed = setOf("creative_read_project", "creative_add_world_item", "recall"),
+        )
+
+        /** Visual art and image-generation specialist. */
         val Creative = Specialist(
             name = "creative",
             icon = "\uD83C\uDFA8", // 🎨
@@ -92,7 +108,7 @@ data class Specialist(
         )
 
         /** All predefined specialists, keyed by name. */
-        val ALL: List<Specialist> = listOf(General, Coder, Researcher, Creative, Executive, PhoneNative)
+        val ALL: List<Specialist> = listOf(General, Coder, Researcher, Writer, Creative, Executive, PhoneNative)
 
         /** Lookup by name. */
         fun byName(name: String): Specialist? = ALL.find { it.name == name }

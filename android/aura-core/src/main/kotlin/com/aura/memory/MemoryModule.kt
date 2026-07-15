@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.aura.data.RoomConfig
+import com.aura.creative.CreativeProjectDao
 import com.aura.documents.DocumentDao
 import com.aura.providers.ProviderKeys
 import dagger.Module
@@ -114,6 +115,29 @@ object MemoryModule {
         }
     }
 
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS creative_projects (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    genre TEXT NOT NULL,
+                    tone TEXT NOT NULL,
+                    worldJson TEXT NOT NULL,
+                    templateId TEXT NOT NULL,
+                    metadataJson TEXT NOT NULL,
+                    turnCount INTEGER NOT NULL,
+                    lastSessionEnded INTEGER NOT NULL,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_projects_updatedAt ON creative_projects(updatedAt)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_projects_name ON creative_projects(name)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MemoryDatabase =
@@ -121,7 +145,7 @@ object MemoryModule {
             context,
             MemoryDatabase::class.java,
             "aura-memory.db",
-            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6),
         ).build()
 
     @Provides
@@ -132,6 +156,9 @@ object MemoryModule {
 
     @Provides
     fun provideDocumentDao(db: MemoryDatabase): DocumentDao = db.documentDao()
+
+    @Provides
+    fun provideCreativeProjectDao(db: MemoryDatabase): CreativeProjectDao = db.creativeProjectDao()
 
     @Provides
     @Singleton

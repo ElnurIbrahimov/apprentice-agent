@@ -158,6 +158,26 @@ class MemoryDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate5To6_createsCreativeProjectStore() {
+        val db = helper.createDatabase("test-aura-memory-v5.db", 5)
+        db.close()
+
+        val migrated = helper.runMigrationsAndValidate(
+            "test-aura-memory-v5.db",
+            6,
+            true,
+            MemoryModule.MIGRATION_5_6,
+        )
+        migrated.query("PRAGMA table_info(creative_projects)").use { cursor ->
+            val names = mutableSetOf<String>()
+            val nameColumn = cursor.getColumnIndex("name")
+            while (cursor.moveToNext()) names += cursor.getString(nameColumn)
+            assertTrue(names.containsAll(setOf("id", "name", "worldJson", "templateId", "turnCount", "updatedAt")))
+        }
+        migrated.close()
+    }
+
+    @Test
     fun migrate4To5_createsDocumentLibrary() {
         val db = helper.createDatabase("test-aura-memory-v4.db", 4)
         db.close()

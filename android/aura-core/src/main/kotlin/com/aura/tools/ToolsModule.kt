@@ -50,6 +50,8 @@ object ToolsModule {
         translate: TranslateTool,
         timer: TimerTool,
         weather: WeatherTool,
+        creativeReadProject: CreativeReadProjectTool,
+        creativeAddWorldItem: CreativeAddWorldItemTool,
     ): ToolRegistry {
         val registry = ToolRegistry()
         registry.register(webSearch.tool)
@@ -88,6 +90,8 @@ object ToolsModule {
         registry.register(translate.tool)
         registry.register(timer.tool)
         registry.register(weather.tool)
+        registry.register(creativeReadProject.tool)
+        registry.register(creativeAddWorldItem.tool)
         return registry
     }
 }

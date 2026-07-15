@@ -30,6 +30,7 @@ data class AuraBackup(
     val memories: List<MemoryBackup> = emptyList(),
     val memoryEdits: List<MemoryEditBackup> = emptyList(),
     val documents: List<DocumentBackup> = emptyList(),
+    val creativeProjects: List<CreativeProjectBackup> = emptyList(),
     val conversations: List<ConversationBackup> = emptyList(),
     val knowledgeGraph: KnowledgeGraphBackup = KnowledgeGraphBackup(),
     val hands: List<HandBackup> = emptyList(),
@@ -42,7 +43,7 @@ data class AuraBackup(
     val usage: UsageSnapshot = UsageSnapshot(),
 ) {
     companion object {
-        const val SCHEMA_VERSION = 5
+        const val SCHEMA_VERSION = 6
     }
 }
 
@@ -84,6 +85,22 @@ data class DocumentBackup(
     val importedAt: Long,
     val characterCount: Int,
     val chunkCount: Int,
+)
+
+@Serializable
+data class CreativeProjectBackup(
+    val id: String,
+    val name: String,
+    val description: String,
+    val genre: String,
+    val tone: String,
+    val worldJson: String,
+    val templateId: String,
+    val metadataJson: String,
+    val turnCount: Int,
+    val lastSessionEnded: Long,
+    val createdAt: Long,
+    val updatedAt: Long,
 )
 
 @Serializable
