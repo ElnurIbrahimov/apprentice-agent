@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.sin
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Full-screen continuous voice mode overlay — premium redesign with
  * a layered breathing orb (3 concentric pulsing rings), a live
@@ -62,10 +63,10 @@ fun ContinuousVoiceOverlay(
 ) {
     val phase = state.phase
     val accent = when (phase) {
-        VoiceModeState.LISTENING -> MaterialTheme.colorScheme.tertiary
-        VoiceModeState.THINKING -> MaterialTheme.colorScheme.tertiary
-        VoiceModeState.SPEAKING -> MaterialTheme.colorScheme.primary
-        VoiceModeState.IDLE -> MaterialTheme.colorScheme.outline
+        VoiceModeState.LISTENING -> AuraThemeTokens.colors.assistantAccent
+        VoiceModeState.THINKING -> AuraThemeTokens.colors.assistantAccent
+        VoiceModeState.SPEAKING -> AuraThemeTokens.colors.actionPrimary
+        VoiceModeState.IDLE -> AuraThemeTokens.colors.borderDefault
     }
     val phaseLabel = when (phase) {
         VoiceModeState.LISTENING -> "Listening…"
@@ -86,7 +87,7 @@ fun ContinuousVoiceOverlay(
     val ring3 by rememberBreath(1600, phase, offset = 1066)
 
     Surface(
-        color = MaterialTheme.colorScheme.background,
+        color = AuraThemeTokens.colors.background,
         modifier = Modifier.fillMaxSize(),
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -98,7 +99,7 @@ fun ContinuousVoiceOverlay(
                         Brush.radialGradient(
                             colors = listOf(
                                 accent.copy(alpha = 0.12f),
-                                MaterialTheme.colorScheme.background,
+                                AuraThemeTokens.colors.background,
                             ),
                             radius = 800f,
                         ),
@@ -142,7 +143,7 @@ fun ContinuousVoiceOverlay(
                         Icon(
                             imageVector = phaseIcon,
                             contentDescription = phaseLabel,
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            tint = AuraThemeTokens.colors.onActionPrimary,
                             modifier = Modifier.size(40.dp),
                         )
                     }
@@ -155,7 +156,7 @@ fun ContinuousVoiceOverlay(
                     text = phaseLabel,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onBackground,
+                    color = AuraThemeTokens.colors.textPrimary,
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -167,7 +168,7 @@ fun ContinuousVoiceOverlay(
                             Text(
                                 text = state.partialTranscript,
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                             )
@@ -184,7 +185,7 @@ fun ContinuousVoiceOverlay(
                             Text(
                                 text = state.lastResponse.take(200),
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                             )
@@ -210,7 +211,7 @@ fun ContinuousVoiceOverlay(
                     Text(
                         text = err,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = AuraThemeTokens.colors.error,
                     )
                 }
 
@@ -221,12 +222,12 @@ fun ContinuousVoiceOverlay(
                     onClick = onStop,
                     modifier = Modifier
                         .size(72.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
+                        .background(AuraThemeTokens.colors.surface1, CircleShape),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Stop,
                         contentDescription = "Stop voice mode",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = AuraThemeTokens.colors.textPrimary,
                         modifier = Modifier.size(32.dp),
                     )
                 }
@@ -234,7 +235,7 @@ fun ContinuousVoiceOverlay(
                 Text(
                     text = "Tap to stop · or say \"stop listening\"",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             }

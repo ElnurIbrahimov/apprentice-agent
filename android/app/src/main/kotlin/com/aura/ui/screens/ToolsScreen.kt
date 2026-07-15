@@ -39,6 +39,7 @@ import com.aura.ui.viewmodel.ToolsViewModel
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Tools browser — lists every tool the agent can invoke, grouped
  * by category. Lets the user see what Aura can actually do without
@@ -64,13 +65,13 @@ fun ToolsScreen(
             text = "Tools",
             style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
+            color = AuraThemeTokens.colors.textPrimary,
         )
         Spacer(Modifier.height(4.dp))
         Text(
             text = "${state.tools.size} capabilities Aura can use",
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
         )
         Spacer(Modifier.height(12.dp))
 
@@ -92,7 +93,7 @@ fun ToolsScreen(
                     if (state.query.isBlank()) "No tools registered"
                     else "No tools match \"${state.query}\"",
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
                 )
             }
         } else {
@@ -130,13 +131,13 @@ private fun CategoryHeader(category: String, count: Int) {
             text = ToolCategories.displayName(category),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground,
+            color = AuraThemeTokens.colors.textPrimary,
             modifier = Modifier.weight(1f),
         )
         Text(
             text = "$count",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
         )
     }
 }
@@ -144,7 +145,7 @@ private fun CategoryHeader(category: String, count: Int) {
 @Composable
 private fun ToolRow(tool: ToolDefinition) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = AuraThemeTokens.colors.surface1,
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -154,7 +155,7 @@ private fun ToolRow(tool: ToolDefinition) {
                     text = tool.name,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AuraThemeTokens.colors.textPrimary,
                     modifier = Modifier.weight(1f),
                 )
                 val paramCount = tool.parameters.properties.size
@@ -162,7 +163,7 @@ private fun ToolRow(tool: ToolDefinition) {
                     Text(
                         text = "$paramCount arg${if (paramCount == 1) "" else "s"}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     )
                 }
             }
@@ -170,7 +171,7 @@ private fun ToolRow(tool: ToolDefinition) {
             Text(
                 text = tool.description,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.8f),
             )
             if (tool.parameters.properties.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
@@ -180,13 +181,13 @@ private fun ToolRow(tool: ToolDefinition) {
                 ) {
                     tool.parameters.properties.keys.take(4).forEach { argName ->
                         Surface(
-                            color = MaterialTheme.colorScheme.surface,
+                            color = AuraThemeTokens.colors.surface1,
                             shape = MaterialTheme.shapes.small,
                         ) {
                             Text(
                                 text = argName,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                             )
                         }
@@ -195,7 +196,7 @@ private fun ToolRow(tool: ToolDefinition) {
                         Text(
                             text = "+${tool.parameters.properties.size - 4}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
                         )
                     }
                 }

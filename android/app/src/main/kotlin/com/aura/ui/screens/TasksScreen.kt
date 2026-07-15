@@ -74,6 +74,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+import com.aura.ui.theme.AuraThemeTokens
 @Composable
 fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
@@ -103,7 +104,7 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                 subtitle = "${state.tasks.size} task${if (state.tasks.size == 1) "" else "s"}",
                 action = if (doneCount > 0 && state.statusFilter != "pending") ({
                     TextButton(onClick = { showClearConfirm = true }) {
-                        Text("Clear $doneCount done", color = MaterialTheme.colorScheme.error)
+                        Text("Clear $doneCount done", color = AuraThemeTokens.colors.error)
                     }
                 }) else null,
             )
@@ -137,21 +138,21 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                     onClick = { viewModel.setStatusFilter("all") },
                     label = { Text("All") },
                     colors = if (state.statusFilter == "all")
-                        AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.primary, labelColor = MaterialTheme.colorScheme.onPrimary)
+                        AssistChipDefaults.assistChipColors(containerColor = AuraThemeTokens.colors.actionPrimary, labelColor = AuraThemeTokens.colors.onActionPrimary)
                     else AssistChipDefaults.assistChipColors(),
                 )
                 AssistChip(
                     onClick = { viewModel.setStatusFilter("pending") },
                     label = { Text("Pending") },
                     colors = if (state.statusFilter == "pending")
-                        AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.primary, labelColor = MaterialTheme.colorScheme.onPrimary)
+                        AssistChipDefaults.assistChipColors(containerColor = AuraThemeTokens.colors.actionPrimary, labelColor = AuraThemeTokens.colors.onActionPrimary)
                     else AssistChipDefaults.assistChipColors(),
                 )
                 AssistChip(
                     onClick = { viewModel.setStatusFilter("done") },
                     label = { Text("Done") },
                     colors = if (state.statusFilter == "done")
-                        AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.primary, labelColor = MaterialTheme.colorScheme.onPrimary)
+                        AssistChipDefaults.assistChipColors(containerColor = AuraThemeTokens.colors.actionPrimary, labelColor = AuraThemeTokens.colors.onActionPrimary)
                     else AssistChipDefaults.assistChipColors(),
                 )
             }
@@ -202,7 +203,7 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                                         else -> "No tasks yet"
                                     },
                                     style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+                                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
                                 )
                             }
                         }
@@ -252,7 +253,7 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                 TextButton(onClick = {
                     showClearConfirm = false
                     viewModel.clearCompleted()
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Delete", color = AuraThemeTokens.colors.error) }
             },
             dismissButton = {
                 TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") }
@@ -319,7 +320,7 @@ private fun TasksSkeletonLoading() {
 @Composable
 private fun SkeletonTaskCard(alpha: Float) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -334,7 +335,7 @@ private fun SkeletonTaskCard(alpha: Float) {
                         .fillMaxWidth(0.6f)
                         .height(16.dp)
                         .background(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.4f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.4f),
                             shape = RoundedCornerShape(4.dp),
                         ),
                 )
@@ -345,7 +346,7 @@ private fun SkeletonTaskCard(alpha: Float) {
                         .fillMaxWidth(0.85f)
                         .height(12.dp)
                         .background(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.25f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.25f),
                             shape = RoundedCornerShape(4.dp),
                         ),
                 )
@@ -357,7 +358,7 @@ private fun SkeletonTaskCard(alpha: Float) {
                             .width(72.dp)
                             .height(10.dp)
                             .background(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                                 shape = RoundedCornerShape(4.dp),
                             ),
                     )
@@ -366,7 +367,7 @@ private fun SkeletonTaskCard(alpha: Float) {
                         modifier = Modifier
                             .size(width = 44.dp, height = 20.dp)
                             .background(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                                color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                                 shape = RoundedCornerShape(10.dp),
                             ),
                     )
@@ -378,7 +379,7 @@ private fun SkeletonTaskCard(alpha: Float) {
                 modifier = Modifier
                     .size(width = 48.dp, height = 28.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.2f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = alpha * 0.2f),
                         shape = RoundedCornerShape(6.dp),
                     ),
             )
@@ -399,7 +400,7 @@ private fun RemindersHeader(onAddReminder: () -> Unit = {}) {
             "Upcoming reminders",
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
+            color = AuraThemeTokens.colors.actionPrimary,
         )
         TextButton(onClick = onAddReminder) {
             Icon(Icons.Filled.Add, contentDescription = "Add reminder", modifier = Modifier.size(18.dp))
@@ -417,7 +418,7 @@ private fun ReminderRow(
 ) {
     val fmt = SimpleDateFormat("MMM d, HH:mm", Locale.US)
     Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = AuraThemeTokens.colors.surface2,
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -439,7 +440,7 @@ private fun ReminderRow(
                         if (reminder.recurrence != "none") append(" · ${reminder.recurrence}")
                     },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
                 )
             }
             IconButton(onClick = onEdit) {
@@ -449,7 +450,7 @@ private fun ReminderRow(
                 Icon(
                     imageVector = Icons.Filled.Delete,
                     contentDescription = "Cancel reminder",
-                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                    tint = AuraThemeTokens.colors.error.copy(alpha = 0.7f),
                 )
             }
         }
@@ -466,7 +467,7 @@ private fun TaskRow(
 ) {
     val fmt = SimpleDateFormat("MMM d, HH:mm", Locale.US)
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -486,7 +487,7 @@ private fun TaskRow(
                     Text(
                         task.description,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -498,7 +499,7 @@ private fun TaskRow(
                         Text(
                             "Due ${fmt.format(Date(due))}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.7f),
                         )
                         Spacer(Modifier.width(8.dp))
                     }
@@ -508,7 +509,7 @@ private fun TaskRow(
                         Text(
                             task.tags,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -524,14 +525,14 @@ private fun TaskRow(
                 Icon(
                     imageVector = Icons.Filled.Edit,
                     contentDescription = "Edit",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    tint = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                 )
             }
             IconButton(onClick = onDelete) {
                 Icon(
                     imageVector = Icons.Filled.Delete,
                     contentDescription = "Delete",
-                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                    tint = AuraThemeTokens.colors.error.copy(alpha = 0.6f),
                 )
             }
         }
@@ -734,7 +735,7 @@ private fun PriorityOption(label: String, selected: Boolean, onClick: () -> Unit
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            containerColor = if (selected) AuraThemeTokens.colors.actionPrimary else AuraThemeTokens.colors.surface1,
         ),
     ) {
         Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {

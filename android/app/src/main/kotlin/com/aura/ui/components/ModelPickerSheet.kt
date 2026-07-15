@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Format a model ID (e.g. "ollama:deepseek-v4-pro:cloud") into a
  * human-friendly display name. Derives everything from the ID —
@@ -106,7 +107,7 @@ fun ModelPickerSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = AuraThemeTokens.colors.surface1,
     ) {
         ModelPickerContent(
             currentModel = currentModel,
@@ -176,14 +177,14 @@ fun ModelPickerContent(
                         text = if (query.isBlank()) "$totalCount models available"
                                else "${grouped.values.sumOf { it.size }} of $totalCount match",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
                     )
                     selectionScopeLabel?.let { label ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = label,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = AuraThemeTokens.colors.actionPrimary,
                             )
                             onMakeDefault?.let { promote ->
                                 TextButton(onClick = promote, contentPadding = PaddingValues(start = 8.dp)) {
@@ -231,8 +232,8 @@ fun ModelPickerContent(
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    focusedContainerColor = AuraThemeTokens.colors.surface1,
+                    unfocusedContainerColor = AuraThemeTokens.colors.surface1,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                 ),
@@ -253,7 +254,7 @@ fun ModelPickerContent(
                     Text(
                         text = "Loading models from your providers…",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     )
                 }
             } else if (models.isEmpty() && errorMessage != null) {
@@ -272,27 +273,27 @@ fun ModelPickerContent(
                     Text(
                         text = errorMessage,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = AuraThemeTokens.colors.error,
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
                         text = "Tap refresh, or check the API key in Settings.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     )
                 }
             } else if (models.isEmpty()) {
                 Text(
                     text = "No verified models available. Save & Test a provider in Settings.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     modifier = Modifier.padding(vertical = 24.dp),
                 )
             } else if (grouped.isEmpty()) {
                 Text(
                     text = "No models match \"$query\"",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.6f),
                     modifier = Modifier.padding(vertical = 24.dp),
                 )
             } else {
@@ -302,7 +303,7 @@ fun ModelPickerContent(
                     if (errorMessage != null) {
                         item(key = "models-warning") {
                             Surface(
-                                color = MaterialTheme.colorScheme.errorContainer,
+                                color = AuraThemeTokens.colors.error,
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -313,13 +314,13 @@ fun ModelPickerContent(
                                         text = "Last refresh failed",
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        color = AuraThemeTokens.colors.textPrimary,
                                     )
                                     Spacer(Modifier.height(4.dp))
                                     Text(
                                         text = errorMessage,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        color = AuraThemeTokens.colors.textPrimary,
                                     )
                                 }
                             }
@@ -378,18 +379,18 @@ private fun ProviderHeader(name: String, count: Int) {
             text = name,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
+            color = AuraThemeTokens.colors.actionPrimary,
         )
         Spacer(modifier = Modifier.size(8.dp))
         Surface(
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+            color = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.12f),
             shape = RoundedCornerShape(8.dp),
         ) {
             Text(
                 text = "$count",
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 1.dp),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = AuraThemeTokens.colors.actionPrimary,
             )
         }
     }
@@ -419,23 +420,23 @@ private fun ModelRow(
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
                 color = when {
-                    !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-                    isCurrent -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurface
+                    !enabled -> AuraThemeTokens.colors.textPrimary.copy(alpha = 0.45f)
+                    isCurrent -> AuraThemeTokens.colors.actionPrimary
+                    else -> AuraThemeTokens.colors.textPrimary
                 },
             )
             Text(
                 text = id,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.4f),
             )
         }
         statusLabel?.let {
             Text(
                 text = it,
                 style = MaterialTheme.typography.labelSmall,
-                color = if (enabled) MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.error,
+                color = if (enabled) AuraThemeTokens.colors.assistantAccent
+                    else AuraThemeTokens.colors.error,
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
         }
@@ -447,7 +448,7 @@ private fun ModelRow(
                 Icon(
                     imageVector = Icons.Filled.Check,
                     contentDescription = "current",
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = AuraThemeTokens.colors.actionPrimary,
                 )
             }
         }

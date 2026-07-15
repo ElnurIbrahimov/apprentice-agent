@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import kotlin.text.Regex
 import androidx.compose.foundation.border
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Lightweight markdown renderer. Handles the 80% case with regex
  * — no external library.
@@ -140,8 +141,8 @@ data class MarkdownColors(
  */
 @Composable
 fun rememberMarkdownColors(): MarkdownColors = MarkdownColors(
-    link = MaterialTheme.colorScheme.primary,
-    linkDim = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+    link = AuraThemeTokens.colors.actionPrimary,
+    linkDim = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
 )
 
 /**
@@ -151,8 +152,8 @@ fun rememberMarkdownColors(): MarkdownColors = MarkdownColors(
 @Composable
 fun parseMarkdown(text: String): AnnotatedString {
     val colors = MarkdownColors(
-        link = MaterialTheme.colorScheme.primary,
-        linkDim = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+        link = AuraThemeTokens.colors.actionPrimary,
+        linkDim = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
     )
     return parseMarkdown(text, colors)
 }
@@ -412,8 +413,8 @@ fun MarkdownText(
     style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyMedium,
 ) {
     val colors = MarkdownColors(
-        link = MaterialTheme.colorScheme.primary,
-        linkDim = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+        link = AuraThemeTokens.colors.actionPrimary,
+        linkDim = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
     )
     val annotated = parseMarkdownClickable(text, colors)
     val uriHandler = LocalUriHandler.current
@@ -449,8 +450,8 @@ fun MarkdownColumn(
     style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyMedium,
 ) {
     val colors = MarkdownColors(
-        link = MaterialTheme.colorScheme.primary,
-        linkDim = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+        link = AuraThemeTokens.colors.actionPrimary,
+        linkDim = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.5f),
     )
     Column(modifier = modifier) {
         val blocks = splitMarkdownBlocks(text)
@@ -572,9 +573,9 @@ private fun parseTableCells(line: String): List<String> {
 private fun CodeBlock(language: String, code: String) {
     // Premium code block: dark surface regardless of theme, mono
     // font, subtle border. Mirrors the look of a real IDE.
-    val codeBg = MaterialTheme.colorScheme.surface
-    val codeFg = MaterialTheme.colorScheme.onSurface
-    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+    val codeBg = AuraThemeTokens.colors.surface1
+    val codeFg = AuraThemeTokens.colors.textPrimary
+    val borderColor = AuraThemeTokens.colors.borderDefault.copy(alpha = 0.3f)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -592,7 +593,7 @@ private fun CodeBlock(language: String, code: String) {
                         modifier = Modifier
                             .size(8.dp)
                             .background(
-                                MaterialTheme.colorScheme.primary,
+                                AuraThemeTokens.colors.actionPrimary,
                                 androidx.compose.foundation.shape.CircleShape,
                             ),
                     )
@@ -600,7 +601,7 @@ private fun CodeBlock(language: String, code: String) {
                     Text(
                         text = language,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = AuraThemeTokens.colors.actionPrimary,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -619,8 +620,8 @@ private fun CodeBlock(language: String, code: String) {
 
 @Composable
 private fun TableBlock(headers: List<String>, rows: List<List<String>>) {
-    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-    val headerBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    val borderColor = AuraThemeTokens.colors.borderDefault.copy(alpha = 0.3f)
+    val headerBg = AuraThemeTokens.colors.surface1.copy(alpha = 0.5f)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -642,7 +643,7 @@ private fun TableBlock(headers: List<String>, rows: List<List<String>>) {
         // Body rows
         for ((idx, row) in rows.withIndex()) {
             val rowBg = if (idx % 2 == 1)
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                AuraThemeTokens.colors.surface1.copy(alpha = 0.2f)
             else Color.Transparent
             Row(modifier = Modifier.background(rowBg)) {
                 for (cell in row) {

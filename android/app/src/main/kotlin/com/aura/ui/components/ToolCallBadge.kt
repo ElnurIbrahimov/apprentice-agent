@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aura.ui.viewmodel.InFlightToolCall
 
+import com.aura.ui.theme.AuraThemeTokens
 /**
  * Three states a tool call can be in:
  *
@@ -78,24 +79,24 @@ fun ToolCallBadge(
     var expanded by remember { mutableStateOf(false) }
     val (containerColor, contentColor, statusIcon, statusTint, summary) = when (state) {
         is ToolCallState.Running -> ToolCallBadgeStyle(
-            container = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
-            content = MaterialTheme.colorScheme.onTertiaryContainer,
+            container = AuraThemeTokens.colors.surface2.copy(alpha = 0.6f),
+            content = AuraThemeTokens.colors.textSecondary,
             icon = RunningDot(),
-            tint = MaterialTheme.colorScheme.tertiary,
+            tint = AuraThemeTokens.colors.assistantAccent,
             summary = "${state.inFlight.name} — running…",
         )
         is ToolCallState.Done -> ToolCallBadgeStyle(
-            container = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-            content = MaterialTheme.colorScheme.onSecondaryContainer,
+            container = AuraThemeTokens.colors.surface2.copy(alpha = 0.5f),
+            content = AuraThemeTokens.colors.textPrimary,
             icon = Icons.Filled.Check,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = AuraThemeTokens.colors.actionPrimary,
             summary = state.name + " — " + state.result.lineSequence().firstOrNull()?.take(120).orEmpty(),
         )
         is ToolCallState.Failed -> ToolCallBadgeStyle(
-            container = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-            content = MaterialTheme.colorScheme.onErrorContainer,
+            container = AuraThemeTokens.colors.error.copy(alpha = 0.5f),
+            content = AuraThemeTokens.colors.textPrimary,
             icon = Icons.Filled.Close,
-            tint = MaterialTheme.colorScheme.error,
+            tint = AuraThemeTokens.colors.error,
             summary = "${state.name} — ${state.error.take(120)}",
         )
     }
@@ -217,7 +218,7 @@ private fun RunningDotIndicator() {
         modifier = Modifier
             .size(10.dp * scale)
             .background(
-                color = MaterialTheme.colorScheme.tertiary.copy(alpha = alpha),
+                color = AuraThemeTokens.colors.assistantAccent.copy(alpha = alpha),
                 shape = CircleShape,
             ),
     )

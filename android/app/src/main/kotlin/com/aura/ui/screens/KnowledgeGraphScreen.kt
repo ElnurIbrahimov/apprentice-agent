@@ -63,6 +63,7 @@ import com.aura.ui.viewmodel.ResolvedKgRelation
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 
+import com.aura.ui.theme.AuraThemeTokens
 private val graphJson = Json { prettyPrint = true }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -99,7 +100,7 @@ fun KnowledgeGraphScreen(
                 Text(
                     "Inspect and correct what Aura connects",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.62f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.62f),
                 )
             }
             IconButton(onClick = viewModel::refresh, enabled = !state.loading) {
@@ -114,13 +115,13 @@ fun KnowledgeGraphScreen(
             GraphStatCard(
                 value = state.stats.nodeCount.toString(),
                 label = "entities",
-                color = MaterialTheme.colorScheme.primary,
+                color = AuraThemeTokens.colors.actionPrimary,
                 modifier = Modifier.weight(1f),
             )
             GraphStatCard(
                 value = state.stats.edgeCount.toString(),
                 label = "relations",
-                color = MaterialTheme.colorScheme.tertiary,
+                color = AuraThemeTokens.colors.assistantAccent,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -157,7 +158,7 @@ fun KnowledgeGraphScreen(
 
         state.error?.let { message ->
             Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
+                color = AuraThemeTokens.colors.error,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             ) {
@@ -168,7 +169,7 @@ fun KnowledgeGraphScreen(
                     Text(
                         message,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        color = AuraThemeTokens.colors.textPrimary,
                         modifier = Modifier.weight(1f),
                     )
                     IconButton(onClick = viewModel::clearError) {
@@ -216,7 +217,7 @@ fun KnowledgeGraphScreen(
                         Text(
                             selected.node.type.displayLabel(),
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = AuraThemeTokens.colors.actionPrimary,
                         )
                     }
                 }
@@ -226,7 +227,7 @@ fun KnowledgeGraphScreen(
                         Text(
                             graphJson.encodeToString(JsonObject.serializer(), selected.node.properties),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = AuraThemeTokens.colors.textPrimary,
                         )
                     }
                 }
@@ -275,7 +276,7 @@ fun KnowledgeGraphScreen(
                         Icon(
                             Icons.Filled.Delete,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
+                            tint = AuraThemeTokens.colors.error,
                             modifier = Modifier.size(17.dp),
                         )
                     }
@@ -321,7 +322,7 @@ fun KnowledgeGraphScreen(
                         deleting = null
                     },
                     enabled = !state.mutating,
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                ) { Text("Delete", color = AuraThemeTokens.colors.error) }
             },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
         )
@@ -341,7 +342,7 @@ private fun GraphStatCard(value: String, label: String, color: Color, modifier: 
         ) {
             Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = color)
             Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, style = MaterialTheme.typography.bodySmall, color = AuraThemeTokens.colors.textPrimary)
         }
     }
 }
@@ -353,8 +354,8 @@ private fun TypeChip(type: NodeType?, label: String, selected: Boolean, onSelect
         label = { Text(label) },
         colors = if (selected) {
             AssistChipDefaults.assistChipColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                labelColor = MaterialTheme.colorScheme.onPrimary,
+                containerColor = AuraThemeTokens.colors.actionPrimary,
+                labelColor = AuraThemeTokens.colors.onActionPrimary,
             )
         } else AssistChipDefaults.assistChipColors(),
     )
@@ -364,7 +365,7 @@ private fun TypeChip(type: NodeType?, label: String, selected: Boolean, onSelect
 private fun GraphNodeCard(node: KgNode, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f),
+        color = AuraThemeTokens.colors.surface1.copy(alpha = 0.34f),
         shape = RoundedCornerShape(16.dp),
     ) {
         Row(
@@ -387,13 +388,13 @@ private fun GraphNodeCard(node: KgNode, onClick: () -> Unit) {
                         if (node.properties.isNotEmpty()) append(" · ${node.properties.size} properties")
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.72f),
                 )
             }
             Text(
                 "${(node.confidence * 100).toInt()}%",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.62f),
             )
         }
     }
@@ -422,7 +423,7 @@ private fun GraphEmptyState(filtered: Boolean) {
                 if (filtered) "Clear the search or choose another type."
                 else "As you chat, Aura will connect people, projects, tools, and ideas here.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.62f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.62f),
             )
         }
     }
@@ -431,7 +432,7 @@ private fun GraphEmptyState(filtered: Boolean) {
 @Composable
 private fun DetailSection(title: String, content: @Composable () -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
+        color = AuraThemeTokens.colors.surface1.copy(alpha = 0.38f),
         shape = RoundedCornerShape(14.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -568,7 +569,7 @@ private fun MergeGraphNodeDialog(
                 LazyColumn(modifier = Modifier.height(220.dp)) {
                     items(visible, key = { it.id }) { candidate ->
                         Surface(
-                            color = if (target?.id == candidate.id) MaterialTheme.colorScheme.primaryContainer
+                            color = if (target?.id == candidate.id) AuraThemeTokens.colors.actionPrimary
                             else Color.Transparent,
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.fillMaxWidth().clickable { target = candidate },
@@ -599,11 +600,11 @@ private fun NodeType.displayLabel(): String = name.lowercase().replace('_', ' ')
 
 @Composable
 private fun NodeType.color(): Color = when (this) {
-    NodeType.PERSON -> MaterialTheme.colorScheme.primary
-    NodeType.PROJECT -> MaterialTheme.colorScheme.tertiary
-    NodeType.TOOL, NodeType.SKILL -> MaterialTheme.colorScheme.secondary
-    NodeType.EVENT -> MaterialTheme.colorScheme.error
+    NodeType.PERSON -> AuraThemeTokens.colors.actionPrimary
+    NodeType.PROJECT -> AuraThemeTokens.colors.assistantAccent
+    NodeType.TOOL, NodeType.SKILL -> AuraThemeTokens.colors.assistantAccent
+    NodeType.EVENT -> AuraThemeTokens.colors.error
     NodeType.LOCATION -> Color(0xFF4DB6AC)
     NodeType.EMOTION -> Color(0xFFE573A9)
-    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f)
+    else -> AuraThemeTokens.colors.textPrimary.copy(alpha = 0.68f)
 }

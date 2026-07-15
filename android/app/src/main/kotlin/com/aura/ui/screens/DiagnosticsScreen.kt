@@ -58,6 +58,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import com.aura.ui.theme.AuraThemeTokens
 @Composable
 fun DiagnosticsScreen(
     onBack: () -> Unit,
@@ -101,7 +102,7 @@ fun DiagnosticsScreen(
                 Text(
                     "${state.entries.size} local ${if (state.entries.size == 1) "entry" else "entries"}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.62f),
+                    color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.62f),
                 )
             }
             IconButton(onClick = viewModel::refresh, enabled = !state.loading) {
@@ -110,7 +111,7 @@ fun DiagnosticsScreen(
         }
 
         Surface(
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
+            color = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.42f),
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -121,14 +122,14 @@ fun DiagnosticsScreen(
                 Icon(
                     Icons.Filled.BugReport,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = AuraThemeTokens.colors.actionPrimary,
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
                     "Logs stay on this device. Aura never uploads them; they leave only when you tap Share.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = AuraThemeTokens.colors.onActionPrimary,
                 )
             }
         }
@@ -159,18 +160,18 @@ fun DiagnosticsScreen(
                 Icon(
                     Icons.Filled.Delete,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
+                    tint = AuraThemeTokens.colors.error,
                     modifier = Modifier.size(17.dp),
                 )
                 Spacer(Modifier.width(6.dp))
-                Text("Clear", color = MaterialTheme.colorScheme.error)
+                Text("Clear", color = AuraThemeTokens.colors.error)
             }
         }
         Spacer(Modifier.height(10.dp))
 
         state.error?.let { error ->
             Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
+                color = AuraThemeTokens.colors.error,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             ) {
@@ -178,7 +179,7 @@ fun DiagnosticsScreen(
                     error,
                     modifier = Modifier.padding(12.dp),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    color = AuraThemeTokens.colors.textPrimary,
                 )
             }
         }
@@ -209,7 +210,7 @@ fun DiagnosticsScreen(
                 TextButton(onClick = {
                     showClearConfirm = false
                     viewModel.clearAll()
-                }) { Text("Clear all", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Clear all", color = AuraThemeTokens.colors.error) }
             },
             dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("Cancel") } },
         )
@@ -220,10 +221,10 @@ fun DiagnosticsScreen(
 private fun DiagnosticCard(entry: CrashLogEntry) {
     var expanded by remember(entry.timestamp, entry.code) { mutableStateOf(false) }
     val canExpand = !entry.stackTrace.isNullOrBlank()
-    val accent = if (entry.fatal) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary
+    val accent = if (entry.fatal) AuraThemeTokens.colors.error else AuraThemeTokens.colors.assistantAccent
 
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
+        color = AuraThemeTokens.colors.surface1.copy(alpha = 0.38f),
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
@@ -266,7 +267,7 @@ private fun DiagnosticCard(entry: CrashLogEntry) {
                     if (entry.threadName.isNotBlank()) append(" · ${entry.threadName}")
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.68f),
             )
             if (expanded) {
                 HorizontalDivider(Modifier.padding(vertical = 10.dp))
@@ -274,7 +275,7 @@ private fun DiagnosticCard(entry: CrashLogEntry) {
                     entry.stackTrace.orEmpty(),
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AuraThemeTokens.colors.textPrimary,
                 )
             }
         }
@@ -286,13 +287,13 @@ private fun DiagnosticsEmptyState() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Surface(
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
+                color = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.10f),
                 shape = CircleShape,
             ) {
                 Icon(
                     Icons.Filled.BugReport,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = AuraThemeTokens.colors.actionPrimary,
                     modifier = Modifier.padding(16.dp).size(28.dp),
                 )
             }
@@ -302,7 +303,7 @@ private fun DiagnosticsEmptyState() {
             Text(
                 "That is the good kind of empty.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.62f),
+                color = AuraThemeTokens.colors.textPrimary.copy(alpha = 0.62f),
             )
         }
     }

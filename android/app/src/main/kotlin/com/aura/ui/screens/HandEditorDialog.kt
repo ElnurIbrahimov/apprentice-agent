@@ -61,6 +61,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+import com.aura.ui.theme.AuraThemeTokens
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun HandEditorDialog(
@@ -95,7 +96,7 @@ internal fun HandEditorDialog(
                 Text(
                     "A repeatable, inspectable tool workflow",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = AuraThemeTokens.colors.textPrimary,
                 )
             }
         },
@@ -134,17 +135,17 @@ internal fun HandEditorDialog(
 
                 EditorSection("Variables", "Defaults can be overridden each time you run") {
                     if (variables.isEmpty()) {
-                        Text("No variables", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("No variables", style = MaterialTheme.typography.bodySmall, color = AuraThemeTokens.colors.textPrimary)
                     }
                     variables.forEach { (key, value) ->
                         Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            color = AuraThemeTokens.colors.surface1,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Row(Modifier.padding(start = 12.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text("{{$key}}", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                Text(value.ifBlank { "empty" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(value.ifBlank { "empty" }, style = MaterialTheme.typography.bodySmall, color = AuraThemeTokens.colors.textPrimary)
                                 IconButton(onClick = { variables = variables - key }) {
                                     Icon(Icons.Filled.Close, contentDescription = "Remove variable")
                                 }
@@ -186,7 +187,7 @@ internal fun HandEditorDialog(
                 EditorSection("Conditions", "All conditions must pass before any tool runs") {
                     conditions.forEachIndexed { index, condition ->
                         Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            color = AuraThemeTokens.colors.surface1,
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
@@ -294,7 +295,7 @@ private fun EditorSection(title: String, subtitle: String, content: @Composable 
     HorizontalDivider()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = AuraThemeTokens.colors.textPrimary)
         content()
     }
 }
@@ -311,11 +312,11 @@ private fun StepEditor(
     onSteps: (List<HandStep>) -> Unit,
 ) {
     if (steps.isEmpty()) {
-        Text("Pick a tool to add the first step", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Pick a tool to add the first step", style = MaterialTheme.typography.bodySmall, color = AuraThemeTokens.colors.textPrimary)
     }
     steps.forEachIndexed { index, step ->
         Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
+            color = AuraThemeTokens.colors.surface1,
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
@@ -326,7 +327,7 @@ private fun StepEditor(
                         Text(
                             step.args.entries.joinToString { "${it.key}=${it.value}" },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = AuraThemeTokens.colors.textPrimary,
                         )
                     }
                 }
@@ -357,7 +358,7 @@ private fun StepEditor(
         }
     }
     selectedTool?.let { definition ->
-        Text(definition.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(definition.description, style = MaterialTheme.typography.bodySmall, color = AuraThemeTokens.colors.textPrimary)
         definition.parameters.properties.forEach { (argument, property) ->
             HandArgumentField(
                 name = argument,

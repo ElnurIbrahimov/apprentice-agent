@@ -85,6 +85,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+import com.aura.ui.theme.AuraThemeTokens
 @Composable
 fun HandsScreen(
     viewModel: HandsViewModel = hiltViewModel(),
@@ -289,20 +290,20 @@ private fun HandCard(
     onDelete: () -> Unit,
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (hand.enabled) 0.85f else 0.45f),
+        color = AuraThemeTokens.colors.surface1.copy(alpha = if (hand.enabled) 0.85f else 0.45f),
         shape = RoundedCornerShape(18.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                    color = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.14f),
                     shape = CircleShape,
                 ) {
                     Icon(
                         Icons.Filled.Build,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = AuraThemeTokens.colors.actionPrimary,
                         modifier = Modifier.padding(10.dp).size(20.dp),
                     )
                 }
@@ -312,7 +313,7 @@ private fun HandCard(
                     Text(
                         hand.triggerPhrase.ifBlank { "Manual or agent-triggered" },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = AuraThemeTokens.colors.textPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -337,7 +338,7 @@ private fun HandCard(
                 }
                 IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = "Edit hand") }
                 IconButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, contentDescription = "Delete hand", tint = MaterialTheme.colorScheme.error)
+                    Icon(Icons.Filled.Delete, contentDescription = "Delete hand", tint = AuraThemeTokens.colors.error)
                 }
             }
         }
@@ -346,7 +347,7 @@ private fun HandCard(
 
 @Composable
 private fun MetadataPill(icon: androidx.compose.ui.graphics.vector.ImageVector?, text: String) {
-    Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(999.dp)) {
+    Surface(color = AuraThemeTokens.colors.surface1, shape = RoundedCornerShape(999.dp)) {
         Row(
             Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -368,10 +369,10 @@ private fun RunHistory(
     if (runs.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Filled.History, contentDescription = null, modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Filled.History, contentDescription = null, modifier = Modifier.size(36.dp), tint = AuraThemeTokens.colors.actionPrimary)
                 Spacer(Modifier.height(10.dp))
                 Text("No runs yet", style = MaterialTheme.typography.titleMedium)
-                Text("Manual, agent, phrase, and scheduled runs appear here", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Manual, agent, phrase, and scheduled runs appear here", style = MaterialTheme.typography.bodySmall, color = AuraThemeTokens.colors.textPrimary)
             }
         }
         return
@@ -402,7 +403,7 @@ private fun RunHistory(
         }
         if (filteredRuns.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                Text("No $filter runs", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("No $filter runs", color = AuraThemeTokens.colors.textPrimary)
             }
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -427,7 +428,7 @@ private fun RunHistoryCard(
     var expanded by remember(run.id) { mutableStateOf(false) }
     val color = statusColor(run.status)
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = AuraThemeTokens.colors.surface1,
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
     ) {
@@ -441,15 +442,15 @@ private fun RunHistoryCard(
             Text(
                 "${run.trigger.replaceFirstChar { it.uppercase() }} · ${DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(run.startedAt))}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AuraThemeTokens.colors.textPrimary,
             )
             AnimatedVisibility(expanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     HorizontalDivider()
-                    if (run.failedStep != null) Text("Stopped at step ${run.failedStep}", color = MaterialTheme.colorScheme.error)
+                    if (run.failedStep != null) Text("Stopped at step ${run.failedStep}", color = AuraThemeTokens.colors.error)
                     Text(run.output.ifBlank { "No output recorded" }, style = MaterialTheme.typography.bodySmall)
                     if (run.variablesJson != "{}") {
-                        Text("Inputs: ${run.variablesJson}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Inputs: ${run.variablesJson}", style = MaterialTheme.typography.labelSmall, color = AuraThemeTokens.colors.textPrimary)
                     }
                     when (run.status) {
                         HandRunStatus.NEEDS_APPROVAL.value -> Button(
@@ -483,7 +484,7 @@ private fun RunHandDialog(hand: Hand, onDismiss: () -> Unit, onRun: (Map<String,
                 if (defaults.isEmpty()) {
                     Text("This hand has no runtime variables. Its conditions and steps will run with saved defaults.")
                 } else {
-                    Text("Override inputs for this run only", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Override inputs for this run only", style = MaterialTheme.typography.bodySmall, color = AuraThemeTokens.colors.textPrimary)
                     defaults.keys.forEach { key ->
                         OutlinedTextField(
                             value = values[key].orEmpty(),
@@ -507,7 +508,7 @@ private fun HandsSkeletonLoading() {
     val alpha by transition.animateFloat(0.25f, 0.60f, infiniteRepeatable(tween(850)), label = "pulse")
     Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
         repeat(3) {
-            Box(Modifier.fillMaxWidth().height(126.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha), RoundedCornerShape(18.dp)))
+            Box(Modifier.fillMaxWidth().height(126.dp).background(AuraThemeTokens.colors.surface1.copy(alpha = alpha), RoundedCornerShape(18.dp)))
         }
     }
 }
@@ -516,8 +517,8 @@ private fun HandsSkeletonLoading() {
 private fun HandsEmptyState() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 28.dp)) {
-            Surface(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f), shape = RoundedCornerShape(22.dp)) {
-                Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(18.dp).size(32.dp))
+            Surface(color = AuraThemeTokens.colors.actionPrimary.copy(alpha = 0.14f), shape = RoundedCornerShape(22.dp)) {
+                Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = AuraThemeTokens.colors.actionPrimary, modifier = Modifier.padding(18.dp).size(32.dp))
             }
             Spacer(Modifier.height(14.dp))
             Text("Build your first hand", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -525,7 +526,7 @@ private fun HandsEmptyState() {
             Text(
                 "Chain tools, name the inputs, decide when it may run, and keep every result inspectable.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = AuraThemeTokens.colors.textPrimary,
             )
         }
     }
@@ -534,10 +535,10 @@ private fun HandsEmptyState() {
 @Composable
 private fun statusColor(status: String): Color = when (status) {
     HandRunStatus.SUCCESS.value -> Color(0xFF5FD3A8)
-    HandRunStatus.RUNNING.value -> MaterialTheme.colorScheme.primary
+    HandRunStatus.RUNNING.value -> AuraThemeTokens.colors.actionPrimary
     HandRunStatus.SKIPPED.value -> Color(0xFFE4B865)
     HandRunStatus.NEEDS_PERMISSION.value, HandRunStatus.NEEDS_APPROVAL.value -> Color(0xFFE4B865)
-    else -> MaterialTheme.colorScheme.error
+    else -> AuraThemeTokens.colors.error
 }
 
 private fun scheduleLabel(hand: Hand): String = when (HandScheduleType.from(hand.scheduleType)) {
