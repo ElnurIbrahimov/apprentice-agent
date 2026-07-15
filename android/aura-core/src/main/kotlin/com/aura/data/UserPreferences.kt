@@ -62,6 +62,11 @@ internal val KEY_CUSTOM_IDENTITY = stringPreferencesKey("custom_identity")
 internal val KEY_SPECIALIST_OVERRIDES = stringPreferencesKey("specialist_overrides")
 internal val KEY_MORNING_BRIEF_HOUR = intPreferencesKey("morning_brief_hour")
 internal val KEY_SPECIALIST_TOOL_OVERRIDES = stringPreferencesKey("specialist_tool_overrides")
+internal val KEY_SMTP_HOST = stringPreferencesKey("smtp_host")
+internal val KEY_SMTP_PORT = intPreferencesKey("smtp_port")
+internal val KEY_SMTP_USERNAME = stringPreferencesKey("smtp_username")
+internal val KEY_SMTP_PASSWORD = stringPreferencesKey("smtp_password")
+internal val KEY_SMTP_FROM = stringPreferencesKey("smtp_from")
 
 @Singleton
 class UserPreferences @Inject constructor(
@@ -281,6 +286,23 @@ class UserPreferences @Inject constructor(
         context.auraPrefs.data.map { prefs ->
             prefs[key]?.let(::normalizeModelId)?.takeIf(String::isNotBlank)
         }
+
+
+    val smtpHost: Flow<String> = context.auraPrefs.data.map { it[KEY_SMTP_HOST] ?: "" }
+    val smtpPort: Flow<Int> = context.auraPrefs.data.map { it[KEY_SMTP_PORT] ?: 587 }
+    val smtpUsername: Flow<String> = context.auraPrefs.data.map { it[KEY_SMTP_USERNAME] ?: "" }
+    val smtpPassword: Flow<String> = context.auraPrefs.data.map { it[KEY_SMTP_PASSWORD] ?: "" }
+    val smtpFrom: Flow<String> = context.auraPrefs.data.map { it[KEY_SMTP_FROM] ?: "" }
+
+    suspend fun setSmtpConfig(host: String, port: Int, username: String, password: String, from: String) {
+        context.auraPrefs.edit { prefs ->
+            prefs[KEY_SMTP_HOST] = host.trim()
+            prefs[KEY_SMTP_PORT] = port.coerceIn(1, 65535)
+            prefs[KEY_SMTP_USERNAME] = username.trim()
+            prefs[KEY_SMTP_PASSWORD] = password
+            prefs[KEY_SMTP_FROM] = from.trim().ifBlank { username.trim() }
+        }
+    }
 
     private suspend fun setOptionalModel(key: Preferences.Key<String>, model: String?) {
         val normalized = model?.let(::normalizeModelId)?.takeIf(String::isNotBlank)

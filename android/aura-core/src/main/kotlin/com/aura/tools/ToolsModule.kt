@@ -31,6 +31,14 @@ object ToolsModule {
         systemVolume: SystemVolumeTool,
         photoLibrary: PhotoLibraryTool,
         biometricPrompt: BiometricPromptTool,
+        clipboardRead: ClipboardReadTool,
+        clipboardWrite: ClipboardWriteTool,
+        openBrowserTab: OpenBrowserTabTool,
+        httpFileRead: HttpFileReadTool,
+        httpFileWrite: HttpFileWriteTool,
+        ttsSpeak: TtsSpeakTool,
+        captureScreen: CaptureScreenTool,
+        sendEmailBackground: SendEmailBackgroundTool,
 
         batteryState: BatteryStateTool,
         networkState: NetworkStateTool,
@@ -72,6 +80,15 @@ object ToolsModule {
         registry.register(systemVolume.tool)
         registry.register(photoLibrary.tool)
         registry.register(biometricPrompt.tool)
+
+        registry.register(clipboardRead.tool)
+        registry.register(clipboardWrite.tool)
+        registry.register(openBrowserTab.tool)
+        registry.register(httpFileRead.tool)
+        registry.register(httpFileWrite.tool)
+        registry.register(ttsSpeak.tool)
+        registry.register(captureScreen.tool)
+        registry.register(sendEmailBackground.tool)
 
         registry.register(batteryState.tool)
         registry.register(networkState.tool)

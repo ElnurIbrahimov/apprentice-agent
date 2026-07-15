@@ -34,6 +34,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import com.aura.data.UserPreferences
 import com.aura.security.BiometricActivityHolder
+import com.aura.security.ScreenCaptureHolder
 import com.aura.tools.BiometricAuthHandler
 import com.aura.ui.components.AuraAppLockContent
 import com.aura.ui.components.AuraStartupState
@@ -49,6 +50,8 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 
 import com.aura.ui.theme.AuraThemeTokens
 @EntryPoint
@@ -92,6 +95,13 @@ class MainActivity : FragmentActivity() {
 
     @Inject lateinit var incomingShareStore: IncomingShareStore
     @Inject lateinit var biometricHolder: BiometricActivityHolder
+    @Inject lateinit var screenCaptureHolder: ScreenCaptureHolder
+
+    private val screenCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        screenCaptureHolder.onPermissionResult(result.resultCode, result.data)
+    }
 
     var launchRequest by mutableStateOf(AuraLaunchRequest())
         private set
@@ -102,6 +112,7 @@ class MainActivity : FragmentActivity() {
         )
         super.onCreate(savedInstanceState)
         biometricHolder.activity = this
+        screenCaptureHolder.attach(this, screenCaptureLauncher)
         handleSharedText(intent)
         handleDeepLink(intent)
         setContent {
@@ -111,6 +122,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onDestroy() {
         biometricHolder.activity = null
+        screenCaptureHolder.detach()
         super.onDestroy()
     }
 

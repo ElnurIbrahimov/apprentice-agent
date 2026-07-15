@@ -113,10 +113,18 @@ data class SettingsUiState(
     val credentialStates: Map<String, ProviderCredentialState> = emptyMap(),
     // Custom endpoint card state.
     val customBaseUrl: String = "",
-    val customApiKey: String = "",
+    val customApiKey: kotlin.String = "",
     val customIsConfigured: Boolean = false,
     val customTesting: Boolean = false,
     val customResult: String? = null,
+    // SMTP config card state.
+    val smtpHost: String = "",
+    val smtpPort: Int = 587,
+    val smtpUsername: String = "",
+    val smtpPassword: kotlin.String = "",
+    val smtpFrom: String = "",
+    val smtpTesting: Boolean = false,
+    val smtpResult: String? = null,
     /** Distinct from credentialStates["custom"]: the URL/key are stored
      *  outside ProviderKeys, so this is a separate UI state. */
 )
@@ -194,6 +202,11 @@ class SettingsViewModel @Inject constructor(
             val identityCustomized = identityStore.hasOverride()
             val specialistOverrides = userPreferences.specialistOverrides.first()
             val morningBriefHour = userPreferences.morningBriefHour.first()
+            val smtpHost = userPreferences.smtpHost.first()
+            val smtpPort = userPreferences.smtpPort.first()
+            val smtpUsername = userPreferences.smtpUsername.first()
+            val smtpPassword = userPreferences.smtpPassword.first()
+            val smtpFrom = userPreferences.smtpFrom.first()
             _state.value = SettingsUiState(
                 keyDrafts = ProviderKeys.PREFIXES.associateWith { prefix ->
                     providerKeys.keyFor(prefix).orEmpty()
@@ -215,6 +228,11 @@ class SettingsViewModel @Inject constructor(
                 identityCustomized = identityCustomized,
                 specialistOverrides = specialistOverrides,
                 morningBriefHour = morningBriefHour,
+                smtpHost = smtpHost,
+                smtpPort = smtpPort,
+                smtpUsername = smtpUsername,
+                smtpPassword = smtpPassword,
+                smtpFrom = smtpFrom,
             )
         }
     }
@@ -569,6 +587,50 @@ class SettingsViewModel @Inject constructor(
                     customIsConfigured = false,
                     customResult = null,
                 )
+            }
+        }
+    }
+
+    fun updateSmtpHost(value: String) {
+        _state.update { it.copy(smtpHost = value, smtpResult = null) }
+    }
+
+    fun updateSmtpPort(value: String) {
+        _state.update { it.copy(smtpPort = value.toIntOrNull() ?: 587, smtpResult = null) }
+    }
+
+    fun updateSmtpUsername(value: String) {
+        _state.update { it.copy(smtpUsername = value, smtpResult = null) }
+    }
+
+    fun updateSmtpPassword(value: kotlin.String) {
+        _state.update { it.copy(smtpPassword = value, smtpResult = null) }
+    }
+
+    fun updateSmtpFrom(value: String) {
+        _state.update { it.copy(smtpFrom = value, smtpResult = null) }
+    }
+
+    fun saveSmtpConfig() {
+        if (_state.value.smtpTesting) return
+        _state.update { it.copy(smtpTesting = true, smtpResult = "Saving…") }
+        viewModelScope.launch {
+            try {
+                userPreferences.setSmtpConfig(
+                    _state.value.smtpHost,
+                    _state.value.smtpPort,
+                    _state.value.smtpUsername,
+                    _state.value.smtpPassword,
+                    _state.value.smtpFrom,
+                )
+                _state.update {
+                    it.copy(
+                        smtpTesting = false,
+                        smtpResult = "✓ SMTP saved",
+                    )
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(smtpTesting = false, smtpResult = "✗ ${e.message}") }
             }
         }
     }

@@ -54,6 +54,9 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             excludes += "META-INF/INDEX.LIST"
             excludes += "META-INF/io.netty.versions.properties"
+            excludes += "META-INF/NOTICE.md"
+            excludes += "META-INF/LICENSE.md"
+            excludes += "META-INF/{NOTICE,LICENSE}*"
         }
     }
 }
@@ -85,6 +88,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.biometric)
     implementation(libs.pdfbox.android)
+    implementation(libs.androidx.browser)
+    implementation(libs.androidx.media3.common)
+    implementation(libs.mail.android)
+    implementation(libs.mail.android.activation)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)

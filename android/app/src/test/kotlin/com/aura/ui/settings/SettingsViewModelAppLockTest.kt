@@ -84,6 +84,11 @@ class SettingsViewModelAppLockTest {
         every { userPreferences.incognitoDefault } returns flowOf(false)
         every { userPreferences.lastSeenProactiveAt } returns flowOf(0L)
         every { userPreferences.morningBriefHour } returns flowOf(7)
+        every { userPreferences.smtpHost } returns flowOf("")
+        every { userPreferences.smtpPort } returns flowOf(587)
+        every { userPreferences.smtpUsername } returns flowOf("")
+        every { userPreferences.smtpPassword } returns flowOf("")
+        every { userPreferences.smtpFrom } returns flowOf("")
         coEvery { userPreferences.setAppLockEnabled(any()) } answers {
             appLockFlow.value = firstArg()
         }

@@ -73,6 +73,9 @@ dependencies {
 
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
+    implementation(libs.androidx.browser)
+    implementation(libs.mail.android)
+    implementation(libs.mail.android.activation)
 
     ksp(libs.androidx.room.compiler)
 
