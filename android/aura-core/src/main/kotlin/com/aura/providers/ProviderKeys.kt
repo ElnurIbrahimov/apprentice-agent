@@ -253,6 +253,22 @@ class ProviderKeys @Inject constructor(
     }
 
     companion object {
-        val PREFIXES = listOf("ollama", "anthropic", "openai", "deepseek", "gemini", "groq", "openrouter", "brave", "tavily", "firecrawl")
+        /**
+         * Every provider prefix Aura knows about. Adding a new provider means
+         * (1) adding its prefix here so the Settings UI persists its key,
+         * (2) wiring it into [com.aura.providers.ProviderModule] or
+         * [com.aura.capabilities.di.CapabilityModule] for the chat/capability
+         * multibindings, (3) surfacing it in the Settings screen.
+         */
+        val PREFIXES = listOf(
+            // Chat providers
+            "ollama", "anthropic", "openai", "deepseek", "gemini", "groq", "openrouter",
+            "mistral", "xai", "together", "cerebras", "nvidia", "llama", "chatgpt",
+            "agnes", "custom", "moa",
+            // Search & content
+            "brave", "tavily", "firecrawl", "exa", "jina",
+            // Capabilities (TTS, image, video, 3D)
+            "elevenlabs", "stability", "kling", "worldlabs",
+        )
     }
 }

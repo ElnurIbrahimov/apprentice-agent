@@ -118,4 +118,75 @@ object ProviderModule {
         userPreferences = userPreferences,
     )
 
+    // -------- New chat LLM providers (all OpenAI-compat) --------
+
+    @Provides
+    @IntoMap
+    @StringKey("mistral")
+    fun provideMistral(client: OkHttpClient, keys: ProviderKeys): Provider = OllamaCloudProvider(
+        prefix = "mistral", displayName = "Mistral",
+        baseUrl = "https://api.mistral.ai/v1", providerKeys = keys, httpClient = client,
+    )
+
+    @Provides
+    @IntoMap
+    @StringKey("xai")
+    fun provideXai(client: OkHttpClient, keys: ProviderKeys): Provider = OllamaCloudProvider(
+        prefix = "xai", displayName = "xAI Grok",
+        baseUrl = "https://api.x.ai/v1", providerKeys = keys, httpClient = client,
+    )
+
+    @Provides
+    @IntoMap
+    @StringKey("together")
+    fun provideTogether(client: OkHttpClient, keys: ProviderKeys): Provider = OllamaCloudProvider(
+        prefix = "together", displayName = "Together AI",
+        baseUrl = "https://api.together.xyz/v1", providerKeys = keys, httpClient = client,
+    )
+
+    @Provides
+    @IntoMap
+    @StringKey("cerebras")
+    fun provideCerebras(client: OkHttpClient, keys: ProviderKeys): Provider = OllamaCloudProvider(
+        prefix = "cerebras", displayName = "Cerebras",
+        baseUrl = "https://api.cerebras.ai/v1", providerKeys = keys, httpClient = client,
+    )
+
+    @Provides
+    @IntoMap
+    @StringKey("nvidia")
+    fun provideNvidia(client: OkHttpClient, keys: ProviderKeys): Provider = OllamaCloudProvider(
+        prefix = "nvidia", displayName = "NVIDIA NIM",
+        baseUrl = "https://integrate.api.nvidia.com/v1", providerKeys = keys, httpClient = client,
+    )
+
+    @Provides
+    @IntoMap
+    @StringKey("llama")
+    fun provideLlama(client: OkHttpClient, keys: ProviderKeys): Provider = OllamaCloudProvider(
+        prefix = "llama", displayName = "Meta Llama",
+        baseUrl = "https://api.llama.com/compat/v1", providerKeys = keys, httpClient = client,
+    )
+
+    @Provides
+    @IntoMap
+    @StringKey("agnes")
+    fun provideAgnes(client: OkHttpClient, keys: ProviderKeys): Provider = OllamaCloudProvider(
+        prefix = "agnes", displayName = "Agnes AI",
+        baseUrl = "https://apihub.agnes-ai.com/v1", providerKeys = keys, httpClient = client,
+    )
+
+    @Provides
+    @IntoMap
+    @StringKey("chatgpt")
+    fun provideChatGptSubscription(client: OkHttpClient, keys: ProviderKeys): Provider =
+        ChatGptSubscriptionProvider(providerKeys = keys, httpClient = client)
+
+    @Provides
+    @IntoMap
+    @StringKey("custom")
+    fun provideCustomEndpoint(
+        client: OkHttpClient,
+        customState: CustomEndpointState,
+    ): Provider = CustomOpenAiCompatProvider(state = customState, httpClient = client)
 }

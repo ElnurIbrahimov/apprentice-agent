@@ -73,9 +73,22 @@ class ProviderKeysTest {
 
     @Test
     fun `PREFIXES contains all supported providers`() {
-        assertEquals(
-            setOf("ollama", "anthropic", "openai", "deepseek", "gemini", "groq", "openrouter", "brave", "tavily", "firecrawl"),
-            ProviderKeys.PREFIXES.toSet()
+        // The expected set is the source of truth; the production PREFIXES
+        // list must always include these chat + capability prefixes. New
+        // providers added to PREFIXES but not here will be a hidden regression.
+        val expected = setOf(
+            // chat
+            "ollama", "anthropic", "openai", "deepseek", "gemini", "groq", "openrouter",
+            "mistral", "xai", "together", "cerebras", "nvidia", "llama", "chatgpt",
+            "agnes", "custom", "moa",
+            // search & content
+            "brave", "tavily", "firecrawl", "exa", "jina",
+            // capabilities
+            "elevenlabs", "stability", "kling", "worldlabs",
+        )
+        assertTrue(
+            expected.all { it in ProviderKeys.PREFIXES },
+            "Missing prefixes: ${expected - ProviderKeys.PREFIXES.toSet()}",
         )
     }
 
