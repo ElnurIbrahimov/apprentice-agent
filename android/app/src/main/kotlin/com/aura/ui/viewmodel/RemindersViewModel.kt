@@ -16,6 +16,12 @@ data class RemindersUiState(
     val upcoming: List<ReminderEntity> = emptyList(),
     val history: List<ReminderEntity> = emptyList(),
     val loading: Boolean = true,
+    /**
+     * Free-text search query. Applied client-side by the screen
+     * (no Room round-trip) — case-insensitive substring match
+     * against message and recurrence ("daily", "weekly", etc.).
+     */
+    val searchQuery: String = "",
 )
 
 @HiltViewModel
@@ -53,5 +59,15 @@ class RemindersViewModel @Inject constructor(
 
     fun clearHistory() {
         viewModelScope.launch { store.clearHistory() }
+    }
+
+    /**
+     * Update the search query. The screen applies the filter
+     * client-side so this is a cheap state update — the
+     * upcoming/history lists stay in memory and the UI re-renders
+     * with the new query without touching Room.
+     */
+    fun setSearchQuery(query: String) {
+        _state.value = _state.value.copy(searchQuery = query)
     }
 }

@@ -40,6 +40,12 @@ data class HandsUiState(
     val running: String? = null,
     val lastResult: String? = null,
     val error: String? = null,
+    /**
+     * Free-text search query. Applied client-side by the screen
+     * (no Room round-trip) — case-insensitive substring match
+     * against hand name and trigger phrase.
+     */
+    val searchQuery: String = "",
 )
 
 @HiltViewModel
@@ -220,5 +226,9 @@ class HandsViewModel @Inject constructor(
 
     fun clearError() {
         _state.value = _state.value.copy(error = null)
+    }
+
+    fun setSearchQuery(query: String) {
+        _state.value = _state.value.copy(searchQuery = query)
     }
 }

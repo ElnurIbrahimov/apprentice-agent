@@ -31,11 +31,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -129,6 +131,22 @@ fun HandsScreen(
                 title = "Hands",
                 subtitle = "Automations with explicit inputs, gates, and history",
             )
+            // Search bar
+            androidx.compose.material3.OutlinedTextField(
+                value = state.searchQuery,
+                onValueChange = { viewModel.setSearchQuery(it) },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                placeholder = { Text("Search hands by name or trigger phrase") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                            Icon(Icons.Filled.Clear, contentDescription = "Clear search")
+                        }
+                    }
+                },
+            )
             TabRow(selectedTabIndex = selectedTab) {
                 Tab(
                     selected = selectedTab == 0,
@@ -146,14 +164,24 @@ fun HandsScreen(
             Spacer(Modifier.height(10.dp))
 
             if (selectedTab == 0) {
+                val visibleHands = run {
+                    val q = state.searchQuery.trim()
+                    if (q.isBlank()) state.hands else {
+                        val needle = q.lowercase()
+                        state.hands.filter { hand ->
+                            hand.name.lowercase().contains(needle) ||
+                                hand.triggerPhrase.lowercase().contains(needle)
+                        }
+                    }
+                }
                 when {
                     state.loading -> HandsSkeletonLoading()
-                    state.hands.isEmpty() -> HandsEmptyState()
+                    visibleHands.isEmpty() -> HandsEmptyState()
                     else -> LazyColumn(
                         contentPadding = PaddingValues(bottom = 96.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        items(state.hands, key = { it.id }) { hand ->
+                        items(visibleHands, key = { it.id }) { hand ->
                             HandCard(
                                 hand = hand,
                                 lastRun = state.runs.firstOrNull { it.handId == hand.id },

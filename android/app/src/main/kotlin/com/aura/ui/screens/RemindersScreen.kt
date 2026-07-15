@@ -16,8 +16,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -61,7 +63,17 @@ fun RemindersScreen(
     var cancelling by remember { mutableStateOf<ReminderEntity?>(null) }
     var confirmClearHistory by remember { mutableStateOf(false) }
 
-    val rows = if (showHistory) state.history else state.upcoming
+    val rows = run {
+        val source = if (showHistory) state.history else state.upcoming
+        val q = state.searchQuery.trim()
+        if (q.isBlank()) source else {
+            val needle = q.lowercase()
+            source.filter {
+                it.message.lowercase().contains(needle) ||
+                    it.recurrence.lowercase().contains(needle)
+            }
+        }
+    }
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         floatingActionButton = {
@@ -99,13 +111,34 @@ fun RemindersScreen(
                 )
             }
             Spacer(Modifier.height(8.dp))
+            // Search bar
+            androidx.compose.material3.OutlinedTextField(
+                value = state.searchQuery,
+                onValueChange = { viewModel.setSearchQuery(it) },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search reminders by message or recurrence") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                            Icon(Icons.Filled.Clear, contentDescription = "Clear search")
+                        }
+                    }
+                },
+            )
+            Spacer(Modifier.height(8.dp))
             if (!state.loading && rows.isEmpty()) {
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        if (showHistory) "No reminder history" else "Nothing scheduled",
+                        when {
+                            state.searchQuery.isNotBlank() -> "No reminders match \"${state.searchQuery}\""
+                            showHistory -> "No reminder history"
+                            else -> "Nothing scheduled"
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
                     )
