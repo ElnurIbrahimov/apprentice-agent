@@ -45,6 +45,13 @@ fun ProviderKeyField(
     credentialState: ProviderCredentialState? = null,
     actionLabel: String = "Save & Test",
     requiresTest: Boolean = true,
+    /**
+     * When false, the field is read-only and the action button is hidden.
+     * Used to surface capability-provider keys that are persisted but
+     * not yet consumed by any tool — better to show the affordance as
+     * "coming soon" than pretend the key does something.
+     */
+    enabled: Boolean = true,
 ) {
     var visible by remember { mutableStateOf(false) }
     val testId = label.lowercase().replace(' ', '-')
@@ -86,6 +93,7 @@ fun ProviderKeyField(
             modifier = Modifier.fillMaxWidth().testTag("provider-key-$testId"),
             placeholder = { Text("Paste API key") },
             singleLine = true,
+            enabled = enabled,
             visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             trailingIcon = {
@@ -97,6 +105,14 @@ fun ProviderKeyField(
                 }
             },
         )
+        if (!enabled) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "Coming soon — this key isn't consumed by any tool yet.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+        }
         if (helperText != null) {
             Spacer(modifier = Modifier.height(2.dp))
             Text(
@@ -105,7 +121,7 @@ fun ProviderKeyField(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
         }
-        if (onVerify != null) {
+        if (onVerify != null && enabled) {
             Spacer(modifier = Modifier.height(4.dp))
             Row(
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,

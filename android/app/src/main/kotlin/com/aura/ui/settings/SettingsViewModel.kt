@@ -26,6 +26,14 @@ data class SettingsCredentialSpec(
     val label: String,
     val helperText: String,
     val testsModelCatalog: Boolean,
+    /**
+     * True when the user's key is actually consumed by at least one tool
+     * or provider registration today. Capability providers whose keys
+     * are persisted but not yet wired into any tool render disabled
+     * with a "Coming soon" hint so the user knows the key is held
+     * but not used.
+     */
+    val isConsumed: Boolean = testsModelCatalog,
 )
 
 val SETTINGS_CREDENTIAL_SPECS: List<SettingsCredentialSpec> = listOf(
@@ -48,15 +56,18 @@ val SETTINGS_CREDENTIAL_SPECS: List<SettingsCredentialSpec> = listOf(
     // needs both a base URL and an API key, so it can't be a single
     // ProviderKeyField row. Don't add it back to this list.
     SettingsCredentialSpec("moa", "Mixture-of-Agents", "Configure MoA presets in code; no API key", true),
-    SettingsCredentialSpec("brave", "Brave Search", "Used by Brave web search tools", false),
-    SettingsCredentialSpec("tavily", "Tavily Search", "Used by Tavily research tools", false),
-    SettingsCredentialSpec("firecrawl", "Firecrawl", "Used by Firecrawl page extraction", false),
-    SettingsCredentialSpec("exa", "Exa Search", "Neural search — get a key at exa.ai/dashboard", false),
-    SettingsCredentialSpec("jina", "Jina Reader", "URL-to-text search — get a key at jina.ai/reader", false),
-    SettingsCredentialSpec("elevenlabs", "ElevenLabs", "TTS — get a key at elevenlabs.io/app/settings/api-keys", false),
-    SettingsCredentialSpec("stability", "Stability AI", "Image generation — platform.stability.ai/account/keys", false),
-    SettingsCredentialSpec("kling", "Kling AI", "Video generation — klingai.com/dev", false),
-    SettingsCredentialSpec("worldlabs", "World Labs", "3D world generation — worldlabs.ai", false),
+    SettingsCredentialSpec("brave", "Brave Search", "Used by Brave web search tools", false, isConsumed = true),
+    SettingsCredentialSpec("tavily", "Tavily Search", "Used by Tavily research tools", false, isConsumed = true),
+    SettingsCredentialSpec("firecrawl", "Firecrawl", "Used by Firecrawl page extraction", false, isConsumed = true),
+    SettingsCredentialSpec("exa", "Exa Search", "Neural search — get a key at exa.ai/dashboard", false, isConsumed = true),
+    SettingsCredentialSpec("jina", "Jina Reader", "URL-to-text search — get a key at jina.ai/reader", false, isConsumed = true),
+    // Capability providers — keys persist but no tool consumes them yet.
+    // The Settings card renders these disabled with a "Coming soon" hint
+    // so the user doesn't think the key does anything.
+    SettingsCredentialSpec("elevenlabs", "ElevenLabs", "TTS — get a key at elevenlabs.io/app/settings/api-keys", false, isConsumed = false),
+    SettingsCredentialSpec("stability", "Stability AI", "Image generation — platform.stability.ai/account/keys", false, isConsumed = false),
+    SettingsCredentialSpec("kling", "Kling AI", "Video generation — klingai.com/dev", false, isConsumed = false),
+    SettingsCredentialSpec("worldlabs", "World Labs", "3D world generation — worldlabs.ai", false, isConsumed = false),
 )
 
 private val TOOL_CREDENTIAL_PREFIXES: Set<String> = SETTINGS_CREDENTIAL_SPECS

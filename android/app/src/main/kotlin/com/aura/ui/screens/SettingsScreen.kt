@@ -284,6 +284,7 @@ fun SettingsScreen(
                     credentialState = state.credentialStates[credential.prefix],
                     actionLabel = if (credential.testsModelCatalog) "Save & Test" else "Save",
                     requiresTest = credential.testsModelCatalog,
+                    enabled = credential.isConsumed,
                 )
             }
 
