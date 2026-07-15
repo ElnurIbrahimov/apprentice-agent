@@ -161,6 +161,7 @@ fun ChatRoute(
     }
 
     val state by viewModel.state.collectAsState()
+    val skills by viewModel.skills.collectAsState()
     val listState = rememberLazyListState()
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
     var followLiveEdge by remember { mutableStateOf(true) }
@@ -373,6 +374,11 @@ fun ChatRoute(
                     )
                 },
                 onAudioClick = { audioLauncher.launch("audio/*") },
+                skills = skills,
+                onUseSkill = { skill ->
+                    val directive = "/use_skill ${skill.name}\n"
+                    viewModel.setDraft(directive + state.draft)
+                },
             )
         },
     )

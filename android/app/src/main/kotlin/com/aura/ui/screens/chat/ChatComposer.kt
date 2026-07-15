@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AudioFile
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -49,6 +50,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.aura.skills.Skill
 import com.aura.ui.components.AuraIconButton
 import com.aura.ui.theme.AuraThemeTokens
 import com.aura.ui.util.Haptics
@@ -68,6 +70,8 @@ fun ChatComposer(
     onCameraClick: () -> Unit = {},
     onGalleryClick: () -> Unit = {},
     onAudioClick: () -> Unit = {},
+    skills: List<Skill> = emptyList(),
+    onUseSkill: (Skill) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var attachmentOpen by remember { mutableStateOf(false) }
@@ -248,6 +252,67 @@ fun ChatComposer(
                 AttachmentOption(Icons.Filled.AudioFile, "Audio") {
                     attachmentOpen = false
                     onAudioClick()
+                }
+                if (skills.isNotEmpty()) {
+                    Text(
+                        text = "Use a skill",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = AuraThemeTokens.colors.textSecondary,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+                    )
+                    Text(
+                        text = "Inserts /use_skill <name> into the composer — the agent will load the skill's body on the next turn.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AuraThemeTokens.colors.textSecondary,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    skills.take(8).forEach { skill ->
+                        Surface(
+                            onClick = {
+                                attachmentOpen = false
+                                onUseSkill(skill)
+                            },
+                            modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
+                            color = Color.Transparent,
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = AuraThemeTokens.colors.actionPrimary,
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = skill.name,
+                                        color = AuraThemeTokens.colors.textPrimary,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    if (skill.description.isNotBlank()) {
+                                        Text(
+                                            text = skill.description,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = AuraThemeTokens.colors.textSecondary,
+                                            maxLines = 2,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (skills.size > 8) {
+                        Text(
+                            text = "+${skills.size - 8} more — open the Skills tab to see all",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AuraThemeTokens.colors.textTertiary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
                 }
             }
         }

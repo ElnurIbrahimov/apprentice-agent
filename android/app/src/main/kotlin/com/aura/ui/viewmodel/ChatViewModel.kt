@@ -26,6 +26,8 @@ import com.aura.providers.ProviderKeys
 import com.aura.providers.ProviderRegistry
 import com.aura.providers.ModelCatalog
 import com.aura.providers.ModelCatalogRepository
+import com.aura.skills.Skill
+import com.aura.skills.SkillsStore
 import com.aura.providers.ProviderStatus
 import com.aura.tools.Citation
 import com.aura.tools.MAX_TRANSCRIPTION_AUDIO_BYTES
@@ -227,9 +229,13 @@ class ChatViewModel @Inject constructor(
     private val knowledgeGraphRepository: KnowledgeGraphRepository,
     private val crashLogger: com.aura.core.error.CrashLogger,
     private val modelCatalogRepository: ModelCatalogRepository? = null,
+    private val skillsStore: SkillsStore? = null,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ChatUiState())
+
+    /** Reactive list of installed skills, exposed for the composer attachment sheet. */
+    val skills: StateFlow<List<Skill>> = skillsStore?.skills ?: MutableStateFlow(emptyList())
     val state: StateFlow<ChatUiState> = _state.asStateFlow()
     @Volatile private var isolatedSessionRequested = false
 
@@ -278,6 +284,9 @@ class ChatViewModel @Inject constructor(
 
     init {
         textToSpeech.initialize()
+        // Pre-load skills so the composer attachment sheet renders
+        // the list on first launch instead of flashing empty.
+        viewModelScope.launch { skillsStore?.awaitLoaded() }
         viewModelScope.launch {
             val recent = conversationStore.mostRecent()
             if (isolatedSessionRequested) return@launch
