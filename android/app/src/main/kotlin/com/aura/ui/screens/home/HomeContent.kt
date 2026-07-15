@@ -151,6 +151,7 @@ fun HomeContent(
                     onOpenReminders = onOpenReminders,
                     onOpenHands = onOpenHands,
                     onOpenTools = onOpenTools,
+                    onOpenSkills = onOpenSkills,
                     onOpenCreative = onOpenCreative,
                     onOpenProactive = onOpenProactive,
                 )
