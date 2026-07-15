@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Lightbulb
@@ -53,6 +54,7 @@ fun HomeSecondaryActions(
     onOpenCalendar: () -> Unit,
     onOpenHands: () -> Unit,
     onOpenTools: () -> Unit,
+    onOpenCreative: () -> Unit = {},
     onOpenProactive: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -80,6 +82,12 @@ fun HomeSecondaryActions(
             if (handsCount == 0) "Create hand" else "$handsCount active",
             Icons.Filled.Build,
             onOpenHands,
+        ),
+        HomeDestination(
+            "Creative",
+            "Worlds, drafts, scenarios",
+            Icons.Filled.AutoStories,
+            onOpenCreative,
         ),
         HomeDestination(
             "Tools",

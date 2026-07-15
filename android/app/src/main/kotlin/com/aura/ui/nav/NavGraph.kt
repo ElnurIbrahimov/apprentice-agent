@@ -30,6 +30,8 @@ import com.aura.ui.screens.chat.ChatRoute
 import com.aura.ui.screens.DiagnosticsScreen
 import com.aura.ui.screens.HandsScreen
 import com.aura.ui.screens.HistoryScreen
+import com.aura.ui.screens.creative.CreativeProjectScreen
+import com.aura.ui.screens.creative.CreativeStudioScreen
 import com.aura.ui.screens.home.HomeRoute
 import com.aura.ui.screens.KnowledgeGraphScreen
 import com.aura.ui.screens.ToolsScreen
@@ -141,6 +143,7 @@ fun NavGraph(
                     onOpenReminders = { navController.navigate("reminders") },
                     onOpenHands = { navController.navigate("hands") },
                     onOpenTools = { navController.navigate("tools") },
+                    onOpenCreative = { navController.navigate("creative") },
                     onOpenProactive = { navController.navigate("proactive") },
                     onOpenCalendar = {
                         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
@@ -227,6 +230,23 @@ fun NavGraph(
             }
             composable("profile") {
                 ProfileScreen(onBack = { navController.popBackStack() })
+            }
+            composable("creative") {
+                CreativeStudioScreen(
+                    onOpenProject = { id -> navController.navigate("creative/$id") },
+                )
+            }
+            composable(
+                route = "creative/{projectId}",
+                arguments = listOf(
+                    navArgument("projectId") { type = NavType.StringType },
+                ),
+            ) { backStackEntry ->
+                val projectId = backStackEntry.arguments?.getString("projectId").orEmpty()
+                CreativeProjectScreen(
+                    projectId = projectId,
+                    onBack = { navController.popBackStack() },
+                )
             }
         }
     }

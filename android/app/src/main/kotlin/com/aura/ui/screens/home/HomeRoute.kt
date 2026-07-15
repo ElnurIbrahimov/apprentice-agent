@@ -22,6 +22,7 @@ fun HomeRoute(
     onOpenReminders: () -> Unit = {},
     onOpenTools: () -> Unit = {},
     onOpenHands: () -> Unit = {},
+    onOpenCreative: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     val greeting = remember(state.hour, state.userName) {
@@ -51,6 +52,7 @@ fun HomeRoute(
         onOpenReminders = onOpenReminders,
         onOpenHands = onOpenHands,
         onOpenTools = onOpenTools,
+        onOpenCreative = onOpenCreative,
         onOpenProactive = {
             viewModel.onProactiveHistoryOpened()
             onOpenProactive()

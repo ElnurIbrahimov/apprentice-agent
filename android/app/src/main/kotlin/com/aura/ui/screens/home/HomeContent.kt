@@ -54,6 +54,7 @@ fun HomeContent(
     onOpenReminders: () -> Unit = {},
     onOpenHands: () -> Unit = {},
     onOpenTools: () -> Unit = {},
+    onOpenCreative: () -> Unit = {},
     onOpenProactive: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -130,6 +131,7 @@ fun HomeContent(
                             onOpenReminders = onOpenReminders,
                             onOpenHands = onOpenHands,
                             onOpenTools = onOpenTools,
+                            onOpenCreative = onOpenCreative,
                             onOpenProactive = onOpenProactive,
                         )
                     }
@@ -147,6 +149,7 @@ fun HomeContent(
                     onOpenReminders = onOpenReminders,
                     onOpenHands = onOpenHands,
                     onOpenTools = onOpenTools,
+                    onOpenCreative = onOpenCreative,
                     onOpenProactive = onOpenProactive,
                 )
 
@@ -162,6 +165,7 @@ fun HomeContent(
                     onOpenReminders = onOpenReminders,
                     onOpenHands = onOpenHands,
                     onOpenTools = onOpenTools,
+                    onOpenCreative = onOpenCreative,
                     onOpenProactive = onOpenProactive,
                 )
             }
@@ -179,9 +183,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.homeResolvedItems(
     onOpenTasks: () -> Unit,
     onOpenCalendar: () -> Unit,
     onOpenReminders: () -> Unit,
-    onOpenHands: () -> Unit,
-    onOpenTools: () -> Unit,
-    onOpenProactive: () -> Unit,
+    onOpenHands: () -> Unit = {},
+    onOpenTools: () -> Unit = {},
+    onOpenCreative: () -> Unit = {},
+    onOpenProactive: () -> Unit = {},
 ) {
     val priority = selectHomePriority(state)
     item(key = "primary") {
@@ -224,6 +229,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.homeResolvedItems(
             onOpenCalendar = onOpenCalendar,
             onOpenHands = onOpenHands,
             onOpenTools = onOpenTools,
+            onOpenCreative = onOpenCreative,
             onOpenProactive = onOpenProactive,
         )
     }
