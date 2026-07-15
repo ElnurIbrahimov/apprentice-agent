@@ -29,14 +29,32 @@ class StartupThemeContractTest {
         Regex("<item\\s+name=\"${Regex.escape(name)}\"[^>]*>([^<]+)</item>")
             .find(xml)?.groupValues?.get(1)?.trim().orEmpty()
 
+    /**
+     * Lock the launch theme contract for both light and dark system
+     * modes. The app used to flash a light gray screen for 200-400ms
+     * during cold start because the parent theme was
+     * `android:Theme.Material.Light.NoActionBar` and the
+     * `windowBackground` was a solid color. Now both buckets use the
+     * `aura_splash` drawable (a vertical gradient matching the
+     * launcher icon background) so the cold-start frame reads as part
+     * of the brand, not a stock Android surface.
+     *
+     * The status bar still gets the per-bucket color so the system
+     * chrome (clock, signal icons) reads correctly against the splash.
+     */
     @Test
     fun `launch window follows light and dark resources`() {
         val light = themeFile("values")
         val dark = themeFile("values-night")
 
-        assertEquals("#F7F8FA", item(light, "android:windowBackground"))
+        // Both buckets must point at the brand splash drawable.
+        assertEquals("@drawable/aura_splash", item(light, "android:windowBackground"))
+        assertEquals("@drawable/aura_splash", item(dark, "android:windowBackground"))
+
+        // Status bar color + icon tint are per-bucket.
+        assertEquals("#F7F8FA", item(light, "android:statusBarColor"))
         assertEquals("true", item(light, "android:windowLightStatusBar"))
-        assertEquals("#030303", item(dark, "android:windowBackground"))
+        assertEquals("#030303", item(dark, "android:statusBarColor"))
         assertEquals("false", item(dark, "android:windowLightStatusBar"))
     }
 

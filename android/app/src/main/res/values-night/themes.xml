@@ -1,7 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Night launch theme — values-night/ overrides values/ when
+    the system reports dark mode. The AuraTokens.Dark bgBase is
+    #030303, so the splash background here matches the Compose
+    surface and eliminates the light-flash on cold start in
+    dark mode.
+
+    aura_splash is the same drawable in both buckets — the
+    gradient looks right against any background. The status
+    bar darkens here, the light one in the values/ theme.
+-->
 <resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Theme.Aura" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#030303</item>
+        <item name="android:windowBackground">@drawable/aura_splash</item>
         <item name="android:statusBarColor">#030303</item>
         <item name="android:navigationBarColor">#030303</item>
         <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
