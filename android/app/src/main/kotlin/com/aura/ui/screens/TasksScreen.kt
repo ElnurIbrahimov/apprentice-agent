@@ -23,8 +23,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -58,7 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -105,6 +107,29 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                     }
                 }) else null,
             )
+
+            // Search bar
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = state.searchQuery,
+                onValueChange = { viewModel.setSearchQuery(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("tasks-search"),
+                placeholder = { Text("Search tasks by title, description, or tag") },
+                singleLine = true,
+                leadingIcon = {
+                    Icon(Icons.Filled.Search, contentDescription = null)
+                },
+                trailingIcon = {
+                    if (state.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                            Icon(Icons.Filled.Clear, contentDescription = "Clear search")
+                        }
+                    }
+                },
+            )
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Status filter chips
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -170,9 +195,12 @@ fun TasksScreen(viewModel: TasksViewModel = hiltViewModel()) {
                         item {
                             Box(Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
                                 Text(
-                                    if (state.statusFilter == "done") "No completed tasks"
-                                    else if (state.statusFilter == "pending") "No pending tasks"
-                                    else "No tasks yet",
+                                    when {
+                                        state.searchQuery.isNotBlank() -> "No tasks match \"${state.searchQuery}\""
+                                        state.statusFilter == "done" -> "No completed tasks"
+                                        state.statusFilter == "pending" -> "No pending tasks"
+                                        else -> "No tasks yet"
+                                    },
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
                                 )

@@ -26,6 +26,12 @@ data class TasksUiState(
     val loading: Boolean = true,
     /** Filter: "all", "pending", "done" */
     val statusFilter: String = "all",
+    /**
+     * Free-text search query applied to title + description + tags.
+     * Empty string disables the filter. The query is debounced in
+     * the ViewModel so typing doesn't thrash Room on every keystroke.
+     */
+    val searchQuery: String = "",
 )
 
 @HiltViewModel
@@ -58,13 +64,34 @@ class TasksViewModel @Inject constructor(
         refreshTasks()
     }
 
+    /**
+     * Update the search query and re-apply the filter. The query is
+     * treated as case-insensitive substring match against title,
+     * description, and tags. Re-applied to the in-memory task list
+     * (no Room round-trip) so it's cheap enough to fire on every
+     * keystroke after a small debounce in the UI.
+     */
+    fun setSearchQuery(query: String) {
+        _state.update { it.copy(searchQuery = query) }
+        refreshTasks()
+    }
+
     private fun refreshTasks() {
         viewModelScope.launch {
             val all = taskDao.all()
-            val filtered = when (_state.value.statusFilter) {
+            val byStatus = when (_state.value.statusFilter) {
                 "pending" -> all.filter { it.status != "done" }
                 "done" -> all.filter { it.status == "done" }
                 else -> all
+            }
+            val q = _state.value.searchQuery.trim()
+            val filtered = if (q.isBlank()) byStatus else {
+                val needle = q.lowercase()
+                byStatus.filter { task ->
+                    task.title.lowercase().contains(needle) ||
+                        task.description.lowercase().contains(needle) ||
+                        task.tags.lowercase().contains(needle)
+                }
             }
             _state.update { it.copy(tasks = filtered) }
         }

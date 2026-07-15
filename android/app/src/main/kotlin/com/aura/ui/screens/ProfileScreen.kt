@@ -144,7 +144,7 @@ fun ProfileScreen(
                         },
                         enabled = traitInput.isNotBlank(),
                     ) {
-                        Icon(Icons.Filled.Edit, contentDescription = "Add trait")
+                        Icon(Icons.Filled.Add, contentDescription = "Add trait")
                     }
                 }
             }
@@ -203,7 +203,7 @@ fun ProfileScreen(
                         },
                         enabled = factInput.isNotBlank(),
                     ) {
-                        Icon(Icons.Filled.Edit, contentDescription = "Add fact")
+                        Icon(Icons.Filled.Add, contentDescription = "Add fact")
                     }
                 }
             }
