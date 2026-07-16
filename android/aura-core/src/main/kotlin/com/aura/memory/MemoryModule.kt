@@ -10,6 +10,10 @@ import com.aura.creative.CreativeArtifactDao
 import com.aura.creative.CreativeRevisionDao
 import com.aura.creative.CreativeBranchDao
 import com.aura.creative.CreativeGenerationJobDao
+import com.aura.creative.CanonFactDao
+import com.aura.creative.CreativeSimulationDao
+import com.aura.creative.ContinuityIssueDao
+import com.aura.creative.ArtifactDependencyDao
 import com.aura.documents.DocumentDao
 import com.aura.documents.DocumentChunkDao
 import com.aura.documents.DocumentChunkEntity
@@ -273,6 +277,100 @@ object MemoryModule {
         }
     }
 
+    val MIGRATION_8_9 = object : Migration(8, 9) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Canon facts table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS canon_facts (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    projectId TEXT NOT NULL,
+                    branchId TEXT NOT NULL,
+                    subjectType TEXT NOT NULL,
+                    subjectId TEXT NOT NULL,
+                    predicate TEXT NOT NULL,
+                    valueJson TEXT NOT NULL,
+                    validFrom INTEGER NOT NULL DEFAULT 0,
+                    validTo INTEGER NOT NULL DEFAULT 0,
+                    confidence REAL NOT NULL DEFAULT 1.0,
+                    sourceRevisionId TEXT,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    FOREIGN KEY(projectId) REFERENCES creative_projects(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_canon_facts_projectId ON canon_facts(projectId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_canon_facts_projectId_branchId ON canon_facts(projectId, branchId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_canon_facts_subjectType_subjectId ON canon_facts(subjectType, subjectId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_canon_facts_predicate ON canon_facts(predicate)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_canon_facts_status ON canon_facts(status)")
+
+            // Creative simulations table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS creative_simulations (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    projectId TEXT NOT NULL,
+                    branchId TEXT NOT NULL,
+                    premise TEXT NOT NULL,
+                    assumptionsJson TEXT NOT NULL DEFAULT '[]',
+                    narrative TEXT NOT NULL DEFAULT '',
+                    stateDeltaJson TEXT NOT NULL DEFAULT '[]',
+                    causalGraphJson TEXT NOT NULL DEFAULT '[]',
+                    confidence REAL NOT NULL DEFAULT 1.0,
+                    contradictionsJson TEXT NOT NULL DEFAULT '[]',
+                    createdAt INTEGER NOT NULL,
+                    canonizedAt INTEGER NOT NULL DEFAULT 0,
+                    canonizedFactIdsJson TEXT NOT NULL DEFAULT '[]',
+                    FOREIGN KEY(projectId) REFERENCES creative_projects(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_simulations_projectId ON creative_simulations(projectId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_simulations_projectId_branchId ON creative_simulations(projectId, branchId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_simulations_canonizedAt ON creative_simulations(canonizedAt)")
+
+            // Continuity issues table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS continuity_issues (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    projectId TEXT NOT NULL,
+                    branchId TEXT NOT NULL,
+                    artifactId TEXT,
+                    category TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    evidenceFactIdsJson TEXT NOT NULL DEFAULT '[]',
+                    suggestedPatchJson TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'open',
+                    createdAt INTEGER NOT NULL,
+                    resolvedAt INTEGER,
+                    resolvedBy TEXT NOT NULL DEFAULT ''
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_continuity_issues_projectId ON continuity_issues(projectId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_continuity_issues_projectId_branchId ON continuity_issues(projectId, branchId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_continuity_issues_artifactId ON continuity_issues(artifactId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_continuity_issues_severity ON continuity_issues(severity)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_continuity_issues_status ON continuity_issues(status)")
+
+            // Artifact dependencies table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS artifact_dependencies (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    sourceArtifactId TEXT NOT NULL,
+                    targetArtifactId TEXT NOT NULL,
+                    relation TEXT NOT NULL,
+                    invalidationPolicy TEXT NOT NULL DEFAULT 'mark_review',
+                    createdAt INTEGER NOT NULL,
+                    FOREIGN KEY(sourceArtifactId) REFERENCES creative_artifacts(id) ON DELETE CASCADE,
+                    FOREIGN KEY(targetArtifactId) REFERENCES creative_artifacts(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_artifact_dependencies_sourceArtifactId ON artifact_dependencies(sourceArtifactId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_artifact_dependencies_targetArtifactId ON artifact_dependencies(targetArtifactId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_artifact_dependencies_relation ON artifact_dependencies(relation)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MemoryDatabase =
@@ -280,7 +378,7 @@ object MemoryModule {
             context,
             MemoryDatabase::class.java,
             "aura-memory.db",
-            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9),
         ).build()
 
     @Provides
@@ -309,6 +407,18 @@ object MemoryModule {
 
     @Provides
     fun provideCreativeGenerationJobDao(db: MemoryDatabase): CreativeGenerationJobDao = db.creativeGenerationJobDao()
+
+    @Provides
+    fun provideCanonFactDao(db: MemoryDatabase): CanonFactDao = db.canonFactDao()
+
+    @Provides
+    fun provideCreativeSimulationDao(db: MemoryDatabase): CreativeSimulationDao = db.creativeSimulationDao()
+
+    @Provides
+    fun provideContinuityIssueDao(db: MemoryDatabase): ContinuityIssueDao = db.continuityIssueDao()
+
+    @Provides
+    fun provideArtifactDependencyDao(db: MemoryDatabase): ArtifactDependencyDao = db.artifactDependencyDao()
 
     @Provides
     @Singleton

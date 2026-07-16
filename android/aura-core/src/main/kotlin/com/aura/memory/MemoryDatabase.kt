@@ -12,6 +12,14 @@ import com.aura.creative.CreativeBranchDao
 import com.aura.creative.CreativeBranchEntity
 import com.aura.creative.CreativeGenerationJobDao
 import com.aura.creative.CreativeGenerationJobEntity
+import com.aura.creative.CanonFactDao
+import com.aura.creative.CanonFactEntity
+import com.aura.creative.CreativeSimulationDao
+import com.aura.creative.CreativeSimulationEntity
+import com.aura.creative.ContinuityIssueDao
+import com.aura.creative.ContinuityIssueEntity
+import com.aura.creative.ArtifactDependencyDao
+import com.aura.creative.ArtifactDependencyEntity
 import com.aura.documents.DocumentDao
 import com.aura.documents.DocumentEntity
 import com.aura.documents.DocumentChunkDao
@@ -33,8 +41,12 @@ import com.aura.kg.NodeEntity
         CreativeRevisionEntity::class,
         CreativeBranchEntity::class,
         CreativeGenerationJobEntity::class,
+        CanonFactEntity::class,
+        CreativeSimulationEntity::class,
+        ContinuityIssueEntity::class,
+        ArtifactDependencyEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class MemoryDatabase : RoomDatabase() {
@@ -48,4 +60,8 @@ abstract class MemoryDatabase : RoomDatabase() {
     abstract fun creativeRevisionDao(): CreativeRevisionDao
     abstract fun creativeBranchDao(): CreativeBranchDao
     abstract fun creativeGenerationJobDao(): CreativeGenerationJobDao
+    abstract fun canonFactDao(): CanonFactDao
+    abstract fun creativeSimulationDao(): CreativeSimulationDao
+    abstract fun continuityIssueDao(): ContinuityIssueDao
+    abstract fun artifactDependencyDao(): ArtifactDependencyDao
 }
