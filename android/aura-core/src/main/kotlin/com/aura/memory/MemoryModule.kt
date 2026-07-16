@@ -6,6 +6,10 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.aura.data.RoomConfig
 import com.aura.creative.CreativeProjectDao
+import com.aura.creative.CreativeArtifactDao
+import com.aura.creative.CreativeRevisionDao
+import com.aura.creative.CreativeBranchDao
+import com.aura.creative.CreativeGenerationJobDao
 import com.aura.documents.DocumentDao
 import com.aura.documents.DocumentChunkDao
 import com.aura.documents.DocumentChunkEntity
@@ -174,6 +178,101 @@ object MemoryModule {
         }
     }
 
+    val MIGRATION_7_8 = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Creative artifacts table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS creative_artifacts (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    projectId TEXT NOT NULL,
+                    branchId TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    currentRevisionId TEXT,
+                    previewText TEXT NOT NULL DEFAULT '',
+                    mimeType TEXT NOT NULL DEFAULT '',
+                    storageUri TEXT,
+                    contentHash TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    metadataJson TEXT NOT NULL DEFAULT '{}',
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    FOREIGN KEY(projectId) REFERENCES creative_projects(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_artifacts_projectId ON creative_artifacts(projectId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_artifacts_projectId_kind ON creative_artifacts(projectId, kind)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_artifacts_status ON creative_artifacts(status)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_artifacts_updatedAt ON creative_artifacts(updatedAt)")
+
+            // Creative revisions table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS creative_revisions (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    artifactId TEXT NOT NULL,
+                    branchId TEXT NOT NULL,
+                    parentRevisionId TEXT,
+                    contentText TEXT NOT NULL DEFAULT '',
+                    storageUri TEXT,
+                    contentHash TEXT NOT NULL DEFAULT '',
+                    authorKind TEXT NOT NULL DEFAULT 'manual',
+                    providerPrefix TEXT NOT NULL DEFAULT '',
+                    modelId TEXT NOT NULL DEFAULT '',
+                    prompt TEXT NOT NULL DEFAULT '',
+                    settingsJson TEXT NOT NULL DEFAULT '{}',
+                    createdAt INTEGER NOT NULL,
+                    FOREIGN KEY(artifactId) REFERENCES creative_artifacts(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_revisions_artifactId ON creative_revisions(artifactId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_revisions_branchId ON creative_revisions(branchId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_revisions_parentRevisionId ON creative_revisions(parentRevisionId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_revisions_createdAt ON creative_revisions(createdAt)")
+
+            // Creative branches table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS creative_branches (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    projectId TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    baseRevisionId TEXT,
+                    headRevisionId TEXT,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    FOREIGN KEY(projectId) REFERENCES creative_projects(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_branches_projectId ON creative_branches(projectId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_branches_status ON creative_branches(status)")
+
+            // Creative generation jobs table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS creative_generation_jobs (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    projectId TEXT NOT NULL,
+                    branchId TEXT NOT NULL,
+                    capabilityKind TEXT NOT NULL,
+                    requestJson TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    progress INTEGER NOT NULL DEFAULT 0,
+                    providerPrefix TEXT NOT NULL DEFAULT '',
+                    providerOperationId TEXT,
+                    resultArtifactIdsJson TEXT NOT NULL DEFAULT '[]',
+                    errorCode TEXT NOT NULL DEFAULT '',
+                    errorMessage TEXT NOT NULL DEFAULT '',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    FOREIGN KEY(projectId) REFERENCES creative_projects(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_generation_jobs_projectId ON creative_generation_jobs(projectId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_generation_jobs_branchId ON creative_generation_jobs(branchId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_creative_generation_jobs_status ON creative_generation_jobs(status)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MemoryDatabase =
@@ -181,7 +280,7 @@ object MemoryModule {
             context,
             MemoryDatabase::class.java,
             "aura-memory.db",
-            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8),
         ).build()
 
     @Provides
@@ -198,6 +297,18 @@ object MemoryModule {
 
     @Provides
     fun provideDocumentChunkDao(db: MemoryDatabase): DocumentChunkDao = db.documentChunkDao()
+
+    @Provides
+    fun provideCreativeArtifactDao(db: MemoryDatabase): CreativeArtifactDao = db.creativeArtifactDao()
+
+    @Provides
+    fun provideCreativeRevisionDao(db: MemoryDatabase): CreativeRevisionDao = db.creativeRevisionDao()
+
+    @Provides
+    fun provideCreativeBranchDao(db: MemoryDatabase): CreativeBranchDao = db.creativeBranchDao()
+
+    @Provides
+    fun provideCreativeGenerationJobDao(db: MemoryDatabase): CreativeGenerationJobDao = db.creativeGenerationJobDao()
 
     @Provides
     @Singleton
