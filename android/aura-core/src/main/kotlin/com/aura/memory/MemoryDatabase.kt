@@ -20,6 +20,14 @@ import com.aura.creative.ContinuityIssueDao
 import com.aura.creative.ContinuityIssueEntity
 import com.aura.creative.ArtifactDependencyDao
 import com.aura.creative.ArtifactDependencyEntity
+import com.aura.world.BeliefDao
+import com.aura.world.BeliefEntity
+import com.aura.world.EvidenceDao
+import com.aura.world.EvidenceEntity
+import com.aura.world.WorldEventDao
+import com.aura.world.WorldEventEntity
+import com.aura.world.OpportunityDao
+import com.aura.world.OpportunityEntity
 import com.aura.documents.DocumentDao
 import com.aura.documents.DocumentEntity
 import com.aura.documents.DocumentChunkDao
@@ -45,8 +53,12 @@ import com.aura.kg.NodeEntity
         CreativeSimulationEntity::class,
         ContinuityIssueEntity::class,
         ArtifactDependencyEntity::class,
+        BeliefEntity::class,
+        EvidenceEntity::class,
+        WorldEventEntity::class,
+        OpportunityEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class MemoryDatabase : RoomDatabase() {
@@ -64,4 +76,8 @@ abstract class MemoryDatabase : RoomDatabase() {
     abstract fun creativeSimulationDao(): CreativeSimulationDao
     abstract fun continuityIssueDao(): ContinuityIssueDao
     abstract fun artifactDependencyDao(): ArtifactDependencyDao
+    abstract fun beliefDao(): BeliefDao
+    abstract fun evidenceDao(): EvidenceDao
+    abstract fun worldEventDao(): WorldEventDao
+    abstract fun opportunityDao(): OpportunityDao
 }

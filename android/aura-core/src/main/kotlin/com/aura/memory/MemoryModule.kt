@@ -14,6 +14,10 @@ import com.aura.creative.CanonFactDao
 import com.aura.creative.CreativeSimulationDao
 import com.aura.creative.ContinuityIssueDao
 import com.aura.creative.ArtifactDependencyDao
+import com.aura.world.BeliefDao
+import com.aura.world.EvidenceDao
+import com.aura.world.WorldEventDao
+import com.aura.world.OpportunityDao
 import com.aura.documents.DocumentDao
 import com.aura.documents.DocumentChunkDao
 import com.aura.documents.DocumentChunkEntity
@@ -371,6 +375,89 @@ object MemoryModule {
         }
     }
 
+    val MIGRATION_9_10 = object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Beliefs table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS beliefs (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    subject TEXT NOT NULL,
+                    predicate TEXT NOT NULL,
+                    valueJson TEXT NOT NULL,
+                    confidence REAL NOT NULL DEFAULT 1.0,
+                    validFrom INTEGER NOT NULL DEFAULT 0,
+                    validTo INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    supersededBy TEXT,
+                    privacyClass TEXT NOT NULL DEFAULT 'personal',
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    lastVerifiedAt INTEGER NOT NULL DEFAULT 0
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_beliefs_subject ON beliefs(subject)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_beliefs_predicate ON beliefs(predicate)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_beliefs_status ON beliefs(status)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_beliefs_validFrom ON beliefs(validFrom)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_beliefs_confidence ON beliefs(confidence)")
+
+            // Evidence table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS evidence (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    beliefId TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    detailJson TEXT NOT NULL DEFAULT '{}',
+                    timestamp INTEGER NOT NULL,
+                    confidence REAL NOT NULL DEFAULT 1.0,
+                    FOREIGN KEY(beliefId) REFERENCES beliefs(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_evidence_beliefId ON evidence(beliefId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_evidence_source ON evidence(source)")
+
+            // World events table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS world_events (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    eventType TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    payloadJson TEXT NOT NULL DEFAULT '{}',
+                    timestamp INTEGER NOT NULL,
+                    consumed INTEGER NOT NULL DEFAULT 0
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_world_events_timestamp ON world_events(timestamp)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_world_events_source ON world_events(source)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_world_events_eventType ON world_events(eventType)")
+
+            // Opportunities table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS opportunities (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    kind TEXT NOT NULL DEFAULT 'suggestion',
+                    benefit REAL NOT NULL DEFAULT 0.5,
+                    urgency REAL NOT NULL DEFAULT 0.5,
+                    confidence REAL NOT NULL DEFAULT 0.5,
+                    costEstimateJson TEXT NOT NULL DEFAULT '{}',
+                    evidenceJson TEXT NOT NULL DEFAULT '[]',
+                    suggestedActionJson TEXT NOT NULL DEFAULT '{}',
+                    status TEXT NOT NULL DEFAULT 'proposed',
+                    createdAt INTEGER NOT NULL,
+                    resolvedAt INTEGER,
+                    snoozeUntil INTEGER NOT NULL DEFAULT 0
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_opportunities_status ON opportunities(status)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_opportunities_benefit ON opportunities(benefit)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_opportunities_urgency ON opportunities(urgency)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MemoryDatabase =
@@ -378,7 +465,7 @@ object MemoryModule {
             context,
             MemoryDatabase::class.java,
             "aura-memory.db",
-            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10),
         ).build()
 
     @Provides
@@ -419,6 +506,18 @@ object MemoryModule {
 
     @Provides
     fun provideArtifactDependencyDao(db: MemoryDatabase): ArtifactDependencyDao = db.artifactDependencyDao()
+
+    @Provides
+    fun provideBeliefDao(db: MemoryDatabase): BeliefDao = db.beliefDao()
+
+    @Provides
+    fun provideEvidenceDao(db: MemoryDatabase): EvidenceDao = db.evidenceDao()
+
+    @Provides
+    fun provideWorldEventDao(db: MemoryDatabase): WorldEventDao = db.worldEventDao()
+
+    @Provides
+    fun provideOpportunityDao(db: MemoryDatabase): OpportunityDao = db.opportunityDao()
 
     @Provides
     @Singleton
