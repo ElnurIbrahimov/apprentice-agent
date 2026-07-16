@@ -538,8 +538,8 @@ class ChatSession:
         """Route slash commands and update status bar afterward."""
         from .context_bar import estimate_messages_tokens, get_context_limit
         from .display import show_error
+        from .commands import handle_command
         try:
-            from .commands import handle_command
             handle_command(self.agent, user_input, speak=self.speak)
         except Exception as exc:
             show_error(f"Command failed: {exc}")
