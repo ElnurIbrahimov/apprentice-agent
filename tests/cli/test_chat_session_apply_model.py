@@ -109,8 +109,9 @@ def _make_session_for_dispatch(agent, brain_override=None):
 
     The method touches: self.agent, self.speak, self.agentic_session,
     self.agentic._conversation_history, self.current_model,
-    self.token_used, self.token_limit, plus calls show_error and
-    handle_command. We mock all of them.
+    self.token_used, self.token_limit, self._project_type,
+    self.session_title, self.msg_count, self.perm_mode,
+    plus calls show_error and handle_command. We mock all of them.
     """
     session = SimpleNamespace()
     session.agent = agent
@@ -120,6 +121,10 @@ def _make_session_for_dispatch(agent, brain_override=None):
     session.token_limit = 8192
     session.agentic_session = None
     session.agentic = SimpleNamespace(_conversation_history=[])
+    session._project_type = ""
+    session.session_title = ""
+    session.msg_count = 0
+    session.perm_mode = "auto"
     # Stub the status-bar sync helper
     session._show_bar = MagicMock()
     return session
@@ -177,9 +182,9 @@ def test_dispatch_command_resyncs_model_from_brain_if_current_model_is_auto():
     method = ChatSession._dispatch_command.__get__(session, type(session))
 
     with patch("aura.cli.commands.handle_command"), \
-         patch("aura.cli.chat_session.show_error"), \
-         patch("aura.cli.chat_session.estimate_messages_tokens", return_value=0), \
-         patch("aura.cli.chat_session.get_context_limit", return_value=4096):
+         patch("aura.cli.display.show_error"), \
+         patch("aura.cli.context_bar.estimate_messages_tokens", return_value=0), \
+         patch("aura.cli.context_bar.get_context_limit", return_value=4096):
         method("/whatever")
 
     agent.brain.get_model_override.assert_called()
