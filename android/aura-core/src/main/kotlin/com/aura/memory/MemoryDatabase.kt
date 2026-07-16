@@ -28,6 +28,14 @@ import com.aura.world.WorldEventDao
 import com.aura.world.WorldEventEntity
 import com.aura.world.OpportunityDao
 import com.aura.world.OpportunityEntity
+import com.aura.taste.PreferenceSignalDao
+import com.aura.taste.PreferenceSignalEntity
+import com.aura.taste.StyleProfileDao
+import com.aura.taste.StyleProfileEntity
+import com.aura.taste.ReferenceIdentityDao
+import com.aura.taste.ReferenceIdentityEntity
+import com.aura.taste.RoutingOutcomeDao
+import com.aura.taste.RoutingOutcomeEntity
 import com.aura.documents.DocumentDao
 import com.aura.documents.DocumentEntity
 import com.aura.documents.DocumentChunkDao
@@ -57,8 +65,12 @@ import com.aura.kg.NodeEntity
         EvidenceEntity::class,
         WorldEventEntity::class,
         OpportunityEntity::class,
+        PreferenceSignalEntity::class,
+        StyleProfileEntity::class,
+        ReferenceIdentityEntity::class,
+        RoutingOutcomeEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class MemoryDatabase : RoomDatabase() {
@@ -80,4 +92,8 @@ abstract class MemoryDatabase : RoomDatabase() {
     abstract fun evidenceDao(): EvidenceDao
     abstract fun worldEventDao(): WorldEventDao
     abstract fun opportunityDao(): OpportunityDao
+    abstract fun preferenceSignalDao(): PreferenceSignalDao
+    abstract fun styleProfileDao(): StyleProfileDao
+    abstract fun referenceIdentityDao(): ReferenceIdentityDao
+    abstract fun routingOutcomeDao(): RoutingOutcomeDao
 }

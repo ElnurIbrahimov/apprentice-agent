@@ -18,6 +18,10 @@ import com.aura.world.BeliefDao
 import com.aura.world.EvidenceDao
 import com.aura.world.WorldEventDao
 import com.aura.world.OpportunityDao
+import com.aura.taste.PreferenceSignalDao
+import com.aura.taste.StyleProfileDao
+import com.aura.taste.ReferenceIdentityDao
+import com.aura.taste.RoutingOutcomeDao
 import com.aura.documents.DocumentDao
 import com.aura.documents.DocumentChunkDao
 import com.aura.documents.DocumentChunkEntity
@@ -458,6 +462,76 @@ object MemoryModule {
         }
     }
 
+    val MIGRATION_10_11 = object : Migration(10, 11) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Preference signals table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS preference_signals (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    projectId TEXT NOT NULL DEFAULT '',
+                    signalType TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    artifactId TEXT,
+                    attributesJson TEXT NOT NULL DEFAULT '{}',
+                    weight REAL NOT NULL DEFAULT 1.0,
+                    createdAt INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_preference_signals_projectId ON preference_signals(projectId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_preference_signals_signalType ON preference_signals(signalType)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_preference_signals_createdAt ON preference_signals(createdAt)")
+
+            // Style profiles table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS style_profiles (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    projectId TEXT NOT NULL DEFAULT '',
+                    attributesJson TEXT NOT NULL DEFAULT '{}',
+                    signalCount INTEGER NOT NULL DEFAULT 0,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_style_profiles_projectId ON style_profiles(projectId)")
+
+            // Reference identities table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS reference_identities (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    projectId TEXT NOT NULL,
+                    identityType TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    attributesJson TEXT NOT NULL DEFAULT '{}',
+                    referenceArtifactIdsJson TEXT NOT NULL DEFAULT '[]',
+                    locked INTEGER NOT NULL DEFAULT 0,
+                    createdAt INTEGER NOT NULL,
+                    updatedAt INTEGER NOT NULL,
+                    FOREIGN KEY(projectId) REFERENCES creative_projects(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_reference_identities_projectId ON reference_identities(projectId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_reference_identities_identityType ON reference_identities(identityType)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_reference_identities_name ON reference_identities(name)")
+
+            // Routing outcomes table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS routing_outcomes (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    modelRole TEXT NOT NULL,
+                    modelId TEXT NOT NULL,
+                    success INTEGER NOT NULL,
+                    latencyMs INTEGER NOT NULL DEFAULT 0,
+                    costClass TEXT NOT NULL DEFAULT 'unknown',
+                    outcomeType TEXT NOT NULL DEFAULT 'user_accepted',
+                    createdAt INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_routing_outcomes_modelRole ON routing_outcomes(modelRole)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_routing_outcomes_modelId ON routing_outcomes(modelId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_routing_outcomes_success ON routing_outcomes(success)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MemoryDatabase =
@@ -465,7 +539,7 @@ object MemoryModule {
             context,
             MemoryDatabase::class.java,
             "aura-memory.db",
-            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11),
         ).build()
 
     @Provides
@@ -518,6 +592,18 @@ object MemoryModule {
 
     @Provides
     fun provideOpportunityDao(db: MemoryDatabase): OpportunityDao = db.opportunityDao()
+
+    @Provides
+    fun providePreferenceSignalDao(db: MemoryDatabase): PreferenceSignalDao = db.preferenceSignalDao()
+
+    @Provides
+    fun provideStyleProfileDao(db: MemoryDatabase): StyleProfileDao = db.styleProfileDao()
+
+    @Provides
+    fun provideReferenceIdentityDao(db: MemoryDatabase): ReferenceIdentityDao = db.referenceIdentityDao()
+
+    @Provides
+    fun provideRoutingOutcomeDao(db: MemoryDatabase): RoutingOutcomeDao = db.routingOutcomeDao()
 
     @Provides
     @Singleton
