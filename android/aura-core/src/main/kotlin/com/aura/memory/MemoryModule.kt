@@ -7,6 +7,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.aura.data.RoomConfig
 import com.aura.creative.CreativeProjectDao
 import com.aura.documents.DocumentDao
+import com.aura.documents.DocumentChunkDao
+import com.aura.documents.DocumentChunkEntity
 import com.aura.providers.ProviderKeys
 import dagger.Module
 import dagger.Provides
@@ -138,6 +140,40 @@ object MemoryModule {
         }
     }
 
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // First-class document chunks table with embedding metadata
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS document_chunks (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    documentId TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL,
+                    charStart INTEGER NOT NULL,
+                    charEnd INTEGER NOT NULL,
+                    pageNumber INTEGER NOT NULL DEFAULT 0,
+                    text TEXT NOT NULL,
+                    contentHash TEXT NOT NULL,
+                    embedding BLOB,
+                    embeddingModel TEXT,
+                    embeddingVersion INTEGER NOT NULL DEFAULT 0,
+                    embeddedAt INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(documentId) REFERENCES documents(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_document_chunks_documentId ON document_chunks(documentId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_document_chunks_documentId_ordinal ON document_chunks(documentId, ordinal)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_document_chunks_contentHash ON document_chunks(contentHash)")
+
+            // Add embedding model/version metadata to memories
+            db.execSQL("ALTER TABLE memories ADD COLUMN embeddingModel TEXT")
+            db.execSQL("ALTER TABLE memories ADD COLUMN embeddingVersion INTEGER NOT NULL DEFAULT 0")
+
+            // Add indexing status to documents
+            db.execSQL("ALTER TABLE documents ADD COLUMN indexStatus TEXT NOT NULL DEFAULT 'pending'")
+            db.execSQL("ALTER TABLE documents ADD COLUMN indexError TEXT NOT NULL DEFAULT ''")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): MemoryDatabase =
@@ -145,7 +181,7 @@ object MemoryModule {
             context,
             MemoryDatabase::class.java,
             "aura-memory.db",
-            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6),
+            migrations = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7),
         ).build()
 
     @Provides
@@ -159,6 +195,9 @@ object MemoryModule {
 
     @Provides
     fun provideCreativeProjectDao(db: MemoryDatabase): CreativeProjectDao = db.creativeProjectDao()
+
+    @Provides
+    fun provideDocumentChunkDao(db: MemoryDatabase): DocumentChunkDao = db.documentChunkDao()
 
     @Provides
     @Singleton

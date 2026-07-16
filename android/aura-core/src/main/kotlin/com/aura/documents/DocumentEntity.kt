@@ -21,6 +21,10 @@ data class DocumentEntity(
     val importedAt: Long = System.currentTimeMillis(),
     val characterCount: Int,
     val chunkCount: Int,
+    /** Indexing state: "pending", "indexing", "ready", "failed". */
+    val indexStatus: kotlin.String = "pending",
+    /** Error message from the last indexing attempt, if any. */
+    val indexError: kotlin.String = "",
 )
 
 data class DocumentImportResult(

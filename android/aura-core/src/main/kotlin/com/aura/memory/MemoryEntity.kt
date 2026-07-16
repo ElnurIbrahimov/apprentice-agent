@@ -24,8 +24,12 @@ data class MemoryEntity(
     @ColumnInfo(name = "decayScore") val decayScore: Float = 1.0f, // 0.0 = forgotten, 1.0 = fresh
     val tags: String = "",       // comma-separated
     val metadata: String = "",   // JSON
-    val sourceConversationId: String = "",
-    val sourceTurnTimestamp: Long = 0L,
+    val sourceConversationId: kotlin.String = "",
+    val sourceTurnTimestamp: kotlin.Long = 0L,
+    /** Which embedding model produced [embedding]. Null for legacy rows. */
+    val embeddingModel: kotlin.String? = null,
+    /** Version of the embedding model for cache invalidation. */
+    val embeddingVersion: Int = 0,
 ) {
     // Room requires equals/hashCode; ByteArray needs special handling
     override fun equals(other: Any?): Boolean {
