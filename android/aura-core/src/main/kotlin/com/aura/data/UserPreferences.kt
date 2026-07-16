@@ -68,6 +68,8 @@ internal val KEY_SMTP_USERNAME = stringPreferencesKey("smtp_username")
 internal val KEY_SMTP_PASSWORD = stringPreferencesKey("smtp_password")
 internal val KEY_SMTP_FROM = stringPreferencesKey("smtp_from")
 
+internal val KEY_EMBEDDING_MODEL = stringPreferencesKey("embedding_model")
+
 @Singleton
 class UserPreferences @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -304,10 +306,43 @@ class UserPreferences @Inject constructor(
         }
     }
 
-    private suspend fun setOptionalModel(key: Preferences.Key<String>, model: String?) {
-        val normalized = model?.let(::normalizeModelId)?.takeIf(String::isNotBlank)
+    private suspend fun setOptionalModel(key: Preferences.Key<String>, model: kotlin.String?) {
+        val normalized = model?.let(::normalizeModelId)?.takeIf(kotlin.String::isNotBlank)
         context.auraPrefs.edit { prefs ->
             if (normalized == null) prefs.remove(key) else prefs[key] = normalized
+        }
+    }
+
+    // ---- Model role routing ----
+
+    private val KEY_CREATIVE_DRAFT_MODEL = stringPreferencesKey("creative_draft_model")
+    private val KEY_CREATIVE_CRITIC_MODEL = stringPreferencesKey("creative_critic_model")
+    private val KEY_PLANNER_MODEL = stringPreferencesKey("planner_model")
+    private val KEY_VERIFIER_MODEL = stringPreferencesKey("verifier_model")
+
+    /** Flow of the user's preferred model for a [com.aura.providers.ModelRole]. */
+    fun forRole(role: com.aura.providers.ModelRole): Flow<kotlin.String?> = when (role) {
+        com.aura.providers.ModelRole.CONVERSATION -> defaultModel
+        com.aura.providers.ModelRole.BACKGROUND -> backgroundModel
+        com.aura.providers.ModelRole.DEEP_RESEARCH -> deepModeModel
+        com.aura.providers.ModelRole.CREATIVE_DRAFT -> optionalModel(KEY_CREATIVE_DRAFT_MODEL)
+        com.aura.providers.ModelRole.CREATIVE_CRITIC -> optionalModel(KEY_CREATIVE_CRITIC_MODEL)
+        com.aura.providers.ModelRole.PLANNER -> optionalModel(KEY_PLANNER_MODEL)
+        com.aura.providers.ModelRole.VERIFIER -> optionalModel(KEY_VERIFIER_MODEL)
+        com.aura.providers.ModelRole.EMBEDDING -> optionalModel(KEY_EMBEDDING_MODEL)
+    }
+
+    /** Set the model for a [com.aura.providers.ModelRole]. Null clears it. */
+    suspend fun setRoleModel(role: com.aura.providers.ModelRole, model: kotlin.String?) {
+        when (role) {
+            com.aura.providers.ModelRole.CONVERSATION -> setDefaultModel(model)
+            com.aura.providers.ModelRole.BACKGROUND -> setBackgroundModel(model)
+            com.aura.providers.ModelRole.DEEP_RESEARCH -> setDeepModeModel(model)
+            com.aura.providers.ModelRole.CREATIVE_DRAFT -> setOptionalModel(KEY_CREATIVE_DRAFT_MODEL, model)
+            com.aura.providers.ModelRole.CREATIVE_CRITIC -> setOptionalModel(KEY_CREATIVE_CRITIC_MODEL, model)
+            com.aura.providers.ModelRole.PLANNER -> setOptionalModel(KEY_PLANNER_MODEL, model)
+            com.aura.providers.ModelRole.VERIFIER -> setOptionalModel(KEY_VERIFIER_MODEL, model)
+            com.aura.providers.ModelRole.EMBEDDING -> setOptionalModel(KEY_EMBEDDING_MODEL, model)
         }
     }
 }
